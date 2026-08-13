@@ -2,6 +2,7 @@ import { and, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/db'
 import { opportunities, organizations, proposals, users } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { basisPoints } from '@/lib/ratio'
 import { OPEN_STAGES, weightedValueCents } from './pipeline'
 
 /**
@@ -15,14 +16,10 @@ import { OPEN_STAGES, weightedValueCents } from './pipeline'
 export type DateRange = { startDate?: string; endDate?: string }
 
 /** A ratio in basis points: 6250 is 62.50%. Returns 0 when there is no base. */
-export function basisPoints(part: number, whole: number): number {
-  if (whole === 0) return 0
-  return Math.round((part / whole) * 10_000)
-}
-
-export function formatBasisPoints(bp: number): string {
-  return `${(bp / 100).toFixed(1)}%`
-}
+// Moved to `lib/ratio` in Phase 7 so client components can use them without
+// pulling the database driver into the browser bundle. Re-exported here
+// because the whole CRM already imports them from this module.
+export { basisPoints, formatBasisPoints } from '@/lib/ratio'
 
 export type WinLossSummary = {
   wonCount: number

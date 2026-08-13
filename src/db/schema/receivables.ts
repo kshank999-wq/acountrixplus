@@ -17,7 +17,8 @@ import { sql } from 'drizzle-orm'
 import { companies } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { journalEntries } from './ledger'
-import { organizations } from './crm'
+import { organizations, projects } from './crm'
+import { costCodes } from './jobs'
 
 /**
  * Accounts receivable and accounts payable (spec §13).
@@ -127,6 +128,15 @@ export const invoices = pgTable(
     subtotalCents: bigint('subtotal_cents', { mode: 'number' }).notNull().default(0),
     taxCents: bigint('tax_cents', { mode: 'number' }).notNull().default(0),
     totalCents: bigint('total_cents', { mode: 'number' }).notNull().default(0),
+    /**
+     * Portion of the total withheld under a retainage clause (spec §5).
+     *
+     * Included in `totalCents` — it is billed work — but excluded from
+     * `balanceCents`, because the customer does not owe it yet. On the ledger
+     * it sits in Retainage Receivable rather than in AR, which is what keeps
+     * the AR control account equal to the sum of open invoice balances.
+     */
+    retainageCents: bigint('retainage_cents', { mode: 'number' }).notNull().default(0),
     /** Remaining unpaid amount. Reaches zero when fully paid. */
     balanceCents: bigint('balance_cents', { mode: 'number' }).notNull().default(0),
 
@@ -164,6 +174,9 @@ export const invoiceLines = pgTable(
     unitPriceCents: bigint('unit_price_cents', { mode: 'number' }).notNull().default(0),
     /** Extended amount, stored rather than recomputed so totals never drift. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /** Job costing dimensions, copied onto the derived journal lines. */
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => ({
@@ -190,6 +203,8 @@ export const bills = pgTable(
     subtotalCents: bigint('subtotal_cents', { mode: 'number' }).notNull().default(0),
     taxCents: bigint('tax_cents', { mode: 'number' }).notNull().default(0),
     totalCents: bigint('total_cents', { mode: 'number' }).notNull().default(0),
+    /** Withheld from a subcontractor under a retainage clause (spec §5). */
+    retainageCents: bigint('retainage_cents', { mode: 'number' }).notNull().default(0),
     balanceCents: bigint('balance_cents', { mode: 'number' }).notNull().default(0),
 
     memo: text('memo'),
@@ -224,6 +239,9 @@ export const billLines = pgTable(
     quantityMilli: bigint('quantity_milli', { mode: 'number' }).notNull().default(1000),
     unitPriceCents: bigint('unit_price_cents', { mode: 'number' }).notNull().default(0),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /** Job costing dimensions, copied onto the derived journal lines. */
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => ({

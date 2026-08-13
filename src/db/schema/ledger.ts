@@ -17,6 +17,7 @@ import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { projects } from './crm'
+import { costCodes } from './jobs'
 
 /**
  * Where a journal entry came from (spec §13).
@@ -128,6 +129,16 @@ export const journalLines = pgTable(
      */
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
 
+    /**
+     * The second accounting dimension, added in Phase 7 (spec §5 job costing).
+     *
+     * Job cost reporting is a `GROUP BY` over these two columns — not a
+     * separate cost ledger. That is what spec §20's "without forking the core
+     * ledger" means concretely: a job's costs and the trial balance are sums
+     * over the same rows, so they cannot disagree.
+     */
+    costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
+
     memo: text('memo'),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -135,6 +146,13 @@ export const journalLines = pgTable(
   (t) => ({
     entryIdx: index('journal_lines_entry_idx').on(t.journalEntryId),
     projectIdx: index('journal_lines_project_idx').on(t.companyId, t.projectId),
+    costCodeIdx: index('journal_lines_cost_code_idx').on(t.companyId, t.costCodeId),
+    // A cost code says which part of *a job* the money went to, so one without
+    // a job is not a partial answer — it is an unanswerable one.
+    costCodeNeedsProject: check(
+      'journal_lines_cost_code_needs_project',
+      sql`${t.costCodeId} IS NULL OR ${t.projectId} IS NOT NULL`,
+    ),
     // Drives the general ledger and account balances.
     accountIdx: index('journal_lines_account_idx').on(t.companyId, t.chartAccountId),
     // A line is a debit or a credit — never both, never neither, never negative.

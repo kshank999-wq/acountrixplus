@@ -124,11 +124,27 @@ async function buildLines(
 
     if (splits.length === 0) return null
 
+    // Each split carries its own job and cost code, so a single card charge
+    // covering two sites lands on both jobs without a second document.
     const categoryLines: JournalLineInput[] = splits.map((split) => {
       const amount = Math.abs(split.amountCents)
+      const dimensions = {
+        projectId: split.projectId ?? transaction.projectId,
+        costCodeId: split.projectId ? split.costCodeId : transaction.costCodeId,
+      }
       return split.amountCents < 0
-        ? { chartAccountId: split.chartAccountId, debitCents: amount, memo: split.memo }
-        : { chartAccountId: split.chartAccountId, creditCents: amount, memo: split.memo }
+        ? {
+            chartAccountId: split.chartAccountId,
+            debitCents: amount,
+            memo: split.memo,
+            ...dimensions,
+          }
+        : {
+            chartAccountId: split.chartAccountId,
+            creditCents: amount,
+            memo: split.memo,
+            ...dimensions,
+          }
     })
 
     const bankLine: JournalLineInput = isOutflow
@@ -140,14 +156,21 @@ async function buildLines(
 
   if (!transaction.chartAccountId) return null
 
+  // The dimensions ride on the category line, never on the bank line: a job
+  // costs money, a checking account does not belong to one.
+  const dimensions = {
+    projectId: transaction.projectId,
+    costCodeId: transaction.costCodeId,
+  }
+
   return isOutflow
     ? [
-        { chartAccountId: transaction.chartAccountId, debitCents: magnitude },
+        { chartAccountId: transaction.chartAccountId, debitCents: magnitude, ...dimensions },
         { chartAccountId: glAccountId, creditCents: magnitude },
       ]
     : [
         { chartAccountId: glAccountId, debitCents: magnitude },
-        { chartAccountId: transaction.chartAccountId, creditCents: magnitude },
+        { chartAccountId: transaction.chartAccountId, creditCents: magnitude, ...dimensions },
       ]
 }
 

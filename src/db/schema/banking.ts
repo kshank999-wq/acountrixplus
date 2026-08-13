@@ -17,6 +17,8 @@ import {
 import { companies } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { reconciliations } from './ledger'
+import { projects } from './crm'
+import { costCodes } from './jobs'
 
 /** Review states enumerated in spec §3. */
 export const reviewStateEnum = pgEnum('review_state', [
@@ -108,6 +110,15 @@ export const bankTransactions = pgTable(
     chartAccountId: uuid('chart_account_id').references(() => chartAccounts.id, {
       onDelete: 'restrict',
     }),
+    /**
+     * Job costing dimensions (spec §5, Phase 7). Carried on the transaction so
+     * the person coding a card purchase for lumber assigns it to a job at the
+     * same moment they assign it to an account — the derived journal entry
+     * copies both onto its lines.
+     */
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
+
     /** Rule that produced the current categorization, when one did. */
     appliedRuleId: uuid('applied_rule_id'),
     /** True once splits exist; `chartAccountId` is then meaningless. */
@@ -193,6 +204,9 @@ export const transactionSplits = pgTable(
       .references(() => chartAccounts.id, { onDelete: 'restrict' }),
     /** Signed cents, same sign convention as the parent transaction. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /** Per-split job costing, so one card purchase can span two jobs. */
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+    costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
     memo: text('memo'),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),

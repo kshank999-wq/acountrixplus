@@ -41,6 +41,10 @@ export const PERMISSIONS = [
   'marketing:view',
   'marketing:manage',
 
+  // Industry modules (spec §5, §20 Phase 7)
+  'jobs:view',
+  'jobs:manage',
+
   // The optional AI module (spec §11, §14)
   'ai:use',
   'ai:manage',
@@ -84,6 +88,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'proposals:manage',
     'marketing:view',
     'marketing:manage',
+    'jobs:view',
+    'jobs:manage',
     'ai:use',
     'ai:manage',
     'audit:view',
@@ -99,6 +105,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'accounting:view',
     'reports:view',
     'crm:view',
+    'jobs:view',
+    'jobs:manage',
     'ai:use',
   ],
 
@@ -115,15 +123,31 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'accounting:close',
     'reports:view',
     'reports:financial',
+    'jobs:view',
+    'jobs:manage',
     'ai:use',
     'audit:view',
   ],
 
-  sales: ['crm:view', 'crm:manage', 'proposals:view', 'proposals:manage', 'ai:use'],
+  sales: [
+    'crm:view',
+    'crm:manage',
+    'proposals:view',
+    'proposals:manage',
+    // Sales sees the job a proposal became, and no financial statement.
+    'jobs:view',
+    'ai:use',
+  ],
 
   marketing: ['crm:view', 'marketing:view', 'marketing:manage', 'ai:use'],
 
-  readonly: ['bookkeeping:view', 'reconciliation:view', 'accounting:view', 'reports:view'],
+  readonly: [
+    'bookkeeping:view',
+    'reconciliation:view',
+    'accounting:view',
+    'reports:view',
+    'jobs:view',
+  ],
 }
 
 /** Granular adjustments layered on top of a role (spec §14). */

@@ -219,12 +219,29 @@ export async function categorize(
   ctx: ActorContext,
   transactionId: string,
   chartAccountId: string,
-  opts: { rememberVendor?: boolean; vendorRuleAction?: 'auto' | 'suggest' } = {},
+  opts: {
+    rememberVendor?: boolean
+    vendorRuleAction?: 'auto' | 'suggest'
+    /**
+     * Job costing dimensions (spec §5, Phase 7).
+     *
+     * Set at the moment of categorization rather than in a separate step: a
+     * contractor deciding a card charge was lumber is deciding which job's
+     * lumber in the same breath, and a second screen for the second half of
+     * one decision is how job costing goes unused.
+     */
+    projectId?: string | null
+    costCodeId?: string | null
+  } = {},
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
   const transaction = await loadEditableTransaction(ctx, transactionId)
   await assertAccountInTenant(ctx, chartAccountId)
+
+  if (opts.costCodeId && !opts.projectId) {
+    throw new Error('A cost code needs the job it belongs to. Choose a job as well.')
+  }
 
   const before = snapshot(transaction)
   // When this also creates a vendor rule, both changes share a batch so undo
@@ -250,6 +267,11 @@ export async function categorize(
         chartAccountId,
         reviewState: 'categorized',
         isSplit: false,
+        // Undefined leaves the existing dimension alone; explicit null clears
+        // it. Recategorizing without mentioning the job should not silently
+        // drop the job.
+        ...(opts.projectId !== undefined ? { projectId: opts.projectId } : {}),
+        ...(opts.costCodeId !== undefined ? { costCodeId: opts.costCodeId } : {}),
         // A human decision supersedes whatever rule proposed it.
         appliedRuleId: null,
         updatedAt: new Date(),
@@ -269,7 +291,14 @@ export async function categorize(
         entityId: transactionId,
         batchId,
         before,
-        after: { ...before, reviewState: 'categorized', chartAccountId, isSplit: false },
+        after: {
+          ...before,
+          reviewState: 'categorized',
+          chartAccountId,
+          isSplit: false,
+          ...(opts.projectId !== undefined ? { projectId: opts.projectId } : {}),
+          ...(opts.costCodeId !== undefined ? { costCodeId: opts.costCodeId } : {}),
+        },
       },
       tx,
     )
@@ -366,7 +395,14 @@ export async function bulkCategorize(
   return { updated: transactions.length, batchId }
 }
 
-export type SplitInput = { chartAccountId: string; amountCents: number; memo?: string }
+export type SplitInput = {
+  chartAccountId: string
+  amountCents: number
+  memo?: string
+  /** Per-line job costing, so one purchase can be split across two jobs. */
+  projectId?: string | null
+  costCodeId?: string | null
+}
 
 /**
  * Splits a transaction across accounts (spec §3).
@@ -421,6 +457,8 @@ export async function splitTransaction(
         chartAccountId: split.chartAccountId,
         amountCents: split.amountCents,
         memo: split.memo ?? null,
+        projectId: split.projectId ?? null,
+        costCodeId: split.costCodeId ?? null,
         sortOrder: index,
       })),
     )

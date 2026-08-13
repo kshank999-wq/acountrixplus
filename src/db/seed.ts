@@ -50,6 +50,13 @@ import { createSegment } from '@/modules/marketing/audience'
 import { addStep, createCampaign, sendStep } from '@/modules/marketing/campaigns'
 import { recordClick, recordOpen } from '@/modules/marketing/engagement'
 import { updateSettings } from '@/modules/ai/settings'
+import { installDefaultCostCodes, listCostCodes } from '@/modules/jobs/cost-codes'
+import { approveChangeOrder, createChangeOrder, setJobBudget } from '@/modules/jobs/budgets'
+import { createProgressBilling, scheduleFor, setScheduleOfValues } from '@/modules/jobs/billing'
+import { createSubcontractor, recordComplianceDocument } from '@/modules/jobs/compliance'
+import { wipSummary } from '@/modules/jobs/reports'
+import { moduleEnabled } from '@/modules/industry/modules'
+import { postManualEntry } from '@/modules/ledger/journal'
 import { suggestCategory, summarizeInbox } from '@/modules/ai/bookkeeping'
 import type { ActorContext } from '@/modules/tenancy/context'
 
@@ -316,6 +323,8 @@ async function main() {
   const contractRevenueAccount = await accountByNumber(company.id, '4200')
   // Captured so documents can be composed once the studio is set up.
   let wonProposalId: string | null = null
+  let jobProjectId: string | null = null
+  let jobCustomerId: string | null = null
   let openProposalId: string | null = null
   let openProposalToken: string | null = null
 
@@ -356,11 +365,15 @@ async function main() {
     await decideProposal(ctx, proposal.id, 'won')
     await changeStage(ctx, won.id, { stage: 'won' })
 
-    const converted = await convertWonOpportunity(ctx, won.id, { createInvoice: true })
+    // No invoice at conversion: this is a construction demo, and a contractor
+    // does not bill the whole contract on the day it is signed. The job is
+    // billed by progress billing in the Phase 7 section below, which is what
+    // makes the WIP schedule tell a coherent story.
+    const converted = await convertWonOpportunity(ctx, won.id, { createInvoice: false })
+    jobProjectId = converted.projectId
+    jobCustomerId = converted.customerId
     console.log(`  Proposal ${proposal.number} sent, viewed, and won.`)
-    console.log(
-      `  Converted to a client, a job, and ${converted.invoiceId ? 'an invoice' : 'no invoice'}.`,
-    )
+    console.log('  Converted to a client and a job, to be billed by application.')
     console.log(`  Client proposal link: /p/${proposal.publicToken}`)
 
     // A second proposal still out with a client, so the dashboard has one open.
@@ -651,6 +664,179 @@ async function main() {
   const inboxSummary = await summarizeInbox(ctx)
   if (inboxSummary.ok) console.log(`  Inbox summary: ${inboxSummary.summary}`)
 
+  // --- Phase 7: job costing, change orders, and progress billing -----------
+
+  // Nothing switches job costing on here: the construction industry pack asks
+  // for it, so it is already on. That is the point of the module registry.
+  console.log('Setting up job costing…')
+  console.log(
+    `  Job costing is ${(await moduleEnabled(company.id, 'job_costing')) ? 'on' : 'off'} — ` +
+      'the construction pack enables it, with nothing configured.',
+  )
+
+  const costCodesCreated = await installDefaultCostCodes(ctx)
+  console.log(`  Loaded ${costCodesCreated} starter cost codes.`)
+
+  if (jobProjectId && jobCustomerId && contractRevenueAccount) {
+    const codes = await listCostCodes(ctx, { activeOnly: true })
+    const codeFor = (value: string) => codes.find((code) => code.code === value)
+
+    const framing = codeFor('06-100')
+    const lumber = codeFor('06-900')
+    const electrical = codeFor('16-100')
+
+    if (framing && lumber && electrical) {
+      // Roughly 80% of the $35,000 contract, which is what a contractor's
+      // estimate actually looks like — the demo should not imply a 70% margin.
+      await setJobBudget(ctx, jobProjectId, [
+        { costCodeId: framing.id, originalAmountCents: 1_180_000 },
+        { costCodeId: lumber.id, originalAmountCents: 940_000 },
+        { costCodeId: electrical.id, originalAmountCents: 760_000 },
+      ])
+      console.log('  Budgeted the job across three cost codes.')
+
+      // Real cost, through the same journal the rest of the books use.
+      const laborAccount = await accountByNumber(company.id, '5120')
+      const cashAccount = await accountByNumber(company.id, '1000')
+      if (laborAccount && cashAccount) {
+        await postManualEntry(ctx, {
+          entryDate: '2026-07-15',
+          memo: 'Framing crew — weeks 1-3',
+          lines: [
+            {
+              chartAccountId: laborAccount.id,
+              debitCents: 268_000,
+              projectId: jobProjectId,
+              costCodeId: framing.id,
+              memo: 'Framing labor',
+            },
+            { chartAccountId: cashAccount.id, creditCents: 268_000 },
+          ],
+        })
+        console.log('  Posted framing labor to the job — an ordinary journal entry.')
+      }
+
+      // A subcontractor bill with retainage withheld.
+      const electrician = await createVendor(ctx, {
+        name: 'Delta Electrical',
+        paymentTermsDays: 30,
+      })
+      const subcontractAccount = await accountByNumber(company.id, '5130')
+      if (subcontractAccount) {
+        await createBill(ctx, {
+          vendorId: electrician.id,
+          issueDate: '2026-07-28',
+          projectId: jobProjectId,
+          retainageCents: 14_200,
+          lines: [
+            {
+              chartAccountId: subcontractAccount.id,
+              description: 'Rough electrical',
+              unitPriceCents: 142_000,
+              costCodeId: electrical.id,
+            },
+          ],
+        })
+        console.log('  Recorded a subcontractor bill with 10% retainage withheld.')
+      }
+
+      const sub = await createSubcontractor(ctx, {
+        vendorId: electrician.id,
+        trade: 'Electrical',
+        licenseNumber: 'EC-448120',
+        defaultRetainageBp: 1000,
+      })
+
+      // One current certificate and one about to lapse, so the compliance
+      // page has something to warn about.
+      await recordComplianceDocument(ctx, {
+        subcontractorId: sub.id,
+        kind: 'workers_comp',
+        carrier: 'Statewide Mutual',
+        reference: 'WC-772104',
+        expiresOn: '2027-03-31',
+      })
+      await recordComplianceDocument(ctx, {
+        subcontractorId: sub.id,
+        kind: 'general_liability',
+        carrier: 'Statewide Mutual',
+        reference: 'GL-118203',
+        coverageAmountCents: 200_000_000,
+        expiresOn: '2026-09-05',
+      })
+      console.log('  Tracked Delta Electrical, with a certificate expiring in three weeks.')
+    }
+
+    // The contract broken into billable items.
+    await setScheduleOfValues(ctx, jobProjectId, [
+      {
+        itemNumber: '1',
+        description: 'Site preparation and demolition',
+        scheduledValueCents: 800_000,
+        chartAccountId: contractRevenueAccount.id,
+        costCodeId: codeFor('02-100')?.id ?? null,
+      },
+      {
+        itemNumber: '2',
+        description: 'Framing and structure',
+        scheduledValueCents: 1_600_000,
+        chartAccountId: contractRevenueAccount.id,
+        costCodeId: framing?.id ?? null,
+      },
+      {
+        itemNumber: '3',
+        description: 'Mechanical and electrical',
+        scheduledValueCents: 1_100_000,
+        chartAccountId: contractRevenueAccount.id,
+        costCodeId: electrical?.id ?? null,
+      },
+    ])
+    console.log('  Set a three-item schedule of values totalling the contract.')
+
+    // A change order the client approved. It revises the contract and the
+    // budget — and posts nothing.
+    const changeOrder = await createChangeOrder(ctx, {
+      projectId: jobProjectId,
+      title: 'Upgraded electrical service',
+      description: 'Client requested a 400A service in place of the specified 200A.',
+      contractAmountCents: 86_000,
+      requestedOn: '2026-07-20',
+      lines: electrical ? [{ costCodeId: electrical.id, amountCents: 61_000 }] : [],
+    })
+    await approveChangeOrder(ctx, changeOrder.id, { decidedOn: '2026-07-24' })
+    console.log(
+      `  Change order ${changeOrder.number} approved: contract and budget revised, ledger untouched.`,
+    )
+
+    // An application for payment, issued as an ordinary invoice.
+    const schedule = await scheduleFor(ctx, jobProjectId)
+    const { invoice, billing } = await createProgressBilling(ctx, {
+      projectId: jobProjectId,
+      customerId: jobCustomerId,
+      periodEnd: '2026-07-31',
+      billingDate: '2026-07-31',
+      retainagePercentBp: 1000,
+      lines: [
+        { scheduleOfValuesId: schedule[0].id, percentCompleteBp: 5000 },
+        { scheduleOfValuesId: schedule[1].id, percentCompleteBp: 1000 },
+      ],
+    })
+    console.log(
+      `  Application ${billing.applicationNumber} issued as invoice ${invoice.number}: ` +
+        `${(billing.thisPeriodCents / 100).toFixed(2)} billed, ` +
+        `${(billing.retainedCents / 100).toFixed(2)} retained, ` +
+        `${(billing.netDueCents / 100).toFixed(2)} due now.`,
+    )
+
+    const wip = await wipSummary(ctx)
+    console.log(
+      `  WIP: ${(wip.costToDateCents / 100).toFixed(2)} cost, ` +
+        `${(wip.billedToDateCents / 100).toFixed(2)} billed, ` +
+        `${(wip.costsInExcessCents / 100).toFixed(2)} underbilled, ` +
+        `${(wip.billingsInExcessCents / 100).toFixed(2)} overbilled.`,
+    )
+  }
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -662,6 +848,9 @@ async function main() {
   console.log('  /marketing            campaign results and the sales loop')
   console.log('  /marketing/segments   the audience builder')
   console.log('  /ai                   the AI module, its meter, and its prompts')
+  console.log('  /jobs                 the WIP schedule')
+  console.log('  /jobs/subcontractors  insurance and W-9 compliance')
+  console.log('  /settings/modules     industry modules, on and off')
 
   process.exit(0)
 }

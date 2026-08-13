@@ -167,7 +167,12 @@ export async function convertWonOpportunity(
   // client and job are already correctly created either way.
   let invoiceId: string | null = null
   if (opts.createInvoice && winningProposal) {
-    invoiceId = await invoiceFromProposal(ctx, winningProposal.id, result.customerId)
+    invoiceId = await invoiceFromProposal(
+      ctx,
+      winningProposal.id,
+      result.customerId,
+      result.projectId,
+    )
   }
 
   return { ...result, invoiceId, alreadyConverted: false }
@@ -202,11 +207,17 @@ async function findWinningProposal(
  * Only selected items are billed, matching what the proposal totalled.
  * Items without a revenue account are skipped rather than guessed at — the
  * caller gets no invoice instead of a wrong one.
+ *
+ * The invoice carries the new job as its dimension, which is what keeps the
+ * WIP schedule honest: revenue billed the moment a proposal is won is billed
+ * *on that job*, and a schedule that missed it would show every converted job
+ * as underbilled by its own first invoice.
  */
 async function invoiceFromProposal(
   ctx: ActorContext,
   proposalId: string,
   customerId: string,
+  projectId: string,
 ): Promise<string | null> {
   const items = await db
     .select()
@@ -223,6 +234,9 @@ async function invoiceFromProposal(
   const invoice = await createInvoice(ctx, {
     customerId,
     issueDate: new Date().toISOString().slice(0, 10),
+    // Tagged with the job it came from (Phase 7), so revenue billed at
+    // conversion appears in the job's WIP rather than going missing from it.
+    projectId,
     lines: billable.map((item) => ({
       chartAccountId: item.chartAccountId!,
       description: item.description,

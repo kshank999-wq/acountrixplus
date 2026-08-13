@@ -50,6 +50,13 @@
       "when": 1786619086359,
       "tag": "0006_phase6_ai",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1786636977333,
+      "tag": "0007_phase7_industry_modules",
+      "breakpoints": true
     }
   ]
 }

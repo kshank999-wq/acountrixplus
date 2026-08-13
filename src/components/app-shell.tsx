@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { logoutAction } from '@/app/actions/auth'
 import { can, type ActorContext } from '@/modules/tenancy/context'
+import { moduleEnabled } from '@/modules/industry/modules'
 
 /**
  * Chrome shared by the workspaces (spec §2).
@@ -8,7 +9,7 @@ import { can, type ActorContext } from '@/modules/tenancy/context'
  * Navigation is filtered by permission, so a role that cannot open a workspace
  * is not shown a link into it in the first place.
  */
-export function AppShell({
+export async function AppShell({
   actor,
   companyName,
   active,
@@ -17,14 +18,22 @@ export function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting' | 'crm' | 'marketing' | 'studio' | 'ai'
+  active: 'bookkeeping' | 'accounting' | 'crm' | 'jobs' | 'marketing' | 'studio' | 'ai'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
+  // Industry modules are per company (spec §5, §23), so the workspace either
+  // exists for this tenant or it does not appear at all. A permanently
+  // greyed-out link to a workspace you did not ask for is an advert.
+  const jobsEnabled = can(actor, 'jobs:view')
+    ? await moduleEnabled(actor.companyId, 'job_costing')
+    : false
+
   const links = [
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
+    { key: 'jobs', href: '/jobs', label: 'Jobs', show: jobsEnabled },
     { key: 'marketing', href: '/marketing', label: 'Marketing', show: can(actor, 'marketing:view') },
     { key: 'studio', href: '/studio', label: 'Company Studio', show: can(actor, 'crm:view') },
     // Last, and only for those who administer it: the AI module is additive

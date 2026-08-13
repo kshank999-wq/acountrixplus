@@ -14,7 +14,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { accountByNumber } from '@/modules/coa/service'
-import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
+import { INDUSTRY_ACCOUNTS, SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/modules/ledger/journal'
 
 /**
@@ -34,6 +34,32 @@ export type DocumentLineInput = {
   /** Thousandths, so 1.5 hours is 1500. Defaults to one unit. */
   quantityMilli?: number
   unitPriceCents: number
+  /**
+   * Job costing dimensions (spec §5, Phase 7). Optional everywhere: a company
+   * without job costing never sets them and nothing about invoicing changes.
+   */
+  projectId?: string | null
+  costCodeId?: string | null
+}
+
+/**
+ * Retainage: the slice of a billed total the customer holds back until the job
+ * is accepted (spec §5).
+ *
+ * Handled here, in the one service that issues invoices, rather than as a
+ * reclassifying journal entry posted afterwards. A reclass would move the
+ * money on the ledger and leave the invoice subledger disagreeing with the AR
+ * control account — the exact divergence that makes a month-end close painful.
+ *
+ * So: the retained portion is part of the invoice total (it *is* billed work,
+ * and the customer's copy shows it) but is excluded from the invoice balance
+ * and debited to Retainage Receivable instead of AR. Sum of open invoice
+ * balances still equals the AR control account, and Retainage Receivable
+ * carries what is being held.
+ */
+export type RetainageInput = {
+  /** Withheld amount in cents. Must be less than the document total. */
+  retainageCents: number
 }
 
 /** Extended amount for a line, rounded half-up to the nearest cent. */
@@ -149,7 +175,19 @@ export async function createInvoice(
     lines: DocumentLineInput[]
     taxCents?: number
     memo?: string
+    /** Default job for every line that does not name one of its own. */
+    projectId?: string | null
+    /** Portion of the total withheld under a retainage clause. */
+    retainageCents?: number
   },
+  /**
+   * Runs inside an existing transaction when one is supplied.
+   *
+   * Progress billing needs the application and the invoice it becomes to
+   * commit together, and the codebase's convention for that is to pass the
+   * caller's executor down rather than to duplicate the logic.
+   */
+  exec?: Executor,
 ) {
   requirePermission(ctx, 'accounting:journal')
 
@@ -174,6 +212,8 @@ export async function createInvoice(
       ...line,
       quantityMilli,
       amountCents: lineAmountCents(quantityMilli, line.unitPriceCents),
+      projectId: line.projectId ?? input.projectId ?? null,
+      costCodeId: line.costCodeId ?? null,
       sortOrder: index,
     }
   })
@@ -186,9 +226,31 @@ export async function createInvoice(
     throw new Error('An invoice total must be greater than zero.')
   }
 
+  const retainageCents = input.retainageCents ?? 0
+  if (retainageCents < 0) {
+    throw new Error('Retainage cannot be negative.')
+  }
+  if (retainageCents >= totalCents) {
+    throw new Error('Retainage must be less than the invoice total.')
+  }
+
+  // Resolved before the transaction opens so a company without the
+  // construction pack gets a message about its chart of accounts rather than a
+  // half-written invoice.
+  const retainageAccount =
+    retainageCents > 0
+      ? await accountByNumber(ctx.companyId, INDUSTRY_ACCOUNTS.retainageReceivable)
+      : null
+
+  if (retainageCents > 0 && !retainageAccount) {
+    throw new Error(
+      'Retainage needs a Retainage Receivable account (1170), which this chart of accounts does not have.',
+    )
+  }
+
   const dueDate = input.dueDate ?? addDays(input.issueDate, customer.paymentTermsDays)
 
-  return db.transaction(async (tx) => {
+  const write = async (tx: Executor) => {
     const number = input.number ?? (await nextDocumentNumber(ctx, 'invoice', tx))
 
     const [invoice] = await tx
@@ -203,7 +265,9 @@ export async function createInvoice(
         subtotalCents,
         taxCents,
         totalCents,
-        balanceCents: totalCents,
+        retainageCents,
+        // What the customer owes now. Retainage is billed but not yet due.
+        balanceCents: totalCents - retainageCents,
         memo: input.memo ?? null,
       })
       .returning()
@@ -217,18 +281,35 @@ export async function createInvoice(
         quantityMilli: line.quantityMilli,
         unitPriceCents: line.unitPriceCents,
         amountCents: line.amountCents,
+        projectId: line.projectId,
+        costCodeId: line.costCodeId,
         sortOrder: line.sortOrder,
       })),
     )
 
     const journalLineInputs: JournalLineInput[] = [
-      { chartAccountId: arAccount.id, debitCents: totalCents, memo: `Invoice ${number}` },
+      {
+        chartAccountId: arAccount.id,
+        debitCents: totalCents - retainageCents,
+        memo: `Invoice ${number}`,
+      },
       ...lines.map((line) => ({
         chartAccountId: line.chartAccountId,
         creditCents: line.amountCents,
         memo: line.description,
+        projectId: line.projectId,
+        costCodeId: line.costCodeId,
       })),
     ]
+
+    if (retainageAccount) {
+      journalLineInputs.splice(1, 0, {
+        chartAccountId: retainageAccount.id,
+        debitCents: retainageCents,
+        memo: `Retainage withheld on invoice ${number}`,
+        projectId: input.projectId ?? null,
+      })
+    }
 
     if (taxCents > 0) {
       const taxAccount = await accountByNumber(ctx.companyId, '2200', tx)
@@ -260,13 +341,15 @@ export async function createInvoice(
         action: 'invoice.create',
         entityType: 'invoice',
         entityId: invoice.id,
-        after: { number, customer: customer.name, totalCents, dueDate },
+        after: { number, customer: customer.name, totalCents, retainageCents, dueDate },
       },
       tx,
     )
 
     return { ...invoice, journalEntryId: entry.id }
-  })
+  }
+
+  return exec ? write(exec) : db.transaction(write)
 }
 
 /**
@@ -285,6 +368,10 @@ export async function createBill(
     lines: DocumentLineInput[]
     taxCents?: number
     memo?: string
+    /** Default job for every line that does not name one of its own. */
+    projectId?: string | null
+    /** Portion withheld from a subcontractor under a retainage clause. */
+    retainageCents?: number
   },
 ) {
   requirePermission(ctx, 'accounting:journal')
@@ -310,6 +397,8 @@ export async function createBill(
       ...line,
       quantityMilli,
       amountCents: lineAmountCents(quantityMilli, line.unitPriceCents),
+      projectId: line.projectId ?? input.projectId ?? null,
+      costCodeId: line.costCodeId ?? null,
       sortOrder: index,
     }
   })
@@ -320,6 +409,25 @@ export async function createBill(
 
   if (totalCents <= 0) {
     throw new Error('A bill total must be greater than zero.')
+  }
+
+  const retainageCents = input.retainageCents ?? 0
+  if (retainageCents < 0) {
+    throw new Error('Retainage cannot be negative.')
+  }
+  if (retainageCents >= totalCents) {
+    throw new Error('Retainage must be less than the bill total.')
+  }
+
+  const retainageAccount =
+    retainageCents > 0
+      ? await accountByNumber(ctx.companyId, INDUSTRY_ACCOUNTS.retainagePayable)
+      : null
+
+  if (retainageCents > 0 && !retainageAccount) {
+    throw new Error(
+      'Retainage needs a Retainage Payable account (2570), which this chart of accounts does not have.',
+    )
   }
 
   const dueDate = input.dueDate ?? addDays(input.issueDate, vendor.paymentTermsDays)
@@ -339,7 +447,9 @@ export async function createBill(
         subtotalCents,
         taxCents,
         totalCents,
-        balanceCents: totalCents,
+        retainageCents,
+        // Retainage is owed, but not yet payable, so it is not in AP.
+        balanceCents: totalCents - retainageCents,
         memo: input.memo ?? null,
       })
       .returning()
@@ -353,9 +463,35 @@ export async function createBill(
         quantityMilli: line.quantityMilli,
         unitPriceCents: line.unitPriceCents,
         amountCents: line.amountCents,
+        projectId: line.projectId,
+        costCodeId: line.costCodeId,
         sortOrder: line.sortOrder,
       })),
     )
+
+    const billJournalLines: JournalLineInput[] = [
+      ...lines.map((line) => ({
+        chartAccountId: line.chartAccountId,
+        debitCents: line.amountCents,
+        memo: line.description,
+        projectId: line.projectId,
+        costCodeId: line.costCodeId,
+      })),
+      {
+        chartAccountId: apAccount.id,
+        creditCents: totalCents - retainageCents,
+        memo: `Bill ${number}`,
+      },
+    ]
+
+    if (retainageAccount) {
+      billJournalLines.push({
+        chartAccountId: retainageAccount.id,
+        creditCents: retainageCents,
+        memo: `Retainage withheld on bill ${number}`,
+        projectId: input.projectId ?? null,
+      })
+    }
 
     const entry = await createJournalEntry(
       ctx,
@@ -365,14 +501,7 @@ export async function createBill(
         source: 'bill',
         sourceType: 'bill',
         sourceId: bill.id,
-        lines: [
-          ...lines.map((line) => ({
-            chartAccountId: line.chartAccountId,
-            debitCents: line.amountCents,
-            memo: line.description,
-          })),
-          { chartAccountId: apAccount.id, creditCents: totalCents, memo: `Bill ${number}` },
-        ],
+        lines: billJournalLines,
       },
       tx,
     )
@@ -385,7 +514,7 @@ export async function createBill(
         action: 'bill.create',
         entityType: 'bill',
         entityId: bill.id,
-        after: { number, vendor: vendor.name, totalCents, dueDate },
+        after: { number, vendor: vendor.name, totalCents, retainageCents, dueDate },
       },
       tx,
     )
@@ -610,7 +739,9 @@ export async function voidDocument(
     if (!document) throw new Error('Document not found')
     if (document.status === 'void') return
 
-    if (document.balanceCents !== document.totalCents) {
+    // Retainage is billed but not in the balance, so "untouched" means the
+    // balance still equals total minus retainage, not total.
+    if (document.balanceCents !== document.totalCents - document.retainageCents) {
       throw new Error(
         'This document has payments applied. Reverse the payments before voiding it.',
       )

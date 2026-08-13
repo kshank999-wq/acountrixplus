@@ -4,8 +4,10 @@ import {
   accountingPeriods,
   chartAccounts,
   companies,
+  costCodes,
   journalEntries,
   journalLines,
+  projects,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -38,6 +40,15 @@ export type JournalLineInput = {
   debitCents?: number
   creditCents?: number
   memo?: string | null
+  /**
+   * Accounting dimensions (spec §13, and job costing in spec §5).
+   *
+   * They ride on the line rather than the entry because one entry routinely
+   * spans jobs — a single supplier bill covering three sites is one document
+   * and three cost postings.
+   */
+  projectId?: string | null
+  costCodeId?: string | null
 }
 
 export type JournalEntryInput = {
@@ -106,6 +117,10 @@ export function normalizeLines(lines: JournalLineInput[]) {
       throw new Error('Each line must be either a debit or a credit, not both and not neither.')
     }
 
+    if (line.costCodeId && !line.projectId) {
+      throw new Error('A cost code needs the job it belongs to. Choose a job as well.')
+    }
+
     debitTotal += debit
     creditTotal += credit
 
@@ -114,6 +129,8 @@ export function normalizeLines(lines: JournalLineInput[]) {
       debitCents: debit,
       creditCents: credit,
       memo: line.memo ?? null,
+      projectId: line.projectId ?? null,
+      costCodeId: line.costCodeId ?? null,
       sortOrder: index,
     }
   })
@@ -189,6 +206,7 @@ export async function createJournalEntry(
     lines.map((l) => l.chartAccountId),
     exec,
   )
+  await assertDimensionsInCompany(ctx, lines, exec)
 
   const entryNumber = await nextEntryNumber(ctx.companyId, exec)
 
@@ -217,6 +235,8 @@ export async function createJournalEntry(
       debitCents: line.debitCents,
       creditCents: line.creditCents,
       memo: line.memo,
+      projectId: line.projectId,
+      costCodeId: line.costCodeId,
       sortOrder: line.sortOrder,
     })),
   )
@@ -363,11 +383,15 @@ export async function reverseEntry(
         sourceId: original.sourceId,
         reversalOfId: original.id,
         // Swap the sides.
+        // Dimensions come across unchanged: a reversal has to land on the same
+        // job, or the job's cost would keep the original and lose the undo.
         lines: lines.map((line) => ({
           chartAccountId: line.chartAccountId,
           debitCents: line.creditCents,
           creditCents: line.debitCents,
           memo: line.memo,
+          projectId: line.projectId,
+          costCodeId: line.costCodeId,
         })),
       },
       tx,
@@ -436,6 +460,44 @@ async function assertAccountsInCompany(
   }
 }
 
+/**
+ * Confirms every dimension on a line belongs to the acting company.
+ *
+ * Same reasoning as the account check: a uuid arriving from a form is not
+ * evidence of anything until it has been looked up under the tenant filter
+ * (spec §19).
+ */
+async function assertDimensionsInCompany(
+  ctx: ActorContext,
+  lines: Array<{ projectId: string | null; costCodeId: string | null }>,
+  exec: Executor,
+) {
+  const projectIds = [...new Set(lines.map((l) => l.projectId).filter(Boolean))] as string[]
+  const costCodeIds = [...new Set(lines.map((l) => l.costCodeId).filter(Boolean))] as string[]
+
+  if (projectIds.length > 0) {
+    const rows = await exec
+      .select({ id: projects.id })
+      .from(projects)
+      .where(and(eq(projects.companyId, ctx.companyId), inArray(projects.id, projectIds)))
+
+    if (rows.length !== projectIds.length) {
+      throw new Error('One or more jobs were not found')
+    }
+  }
+
+  if (costCodeIds.length > 0) {
+    const rows = await exec
+      .select({ id: costCodes.id })
+      .from(costCodes)
+      .where(and(eq(costCodes.companyId, ctx.companyId), inArray(costCodes.id, costCodeIds)))
+
+    if (rows.length !== costCodeIds.length) {
+      throw new Error('One or more cost codes were not found')
+    }
+  }
+}
+
 /** Journal entries for the accounting workspace, newest first. */
 export async function listEntries(
   ctx: ActorContext,
@@ -478,6 +540,8 @@ export async function entryWithLines(ctx: ActorContext, entryId: string) {
       debitCents: journalLines.debitCents,
       creditCents: journalLines.creditCents,
       memo: journalLines.memo,
+      projectId: journalLines.projectId,
+      costCodeId: journalLines.costCodeId,
     })
     .from(journalLines)
     .innerJoin(chartAccounts, eq(chartAccounts.id, journalLines.chartAccountId))

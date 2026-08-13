@@ -5,15 +5,16 @@ marketing — an alternative to QuickBooks.
 
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
-**Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**, and
-**Phase 6 (AI Add-on)** from the
+**Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
+**Phase 6 (AI Add-on)**, and **Phase 7 (Industry Modules)** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
 [ADR 0003](docs/adr/0003-crm-and-public-intake.md),
 [ADR 0004](docs/adr/0004-document-engine-and-brand.md),
-[ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md), and
-[ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md).
+[ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md),
+[ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md), and
+[ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md).
 
 ## What works today
 
@@ -131,6 +132,41 @@ suite asserts the full bookkeeping workflow runs with the module off.
 No AI provider is required for any of it (spec §22) — the built-in heuristic provider needs no
 API key, no network, and no configuration.
 
+### Industry modules and construction (Phase 7)
+
+Spec §20 attaches one constraint to this phase: add specialized workflows **without forking the
+core ledger**. Everything below is a `SUM` over `journal_lines` or an extension of a service that
+already existed — there is no job cost table, no construction invoice type, and no second set of
+books. `tests/jobs.test.ts` asserts the reconciliation directly.
+
+- **Modules resolve from the industry pack plus the company's own overrides** — a contractor gets
+  job costing with nothing configured; a landscaper on the "general" pack can switch it on; a
+  contractor who does not want it can switch it off. Industry is a starting point, not a cage.
+  When a module is off, its workspace is *absent*, not greyed out.
+- **Cost codes are a second dimension on the journal line**, beside the job that Phase 2 added.
+  The account says what kind of cost; the cost code says which part of the work. A database CHECK
+  refuses a cost code without a job.
+- **Job budgets** keep the original estimate and approved changes in separate columns, because
+  "over the revised budget" and "over the original bid" are different findings.
+- **Change orders** revise the contract value, the budget, and the schedule of values on approval,
+  and post **nothing** — the work has not happened yet, and recognizing revenue for it is the
+  error percentage-of-completion accounting exists to prevent.
+- **Progress billing** with an AIA-style schedule of values: percent complete per contract item,
+  billed as increments, issued as an **ordinary invoice** that ages and takes payments like any
+  other.
+- **Retainage** is withheld inside `createInvoice` (and `createBill`), not reclassified afterwards:
+  Dr AR net, Dr Retainage Receivable retained, Cr revenue in full. The AR control account still
+  equals the sum of open invoice balances, and the retained amount stays out of AR aging.
+  Releasing it needs no new machinery — it is an invoice whose line credits Retainage Receivable.
+- **WIP and job profitability** — cost-to-cost percent complete, earned revenue, and over- and
+  under-billings reported *apart* rather than netted, because one is a liability and the other an
+  asset. A job with no budget reports percent complete as unknown rather than zero.
+- **Subcontractor compliance** — insurance, workers' comp, W-9s, licences, and lien waivers with
+  expiry warnings. Status is always derived from the expiry date, never stored: a stored status is
+  correct the day it is written and wrong every day after.
+- **Terminology** — each industry pack's vocabulary reaches the UI. A "Tenant", a "Patient", a
+  "Production". Only the words change; the records are the ones every company keeps.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -207,6 +243,7 @@ Coverage matches what spec §21 asks for:
 | `tests/design.test.ts` | Block validation, merge-field resolution, template composition, brand colour validation, clause versioning |
 | `tests/acceptance.test.ts` | Server-side total recomputation, signature matching, expiry, double-acceptance, foreign item ids |
 | `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics denominators, tenant and role isolation |
+| `tests/jobs.test.ts` | Module resolution from pack plus override, workflow gating, terminology, the cost-code dimension end to end, budget vs actual, change-order approval posting nothing, application pricing and increments, retainage splitting AR from Retainage Receivable, the AR-control-equals-subledger identity, retainage release without double-recognizing revenue, WIP arithmetic, compliance expiry, and the no-forked-ledger reconciliation |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -370,7 +407,7 @@ key and the client proposal link — keep them for steps 22 and 24.
     settings row means off. Untick **Enable the AI module** and the assistant disappears from
     Bookkeeping entirely — absent, not greyed out.
 49. **No API key needed** — the provider reads `mock`, and the model column reads
-    `mock-heuristic-v1`. It answers from readable heuristics, which is why the demo and all 408
+    `mock-heuristic-v1`. It answers from readable heuristics, which is why the demo and all 452
     tests run with no credentials and no network.
 50. **The meter is the page** — spend, request count, per-capability usage, and the raw usage
     ledger. Every call is there, including the ones that were blocked, so "why did nothing happen"
@@ -410,6 +447,62 @@ key and the client proposal link — keep them for steps 22 and 24.
     setting `ANTHROPIC_API_KEY`. The page warns that credentials are missing and suggestions keep
     coming from the heuristics. Bookkeeping is unaffected either way.
 
+### Job costing and construction (Phase 7)
+
+61. **The module is already on, and nobody configured it** — the **Jobs** chip is in the workspace
+    row because the construction industry pack asks for job costing. Open **Jobs → Modules**: it
+    is ticked and labelled *on by default for your industry*.
+62. **Turn it off and it disappears** — untick **Job costing**. The **Jobs** chip vanishes from
+    every workspace, and visiting `/jobs` directly explains the module is off rather than showing
+    an empty page. Tick it back on.
+63. **The WIP schedule** — **Jobs** shows contract value, revised budget, cost to date, percent
+    complete, earned revenue, billed to date, and over/under billing for every open job. The seed's
+    job is slightly overbilled, which is the normal healthy position for a contractor.
+64. **Budget vs actual** — open the job. **Actual** is posted ledger cost carrying that job and
+    cost code; nothing on the page is a cached total. Framing is 22.7% spent against $11,800
+    budgeted.
+65. **Approving a change order posts nothing** — the **Change orders** tab shows CO-001 approved
+    for $860 of contract and $610 of budget. Look at **Accounting → Trial balance**: there is no
+    entry for it. A change order is an agreement about work nobody has done, and posting on
+    approval recognizes revenue for it.
+66. **Where the change went instead** — back on the job, the **Budget vs actual** tab shows
+    Electrical with a `$610.00` *Changes* column beside its unchanged `$7,600.00` original, and the
+    **Billing** tab shows a new `CO-001` line on the schedule of values, so the change is billable.
+67. **An application is an ordinary invoice** — under **Billing**, application 1 billed $5,600 with
+    $560 retained and $5,040 due, issued as `INV-1004`. Open **Accounting → A/R aging**: that
+    invoice contributes **$5,040**, not $5,600. The retained portion is billed work sitting in
+    Retainage Receivable, not in AR — and it ages nowhere, because it is not yet owed.
+68. **The identity that motivated the design** — on **Trial balance** (set the range wide enough to
+    cover the seeded dates), `1100 Accounts Receivable` nets to **$38,440.00**, which is exactly
+    the total on the A/R aging report — the sum of open invoice balances. `1170 Retainage
+    Receivable` carries the $560 separately. Handling retainage as a reclassifying entry *after*
+    the invoice would leave the control account short by $560 while the subledger was not, which
+    is why it lives inside `createInvoice` instead.
+69. **Release the retainage** — press **Release retainage**, choose the client, and bill it. On
+    **Profit & loss**, revenue is *unchanged*: the money moved from held to owed, and it was
+    recognized when the work was billed. `1170` is back to zero.
+70. **The job's ledger** — at the bottom of the job page is every posted line carrying it, with
+    entry numbers. The budget report above is exactly these rows, grouped. Follow any number to the
+    entry behind it in **Accounting → Journal**.
+71. **Nothing forked** — this is the phase's claim. Every cost line on the job page carries an
+    entry number; find the same entry under **Accounting → Journal** and it is one entry, not a
+    ledger posting plus a job-cost posting. There is no job cost table to fall out of step, because
+    a job's costs and the trial balance are the same rows added up two different ways. The global
+    form of the claim — job cost plus unassigned cost equals cost of sales plus operating expenses
+    on the P&L — is asserted directly by `tests/jobs.test.ts`, in the suite named
+    *the ledger did not fork*.
+72. **Subcontractor compliance** — **Jobs → Subcontractors**. Delta Electrical is flagged: a
+    missing W-9 and a general liability certificate expiring in three weeks. Record the W-9 and the
+    warning clears. Note the certificate status is derived from its expiry date every time the page
+    loads — nothing stores "valid".
+73. **Advice, not a lock** — a missing form does not block anything on its own. **Hold payments**
+    is a decision a person makes, and it is the only thing that blocks. Software that silently
+    refuses to pay a subcontractor over a stale form is software that gets worked around.
+74. **A company without the module is untouched** — register a second company as **Retail**. It has
+    no **Jobs** chip, no cost codes, no retainage account, and its invoices post the same two-line
+    entry they always did. That is spec §23's rule: industry customization extends the common
+    platform rather than creating separate products.
+
 ## Project layout
 
 ```
@@ -421,6 +514,8 @@ src/
     crm/                  Pipeline, dashboard, clients, proposals, designer
     marketing/            Overview, campaigns, segments, creative, suppressions
     ai/                   AI module admin, usage ledger, insights, prompt registry
+    jobs/                 WIP schedule, job detail, cost codes, subcontractors
+    settings/modules/     Industry module switches
     studio/               Company Studio — profile, brand, catalog, clauses
     api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
     api/proposals/        Public proposal acceptance (unauthenticated)
@@ -434,7 +529,7 @@ src/
   db/
     schema/               Drizzle table definitions (the migration source)
     migrate.ts, seed.ts
-  lib/                    Money arithmetic, request-scoped actor resolution
+  lib/                    Money arithmetic, basis points, request-scoped actor resolution
   modules/                Domain logic, one directory per spec §17 boundary
     audit/                Append-only event log and undo support
     auth/                 Password hashing and sessions
@@ -445,6 +540,8 @@ src/
     design/               Blocks, merge fields, templates, document composition
     marketing/            Segments, campaigns, email provider, engagement, analytics
     ai/                   Gateway, providers, prompts, retrieval, suggestions, metering
+    industry/             Module resolution from industry packs and company overrides
+    jobs/                 Cost codes, budgets, change orders, progress billing, WIP, compliance
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
@@ -525,6 +622,28 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
+- **Eight of ten industry modules do nothing.** `job_costing` and `projects` are implemented;
+  `inventory`, `time_billing`, `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
+  and `manufacturing` are declared, switched on by the packs that ask for them, and have no
+  workflows. The module settings page lists them under "Not built yet" rather than hiding them.
+- **WIP does not post its adjusting entry.** The schedule reports over- and under-billings;
+  `1160 Costs in Excess of Billings` and `2560 Billings in Excess of Costs` install with the pack
+  and stay empty until an accountant posts to them. Automating a period-end adjustment nobody
+  reviewed is how a WIP schedule becomes a source of surprises. See ADR 0007.
+- **Percent complete is cost-to-cost only.** Units-complete and effort-expended methods are not
+  offered.
+- **An application for payment is issued immediately.** `priceApplication` gives the UI a preview,
+  but there is no save-as-draft-then-review step; the `draft` progress-billing status is reserved
+  for it and unused.
+- **Retainage release is not per contract item.** A partial release takes an amount, not a
+  schedule-of-values breakdown, so contracts releasing retainage per trade as each finishes are
+  not supported.
+- **Subcontractor retainage is a default, not an automation.** A sub's default rate is recorded and
+  shown; `createBill` still takes the withheld amount explicitly, because a bill whose total
+  depends on a setting the person entering it cannot see is worse than typing the number.
+- **Lien waivers are not tied to payments.** They are a compliance document kind and can be filed
+  against a job, but nothing blocks a payment for want of one.
+
 - **Campaign scheduling.** `scheduledFor` puts a campaign on the calendar and a nurture step's
   `delayDays` is recorded, but nothing fires on its own — sending is a button somebody presses.
   The missing piece is a background worker calling the same `sendStep` that enforces consent.
@@ -553,9 +672,10 @@ Gaps within the phases already built:
   and inline links need their own decision about format.
 - **Comments and questions on a proposal** (spec §7). The acceptance endpoint is the model to
   copy when they are built.
-- **Project dimension is stored but not reported on.** `journal_lines.projectId` exists and is set
-  by conversion; filtering the statements by job is a query change still to make. Classes,
-  departments, and locations are not modelled at all.
+- **Classes, departments, and locations are not modelled.** The job and cost-code dimensions are
+  real as of Phase 7 and reported on throughout the jobs workspace; the other §13 dimensions are
+  not. The statements themselves still cannot be filtered by job — the WIP and job cost reports
+  answer that question, but a P&L scoped to one job is a query change still to make.
 - Fixed assets and depreciation, recurring and closing entries, customer statements, write-offs,
   and 1099 reporting remain open from spec §13. Vendor `taxId` and `is1099Vendor` columns exist so
   the data is captured now.

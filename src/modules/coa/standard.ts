@@ -161,3 +161,20 @@ export const SYSTEM_ACCOUNTS = {
   defaultChecking: '1000',
   defaultCreditCard: '2100',
 } as const
+
+/**
+ * Accounts an industry pack installs that the application still looks up by
+ * number (spec §5, §20 Phase 7).
+ *
+ * Kept apart from `SYSTEM_ACCOUNTS` because they are not guaranteed to exist:
+ * a company on the retail pack has no Retainage Receivable, and the code that
+ * needs one has to say so rather than assume it.
+ */
+export const INDUSTRY_ACCOUNTS = {
+  retainageReceivable: '1170',
+  retainagePayable: '2570',
+  contractRevenue: '4200',
+  changeOrderRevenue: '4210',
+  costsInExcessOfBillings: '1160',
+  billingsInExcessOfCosts: '2560',
+} as const
