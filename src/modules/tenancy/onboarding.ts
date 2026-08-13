@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { companies, memberships, users } from '@/db/schema'
 import { hashPassword } from '@/modules/auth/password'
 import { installChartOfAccounts } from '@/modules/coa/service'
+import { installStudioDefaults } from '@/modules/studio/service'
 import { industryPack, type Industry } from '@/modules/coa/industry'
 import { recordAudit } from '@/modules/audit'
 import type { ActorContext } from './context'
@@ -52,6 +53,9 @@ export async function registerCompany(input: RegisterInput) {
     })
 
     const accountsCreated = await installChartOfAccounts(company.id, input.industry, tx)
+    // A starter profile and brand kit, so the first proposal is branded
+    // rather than blank (spec §15).
+    await installStudioDefaults(company.id, input.companyName, tx)
 
     // The founding actor, so the creation events are attributable like any
     // other change (spec §22: every change is attributable to a user).

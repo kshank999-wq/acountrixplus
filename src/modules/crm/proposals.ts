@@ -510,6 +510,7 @@ export async function listProposals(ctx: ActorContext, opts: { limit?: number } 
       expiresOn: proposals.expiresOn,
       opportunityId: proposals.opportunityId,
       organizationName: organizations.name,
+      publicToken: proposals.publicToken,
     })
     .from(proposals)
     .innerJoin(opportunities, eq(opportunities.id, proposals.opportunityId))

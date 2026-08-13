@@ -1,0 +1,560 @@
+/**
+ * Document styling for rendered proposals (spec §7 print-quality output).
+ *
+ * Deliberately independent of the app's Tailwind theme: a document carries the
+ * *company's* brand, not the product's, and it has to look the same on screen,
+ * on paper, and in whatever the client opens it with. Brand values arrive as
+ * custom properties set by the renderer.
+ *
+ * Server-side PDF generation (spec §18) is not built. What is here instead is
+ * a correct print stylesheet, so the browser's own Print → Save as PDF
+ * produces a properly paginated, print-ready file with real page margins and
+ * no orphaned headings. See ADR 0004.
+ */
+
+.doc {
+  color: var(--doc-text);
+  background: var(--doc-surface);
+  font-family: var(--doc-body-font);
+  font-size: var(--doc-base-size);
+  line-height: 1.55;
+  /*
+   * Bounded by the page's printable width so screen matches paper — but the
+   * margins are part of that width, not added to it, or a letter-width
+   * document overflows a phone by the size of its own margins.
+   */
+  box-sizing: border-box;
+  width: 100%;
+  max-width: calc(
+    var(--doc-content-width, 7in) + var(--doc-margin-left, 0.75in) +
+      var(--doc-margin-right, 0.75in)
+  );
+  margin: 0 auto;
+  padding: var(--doc-margin-top, 0.75in) var(--doc-margin-right, 0.75in)
+    var(--doc-margin-bottom, 0.75in) var(--doc-margin-left, 0.75in);
+}
+
+/*
+ * On a phone the page margins are wasted space — the screen edge already
+ * provides the breathing room a printed margin does.
+ */
+@media screen and (max-width: 640px) {
+  .doc {
+    padding-left: 1.25rem;
+    padding-right: 1.25rem;
+    padding-top: 1.5rem;
+  }
+}
+
+.doc > * + * {
+  margin-top: 0.85em;
+}
+
+/* --- Headings ----------------------------------------------------------- */
+
+.doc-heading {
+  font-family: var(--doc-heading-font);
+  color: var(--doc-primary);
+  line-height: 1.25;
+  /* A heading must never be the last thing on a printed page. */
+  break-after: avoid-page;
+  page-break-after: avoid;
+}
+
+.doc-heading-1 {
+  font-size: 1.9em;
+  margin-top: 0;
+}
+.doc-heading-2 {
+  font-size: 1.4em;
+  margin-top: 1.6em;
+  padding-bottom: 0.25em;
+  border-bottom: 1px solid color-mix(in srgb, var(--doc-primary) 25%, transparent);
+}
+.doc-heading-3 {
+  font-size: 1.12em;
+  margin-top: 1.3em;
+  color: var(--doc-text);
+}
+
+/* --- Cover -------------------------------------------------------------- */
+
+.doc-cover {
+  padding: 2.4em 2em;
+  border-radius: 6px;
+  break-after: avoid-page;
+}
+
+.doc-cover-brand {
+  background: var(--doc-primary);
+  color: #fff;
+  /* Without this the browser drops the background when printing. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.doc-cover-logo {
+  max-height: 56px;
+  max-width: 240px;
+  margin-bottom: 1.4em;
+  object-fit: contain;
+}
+
+.doc-cover-title {
+  font-family: var(--doc-heading-font);
+  font-size: 2.3em;
+  line-height: 1.15;
+  margin: 0;
+}
+
+.doc-cover-brand .doc-cover-title {
+  color: #fff;
+}
+
+.doc-cover-subtitle {
+  margin: 0.5em 0 0;
+  opacity: 0.85;
+}
+
+.doc-cover-for {
+  margin: 1.4em 0 0;
+  font-size: 1.05em;
+  font-weight: 600;
+}
+
+/* --- Text --------------------------------------------------------------- */
+
+.doc-text p {
+  margin: 0 0 0.7em;
+  /* Avoid a single stranded line across a page break. */
+  orphans: 3;
+  widows: 3;
+}
+
+.doc-text p:last-child {
+  margin-bottom: 0;
+}
+
+.doc-text-lead p {
+  font-size: 1.08em;
+  color: var(--doc-text);
+}
+
+.doc-list {
+  margin: 0;
+  padding-left: 1.3em;
+}
+
+.doc-list li {
+  margin-bottom: 0.35em;
+}
+
+.doc-divider {
+  border: 0;
+  border-top: 1px solid color-mix(in srgb, var(--doc-muted) 35%, transparent);
+  margin: 1.6em 0;
+}
+
+/* --- Tables ------------------------------------------------------------- */
+
+.doc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.96em;
+  /* A short table should not be split across pages. */
+  break-inside: avoid-page;
+}
+
+.doc-table th,
+.doc-table td {
+  padding: 0.5em 0.6em;
+  text-align: left;
+  border-bottom: 1px solid color-mix(in srgb, var(--doc-muted) 25%, transparent);
+}
+
+.doc-table thead th {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--doc-muted);
+  border-bottom-width: 2px;
+}
+
+.doc-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.doc-table tfoot td {
+  border-bottom: none;
+  padding-top: 0.6em;
+}
+
+.doc-table tfoot .doc-total td {
+  font-weight: 700;
+  font-size: 1.1em;
+  border-top: 2px solid var(--doc-primary);
+  color: var(--doc-primary);
+}
+
+.doc-kv table {
+  width: 100%;
+  border-collapse: collapse;
+  break-inside: avoid-page;
+}
+
+.doc-kv th {
+  text-align: left;
+  font-weight: 600;
+  color: var(--doc-muted);
+  padding: 0.35em 1.2em 0.35em 0;
+  white-space: nowrap;
+  vertical-align: top;
+  width: 1%;
+}
+
+.doc-kv td {
+  padding: 0.35em 0;
+  white-space: pre-line;
+}
+
+.doc-optional {
+  margin-top: 1.2em;
+  padding: 0.9em 1em;
+  border: 1px dashed color-mix(in srgb, var(--doc-muted) 40%, transparent);
+  border-radius: 6px;
+}
+
+.doc-optional h4 {
+  margin: 0 0 0.4em;
+  font-size: 0.9em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--doc-muted);
+}
+
+/* --- Columns ------------------------------------------------------------ */
+
+.doc-columns {
+  display: grid;
+  gap: 1.4em;
+  break-inside: avoid-page;
+}
+
+.doc-columns[data-count='2'] {
+  grid-template-columns: 1fr 1fr;
+}
+.doc-columns[data-count='3'] {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.doc-columns h4 {
+  margin: 0 0 0.35em;
+  font-family: var(--doc-heading-font);
+  font-size: 1.02em;
+  color: var(--doc-primary);
+}
+
+.doc-columns p {
+  margin: 0 0 0.5em;
+  font-size: 0.96em;
+}
+
+/* Stack on a phone. Print always keeps the grid. */
+@media screen and (max-width: 640px) {
+  .doc-columns[data-count='2'],
+  .doc-columns[data-count='3'] {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* --- Figures ------------------------------------------------------------ */
+
+.doc-figure {
+  margin: 1.2em 0;
+  break-inside: avoid-page;
+}
+
+.doc-figure img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.doc-figure figcaption {
+  margin-top: 0.4em;
+  font-size: 0.88em;
+  color: var(--doc-muted);
+}
+
+/* --- Clauses and signature ---------------------------------------------- */
+
+.doc-clause {
+  break-inside: avoid-page;
+}
+
+.doc-clause h4 {
+  margin: 0 0 0.3em;
+  font-size: 1em;
+  font-weight: 700;
+}
+
+.doc-clause p {
+  margin: 0 0 0.5em;
+  font-size: 0.93em;
+  color: var(--doc-muted);
+}
+
+.doc-signature {
+  margin-top: 2em;
+  padding-top: 1.2em;
+  border-top: 2px solid var(--doc-primary);
+  break-inside: avoid-page;
+}
+
+.doc-agreement {
+  font-size: 0.95em;
+  color: var(--doc-muted);
+  margin: 0 0 1.4em;
+}
+
+.doc-signature-lines {
+  display: grid;
+  gap: 1.6em 2em;
+  grid-template-columns: 2fr 1fr;
+}
+
+.doc-signature-lines > div:last-child {
+  grid-column: 1 / -1;
+  max-width: 12em;
+}
+
+.doc-signature-lines span {
+  display: block;
+  border-bottom: 1px solid var(--doc-text);
+  height: 2.2em;
+}
+
+.doc-signature-lines label {
+  display: block;
+  margin-top: 0.35em;
+  font-size: 0.82em;
+  color: var(--doc-muted);
+}
+
+/* --- Pagination --------------------------------------------------------- */
+
+.doc-page-break {
+  break-before: page;
+  page-break-before: always;
+}
+
+/* --- Print -------------------------------------------------------------- */
+
+@page {
+  size: var(--doc-page-size, letter) var(--doc-page-orientation, portrait);
+  margin: 0.75in;
+}
+
+@media print {
+  /* The page box supplies the margins; the element must not double them. */
+  .doc {
+    max-width: none;
+    padding: 0;
+    font-size: var(--doc-base-size);
+  }
+
+  /* Anything that is not the document itself. */
+  .doc-screen-only {
+    display: none !important;
+  }
+
+  /* Brand colours must survive the print pipeline. */
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  a {
+    text-decoration: none;
+    color: inherit;
+  }
+}
+
+/* --- Acceptance form ----------------------------------------------------- */
+/* Screen-only: the print fallback is the ruled signature lines above. */
+
+.doc-accept-form {
+  display: grid;
+  gap: 1em;
+}
+
+.doc-optional-picker {
+  border: 1px solid color-mix(in srgb, var(--doc-muted) 30%, transparent);
+  border-radius: 6px;
+  padding: 0.9em 1em;
+  margin: 0;
+}
+
+.doc-optional-picker legend {
+  font-size: 0.85em;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--doc-muted);
+  padding: 0 0.4em;
+}
+
+.doc-optional-picker label {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 0.7em;
+  padding: 0.4em 0;
+  cursor: pointer;
+}
+
+.doc-optional-picker input {
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.doc-running-total {
+  margin: 0;
+  font-size: 1.05em;
+  display: flex;
+  justify-content: space-between;
+  gap: 1em;
+  padding: 0.6em 0;
+  border-top: 1px solid color-mix(in srgb, var(--doc-muted) 25%, transparent);
+}
+
+.doc-accept-fields {
+  display: grid;
+  gap: 0.8em;
+  grid-template-columns: 1fr 1fr;
+}
+
+.doc-accept-fields label {
+  display: grid;
+  gap: 0.25em;
+}
+
+.doc-accept-fields label span {
+  font-size: 0.85em;
+  color: var(--doc-muted);
+}
+
+.doc-accept-fields input {
+  border: 1px solid color-mix(in srgb, var(--doc-muted) 45%, transparent);
+  border-radius: 5px;
+  padding: 0.55em 0.7em;
+  font: inherit;
+  font-size: 0.95em;
+  color: var(--doc-text);
+  background: var(--doc-surface);
+}
+
+.doc-accept-fields input:focus {
+  outline: 2px solid color-mix(in srgb, var(--doc-primary) 45%, transparent);
+  outline-offset: 1px;
+}
+
+.doc-signature-input {
+  font-family: var(--doc-heading-font) !important;
+  font-size: 1.25em !important;
+  font-style: italic;
+}
+
+.doc-signature-help {
+  margin: -0.4em 0 0;
+  font-size: 0.82em;
+  color: var(--doc-muted);
+}
+
+.doc-agree {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6em;
+  font-size: 0.93em;
+}
+
+.doc-agree input {
+  margin-top: 0.2em;
+  width: 1.1em;
+  height: 1.1em;
+}
+
+.doc-accept-button {
+  justify-self: start;
+  background: var(--doc-primary);
+  color: #fff;
+  border: 0;
+  border-radius: 6px;
+  padding: 0.7em 1.4em;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.doc-accept-button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.doc-accept-error {
+  margin: 0;
+  color: #be123c;
+  font-size: 0.9em;
+}
+
+.doc-accepted {
+  border: 2px solid var(--doc-primary);
+  border-radius: 6px;
+  padding: 1em 1.2em;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.doc-accepted-mark {
+  margin: 0 0 0.3em;
+  font-family: var(--doc-heading-font);
+  font-size: 1.2em;
+  font-weight: 700;
+  color: var(--doc-primary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.doc-accepted p {
+  margin: 0;
+  font-size: 0.95em;
+}
+
+.doc-running-header {
+  font-size: 0.82em;
+  color: var(--doc-muted);
+  border-bottom: 1px solid color-mix(in srgb, var(--doc-muted) 25%, transparent);
+  padding-bottom: 0.5em;
+  margin-bottom: 1.4em;
+}
+
+@media screen and (max-width: 640px) {
+  .doc-accept-fields {
+    grid-template-columns: 1fr;
+  }
+  .doc-signature-lines {
+    grid-template-columns: 1fr;
+  }
+}
+
+/*
+ * A wide fee table must scroll inside its own box rather than pushing the
+ * page sideways. Print is unaffected: the page box is wide enough there.
+ */
+@media screen {
+  .doc-pricing,
+  .doc-kv {
+    overflow-x: auto;
+  }
+}

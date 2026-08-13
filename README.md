@@ -4,11 +4,13 @@ A unified business operating system for bookkeeping, accounting, clients, propos
 marketing — an alternative to QuickBooks.
 
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
-**Phase 2 (Reconciliation + Accounting Core)**, and **Phase 3 (CRM + Proposal Pipeline)** from
-the [development specification](docs/SPEC.md). Architecture decisions are recorded in
+**Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**, and
+**Phase 4 (Proposal Designer + Company Studio)** from the
+[development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
-[ADR 0002](docs/adr/0002-double-entry-ledger.md), and
-[ADR 0003](docs/adr/0003-crm-and-public-intake.md).
+[ADR 0002](docs/adr/0002-double-entry-ledger.md),
+[ADR 0003](docs/adr/0003-crm-and-public-intake.md), and
+[ADR 0004](docs/adr/0004-document-engine-and-brand.md).
 
 ## What works today
 
@@ -60,6 +62,21 @@ the [development specification](docs/SPEC.md). Architecture decisions are record
   breakdown with re-engagement eligibility.
 - **Won deals become work** — one action creates the client, the job, and optionally an invoice
   from the winning proposal's lines.
+
+### Documents and brand (Phase 4)
+
+- **Company Studio** — profile, brand kit (colours, fonts, logo), a logo and image library, a
+  reusable service catalog, and a versioned legal clause library.
+- **Proposal designer** — a block-based document editor with a live preview through the same
+  renderer the client sees. Blocks reflow, so one document works on a phone, in print, and
+  (in Phase 5) in an email.
+- **Template gallery** — built-in templates ordered by your industry, plus your own saved layouts.
+- **Merge fields** — `{{client.name}}`, `{{proposal.total}}` and friends fill from real records.
+  Unresolved fields render blank and are flagged to the author before sending.
+- **Branded client proposals** — the public link renders in your colours with a print stylesheet,
+  so the client's own Print → Save as PDF gives a paginated, print-ready file.
+- **Acceptance and e-signature** — the client picks optional items, sees the total update, types
+  their name to sign, and the deal closes. The accepted total is recomputed server-side.
 
 No AI provider is required for any of it (spec §22).
 
@@ -136,6 +153,8 @@ Coverage matches what spec §21 asks for:
 | `tests/crm.test.ts` | Stage transitions, probability tracking, consent-based marketing eligibility, conversion idempotence, win/loss maths |
 | `tests/proposals.test.ts` | Optional-item pricing, send-time versioning, forward-only stage advances, view tracking, proposal-to-invoice |
 | `tests/intake.test.ts` | Honeypot, rate limiting, log ceiling, origin allowlist, address truncation, key scoping and enumeration |
+| `tests/design.test.ts` | Block validation, merge-field resolution, template composition, brand colour validation, clause versioning |
+| `tests/acceptance.test.ts` | Server-side total recomputation, signature matching, expiry, double-acceptance, foreign item ids |
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -225,6 +244,35 @@ key and the client proposal link — keep them for steps 22 and 24.
     the accounting customer linked to the CRM record, a job, and optionally an invoice from the
     proposal's lines. Running it twice does not duplicate anything.
 
+### Documents and brand (Phase 4)
+
+26. **Company Studio** — open **Company Studio**. The profile fills merge fields; the **Brand**
+    tab has the company's colours and fonts with a live preview; **Legal clauses** holds three
+    approved clauses.
+27. **Brand safety** — try setting a brand colour to `red; background: url(...)`. It is refused:
+    these values land in a `style` attribute on public pages, so only plain hex is accepted.
+    SVG uploads are refused for the same reason.
+28. **Designer** — from **Proposals**, click **Design** on any proposal. The left pane lists the
+    blocks; the right pane is a live preview through the same renderer the client sees. Add,
+    reorder, and delete blocks; the preview follows.
+29. **Merge fields** — the preview shows real values, not `{{client.name}}`. Add a block using a
+    field with no data and a warning appears above the editor naming it — before you send.
+30. **Templates** — **Templates** offers a construction bid, a professional engagement, a simple
+    estimate, and a general services proposal, ordered so your industry's comes first. **Save as
+    template** puts your own layout in the gallery.
+31. **Locked once sent** — open the designer on a sent proposal. It is read-only: the sent version
+    is a snapshot, and editing what a client is reading would be worse than making them wait for
+    version 2.
+32. **The client's view** — open the proposal link from the seed output. It renders in the
+    company's colours, with the fee table drawn from the real line items.
+33. **Print to PDF** — click **Print or save as PDF**. Page margins, page breaks, and brand
+    colours all survive; the interactive form is replaced by ruled signature lines.
+34. **Accept it** — type a name, then type something *different* as the signature: it refuses.
+    Match them, tick the agreement, and accept. The page shows the acceptance, and back in the
+    pipeline the deal is **Won**.
+35. **Accept it twice** — reload and try again, or re-post to the endpoint. It returns 409: a
+    unique constraint makes double-acceptance impossible, not just unlikely.
+
 ## Project layout
 
 ```
@@ -233,10 +281,14 @@ src/
     actions/              Server actions — resolve the actor, call one service
     bookkeeping/          Transaction Inbox
     accounting/           Reports, journal, reconciliation workspace
-    crm/                  Pipeline, dashboard, clients, proposals, lead intake
+    crm/                  Pipeline, dashboard, clients, proposals, designer
+    studio/               Company Studio — profile, brand, catalog, clauses
     api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
+    api/proposals/        Public proposal acceptance (unauthenticated)
+    api/assets/[id]/      Asset serving, authorized by session or proposal token
     p/[token]/            Public client-facing proposal link (unauthenticated)
-  components/             Shared app shell and navigation
+  components/
+    design/               Block renderer and the document stylesheet
   db/
     schema/               Drizzle table definitions (the migration source)
     migrate.ts, seed.ts
@@ -247,7 +299,9 @@ src/
     banking/              Provider interface, mock adapter, import and dedup
     bookkeeping/          Rule matching, categorization, splits, transfers
     coa/                  Chart of accounts and industry packs
-    crm/                  Pipeline, proposals, lead intake, conversion, analytics
+    crm/                  Pipeline, proposals, intake, conversion, acceptance
+    design/               Blocks, merge fields, templates, document composition
+    studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
@@ -288,9 +342,17 @@ Gaps within the phases already built:
   applications to the accounts on the documents they settle. The `payment_applications` table was
   designed to make that possible, but it is not implemented — deliberately left rather than
   shipped as an approximation.
-- **E-signature and in-page acceptance** (spec §7). The client proposal link is read-only.
-  Accepting in-page means a second public write endpoint, which deserves the same scrutiny the
-  intake endpoint got rather than being tacked on.
+- **Server-side PDF generation** (spec §18). Print CSS gives a correct, paginated file through the
+  browser's Save as PDF, but there is no server-rendered PDF. Adding it means either a headless
+  browser in the deployment or a layout library re-implementing pagination the browser already
+  does. See ADR 0004.
+- **Illustrator-class vector editing** (spec §7). Deliberately deferred — §7 itself says to
+  prioritize business-document layout first. No arbitrary positioning, layering, or path editing;
+  a `canvas` block type is the extension point.
+- **Rich text inside a paragraph.** Text blocks are plain with paragraph breaks. Bold, italics,
+  and inline links need their own decision about format.
+- **Comments and questions on a proposal** (spec §7). The acceptance endpoint is the model to
+  copy when they are built.
 - **Project dimension is stored but not reported on.** `journal_lines.projectId` exists and is set
   by conversion; filtering the statements by job is a query change still to make. Classes,
   departments, and locations are not modelled at all.
@@ -299,8 +361,12 @@ Gaps within the phases already built:
   the data is captured now.
 - Communications and file attachments on opportunities (spec §6) are not built;
   `opportunity_activities` is the seam they will hang from.
-- Renaming an organization does not propagate to its linked customer or vendor record. Worth
-  fixing before the name appears on client-facing documents in Phase 4.
+- Renaming an organization does not propagate to its linked customer or vendor record. Client-
+  facing documents read the organization, so they stay correct — but the accounting record drifts.
+- A document's brand kit is captured when the document is composed. Changing the kit does not
+  restyle existing documents: right for sent proposals, arguably surprising for drafts.
+- Assets are stored in Postgres through the default `AssetStore` adapter. Fine for logos; object
+  storage is one adapter away when receipts arrive at volume.
 - Infrastructure from spec §18 still open: background job queue (bank sync runs inline and now
   writes journal entries too, so this matters more than it did), object storage for receipts, the
   outbox pattern.

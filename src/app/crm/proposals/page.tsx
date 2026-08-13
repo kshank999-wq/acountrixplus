@@ -54,6 +54,7 @@ export default async function ProposalsPage() {
           sentAt: p.sentAt ? p.sentAt.toISOString().slice(0, 10) : null,
           viewCount: p.viewCount,
           expiresOn: p.expiresOn,
+          publicToken: p.publicToken,
         }))}
         opportunities={opportunities.map((o) => ({
           id: o.id,

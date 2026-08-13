@@ -17,7 +17,7 @@ export function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting' | 'crm'
+  active: 'bookkeeping' | 'accounting' | 'crm' | 'studio'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -25,6 +25,7 @@ export function AppShell({
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
+    { key: 'studio', href: '/studio', label: 'Company Studio', show: can(actor, 'crm:view') },
   ].filter((link) => link.show)
 
   return (

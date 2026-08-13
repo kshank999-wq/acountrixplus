@@ -29,6 +29,13 @@
       "when": 1786606239075,
       "tag": "0003_probability_override",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1786607368168,
+      "tag": "0004_phase4_studio_design",
+      "breakpoints": true
     }
   ]
 }

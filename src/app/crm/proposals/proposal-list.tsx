@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import { formatCents } from '@/lib/money'
 import {
   createProposalAction,
@@ -19,6 +20,7 @@ type Proposal = {
   sentAt: string | null
   viewCount: number
   expiresOn: string | null
+  publicToken: string
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -137,8 +139,24 @@ export function ProposalList({
                   </div>
                 </div>
 
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  <Link
+                    href={`/crm/proposals/${proposal.id}/design`}
+                    className="btn px-2 py-1 text-xs"
+                  >
+                    {canManage && proposal.status === 'draft' ? 'Design' : 'View document'}
+                  </Link>
+                  <Link
+                    href={`/p/${proposal.publicToken}`}
+                    target="_blank"
+                    className="btn px-2 py-1 text-xs"
+                  >
+                    Client link
+                  </Link>
+                </div>
+
                 {canManage && (
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
                     <button
                       onClick={() => act(() => sendProposalAction(proposal.id))}
                       disabled={pending}

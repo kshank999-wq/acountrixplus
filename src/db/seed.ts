@@ -7,7 +7,7 @@
  */
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { financialAccounts } from '@/db/schema'
+import { brandKits, financialAccounts } from '@/db/schema'
 import { registerCompany } from '@/modules/tenancy/onboarding'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
@@ -34,6 +34,13 @@ import {
 } from '@/modules/crm/proposals'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
 import { createIntakeKey } from '@/modules/crm/intake'
+import {
+  createClause,
+  createServiceItem,
+  saveProfile,
+  updateBrandKit,
+} from '@/modules/studio/service'
+import { createDocumentForProposal } from '@/modules/design/documents'
 import type { ActorContext } from '@/modules/tenancy/context'
 
 /** The checking account the demo payments move through. */
@@ -265,10 +272,16 @@ async function main() {
   console.log('  4 opportunities across the pipeline.')
 
   const contractRevenueAccount = await accountByNumber(company.id, '4200')
+  // Captured so documents can be composed once the studio is set up.
+  let wonProposalId: string | null = null
+  let openProposalId: string | null = null
+  let openProposalToken: string | null = null
+
   if (contractRevenueAccount) {
     const proposal = await createProposal(ctx, {
       opportunityId: won.id,
       title: 'Foundation and framing proposal',
+      expiresOn: '2026-10-15',
       executiveSummary:
         'A two-phase package covering excavation, foundation, and structural framing.',
       scope: 'Site preparation, excavation, footings, foundation walls, and framing to lock-up.',
@@ -295,6 +308,7 @@ async function main() {
       ],
     })
 
+    wonProposalId = proposal.id
     await sendProposal(ctx, proposal.id)
     await recordView(proposal.publicToken, { ipPrefix: '203.0.113.0/24' })
     await decideProposal(ctx, proposal.id, 'won')
@@ -311,6 +325,7 @@ async function main() {
     const openProposal = await createProposal(ctx, {
       opportunityId: negotiating.id,
       title: 'Mixed-use foundation proposal',
+      expiresOn: '2026-11-30',
       scope: 'Excavation and foundation for the mixed-use block.',
       items: [
         {
@@ -321,6 +336,8 @@ async function main() {
       ],
     })
     await sendProposal(ctx, openProposal.id)
+    openProposalId = openProposal.id
+    openProposalToken = openProposal.publicToken
     console.log(`  Proposal ${openProposal.number} sent and awaiting a decision.`)
   }
 
@@ -329,6 +346,97 @@ async function main() {
     hourlyLimit: 60,
   })
   console.log(`  Lead intake key: ${intakeKey.publicKey}`)
+
+  // --- Phase 4: Company Studio and the proposal designer -------------------
+
+  console.log('Filling in Company Studio…')
+
+  await saveProfile(ctx, {
+    legalName: 'Ridgeline Construction LLC',
+    tagline: 'Foundations, framing, and finish work since 2009.',
+    addressLine1: '412 Mill Street',
+    city: 'Bellingham',
+    region: 'WA',
+    postalCode: '98225',
+    phone: '(360) 555-0148',
+    email: 'hello@ridgeline.test',
+    website: 'ridgeline.test',
+    paymentInstructions:
+      'A 25% deposit is due on acceptance. Progress billing is monthly on work in place, net 30. Retainage of 10% is released at substantial completion.',
+    documentFooter: 'Ridgeline Construction LLC · WA contractor licence RIDGEC*781QK',
+  })
+
+  // A brand kit in the company's own colours rather than the product default.
+  const [defaultKit] = await db
+    .select()
+    .from(brandKits)
+    .where(eq(brandKits.companyId, company.id))
+    .limit(1)
+
+  if (defaultKit) {
+    await updateBrandKit(ctx, defaultKit.id, {
+      name: 'Ridgeline',
+      primaryColor: '#1e3a5f',
+      accentColor: '#c2703d',
+      textColor: '#1a1a1a',
+      mutedColor: '#6b7280',
+      surfaceColor: '#ffffff',
+      headingFont: 'Georgia, serif',
+      bodyFont: 'system-ui, sans-serif',
+      baseSizePt: 11,
+    })
+    console.log('  Brand kit set to the company colours.')
+  }
+
+  await createClause(ctx, {
+    title: 'Payment terms',
+    category: 'payment',
+    body: 'A deposit of 25% is due on acceptance. Progress invoices are issued monthly for work in place and are due net 30. Retainage of 10% is held until substantial completion.',
+    approve: true,
+  })
+  await createClause(ctx, {
+    title: 'Change orders',
+    category: 'terms',
+    body: 'Any change to the scope described in this proposal requires a written change order signed by both parties before the work is performed. Change orders are billed at the rates in effect at the time of the change.',
+    approve: true,
+  })
+  await createClause(ctx, {
+    title: 'Warranty',
+    category: 'warranty',
+    body: 'Workmanship is warranted for one year from substantial completion. Manufacturer warranties on materials are passed through to the owner.',
+    approve: true,
+  })
+  console.log('  3 approved clauses in the legal library.')
+
+  await createServiceItem(ctx, {
+    name: 'Excavation and site preparation',
+    unit: 'day',
+    unitPriceCents: 285_000,
+    chartAccountId: contractRevenueAccount?.id ?? null,
+    description: 'Machine and operator, including haul-off.',
+  })
+  await createServiceItem(ctx, {
+    name: 'Foundation forming and pour',
+    unit: 'sq ft',
+    unitPriceCents: 1_450,
+    chartAccountId: contractRevenueAccount?.id ?? null,
+  })
+  console.log('  2 items in the service catalog.')
+
+  // Compose the proposal documents now that the brand and clauses exist, so
+  // the client-facing pages render in the company's own colours.
+  for (const [proposalId, templateKey, label] of [
+    [wonProposalId, 'construction-bid', 'won'],
+    [openProposalId, 'construction-bid', 'open'],
+  ] as const) {
+    if (!proposalId) continue
+    await createDocumentForProposal(ctx, proposalId, templateKey)
+    console.log(`  Composed the ${label} proposal from the "${templateKey}" template.`)
+  }
+
+  if (openProposalToken) {
+    console.log(`  Open proposal, ready to accept: /p/${openProposalToken}`)
+  }
 
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)

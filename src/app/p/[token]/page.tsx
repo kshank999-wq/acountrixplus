@@ -1,18 +1,25 @@
 import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
-import { formatCents } from '@/lib/money'
+import { and, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { brandKits, designDocuments, proposalAcceptances } from '@/db/schema'
 import { proposalByToken, recordView } from '@/modules/crm/proposals'
+import { isAcceptable } from '@/modules/crm/acceptance'
+import { proposalRenderContext } from '@/modules/design/documents'
 import { truncateIp } from '@/modules/crm/intake'
+import { DocumentPage, brandTokens } from '@/components/design/document-page'
+import { AcceptancePanel } from './acceptance-panel'
+import { PrintButton } from './print-button'
 
 export const dynamic = 'force-dynamic'
 
 /**
- * The client-facing proposal link (spec §7, §9).
+ * The client-facing proposal (spec §7, §9).
  *
- * Unauthenticated and read-only: the token grants a view of exactly one
- * proposal. Opening the page records a view, which is what feeds the
- * open-tracking figures in spec §9 — coarse by design, since §9 qualifies view
- * tracking with "where technically and legally appropriate".
+ * Unauthenticated and read-only apart from acceptance. It renders the same
+ * design document the author edited, under the company's brand, with a print
+ * stylesheet so the client's own Print → Save as PDF produces a paginated,
+ * print-ready file.
  */
 export default async function PublicProposalPage({
   params,
@@ -23,114 +30,119 @@ export default async function PublicProposalPage({
   const view = await proposalByToken(token)
   if (!view) notFound()
 
+  const { proposal, organizationName } = view
+
   const headerStore = await headers()
   await recordView(token, {
-    ipPrefix: truncateIp(
-      headerStore.get('x-forwarded-for') ?? headerStore.get('x-real-ip'),
-    ),
+    ipPrefix: truncateIp(headerStore.get('x-forwarded-for') ?? headerStore.get('x-real-ip')),
     userAgent: headerStore.get('user-agent'),
   })
 
-  const { proposal, organizationName, items } = view
-  const billable = items.filter((item) => !item.isOptional || item.isSelected)
-  const optional = items.filter((item) => item.isOptional && !item.isSelected)
+  const [render, existingAcceptance, documents] = await Promise.all([
+    proposalRenderContext(proposal.companyId, proposal.id),
+    db
+      .select()
+      .from(proposalAcceptances)
+      .where(
+        and(
+          eq(proposalAcceptances.proposalId, proposal.id),
+          eq(proposalAcceptances.companyId, proposal.companyId),
+        ),
+      )
+      .limit(1),
+    db
+      .select()
+      .from(designDocuments)
+      .where(
+        and(
+          eq(designDocuments.proposalId, proposal.id),
+          eq(designDocuments.companyId, proposal.companyId),
+        ),
+      )
+      .limit(1),
+  ])
+
+  const document = documents[0]
+
+  const [kit] = document?.brandKitId
+    ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
+    : []
+
+  const accepted = existingAcceptance[0] ?? null
+  const acceptable = isAcceptable(proposal) && !accepted
+
+  const items = (render?.items ?? []).map((item) => ({
+    id: item.id,
+    description: item.description,
+    quantityMilli: item.quantityMilli,
+    unitPriceCents: item.unitPriceCents,
+    amountCents: item.amountCents,
+    isOptional: item.isOptional,
+    isSelected: item.isSelected,
+  }))
+
+  const assetUrl = (assetId: string) =>
+    `/api/assets/${assetId}?proposal=${encodeURIComponent(token)}`
+
+  const logoAssetId = kit?.logoAssetId ?? null
+
+  const setup = document ?? {
+    pageSize: 'letter',
+    orientation: 'portrait',
+    marginTopPt: 54,
+    marginRightPt: 54,
+    marginBottomPt: 54,
+    marginLeftPt: 54,
+    headerText: null,
+    footerText: null,
+  }
 
   return (
-    <main className="mx-auto max-w-3xl px-5 py-10 sm:px-8 sm:py-16">
-      <header className="mb-8 border-b border-line pb-6">
-        <p className="tnum text-xs uppercase tracking-wide text-muted">{proposal.number}</p>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight sm:text-3xl">
-          {proposal.title}
-        </h1>
-        <p className="mt-1 text-sm text-muted">Prepared for {organizationName}</p>
-        {proposal.expiresOn && (
-          <p className="mt-3 text-xs text-warning">Valid through {proposal.expiresOn}</p>
-        )}
-      </header>
-
-      {proposal.executiveSummary && (
-        <Section title="Summary">{proposal.executiveSummary}</Section>
-      )}
-      {proposal.scope && <Section title="Scope of work">{proposal.scope}</Section>}
-      {proposal.exclusions && <Section title="Exclusions">{proposal.exclusions}</Section>}
-
-      <section className="mb-8">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-muted">
-          Pricing
-        </h2>
-        <div className="card overflow-x-auto">
-          <table className="w-full text-sm">
-            <tbody>
-              {billable.map((item) => (
-                <tr key={item.id} className="border-b border-line last:border-0">
-                  <td className="px-4 py-2.5">{item.description}</td>
-                  <td className="tnum whitespace-nowrap px-4 py-2.5 text-right">
-                    {formatCents(item.amountCents)}
-                  </td>
-                </tr>
-              ))}
-
-              {proposal.discountCents > 0 && (
-                <tr className="border-b border-line">
-                  <td className="px-4 py-2.5 text-muted">Discount</td>
-                  <td className="tnum px-4 py-2.5 text-right text-muted">
-                    −{formatCents(proposal.discountCents)}
-                  </td>
-                </tr>
-              )}
-              {proposal.taxCents > 0 && (
-                <tr className="border-b border-line">
-                  <td className="px-4 py-2.5 text-muted">Tax</td>
-                  <td className="tnum px-4 py-2.5 text-right text-muted">
-                    {formatCents(proposal.taxCents)}
-                  </td>
-                </tr>
-              )}
-
-              <tr className="bg-raised/60 text-base font-semibold">
-                <td className="px-4 py-3">Total</td>
-                <td className="tnum px-4 py-3 text-right">{formatCents(proposal.totalCents)}</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-
-        {optional.length > 0 && (
-          <div className="mt-4">
-            <h3 className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted">
-              Optional additions
-            </h3>
-            <ul className="card divide-y divide-line text-sm">
-              {optional.map((item) => (
-                <li key={item.id} className="flex justify-between gap-4 px-4 py-2.5">
-                  <span>{item.description}</span>
-                  <span className="tnum shrink-0 text-muted">
-                    {formatCents(item.amountCents)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-      </section>
-
-      {proposal.terms && <Section title="Terms">{proposal.terms}</Section>}
-
-      <footer className="mt-10 border-t border-line pt-6 text-xs text-faint">
-        <p>
-          Questions about this proposal? Reply to the message it came with and we will get back
-          to you.
+    <div className="min-h-screen bg-canvas py-6 print:bg-white print:py-0">
+      <div className="doc-screen-only mx-auto mb-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4">
+        <p className="text-xs text-muted">
+          Proposal {proposal.number} for {organizationName}
         </p>
-      </footer>
-    </main>
-  )
-}
+        <PrintButton />
+      </div>
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
-  return (
-    <section className="mb-8">
-      <h2 className="mb-2 text-sm font-semibold uppercase tracking-wide text-muted">{title}</h2>
-      <div className="whitespace-pre-wrap text-sm leading-relaxed">{children}</div>
-    </section>
+      <div className="mx-auto max-w-3xl bg-white shadow-sm print:max-w-none print:shadow-none">
+        <DocumentPage
+          blocks={document?.blocks ?? []}
+          setup={setup}
+          brand={brandTokens(kit)}
+          context={render?.context ?? {}}
+          data={{
+            items,
+            discountCents: proposal.discountCents,
+            taxCents: proposal.taxCents,
+            logoUrl: logoAssetId ? assetUrl(logoAssetId) : null,
+            assetUrl,
+            signatureSlot: (
+              <AcceptancePanel
+                token={token}
+                items={items}
+                discountCents={proposal.discountCents}
+                taxCents={proposal.taxCents}
+                acceptable={acceptable}
+                accepted={
+                  accepted
+                    ? {
+                        signerName: accepted.signerName,
+                        acceptedAt: accepted.acceptedAt.toISOString().slice(0, 10),
+                        totalCents: accepted.acceptedTotalCents,
+                      }
+                    : null
+                }
+                expired={
+                  Boolean(proposal.expiresOn) &&
+                  proposal.expiresOn! < new Date().toISOString().slice(0, 10)
+                }
+              />
+            ),
+          }}
+        />
+      </div>
+    </div>
   )
 }
