@@ -40,36 +40,46 @@ type Item = {
 }
 
 /**
- * The proposal designer (spec §7).
+ * The document designer (spec §7, §8).
  *
  * Two panes: a block list on the left and a live preview on the right, using
- * the same renderer the client will see. Editing a sent proposal is blocked —
+ * the same renderer the reader will see. Editing a sent proposal is blocked —
  * the sent version is a snapshot, and changing what a client is looking at
  * mid-read would be worse than making them wait for version 2.
+ *
+ * One designer serves proposals and marketing creative. What differs between
+ * them is the palette of blocks on offer (`kind`) and whether a pricing table
+ * has any figures to draw — not the editor itself. Spec §8 asks for exactly
+ * this: "the same design engine", not a second one that looks similar.
  */
 export function Designer({
   documentId,
-  proposalNumber,
-  proposalTitle,
+  kind = 'proposal',
+  eyebrow,
+  title,
   isEditable,
-  status,
+  statusNote,
   initialBlocks,
   setup,
   brand,
   context,
   unresolvedFields,
-  items,
-  discountCents,
-  taxCents,
+  items = [],
+  discountCents = 0,
+  taxCents = 0,
   templates,
   clauses,
   assets,
 }: {
   documentId: string
-  proposalNumber: string
-  proposalTitle: string
+  /** Which block palette to offer. */
+  kind?: 'proposal' | 'marketing'
+  /** A short prefix before the title — a proposal number, say. */
+  eyebrow?: string | null
+  title: string
   isEditable: boolean
-  status: string
+  /** What to say under the title when the document is not editable. */
+  statusNote?: string | null
   initialBlocks: Block[]
   setup: {
     pageSize: string
@@ -84,9 +94,9 @@ export function Designer({
   brand: Brand | null
   context: MergeContext
   unresolvedFields: string[]
-  items: Item[]
-  discountCents: number
-  taxCents: number
+  items?: Item[]
+  discountCents?: number
+  taxCents?: number
   templates: Array<{
     key: string
     name: string
@@ -105,7 +115,7 @@ export function Designer({
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null)
   const [showTemplates, setShowTemplates] = useState(false)
 
-  const definitions = useMemo(() => definitionsForKind('proposal'), [])
+  const definitions = useMemo(() => definitionsForKind(kind), [kind])
   const selected = blocks.find((block) => block.id === selectedId) ?? null
 
   function notify(result: { ok: boolean; message?: string; error?: string }) {
@@ -149,12 +159,15 @@ export function Designer({
       <header className="flex flex-wrap items-center gap-3">
         <div className="min-w-0">
           <h1 className="truncate text-base font-semibold">
-            <span className="tnum text-faint">{proposalNumber}</span> {proposalTitle}
+            {eyebrow && <span className="tnum text-faint">{eyebrow} </span>}
+            {title}
           </h1>
           <p className="text-xs text-muted">
             {isEditable
-              ? 'Editing the draft. The client sees this once you send it.'
-              : `This proposal is ${status.replace('_', ' ')} — its sent version is locked.`}
+              ? kind === 'marketing'
+                ? 'Editing the creative. Campaigns render it as email and as a web page.'
+                : 'Editing the draft. The client sees this once you send it.'
+              : (statusNote ?? 'This document is locked.')}
           </p>
         </div>
 
@@ -425,6 +438,12 @@ function labelFor(block: Block): string {
       return `Columns — ${block.columns.length}`
     case 'clause':
       return `Clause — ${truncate(block.title) || 'none chosen'}`
+    case 'button':
+      return `Button — ${truncate(block.label) || 'no label'}`
+    case 'qrCode':
+      return `QR code — ${truncate(block.value) || 'nothing encoded'}`
+    case 'video':
+      return `Video — ${truncate(block.caption) || truncate(block.url) || 'no link'}`
     case 'signature':
       return 'Acceptance'
     case 'divider':

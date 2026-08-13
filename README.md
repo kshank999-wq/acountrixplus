@@ -4,13 +4,14 @@ A unified business operating system for bookkeeping, accounting, clients, propos
 marketing — an alternative to QuickBooks.
 
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
-**Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**, and
-**Phase 4 (Proposal Designer + Company Studio)** from the
+**Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
+**Phase 4 (Proposal Designer + Company Studio)**, and **Phase 5 (Marketing)** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
-[ADR 0003](docs/adr/0003-crm-and-public-intake.md), and
-[ADR 0004](docs/adr/0004-document-engine-and-brand.md).
+[ADR 0003](docs/adr/0003-crm-and-public-intake.md),
+[ADR 0004](docs/adr/0004-document-engine-and-brand.md), and
+[ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md).
 
 ## What works today
 
@@ -68,8 +69,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 - **Company Studio** — profile, brand kit (colours, fonts, logo), a logo and image library, a
   reusable service catalog, and a versioned legal clause library.
 - **Proposal designer** — a block-based document editor with a live preview through the same
-  renderer the client sees. Blocks reflow, so one document works on a phone, in print, and
-  (in Phase 5) in an email.
+  renderer the client sees. Blocks reflow, so one document works on a phone, in print, and in
+  an email.
 - **Template gallery** — built-in templates ordered by your industry, plus your own saved layouts.
 - **Merge fields** — `{{client.name}}`, `{{proposal.total}}` and friends fill from real records.
   Unresolved fields render blank and are flagged to the author before sending.
@@ -77,6 +78,27 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
   so the client's own Print → Save as PDF gives a paginated, print-ready file.
 - **Acceptance and e-signature** — the client picks optional items, sees the total update, types
   their name to sign, and the deal closes. The accepted total is recomputed server-side.
+
+### Marketing (Phase 5)
+
+- **Segment builder** — filter by lifecycle stage, industry, region, size, source, tags, strategic
+  flag, and deal history, with a live count that shows how many match *and* how many may actually
+  be emailed, broken down by reason.
+- **Campaigns and nurture sequences** — a broadcast or a multi-step sequence, each step attached
+  to a piece of creative. Sending reports matched, sent, skipped, and why.
+- **Consent enforced at send time** — a segment says who you are interested in; permission is
+  decided against the state of the world at the moment the message would go out. Suppression is
+  company-wide and keyed by address, so it survives a contact being recreated.
+- **Shared creative studio** — the same design engine proposals use, with `button`, `qrCode`, and
+  `video` blocks added. One document renders as a branded web page and as table-based email HTML
+  with a plain-text alternative.
+- **Public unsubscribe and tracking** — an RFC 8058 one-click endpoint, a confirmation page, an
+  open pixel, and click redirects that re-validate their destination.
+- **The sales loop** — a click raises a follow-up task for whoever owns the relationship, and
+  lost deals marked eligible at close surface on a re-engagement list with a one-press reopen.
+  Engagement never reopens a deal on its own.
+- **Analytics** — open, click, click-through, unsubscribe, and bounce rates per campaign and
+  across the account, with a scheduled-campaign calendar.
 
 No AI provider is required for any of it (spec §22).
 
@@ -155,6 +177,7 @@ Coverage matches what spec §21 asks for:
 | `tests/intake.test.ts` | Honeypot, rate limiting, log ceiling, origin allowlist, address truncation, key scoping and enumeration |
 | `tests/design.test.ts` | Block validation, merge-field resolution, template composition, brand colour validation, clause versioning |
 | `tests/acceptance.test.ts` | Server-side total recomputation, signature matching, expiry, double-acceptance, foreign item ids |
+| `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics denominators, tenant and role isolation |
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -273,6 +296,43 @@ key and the client proposal link — keep them for steps 22 and 24.
 35. **Accept it twice** — reload and try again, or re-post to the endpoint. It returns 409: a
     unique constraint makes double-acceptance impossible, not just unlikely.
 
+### Marketing (Phase 5)
+
+36. **The overview** — open **Marketing**. The seed sends two campaigns, so there are open and
+    click rates, an engagement feed, and a scheduled campaign on the calendar.
+37. **Segments** — under **Segments**, add a rule (say `industry is Real estate`). The panel on
+    the right counts the audience as you type, and tells you how many of them may actually be
+    emailed and why the rest may not.
+38. **A segment is not permission** — delete every rule. It now matches everyone, and the panel
+    still shows only the contactable subset. A wide segment never implies consent.
+39. **A campaign's honesty** — open **Year-end planning note**. It says "1 of 3 people who matched
+    this segment were not emailed: 1 had not opted in." The recipients table lists the skipped
+    person with the reason, rather than quietly dropping them.
+40. **Creative** — under **Creative**, open the year-end note. It is the same designer proposals
+    use, with `Button`, `QR code`, and `Video` added and the fee table and signature blocks gone.
+    **Duplicate** copies it with fresh block ids.
+41. **One document, two renderers** — the preview is the React renderer; the same blocks go out as
+    table-based email HTML with a plain-text alternative. That is what ADR 0004's flowing-block
+    decision bought.
+42. **Unsubscribe** — take a token from the recipients table and open `/u/<token>`. It asks before
+    doing anything: mail clients pre-fetch links, so a GET must not opt someone out. Confirm, then
+    reload — it says you were already unsubscribed rather than erroring.
+43. **Suppression outlives the contact** — the address now appears under **Suppressions**. Delete
+    that contact in the CRM and let lead intake recreate them; they are still suppressed, because
+    the list is keyed by address, not by row id.
+44. **Removing a suppression restores nothing** — remove the entry. The hard block lifts, but the
+    contact's consent stays withdrawn. It is theirs to give.
+45. **Click tracking will not redirect anywhere** — try
+    `/api/track/<token>?u=javascript:alert(1)`. It lands on the home page instead: the destination
+    is re-validated, so a forged tracking link is not an open redirect.
+46. **The sales loop** — a click raised **Follow up: City Works Authority engaged with…** on the
+    overview, and the lost parking-structure deal appears under **Lost deals showing interest**.
+    Press **Reopen deal** and it returns to the pipeline — the deal never reopened on its own,
+    because that would have rewritten the win/loss figures.
+47. **Roles** — the `marketing` role gets marketing and read-only CRM, and nothing financial. The
+    same designer serves both proposals and creative, but the document's own kind decides which
+    permission governs it, so sales cannot edit a newsletter and marketing cannot edit a proposal.
+
 ## Project layout
 
 ```
@@ -282,13 +342,17 @@ src/
     bookkeeping/          Transaction Inbox
     accounting/           Reports, journal, reconciliation workspace
     crm/                  Pipeline, dashboard, clients, proposals, designer
+    marketing/            Overview, campaigns, segments, creative, suppressions
     studio/               Company Studio — profile, brand, catalog, clauses
     api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
     api/proposals/        Public proposal acceptance (unauthenticated)
+    api/track/[token]/    Public open pixel and click redirect (unauthenticated)
+    api/unsubscribe/      Public RFC 8058 one-click unsubscribe (unauthenticated)
     api/assets/[id]/      Asset serving, authorized by session or proposal token
     p/[token]/            Public client-facing proposal link (unauthenticated)
+    u/[token]/            Public unsubscribe confirmation (unauthenticated)
   components/
-    design/               Block renderer and the document stylesheet
+    design/               Block renderer, the designer, and the document stylesheet
   db/
     schema/               Drizzle table definitions (the migration source)
     migrate.ts, seed.ts
@@ -301,6 +365,7 @@ src/
     coa/                  Chart of accounts and industry packs
     crm/                  Pipeline, proposals, intake, conversion, acceptance
     design/               Blocks, merge fields, templates, document composition
+    marketing/            Segments, campaigns, email provider, engagement, analytics
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
@@ -327,15 +392,39 @@ No changes to import, dedup, categorization, or the inbox — that isolation is 
 (spec §3). Provider credentials stay server-side and are never exposed to the browser
 (spec §19).
 
+## Switching email providers
+
+Set `EMAIL_PROVIDER` in `.env.local`. The default `mock` adapter records messages in memory and
+sends nothing, so the demo and the tests run with no credentials. To add a real ESP:
+
+1. Implement the `EmailProvider` interface from `src/modules/marketing/email-provider.ts`.
+2. Register it with `registerEmailProvider`.
+3. Set `EMAIL_PROVIDER` to its key, and set `PUBLIC_BASE_URL` — links inside a sent email are
+   opened days later from a different origin, so they cannot be relative.
+
+No adapter is ever asked to decide *whether* someone may be emailed. Consent and suppression are
+enforced in the send pipeline before a message reaches a provider, so a misconfigured adapter
+cannot become a compliance failure (spec §10, §19).
+
 ## Not built yet
 
 Tracked against the spec §20 phases:
 
-- **Phase 4** — proposal designer, Company Studio brand kit
-- **Phase 5** — marketing, segments, campaigns
 - **Phase 6** — the optional AI module and its gateway
 
 Gaps within the phases already built:
+
+- **Campaign scheduling.** `scheduledFor` puts a campaign on the calendar and a nurture step's
+  `delayDays` is recorded, but nothing fires on its own — sending is a button somebody presses.
+  The missing piece is a background worker calling the same `sendStep` that enforces consent.
+- **Provider delivery callbacks.** Bounces are recorded from the synchronous send result. Real
+  ESPs report hard bounces and spam complaints by webhook hours later, so the suppression list
+  under-counts until that endpoint exists.
+- **Open tracking is a pixel**, so it under-reports wherever images are blocked. Click rate is the
+  more honest figure, which is why the sales loop keys on clicks rather than opens.
+- **QR codes do not render in the designer preview.** The encoder is server-side; the preview
+  shows a labelled placeholder naming what will be encoded. Sent and printed output is correct.
+- **A/B testing and send-time optimization** (spec §10) are not built.
 
 - **Cash-basis reporting.** All statements are accrual. Spec §13 asks for both "where supported by
   the underlying transaction model"; doing cash basis correctly means looking through payment

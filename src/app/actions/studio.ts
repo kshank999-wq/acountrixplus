@@ -22,10 +22,13 @@ import {
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
-async function run(path: string, fn: () => Promise<string | void>): Promise<ActionResult> {
+async function run(
+  path: string | string[],
+  fn: () => Promise<string | void>,
+): Promise<ActionResult> {
   try {
     const message = await fn()
-    revalidatePath(path)
+    for (const entry of Array.isArray(path) ? path : [path]) revalidatePath(entry)
     return { ok: true, message: message ?? undefined }
   } catch (error) {
     return {
@@ -186,6 +189,12 @@ export async function reviseClauseAction(
 
 // --- Documents -------------------------------------------------------------
 
+/**
+ * One designer serves proposals and marketing creative, so a save has to
+ * refresh whichever list the author came from — the action cannot tell.
+ */
+const DOCUMENT_PATHS = ['/crm/proposals', '/marketing/creative']
+
 export async function saveDocumentAction(
   documentId: string,
   blocks: unknown,
@@ -197,7 +206,7 @@ export async function saveDocumentAction(
     footerText?: string | null
   },
 ): Promise<ActionResult> {
-  return run('/crm/proposals', async () => {
+  return run(DOCUMENT_PATHS, async () => {
     const actor = await requireActor()
     await saveDocument(actor, documentId, { blocks, settings })
     return 'Saved.'
@@ -208,7 +217,7 @@ export async function applyTemplateAction(
   documentId: string,
   templateKey: string,
 ): Promise<ActionResult> {
-  return run('/crm/proposals', async () => {
+  return run(DOCUMENT_PATHS, async () => {
     const actor = await requireActor()
     await applyTemplate(actor, documentId, templateKey)
     return 'Template applied. Your previous content was replaced.'
@@ -237,7 +246,7 @@ export async function saveAsTemplateAction(
   key: string,
   name: string,
 ): Promise<ActionResult> {
-  return run('/crm/proposals', async () => {
+  return run(DOCUMENT_PATHS, async () => {
     const actor = await requireActor()
     await saveAsTemplate(actor, documentId, { key, name })
     return `Saved "${name}" to your template library.`

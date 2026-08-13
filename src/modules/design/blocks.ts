@@ -144,6 +144,55 @@ export const pageBreakBlockSchema = z.object({
   type: z.literal('pageBreak'),
 })
 
+/**
+ * Marketing collateral blocks (spec §8).
+ *
+ * Added in Phase 5. They are new entries in the same union — the engine, the
+ * renderer's dispatch, the merge-field resolver, and the storage model all
+ * stayed as they were, which is the test ADR 0004 set for itself.
+ */
+
+/** A call to action (spec §8 buttons/links). */
+export const buttonBlockSchema = z.object({
+  ...baseBlock,
+  type: z.literal('button'),
+  label: z.string().default('Get in touch'),
+  url: z.string().default(''),
+  style: z.enum(['solid', 'outline']).default('solid'),
+  align: alignment,
+})
+
+/**
+ * A QR code (spec §8).
+ *
+ * Rendered as SVG so it stays sharp in print, which is the whole point of a QR
+ * code on a one-sheet or capability statement.
+ */
+export const qrCodeBlockSchema = z.object({
+  ...baseBlock,
+  type: z.literal('qrCode'),
+  value: z.string().default(''),
+  caption: z.string().default(''),
+  sizePt: z.number().int().min(48).max(288).default(120),
+  align: alignment,
+})
+
+/**
+ * Linked video for digital collateral (spec §8).
+ *
+ * Rendered as a thumbnail that links out rather than an embedded player:
+ * a document that has to survive print and email cannot rely on an iframe, and
+ * a silently blank rectangle is worse than a picture with a play affordance.
+ */
+export const videoBlockSchema = z.object({
+  ...baseBlock,
+  type: z.literal('video'),
+  url: z.string().default(''),
+  thumbnailAssetId: z.string().nullable().default(null),
+  caption: z.string().default(''),
+  widthPercent: z.number().int().min(20).max(100).default(100),
+})
+
 export const blockSchema = z.discriminatedUnion('type', [
   coverBlockSchema,
   headingBlockSchema,
@@ -158,6 +207,9 @@ export const blockSchema = z.discriminatedUnion('type', [
   clauseBlockSchema,
   signatureBlockSchema,
   pageBreakBlockSchema,
+  buttonBlockSchema,
+  qrCodeBlockSchema,
+  videoBlockSchema,
 ])
 
 export type Block = z.infer<typeof blockSchema>
@@ -300,6 +352,27 @@ export const BLOCK_DEFINITIONS: BlockDefinition[] = [
     description: 'Where the client signs. Only one per proposal is used.',
     kinds: ['proposal'],
     create: (id) => signatureBlockSchema.parse({ id, type: 'signature' }),
+  },
+  {
+    type: 'button',
+    label: 'Button',
+    description: 'A call to action. Becomes a plain link in print.',
+    kinds: ['marketing'],
+    create: (id) => buttonBlockSchema.parse({ id, type: 'button' }),
+  },
+  {
+    type: 'qrCode',
+    label: 'QR code',
+    description: 'Scannable link, drawn as vector so it stays sharp in print.',
+    kinds: ['marketing'],
+    create: (id) => qrCodeBlockSchema.parse({ id, type: 'qrCode' }),
+  },
+  {
+    type: 'video',
+    label: 'Video',
+    description: 'A thumbnail that links to the video. Works in print and email.',
+    kinds: ['marketing'],
+    create: (id) => videoBlockSchema.parse({ id, type: 'video' }),
   },
   {
     type: 'divider',

@@ -6,75 +6,73 @@ import { brandKits } from '@/db/schema'
 import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
-import { getProposal } from '@/modules/crm/proposals'
-import { documentForProposal, listTemplates, proposalRenderContext } from '@/modules/design/documents'
+import { Designer } from '@/components/design/designer'
+import {
+  getDocument,
+  listTemplates,
+  marketingRenderContext,
+} from '@/modules/design/documents'
 import { listClauses } from '@/modules/studio/service'
 import { listAssets } from '@/modules/studio/assets'
 import { parseBlocks } from '@/modules/design/blocks'
-import { unresolvedInBlocks } from '@/modules/design/merge-fields'
-import { Designer } from '@/components/design/designer'
+import { NoAccess } from '../../ui'
 
 export const dynamic = 'force-dynamic'
 
-/** The proposal designer (spec §7). */
-export default async function DesignPage({ params }: { params: Promise<{ id: string }> }) {
+/**
+ * The marketing creative designer (spec §8).
+ *
+ * The same component the proposal designer uses, given a different block
+ * palette and a sample merge context. ADR 0004 predicted this would be
+ * possible; that it needed no engine change is the evidence.
+ */
+export default async function CreativeDesignPage({
+  params,
+}: {
+  params: Promise<{ id: string }>
+}) {
   const actor = await requireActor()
   const session = await currentSession()
   const { id } = await params
 
-  if (!can(actor, 'proposals:view')) {
-    return (
-      <main className="mx-auto max-w-2xl px-6 py-16">
-        <h1 className="text-xl font-semibold">Proposal designer</h1>
-        <p className="mt-2 text-sm text-muted">
-          Your role ({actor.role}) does not include access to proposals.
-        </p>
-      </main>
-    )
+  if (!can(actor, 'marketing:view')) {
+    return <NoAccess role={actor.role} what="Creative designer" />
   }
 
-  let proposalData
+  let document
   try {
-    proposalData = await getProposal(actor, id)
+    document = await getDocument(actor, id)
   } catch {
     notFound()
   }
 
-  const { proposal, items } = proposalData
-  const document = await documentForProposal(actor, id)
-
-  const [templates, clauses, assets, render] = await Promise.all([
+  const [templates, clauses, assets, context] = await Promise.all([
     listTemplates(actor),
     listClauses(actor),
     listAssets(actor),
-    proposalRenderContext(actor.companyId, id),
+    marketingRenderContext(actor.companyId),
   ])
 
   const [kit] = document.brandKitId
     ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
     : []
 
-  const context = render?.context ?? {}
-  const unresolved = unresolvedInBlocks(parseBlocks(document.blocks), context)
-
   return (
     <AppShell
       actor={actor}
       companyName={session?.companyName ?? 'Accountrix Plus'}
-      active="crm"
+      active="marketing"
       actions={
-        <Link href={`/p/${proposal.publicToken}`} target="_blank" className="btn text-xs">
-          Preview client view
+        <Link href="/marketing/creative" className="btn text-xs">
+          All creative
         </Link>
       }
     >
       <Designer
         documentId={document.id}
-        kind="proposal"
-        eyebrow={proposal.number}
-        title={proposal.title}
-        isEditable={proposal.status === 'draft' && can(actor, 'proposals:manage')}
-        statusNote={`This proposal is ${proposal.status.replace('_', ' ')} — its sent version is locked.`}
+        kind="marketing"
+        title={document.name}
+        isEditable={can(actor, 'marketing:manage')}
         initialBlocks={parseBlocks(document.blocks)}
         setup={{
           pageSize: document.pageSize,
@@ -102,18 +100,9 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
             : null
         }
         context={context}
-        unresolvedFields={unresolved}
-        items={items.map((item) => ({
-          id: item.id,
-          description: item.description,
-          quantityMilli: item.quantityMilli,
-          unitPriceCents: item.unitPriceCents,
-          amountCents: item.amountCents,
-          isOptional: item.isOptional,
-          isSelected: item.isSelected,
-        }))}
-        discountCents={proposal.discountCents}
-        taxCents={proposal.taxCents}
+        // Merge fields are filled per recipient at send time, so an unresolved
+        // field here is expected rather than a warning worth showing.
+        unresolvedFields={[]}
         templates={templates.map((template) => ({
           key: template.key,
           name: template.name,

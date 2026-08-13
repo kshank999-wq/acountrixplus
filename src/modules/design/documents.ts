@@ -14,6 +14,7 @@ import {
   proposals,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import type { Permission } from '@/modules/permissions'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { defaultBrandKit } from '@/modules/studio/service'
 import { parseBlocks, validateBlocks, type Block } from './blocks'
@@ -129,9 +130,9 @@ async function resolveTemplateBlocks(ctx: ActorContext, templateKey: string): Pr
 
 /** Replaces a document's blocks with a template's, discarding current content. */
 export async function applyTemplate(ctx: ActorContext, documentId: string, templateKey: string) {
-  requirePermission(ctx, 'proposals:manage')
-
   const document = await loadDocument(ctx, documentId)
+  requirePermission(ctx, permissionFor(document.kind, 'manage'))
+
   const blocks = await resolveTemplateBlocks(ctx, templateKey)
 
   return db.transaction(async (tx) => {
@@ -181,9 +182,11 @@ export async function saveDocument(
   documentId: string,
   input: { blocks?: unknown; settings?: DocumentSettings },
 ) {
-  requirePermission(ctx, 'proposals:manage')
-
+  // The document is loaded first because which permission applies depends on
+  // what it is for — see `permissionFor`. Tenant isolation is not at stake:
+  // `loadDocument` is scoped, so another company's document is simply absent.
   const document = await loadDocument(ctx, documentId)
+  requirePermission(ctx, permissionFor(document.kind, 'manage'))
 
   let blocks: Block[] | undefined
   if (input.blocks !== undefined) {
@@ -235,8 +238,21 @@ async function loadDocument(ctx: ActorContext, documentId: string) {
 }
 
 export async function getDocument(ctx: ActorContext, documentId: string) {
-  requirePermission(ctx, 'proposals:view')
-  return loadDocument(ctx, documentId)
+  const document = await loadDocument(ctx, documentId)
+  requirePermission(ctx, permissionFor(document.kind, 'view'))
+  return document
+}
+
+/**
+ * Which permission governs a document (spec §14).
+ *
+ * A marketing role has no proposal permissions and a sales role has no
+ * marketing ones, yet both edit documents through the same engine. The
+ * document's own `kind` decides which check applies, so neither role gains
+ * reach into the other's work by way of a shared editor.
+ */
+function permissionFor(kind: string, level: 'view' | 'manage'): Permission {
+  return kind === 'marketing' ? `marketing:${level}` : `proposals:${level}`
 }
 
 /** Saves the current document as a reusable company template (spec §7). */
@@ -289,7 +305,9 @@ export async function saveAsTemplate(
 export async function listTemplates(ctx: ActorContext): Promise<
   Array<TemplateDefinition & { source: 'built-in' | 'company' }>
 > {
-  requirePermission(ctx, 'proposals:view')
+  // Templates are shared company property, not proposal data — the marketing
+  // designer offers the same gallery. `crm:view` is what both roles hold.
+  requirePermission(ctx, 'crm:view')
 
   const [company] = await db
     .select({ industry: companies.industry })
@@ -335,6 +353,43 @@ export async function listTemplates(ctx: ActorContext): Promise<
  * kit — gathered here so both the authenticated preview and the public
  * client-facing page render from exactly the same inputs.
  */
+/**
+ * The merge context for a document with no client attached (spec §8).
+ *
+ * Marketing creative is written once and sent to many people, so at design
+ * time there is no single client to merge in. The company fields resolve; the
+ * client fields are filled with a visible sample so the author can see where
+ * a name will land instead of editing around blanks. The real values are
+ * substituted per recipient at send time.
+ */
+export async function marketingRenderContext(companyId: string): Promise<MergeContext> {
+  const [row] = await db
+    .select({ company: companies, profile: companyProfiles })
+    .from(companies)
+    .leftJoin(companyProfiles, eq(companyProfiles.companyId, companies.id))
+    .where(eq(companies.id, companyId))
+    .limit(1)
+
+  return buildMergeContext({
+    company: {
+      name: row?.profile?.legalName ?? row?.company.name,
+      legalName: row?.profile?.legalName ?? row?.company.name,
+      email: row?.profile?.email,
+      phone: row?.profile?.phone,
+      website: row?.profile?.website,
+      addressLine1: row?.profile?.addressLine1,
+      city: row?.profile?.city,
+      region: row?.profile?.region,
+      postalCode: row?.profile?.postalCode,
+    },
+    client: {
+      name: 'Sample Client Ltd',
+      contactName: 'Sample Contact',
+      email: 'contact@example.com',
+    },
+  })
+}
+
 export async function proposalRenderContext(
   companyId: string,
   proposalId: string,
@@ -415,13 +470,102 @@ export async function proposalRenderContext(
   return { context, items, brandKitId: document?.brandKitId ?? null }
 }
 
-/** Documents for the company, for a future marketing asset list. */
+/** Documents for the company, filtered to one kind. */
 export async function listDocuments(ctx: ActorContext, kind?: 'proposal' | 'marketing') {
-  requirePermission(ctx, 'proposals:view')
+  requirePermission(ctx, permissionFor(kind ?? 'proposal', 'view'))
 
   return db
     .select()
     .from(designDocuments)
     .where(scoped(ctx, designDocuments, kind ? eq(designDocuments.kind, kind) : undefined))
     .orderBy(desc(designDocuments.updatedAt))
+}
+
+/**
+ * Creates a piece of marketing creative (spec §8).
+ *
+ * The counterpart to `createDocumentForProposal`, and deliberately the same
+ * shape: same table, same templates, same brand kit. Nothing about a marketing
+ * document is a different kind of object — it just has no proposal attached.
+ */
+export async function createMarketingDocument(
+  ctx: ActorContext,
+  input: { name: string; templateKey?: string },
+) {
+  requirePermission(ctx, 'marketing:manage')
+
+  const blocks = input.templateKey ? await resolveTemplateBlocks(ctx, input.templateKey) : []
+  const brandKit = await defaultBrandKit(ctx.companyId)
+
+  return db.transaction(async (tx) => {
+    const [document] = await tx
+      .insert(designDocuments)
+      .values({
+        companyId: ctx.companyId,
+        kind: 'marketing',
+        name: input.name,
+        brandKitId: brandKit?.id ?? null,
+        blocks: withFreshIds(blocks),
+        createdBy: ctx.userId,
+      })
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'document.create',
+        entityType: 'design_document',
+        entityId: document.id,
+        after: { kind: 'marketing', name: input.name, blockCount: blocks.length },
+      },
+      tx,
+    )
+
+    return document
+  })
+}
+
+/**
+ * Copies a piece of creative (spec §8 "creative reuse").
+ *
+ * Block ids are regenerated so the copy and the original can be edited
+ * independently — without that, the designer's selection state would follow
+ * whichever document was opened last.
+ */
+export async function duplicateDocument(ctx: ActorContext, documentId: string, name?: string) {
+  const source = await loadDocument(ctx, documentId)
+  requirePermission(ctx, permissionFor(source.kind, 'manage'))
+
+  return db.transaction(async (tx) => {
+    const [copy] = await tx
+      .insert(designDocuments)
+      .values({
+        companyId: ctx.companyId,
+        // A copy is never attached to the original's proposal: it is a starting
+        // point, not a second version of a document a client may be reading.
+        kind: source.kind === 'proposal' ? 'marketing' : source.kind,
+        name: name?.trim() || `${source.name} (copy)`,
+        brandKitId: source.brandKitId,
+        pageSize: source.pageSize,
+        orientation: source.orientation,
+        headerText: source.headerText,
+        footerText: source.footerText,
+        blocks: withFreshIds(parseBlocks(source.blocks)),
+        createdBy: ctx.userId,
+      })
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'document.create',
+        entityType: 'design_document',
+        entityId: copy.id,
+        after: { copiedFrom: documentId, name: copy.name },
+      },
+      tx,
+    )
+
+    return copy
+  })
 }

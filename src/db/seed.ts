@@ -5,9 +5,10 @@
  * services the application uses, so the seeded state is reachable by a real
  * user rather than a special case.
  */
+import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { brandKits, financialAccounts } from '@/db/schema'
+import { brandKits, campaignRecipients, financialAccounts } from '@/db/schema'
 import { registerCompany } from '@/modules/tenancy/onboarding'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
@@ -40,7 +41,14 @@ import {
   saveProfile,
   updateBrandKit,
 } from '@/modules/studio/service'
-import { createDocumentForProposal } from '@/modules/design/documents'
+import {
+  createDocumentForProposal,
+  createMarketingDocument,
+  saveDocument,
+} from '@/modules/design/documents'
+import { createSegment } from '@/modules/marketing/audience'
+import { addStep, createCampaign, sendStep } from '@/modules/marketing/campaigns'
+import { recordClick, recordOpen } from '@/modules/marketing/engagement'
 import type { ActorContext } from '@/modules/tenancy/context'
 
 /** The checking account the demo payments move through. */
@@ -250,8 +258,40 @@ async function main() {
   })
   await changeStage(ctx, qualified.id, { stage: 'qualified' })
 
+  // Consent on the contact is what makes the lost deal eligible for nurture
+  // later — see `contactAllowsMarketing`.
+  const cityContact = await createContact(ctx, {
+    organizationId: cityOrg.id,
+    firstName: 'Dana',
+    lastName: 'Okafor',
+    email: 'dana@cityworks.test',
+    isPrimary: true,
+    emailConsent: 'subscribed',
+    consentSource: 'manual_entry',
+  })
+
+  await createContact(ctx, {
+    organizationId: summitOrg.id,
+    firstName: 'Priya',
+    lastName: 'Raman',
+    email: 'priya@summitproperty.test',
+    isPrimary: true,
+    emailConsent: 'subscribed',
+    consentSource: 'web_form',
+  })
+
+  // Someone who never opted in, so the send pipeline has a reason to skip.
+  await createContact(ctx, {
+    organizationId: summitOrg.id,
+    firstName: 'Alex',
+    lastName: 'Whitfield',
+    email: 'alex@summitproperty.test',
+    emailConsent: 'unknown',
+  })
+
   const lost = await createOpportunity(ctx, {
     organizationId: cityOrg.id,
+    primaryContactId: cityContact.id,
     title: 'Parking structure repair',
     expectedValueCents: 2_800_000,
     source: 'tender',
@@ -438,6 +478,136 @@ async function main() {
     console.log(`  Open proposal, ready to accept: /p/${openProposalToken}`)
   }
 
+  // --- Phase 5: segments, creative, and a sent campaign --------------------
+
+  console.log('Setting up marketing…')
+
+  const prospects = await createSegment(ctx, {
+    name: 'Prospects in real estate',
+    description: 'Everyone at a real-estate client we have not won yet.',
+    definition: {
+      matchType: 'all',
+      rules: [{ field: 'industry', operator: 'is', value: 'Real estate' }],
+      lostOpportunityNurture: false,
+    },
+  })
+
+  const nurture = await createSegment(ctx, {
+    name: 'Lost deals worth another try',
+    description: 'Closed lost or dormant, with consent on record at close.',
+    definition: { matchType: 'all', rules: [], lostOpportunityNurture: true },
+  })
+  console.log('  2 segments.')
+
+  // A piece of creative built from the same blocks a proposal uses — the
+  // button and QR blocks are the only ones marketing added (spec §8).
+  const creative = await createMarketingDocument(ctx, { name: 'Year-end planning note' })
+  await saveDocument(ctx, creative.id, {
+    blocks: [
+      {
+        id: randomUUID(),
+        type: 'cover',
+        title: 'Three things worth doing before year-end',
+        subtitle: 'A short note from {{company.name}}',
+      },
+      {
+        id: randomUUID(),
+        type: 'text',
+        text: 'Hello {{client.contactName}},\n\nEvery year the same three items catch people out. None of them take long, and all of them are cheaper to handle now than in March.',
+        align: 'left',
+        emphasis: false,
+      },
+      {
+        id: randomUUID(),
+        type: 'list',
+        ordered: true,
+        items: [
+          'Reconcile the last two months so the year closes clean.',
+          'Confirm which jobs finish this year and which roll over.',
+          'Book equipment purchases before the cut-off if you plan to make them.',
+        ],
+      },
+      {
+        id: randomUUID(),
+        type: 'button',
+        label: 'Book a 20-minute review',
+        url: 'https://example.com/book',
+        align: 'center',
+        style: 'solid',
+      },
+    ],
+  })
+  console.log(`  1 piece of creative: "${creative.name}".`)
+
+  const campaign = await createCampaign(ctx, {
+    name: 'Year-end planning note',
+    kind: 'broadcast',
+    segmentId: prospects.id,
+    fromName: 'Ridgeline Construction',
+    fromEmail: 'hello@ridgeline.test',
+    scheduledFor: new Date(Date.now() + 7 * 86_400_000),
+  })
+
+  await addStep(ctx, campaign.id, {
+    subject: 'Three things worth doing before year-end',
+    previewText: 'None of them take long.',
+    designDocumentId: creative.id,
+  })
+
+  const sendSummary = await sendStep(ctx, campaign.id, 1)
+  console.log(
+    `  Campaign sent: ${sendSummary.matched} matched, ${sendSummary.sent} emailed, ` +
+      `${sendSummary.skipped} skipped.`,
+  )
+
+  // Simulate the reader's side of the loop, so the dashboard has engagement
+  // and the sales team has a follow-up task waiting.
+  const [firstRecipient] = await db
+    .select()
+    .from(campaignRecipients)
+    .where(eq(campaignRecipients.campaignId, campaign.id))
+    .limit(1)
+
+  if (firstRecipient && firstRecipient.status === 'sent') {
+    await recordOpen(firstRecipient.unsubscribeToken, { ipPrefix: '198.51.100.0/24' })
+    await recordClick(firstRecipient.unsubscribeToken, 'https://example.com/book', {
+      ipPrefix: '198.51.100.0/24',
+    })
+    console.log(`  ${firstRecipient.email} opened and clicked — a follow-up task is waiting.`)
+  }
+
+  // The lost-opportunity nurture path (spec §9, §10): a deal closed as lost,
+  // whose contact had consented, gets a second approach — and their click puts
+  // the deal in front of sales again.
+  const nurtureCampaign = await createCampaign(ctx, {
+    name: 'Still worth a conversation',
+    kind: 'nurture',
+    segmentId: nurture.id,
+    fromName: 'Ridgeline Construction',
+    fromEmail: 'hello@ridgeline.test',
+  })
+  await addStep(ctx, nurtureCampaign.id, {
+    subject: 'Six months on — has the parking structure moved?',
+    designDocumentId: creative.id,
+  })
+  const nurtureSummary = await sendStep(ctx, nurtureCampaign.id, 1)
+  console.log(
+    `  Nurture campaign sent: ${nurtureSummary.matched} matched, ${nurtureSummary.sent} emailed.`,
+  )
+
+  const [nurtureRecipient] = await db
+    .select()
+    .from(campaignRecipients)
+    .where(eq(campaignRecipients.campaignId, nurtureCampaign.id))
+    .limit(1)
+
+  if (nurtureRecipient && nurtureRecipient.status === 'sent') {
+    await recordClick(nurtureRecipient.unsubscribeToken, 'https://example.com/book', {
+      ipPrefix: '203.0.113.0/24',
+    })
+    console.log(`  ${nurtureRecipient.email} clicked — their lost deal is worth reopening.`)
+  }
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -446,6 +616,8 @@ async function main() {
   console.log('  /accounting/reports   trial balance and statements')
   console.log('  /crm                  the sales pipeline')
   console.log('  /crm/dashboard        win/loss analytics')
+  console.log('  /marketing            campaign results and the sales loop')
+  console.log('  /marketing/segments   the audience builder')
 
   process.exit(0)
 }

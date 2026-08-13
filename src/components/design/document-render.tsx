@@ -1,5 +1,6 @@
 import { formatCents } from '@/lib/money'
 import type { Block } from '@/modules/design/blocks'
+import { safeUrl } from '@/modules/design/urls'
 
 /**
  * The block renderer (spec §7).
@@ -56,6 +57,11 @@ export type RenderData = {
    * read with.
    */
   assetUrl: (assetId: string) => string
+  /**
+   * Pre-rendered QR SVG markup, keyed by block id. Encoding happens on the
+   * server so the same markup works in the browser, in print, and in email.
+   */
+  qrCodes?: Record<string, string>
   /** Rendered by the public page, which supplies its own interactive form. */
   signatureSlot?: React.ReactNode
   /** Optional-item checkboxes are interactive only on the client-facing page. */
@@ -113,6 +119,12 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
       return <ClauseBlock block={block} />
     case 'signature':
       return <SignatureBlock block={block} slot={data.signatureSlot} />
+    case 'button':
+      return <ButtonBlock block={block} />
+    case 'qrCode':
+      return <QrCodeBlock block={block} data={data} />
+    case 'video':
+      return <VideoBlock block={block} assetUrl={data.assetUrl} />
     case 'divider':
       return <hr className="doc-divider" />
     case 'spacer':
@@ -123,6 +135,96 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
       return null
   }
 }
+
+/**
+ * A call to action (spec §8).
+ *
+ * Still an anchor, so it degrades to a plain link in print and in email
+ * clients that strip styling.
+ */
+function ButtonBlock({ block }: { block: Extract<Block, { type: 'button' }> }) {
+  if (!block.label) return null
+
+  return (
+    <p className="doc-button-wrap" style={{ textAlign: block.align }}>
+      <a
+        href={safeUrl(block.url)}
+        className={`doc-button doc-button-${block.style}`}
+        rel="noopener noreferrer"
+      >
+        {block.label}
+      </a>
+    </p>
+  )
+}
+
+/**
+ * A QR code (spec §8).
+ *
+ * `data.qrCodes` carries pre-rendered SVG markup keyed by block id — encoding
+ * happens on the server so the markup is identical in the browser, in print,
+ * and in an email where no script runs.
+ */
+function QrCodeBlock({
+  block,
+  data,
+}: {
+  block: Extract<Block, { type: 'qrCode' }>
+  data: RenderData
+}) {
+  const svg = data.qrCodes?.[block.id]
+
+  return (
+    <figure className="doc-qr" style={{ textAlign: block.align }}>
+      {svg ? (
+        <div
+          style={{ width: `${block.sizePt}pt`, display: 'inline-block' }}
+          // Generated server-side by the qrcode library from the block's own
+          // value; never user-authored markup.
+          dangerouslySetInnerHTML={{ __html: svg }}
+        />
+      ) : (
+        // The designer's preview runs in the browser, where the server-side
+        // encoder is unavailable. A labelled placeholder shows the author what
+        // will be encoded rather than leaving a gap where a code will appear.
+        <div
+          className="doc-qr-placeholder"
+          style={{ width: `${block.sizePt}pt`, height: `${block.sizePt}pt` }}
+        >
+          <span>QR</span>
+          <small>{block.value || 'no value yet'}</small>
+        </div>
+      )}
+      {block.caption && <figcaption>{block.caption}</figcaption>}
+    </figure>
+  )
+}
+
+/** Linked video, rendered as a thumbnail (spec §8). */
+function VideoBlock({
+  block,
+  assetUrl,
+}: {
+  block: Extract<Block, { type: 'video' }>
+  assetUrl: (assetId: string) => string
+}) {
+  if (!block.url) return null
+
+  return (
+    <figure className="doc-video" style={{ width: `${block.widthPercent}%` }}>
+      <a href={safeUrl(block.url)} rel="noopener noreferrer">
+        {block.thumbnailAssetId ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={assetUrl(block.thumbnailAssetId)} alt={block.caption || 'Watch the video'} />
+        ) : (
+          <span className="doc-video-placeholder">Watch the video</span>
+        )}
+      </a>
+      {block.caption && <figcaption>{block.caption}</figcaption>}
+    </figure>
+  )
+}
+
 
 function CoverBlock({
   block,

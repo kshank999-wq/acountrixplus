@@ -17,7 +17,7 @@ export function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting' | 'crm' | 'studio'
+  active: 'bookkeeping' | 'accounting' | 'crm' | 'marketing' | 'studio'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -25,6 +25,7 @@ export function AppShell({
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
+    { key: 'marketing', href: '/marketing', label: 'Marketing', show: can(actor, 'marketing:view') },
     { key: 'studio', href: '/studio', label: 'Company Studio', show: can(actor, 'crm:view') },
   ].filter((link) => link.show)
 
@@ -47,13 +48,18 @@ export function AppShell({
           </div>
         </div>
 
+        {/*
+          The workspace row scrolls rather than wraps: with five workspaces it
+          no longer fits a phone, and a chip whose label breaks across two lines
+          is harder to read than one you swipe to.
+        */}
         {links.length > 1 && (
-          <nav className="mx-auto flex max-w-7xl gap-1 px-4 pb-2 sm:px-6">
+          <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 sm:px-6">
             {links.map((link) => (
               <Link
                 key={link.key}
                 href={link.href}
-                className={`chip px-3 py-1.5 ${
+                className={`chip whitespace-nowrap px-3 py-1.5 ${
                   active === link.key
                     ? 'bg-brand text-brand-ink'
                     : 'bg-raised text-muted hover:text-ink'

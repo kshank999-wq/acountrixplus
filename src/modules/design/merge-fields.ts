@@ -134,6 +134,12 @@ export function resolveBlock(block: Block, context: MergeContext): Block {
       return { ...block, caption: fill(block.caption) }
     case 'signature':
       return { ...block, prompt: fill(block.prompt), agreementText: fill(block.agreementText) }
+    case 'button':
+      return { ...block, label: fill(block.label), url: fill(block.url) }
+    case 'qrCode':
+      return { ...block, value: fill(block.value), caption: fill(block.caption) }
+    case 'video':
+      return { ...block, url: fill(block.url), caption: fill(block.caption) }
     default:
       return block
   }
@@ -178,6 +184,12 @@ function textsOf(block: Block): string[] {
       return [block.caption]
     case 'signature':
       return [block.prompt, block.agreementText]
+    case 'button':
+      return [block.label, block.url]
+    case 'qrCode':
+      return [block.value, block.caption]
+    case 'video':
+      return [block.url, block.caption]
     default:
       return []
   }
