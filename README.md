@@ -743,19 +743,20 @@ so no call site can skip them (spec §12).
 
 ## Known security advisories
 
-`npm audit` reports vulnerabilities in pinned dependencies that this repository has **not** taken,
-because each fix is a major-version upgrade and none has been evaluated against the ledger tests:
+`npm audit` reports the following against pinned dependencies. Each is recorded here with what was
+done about it rather than left for somebody to rediscover:
 
-- **`drizzle-orm` < 0.45.2 — SQL injection via improperly escaped SQL identifiers** (high).
-  This is the one that matters most: it is the data layer of an accounting product. Every query in
-  this codebase goes through the query builder with parameterized values rather than interpolated
-  identifiers, so the advisory's pattern does not appear here — but that is an argument for the
-  upgrade being safe, not for skipping it.
-- **`postcss` and `sharp`**, both transitively through `next` (high). Build-time and image
-  processing; neither is reachable from user input at runtime here.
-
-Upgrading `drizzle-orm` across a major version should be its own change, with the full suite run
-before and after — not folded into a feature phase.
+- **`drizzle-orm` — SQL injection via improperly escaped SQL identifiers** (high).
+  **Fixed.** Upgraded from 0.36.4 to 0.45.2 (with `drizzle-kit` 0.28.1 → 0.31.10). Verified three
+  ways: the committed migrations produce a byte-identical schema from an empty database,
+  `drizzle-kit generate` reports no drift and rewrites no snapshot, and the full suite passes
+  unchanged.
+- **`postcss` and `sharp`**, both transitive through `next` (high). Not taken: the only fix
+  `npm audit` offers is a `next` major upgrade, which is a framework migration rather than a
+  dependency bump. Neither is reachable from user input at runtime here — `postcss` runs at build
+  time, and `sharp` is used only by `scripts/generate-icons.mjs`, which is run by hand and whose
+  output is committed. They should be cleared by a deliberate Next upgrade with the suite run
+  before and after.
 
 ## Not built yet
 

@@ -234,9 +234,12 @@ named after it.
    scheduler (ADR 0005), the WIP adjusting entry (ADR 0007), and the review
    nudge. That is enough evidence that it is the next piece of infrastructure
    rather than another feature.
-2. **A dependency audit.** `npm audit` reports a high-severity SQL-injection
-   advisory against the pinned `drizzle-orm`, fixable only by a major upgrade.
-   For an accounting product that is not a background task.
+2. ~~**A dependency audit.**~~ Done immediately after this ADR was written:
+   `drizzle-orm` went 0.36.4 → 0.45.2 and `drizzle-kit` 0.28.1 → 0.31.10,
+   clearing the SQL-injection advisory. The migrations produce a byte-identical
+   schema from empty and the suite passed unchanged. The remaining `postcss`
+   and `sharp` advisories are transitive through `next` and need a framework
+   upgrade rather than a dependency bump.
 3. **Conflict presentation.** The outbox parks an operation the server refused
    and shows the reason, which is honest but not helpful — a person who
    categorized something into a period that closed while they were offline gets
