@@ -6,7 +6,8 @@ marketing — an alternative to QuickBooks.
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
-**Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, and the mobile app from the
+**Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app, and
+**Payroll and Tax** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -14,15 +15,16 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0004](docs/adr/0004-document-engine-and-brand.md),
 [ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md),
 [ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md),
-[ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md), and
-[ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md).
+[ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md),
+[ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md), and
+[ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
 > for "a responsive web/PWA interface **before committing to separate native
 > mobile apps**". The mobile work below is that PWA, plus the versioned API and
-> replay contract a native client would consume later. Payroll and tax remain
-> unbuilt.
+> replay contract a native client would consume later. Payroll and tax — §20's
+> actual Phase 8 — followed it, and is the last section below.
 
 ## What works today
 
@@ -215,6 +217,61 @@ sometimes emptied.
   GET is considered, and the offline fallback is plain HTML rather than a page in
   the app.
 
+### Payroll and tax (Phase 9)
+
+The workspace at `/payroll`. It is built around one distinction, and every part
+of it is that distinction applied to another surface: **this system is
+authoritative about the journal entry, and is not authoritative about the tax.**
+
+A wrong withholding figure takes money out of a real person's pay packet. That
+depends on jurisdiction, filing status, year-to-date position, and rules that
+change annually — so the default adapter does not calculate it at all.
+
+- **Payroll behind an adapter, calculating nothing by default** — the sixth use
+  of this codebase's provider pattern, but the point is not swappability. The
+  default (`manual`) takes what a payroll bureau already worked out and records
+  it, which is how most small businesses actually run payroll. The registry has
+  **no fallback**: an unknown `PAYROLL_PROVIDER` throws, because silently
+  substituting one source of payroll figures for another is the failure mode.
+- **One balanced entry, and you see it before it posts** — the run wizard's
+  third step is the entry itself, itemised, with the identity `gross +
+  employer cost = net + everything owed` shown as arithmetic. A totals row looks
+  identical whether withholding was kinded correctly or not; the entry is the
+  only place the difference shows.
+- **Withholding can't be booked as an employer cost** — the commonest payroll
+  error, and it still balances, which is why it survives review. Three guards:
+  a `payroll_item_kind` enum on every line, `expense_account_id` null on a
+  withholding line *by construction*, and `assertBalanced` checking the payroll
+  identity before anything reaches the journal engine.
+- **Liabilities read from the ledger** — a figure somebody is about to pay an
+  agency comes from the same place the balance sheet gets it. A remittance
+  posts Dr the liability, Cr the bank, and **no expense**. It refuses to remit
+  more than is owed, and refuses a kind that disagrees with the account.
+- **Sales tax rates are yours** — nothing ships and nothing updates itself. A
+  rate table in a release is correct on the day it ships and silently wrong
+  afterwards. The rate is frozen onto each document, so changing a code next
+  quarter cannot restate last quarter's return. Exempt sales are reported
+  alongside taxable ones, and the ledger balance sits *beside* the period's
+  collections rather than instead of them.
+- **Contractor reporting, named for what it is** — what was paid to each
+  reportable contractor in a calendar year, counted from **payments made**, not
+  bills raised. The column that matters is `blockers`: the figure is the easy
+  part, and the missing tax identifier is what actually stops a filing in
+  January.
+- **Only four digits of an employee's tax id**, with a database CHECK, and a
+  longer value is *refused* rather than truncated. The system cannot leak what
+  it never took. Payroll permissions are implied by nothing else — a bookkeeper
+  gets tax and no payroll at all.
+- **Workpapers that say what is wrong** — an accountant needs the figures, the
+  trail back to them, and an honest account of what is wrong with them. Most
+  software gives the first two. Every pack carries an `exceptions` list, and
+  `prepareFiling` refuses on a blocker unless given a reason that is stored
+  alongside every blocker it overrode.
+- **No `file()`, and the enum says so** — `tax_filings.status` is `prepared` or
+  `filed_externally`. There is no `filed`. This system does not submit returns,
+  and spec §19 requires a security review before it could. The notice saying so
+  is at the top of every screen in the workspace, not only in this README.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -293,6 +350,7 @@ Coverage matches what spec §21 asks for:
 | `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics denominators, tenant and role isolation |
 | `tests/mobile.test.ts` | Replay safety under sequential and concurrent retries, fingerprint conflicts, key scoping and rollback, the outbox's ordering/superseding/backoff/classification rules, device revocation and session invalidation, receipt permissions and idempotent attachment, notification defaults and delivery outcomes, the proposal-acceptance push, a full offline session, and a regression test for the journal-numbering deadlock |
 | `tests/jobs.test.ts` | Module resolution from pack plus override, workflow gating, terminology, the cost-code dimension end to end, budget vs actual, change-order approval posting nothing, application pricing and increments, retainage splitting AR from Retainage Receivable, the AR-control-equals-subledger identity, retainage release without double-recognizing revenue, WIP arithmetic, compliance expiry, and the no-forked-ledger reconciliation |
+| `tests/payroll.test.ts` | The payroll identity and the arithmetic behind it, the entry's shape line by line (withholding never touching an expense account), negative net pay refused, voiding reversing rather than deleting, liability positions read from the ledger, over-remitting and kind/account mismatches refused, a remittance touching no expense, sales tax per jurisdiction with exempt sales and a frozen rate, an invoice pricing its own tax from its codes, contractor payments counted from payments not bills, a tax identifier never reaching the audit log, the manual adapter's refusal and the registry's absence of a fallback, illustrative runs marked in the database, the workpaper exceptions, and a filing blocked until its blocker is cleared |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -599,6 +657,67 @@ key and the client proposal link — keep them for steps 22 and 24.
     and drains the queue and returns fresh state in one round trip. A native client would call
     exactly this.
 
+### Payroll and tax (Phase 9)
+
+89. **The notice is in the product** — every screen under **Payroll & Tax** leads with the spec §19
+    warning: this workspace records payroll and tax and posts the entries, it does not calculate
+    withholding, move money, or submit a return. The person about to remit against these figures is
+    the one who needs to know, and they will never open this README.
+90. **Cost to the employer, not gross pay** — `/payroll` leads with $15,011.00, not the $14,056.00
+    gross. The employer's own taxes are real money that never appears on a payslip, and a business
+    budgeting off gross is short by them every month.
+91. **Ask the adapter to calculate, and watch it refuse** — **Run payroll**, fill in the dates,
+    press **Ask the adapter**. The default says *"This adapter does not calculate payroll. Enter
+    the figures from your payroll provider's report…"* and drops you straight into the form to do
+    that in. That is the honest default, not a degraded mode.
+92. **See the entry before it posts** — enter a salary line and a tax-withheld line, then press
+    **Show me the entry**. Step 3 is the journal entry itself: Dr 6500 the *gross*, Cr 2300 the
+    withholding, Cr 2350 the net. Underneath, "Why it balances" shows the identity as arithmetic —
+    what it costs the employer on one side, where that money goes on the other.
+93. **Kind a line wrongly and the entry changes shape** — go back, switch the withholding line to
+    *Employer tax*, and look again. The same total now debits 6550 as well, because an employer tax
+    is a cost on top of gross while withholding is somebody else's money in transit. The totals row
+    would have looked identical either way; this is the only screen where the difference shows.
+94. **Try to remit more than is owed** — **Liabilities** shows what the *ledger* says, not what the
+    runs say. Enter a wild figure and it refuses in money, naming the balance and the date:
+    over-remitting drives a liability negative, which reads on a balance sheet as the agency owing
+    *you* money and goes unnoticed for months.
+95. **The kind and the account cannot disagree** — switch the remittance to **Sales tax** and the
+    account list changes to 2200 alone. A payroll remittance against Sales Tax Payable balances
+    perfectly and leaves both accounts wrong; the service refuses it, so the form never offers it.
+96. **A remittance is not an expense** — record one, then check **Accounting → Reports**. The P&L is
+    unchanged. The cost was recognised when the payroll ran; this settles a debt.
+97. **Sales tax is priced from your codes** — **Sales tax** shows two jurisdictions at rates the
+    company entered. The seeded invoice carries $328.00 split between them, and it foots to the
+    ledger exactly: the invoice header and the per-jurisdiction breakdown come from one read of
+    the codes inside one transaction.
+98. **A rate change does not restate history** — the rate shown against each line is the rate *as
+    applied*. Change a code's rate and the past quarter does not move.
+99. **The uncoded-sales warning is a real gap, not noise** — the demo has $29,600.00 of invoiced
+    sales carrying no tax code, so they appear on no jurisdiction's return. Most software would
+    show a short figure and say nothing.
+100. **What is stopping a filing** — **Contractors** lists Delta Electrical: paid $3,400.00, marked
+     reportable, and *no tax identifier on file*. The figure was the easy part. That missing number
+     is what actually stops a filing in January, when they no longer answer the phone.
+101. **The pack refuses, and says exactly why** — **Workpapers** → **Prepare**. It refuses:
+     *"This period has 1 unresolved problem: Delta Electrical: No tax identifier on file."* Then the
+     override box appears, with a field for the reason — offered *after* you have read the blocker,
+     not before.
+102. **Clear it and prepare properly** — go back to **Contractors**, press **Add id**, enter one.
+     Return to **Workpapers**: blockers reads 0, and **Prepare** succeeds. The exceptions that
+     *were* found are frozen onto the filing alongside the figures, so a return questioned later
+     shows what was known at the time.
+103. **There is no "filed"** — a prepared filing offers **Record as filed**, which wants a date and
+     a note saying where and with what reference. The status becomes *filed elsewhere*. The enum has
+     no `filed` value at all, because this system does not submit returns.
+104. **A tax identifier never reaches the audit log** — after setting Delta's, check
+     **Settings → Audit**. The entry records `hasTaxId: true` and not the number. An audit log is
+     read by everybody with permission to see it.
+105. **Payroll is not implied by seeing the books** — add a bookkeeper and sign in as them. They get
+     **Sales tax**, **Contractors**, **Liabilities**, and **Workpapers**, and no **Overview**, no
+     **People**, no **Run payroll**. What people are paid is the most sensitive data a small
+     business holds.
+
 ## Project layout
 
 ```
@@ -611,6 +730,7 @@ src/
     marketing/            Overview, campaigns, segments, creative, suppressions
     ai/                   AI module admin, usage ledger, insights, prompt registry
     jobs/                 WIP schedule, job detail, cost codes, subcontractors
+    payroll/              Payroll runs, people, liabilities, sales tax, workpapers
     settings/modules/     Industry module switches
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
@@ -641,6 +761,7 @@ src/
     industry/             Module resolution from industry packs and company overrides
     jobs/                 Cost codes, budgets, change orders, progress billing, WIP, compliance
     mobile/               Idempotency, the pure outbox, devices, receipts, push, notifications
+    payroll/              Payroll provider, runs and the entry, remittance, sales tax, workpapers
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
@@ -741,6 +862,33 @@ bookkeeping inbox. Nothing outside `modules/ai` imports a provider: permission, 
 ceiling, prompt resolution, output validation, and metering all happen in one gateway function,
 so no call site can skip them (spec §12).
 
+## Switching payroll providers
+
+Set `PAYROLL_PROVIDER`. The default is `manual`, which **calculates nothing** — it takes what a
+payroll bureau already worked out and records it, and posts the journal entry for it. That is how
+most small businesses run payroll, and it is the only answer this codebase can give honestly:
+withholding depends on jurisdiction, filing status, year-to-date position, and rules that change
+every year, and a wrong figure takes money out of a real person's pay packet.
+
+`illustrative` uses invented flat rates for the demo and the tests. They correspond to no
+jurisdiction. Every run it produces is marked `is_illustrative` in the database, every screen says
+so, and `prepareFiling` refuses on it.
+
+To add a real one:
+
+1. Implement the `PayrollProvider` interface from `src/modules/payroll/provider.ts`.
+2. Register it with `registerPayrollProvider`.
+3. Set its credentials in the server environment and `PAYROLL_PROVIDER` to its key.
+
+**Unlike every other provider registry in this codebase, there is no fallback.** The others degrade
+to a mock when the real adapter is unconfigured, because sending no email beats crashing. Here,
+silently substituting one source of payroll figures for another *is* the failure — so an
+unrecognised `PAYROLL_PROVIDER` throws the first time payroll is touched rather than quietly
+reverting to invented rates.
+
+Per spec §19, none of this is reviewed for production use. The warning saying so is at the top of
+every screen in the workspace.
+
 ## Dependency security
 
 `npm audit` reports **0 vulnerabilities**, across runtime and development dependencies alike.
@@ -786,9 +934,11 @@ the guarantee the suite depends on is stated rather than inherited from a pool d
 
 Tracked against the spec §20 phases:
 
-- **Phase 8 — Payroll / Tax / Advanced Integrations.** Nothing built. Spec §19 requires a security
-  review before production use of payroll or tax filing, which makes it a poor candidate for a
-  phase that ends in a commit rather than an audit.
+- **Phase 8 — Payroll / Tax / Advanced Integrations.** Payroll, sales tax, contractor reporting,
+  and tax workpapers are built (see *Payroll and tax* above). What is **not** built, and will not
+  be without the spec §19 security review, is anything that calculates a real person's withholding
+  or submits a return. "Advanced integrations" remains open: there is no accounting-package import,
+  no payments processor, and no e-filing.
 
 
 Gaps within the phases already built:
@@ -851,6 +1001,32 @@ Gaps within the phases already built:
   was offline, the outbox shows the error and offers retry or discard — not a way to redate the
   entry. See ADR 0008.
 
+- **Nobody's withholding is calculated.** With `PAYROLL_PROVIDER=manual` (the default), figures
+  come from a payroll bureau's report. This is the honest capability rather than a limitation, but
+  it is worth stating plainly: there is no tax engine here.
+- **The illustrative adapter's rates are invented.** They match no jurisdiction, they never update,
+  and every run they produce is stamped `is_illustrative` in the database, flagged on screen, and
+  blocked from a filing. It exists so the ledger machinery can be exercised end to end.
+- **Sales tax on a bill is not tracked.** `document_tax_lines` has a `bill` document type and only
+  invoices are ever written. Input tax credits are a real jurisdictional feature and half of one is
+  worse than none.
+- **Net Pay Payable is never cleared automatically.** Posting payroll credits 2350; actually paying
+  people is a bank transaction somebody matches against it. The workpaper pack raises a standing
+  balance as a warning.
+- **Remittances do not reconcile against a bank feed.** A remittance credits the bank's chart
+  account directly rather than creating a matchable transaction, so it shows as an unexplained
+  difference in reconciliation until matched by hand.
+- **The contractor threshold has no UI.** It is a service argument defaulting to 60,000 cents; a
+  company outside the US passes its own, but not from a settings page yet.
+- **Tax codes are not effective-dated in force.** `effectiveFrom` is stored and nothing enforces
+  it, so a code can be applied before its date. The frozen `rate_bp` means this cannot corrupt a
+  past return.
+- **Employer taxes are not allocated to jobs.** Wage lines carry the job dimensions; liabilities do
+  not, because a tax owed to an agency does not belong to a job. Fully burdened job cost is a
+  policy question rather than a missing feature.
+- **Nothing reminds anybody a remittance is due.** Same missing background worker — and this is the
+  one somebody would lose money over.
+
 - **Campaign scheduling.** `scheduledFor` puts a campaign on the calendar and a nurture step's
   `delayDays` is recorded, but nothing fires on its own — sending is a button somebody presses.
   The missing piece is a background worker calling the same `sendStep` that enforces consent.
@@ -883,9 +1059,9 @@ Gaps within the phases already built:
   real as of Phase 7 and reported on throughout the jobs workspace; the other §13 dimensions are
   not. The statements themselves still cannot be filtered by job — the WIP and job cost reports
   answer that question, but a P&L scoped to one job is a query change still to make.
-- Fixed assets and depreciation, recurring and closing entries, customer statements, write-offs,
-  and 1099 reporting remain open from spec §13. Vendor `taxId` and `is1099Vendor` columns exist so
-  the data is captured now.
+- Fixed assets and depreciation, recurring and closing entries, customer statements, and write-offs
+  remain open from spec §13. Contractor (1099) reporting is built as of Phase 9 — the figure and
+  the blockers, not the form.
 - Communications and file attachments on opportunities (spec §6) are not built;
   `opportunity_activities` is the seam they will hang from.
 - Renaming an organization does not propagate to its linked customer or vendor record. Client-

@@ -35,6 +35,11 @@ export const journalSourceEnum = pgEnum('journal_source', [
   'payment',
   'adjusting',
   'closing',
+  // Phase 9. Payroll and tax remittances are named sources rather than
+  // `manual`, so "show me every payroll posting" is a filter rather than a
+  // text search through memos.
+  'payroll',
+  'remittance',
 ])
 
 /**

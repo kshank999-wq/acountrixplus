@@ -99,6 +99,16 @@ export type AuditAction =
   | 'ai_prompt.activate'
   | 'ai_suggestion.accept'
   | 'ai_suggestion.reject'
+  // Payroll and tax (spec §13, §19 — Phase 9)
+  | 'employee.create'
+  | 'employee.update'
+  | 'payroll.post'
+  | 'payroll.void'
+  | 'remittance.record'
+  | 'tax_code.create'
+  | 'tax_code.update'
+  | 'filing.prepare'
+  | 'filing.mark_filed'
   // The mobile app (spec §3, §18, §19 — Phase 8)
   | 'device.revoke'
   | 'device.rename'

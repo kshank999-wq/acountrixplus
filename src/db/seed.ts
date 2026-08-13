@@ -63,7 +63,17 @@ import { applyOperation } from '@/modules/mobile/operations'
 import { listInbox as listInboxForMobile } from '@/modules/bookkeeping/transactions'
 import { postManualEntry } from '@/modules/ledger/journal'
 import { suggestCategory, summarizeInbox } from '@/modules/ai/bookkeeping'
+import { createEmployee, createPayrollRun } from '@/modules/payroll/service'
+import { recordRemittance } from '@/modules/payroll/remittance'
+import { createTaxCode } from '@/modules/payroll/sales-tax'
+import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
+import { workpaperPack } from '@/modules/payroll/workpapers'
 import type { ActorContext } from '@/modules/tenancy/context'
+
+/** Cents as plain dollars, for the seed's console output. */
+function formatCentsPlain(cents: number): string {
+  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2 })}`
+}
 
 /** The checking account the demo payments move through. */
 async function firstCheckingAccountId(companyId: string): Promise<string | null> {
@@ -912,6 +922,171 @@ async function main() {
       : '  Not enough waiting to be worth a nudge.',
   )
 
+  // --- Phase 9: payroll, sales tax, and the workpaper pack -----------------
+
+  console.log('Running payroll and setting up tax…')
+
+  // Entered by hand, the way most small businesses actually run payroll: the
+  // bureau works out the withholding, and this records it and posts the entry.
+  // Deliberately *not* the illustrative adapter — a demo whose payroll figures
+  // are invented teaches the wrong thing about what this system knows.
+  const dana = await createEmployee(ctx, {
+    name: 'Dana Ruiz',
+    reference: 'EMP-001',
+    workerType: 'employee',
+    payBasis: 'salary',
+    baseRateCents: 8_400_000,
+    taxIdLast4: '4417',
+    startDate: '2024-03-04',
+  })
+  const marcus = await createEmployee(ctx, {
+    name: 'Marcus Bell',
+    reference: 'EMP-002',
+    workerType: 'employee',
+    payBasis: 'hourly',
+    baseRateCents: 4_200,
+    taxIdLast4: '9082',
+    startDate: '2025-11-17',
+  })
+  console.log('  2 people on payroll, with the last four digits of a tax id and nothing more.')
+
+  const july = await createPayrollRun(ctx, {
+    frequency: 'monthly',
+    periodStart: '2026-07-01',
+    periodEnd: '2026-07-31',
+    payDate: '2026-07-31',
+    sourceReference: 'Bureau report 2026-07',
+    memo: 'July payroll — figures from the bureau report',
+    payslips: [
+      {
+        employeeId: dana.id,
+        lines: [
+          { kind: 'earning', label: 'Salary', amountCents: 700_000 },
+          { kind: 'employee_tax', label: 'Income tax withheld', amountCents: 112_400, agency: 'Revenue authority' },
+          { kind: 'employee_tax', label: 'Social contribution withheld', amountCents: 43_400, agency: 'Revenue authority' },
+          { kind: 'employee_deduction', label: 'Health plan', amountCents: 18_000, agency: 'Meridian Health' },
+          { kind: 'employer_tax', label: 'Employer social contribution', amountCents: 43_400, agency: 'Revenue authority' },
+          { kind: 'employer_tax', label: 'Unemployment contribution', amountCents: 4_200, agency: 'Unemployment fund' },
+        ],
+      },
+      {
+        employeeId: marcus.id,
+        hoursMilli: 168_000,
+        lines: [
+          { kind: 'earning', label: 'Hourly pay', amountCents: 705_600 },
+          { kind: 'employee_tax', label: 'Income tax withheld', amountCents: 98_800, agency: 'Revenue authority' },
+          { kind: 'employee_tax', label: 'Social contribution withheld', amountCents: 43_700, agency: 'Revenue authority' },
+          { kind: 'employer_tax', label: 'Employer social contribution', amountCents: 43_700, agency: 'Revenue authority' },
+          { kind: 'employer_tax', label: 'Unemployment contribution', amountCents: 4_200, agency: 'Unemployment fund' },
+        ],
+      },
+    ],
+  })
+  console.log(
+    `  ${july.reference}: ${formatCentsPlain(july.totals.grossPayCents)} gross, ` +
+      `${formatCentsPlain(july.totals.employerCostCents)} employer cost, ` +
+      `${formatCentsPlain(july.totals.netPayCents)} net — one balanced entry.`,
+  )
+
+  // Part of what was withheld, remitted. Leaving the rest outstanding is the
+  // point: the liabilities screen should have a real balance to look at.
+  const payrollLiability = await accountByNumber(company.id, '2300')
+  const checkingId = await firstCheckingAccountId(company.id)
+
+  if (payrollLiability && checkingId) {
+    await recordRemittance(ctx, {
+      kind: 'payroll',
+      agency: 'Revenue authority',
+      periodStart: '2026-07-01',
+      periodEnd: '2026-07-31',
+      paidOn: '2026-08-05',
+      amountCents: 254_600,
+      liabilityAccountId: payrollLiability.id,
+      financialAccountId: checkingId,
+      reference: 'EFT 88213',
+    })
+    console.log('  Remitted the income tax withheld — Dr the liability, Cr the bank, no expense.')
+  }
+
+  // Sales tax: the codes are the company's, entered with the rates its
+  // jurisdictions gave it. Nothing here ships with the software.
+  const cityTax = await createTaxCode(ctx, {
+    code: 'CITY',
+    name: 'City and county combined',
+    jurisdiction: 'Springfield City',
+    rateBp: 825,
+    effectiveFrom: '2026-01-01',
+  })
+  const stateTax = await createTaxCode(ctx, {
+    code: 'STATE',
+    name: 'State sales tax',
+    jurisdiction: 'State',
+    rateBp: 400,
+    effectiveFrom: '2026-01-01',
+  })
+  console.log('  2 tax codes at 8.25% and 4% — the company’s rates, not ours.')
+
+  if (contractRevenue) {
+    const taxed = await createInvoice(ctx, {
+      customerId: harborview.id,
+      issueDate: '2026-08-05',
+      lines: [
+        {
+          chartAccountId: contractRevenue.id,
+          description: 'Kitchen fit-out — taxable materials and labour',
+          unitPriceCents: 480_000,
+        },
+      ],
+      taxLines: [
+        { taxCodeId: cityTax.id, taxableCents: 320_000, exemptCents: 60_000 },
+        { taxCodeId: stateTax.id, taxableCents: 160_000 },
+      ],
+    })
+    console.log(
+      `  Invoice with tax priced from those codes: ${formatCentsPlain(taxed.taxCents)} across two jurisdictions.`,
+    )
+  }
+
+  // A contractor paid over the threshold with no identifier on file. This is
+  // the exception the workpaper pack exists to surface, and clearing it in the
+  // UI is the most instructive thing in this workspace.
+  const delta = await createVendor(ctx, { name: 'Delta Electrical' })
+  const contractExpense = await accountByNumber(company.id, '5130')
+
+  if (contractExpense && checkingId) {
+    const deltaBill = await createBill(ctx, {
+      vendorId: delta.id,
+      issueDate: '2026-04-02',
+      lines: [
+        {
+          chartAccountId: contractExpense.id,
+          description: 'Rough-in electrical, Harborview',
+          unitPriceCents: 340_000,
+        },
+      ],
+    })
+    await recordPayment(ctx, {
+      kind: 'disbursement',
+      vendorId: delta.id,
+      paymentDate: '2026-04-28',
+      amountCents: 340_000,
+      financialAccountId: checkingId,
+      applications: [{ billId: deltaBill.id, amountCents: 340_000 }],
+    })
+    await setVendorReporting(ctx, delta.id, { isReportable: true })
+    console.log(
+      '  Delta Electrical: paid over the threshold, marked reportable, no tax id — a blocker on purpose.',
+    )
+  }
+
+  const pack = await workpaperPack(ctx, { startDate: '2026-07-01', endDate: '2026-09-30' })
+  const blockers = pack.exceptions.filter((entry) => entry.severity === 'blocker').length
+  const warnings = pack.exceptions.filter((entry) => entry.severity === 'warning').length
+  console.log(
+    `  Workpaper pack for Q3: ${blockers} ${blockers === 1 ? 'blocker' : 'blockers'}, ` +
+      `${warnings} worth checking.`,
+  )
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -927,6 +1102,12 @@ async function main() {
   console.log('  /jobs/subcontractors  insurance and W-9 compliance')
   console.log('  /settings/modules     industry modules, on and off')
   console.log('  /m                    the mobile app — install it, then turn off your wifi')
+  console.log('  /payroll              payroll runs and what each one cost')
+  console.log('  /payroll/run          the run wizard — it shows the entry before it posts')
+  console.log('  /payroll/liabilities  what is owed to agencies, and remitting it')
+  console.log('  /payroll/sales-tax    the return, per jurisdiction')
+  console.log('  /payroll/contractors  who is reportable, and what is stopping it')
+  console.log('  /payroll/workpapers   the pack, and the filing it refuses to prepare')
 
   process.exit(0)
 }

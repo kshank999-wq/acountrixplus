@@ -16,6 +16,11 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS, SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/modules/ledger/journal'
+import {
+  priceDocumentTax,
+  recordDocumentTax,
+  type DocumentTaxLineInput,
+} from '@/modules/payroll/sales-tax'
 
 /**
  * Accounts receivable and payable (spec §13, §20 "AR/AP basics").
@@ -174,6 +179,15 @@ export async function createInvoice(
     dueDate?: string
     lines: DocumentLineInput[]
     taxCents?: number
+    /**
+     * Sales tax broken down by code (spec §13).
+     *
+     * Given these, the tax total is priced from them rather than passed in,
+     * and the breakdown is written inside this invoice's transaction — so a
+     * jurisdiction's return and the invoice it came from cannot disagree. A
+     * lump `taxCents` still works for a company that has not set codes up.
+     */
+    taxLines?: DocumentTaxLineInput[]
     memo?: string
     /** Default job for every line that does not name one of its own. */
     projectId?: string | null
@@ -219,7 +233,14 @@ export async function createInvoice(
   })
 
   const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
-  const taxCents = input.taxCents ?? 0
+
+  // Priced before the transaction opens, because the total belongs on the
+  // invoice header this is about to write while the breakdown needs the id it
+  // does not have yet. One read of the codes feeds both.
+  const pricedTax = input.taxLines?.length
+    ? await priceDocumentTax(ctx, input.taxLines)
+    : null
+  const taxCents = input.taxCents ?? pricedTax?.totalCents ?? 0
   const totalCents = subtotalCents + taxCents
 
   if (totalCents <= 0) {
@@ -329,6 +350,21 @@ export async function createInvoice(
       },
       tx,
     )
+
+    if (pricedTax) {
+      await recordDocumentTax(
+        ctx,
+        {
+          documentType: 'invoice',
+          documentId: invoice.id,
+          documentDate: input.issueDate,
+          // The priced amounts, not the codes' current rates: re-reading them
+          // here could produce a breakdown that does not foot to the header.
+          lines: pricedTax.lines,
+        },
+        tx,
+      )
+    }
 
     await tx
       .update(invoices)

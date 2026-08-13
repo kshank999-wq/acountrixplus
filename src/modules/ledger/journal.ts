@@ -33,6 +33,11 @@ export type JournalSource =
   | 'payment'
   | 'adjusting'
   | 'closing'
+  // Phase 9. Named rather than folded into `manual` so a payroll entry can be
+  // found without knowing its memo — an auditor asking "show me every payroll
+  // posting" should not have to search text.
+  | 'payroll'
+  | 'remittance'
 
 export type JournalLineInput = {
   chartAccountId: string

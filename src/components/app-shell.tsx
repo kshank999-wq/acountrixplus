@@ -18,7 +18,7 @@ export async function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting' | 'crm' | 'jobs' | 'marketing' | 'studio' | 'ai'
+  active: 'bookkeeping' | 'accounting' | 'crm' | 'jobs' | 'payroll' | 'marketing' | 'studio' | 'ai'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -34,6 +34,15 @@ export async function AppShell({
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
     { key: 'jobs', href: '/jobs', label: 'Jobs', show: jobsEnabled },
+    // Either half opens the workspace: a bookkeeper who handles sales tax but
+    // not wages has `tax:view` without `payroll:view`, and the sub-navigation
+    // hides what they cannot see rather than the whole workspace.
+    {
+      key: 'payroll',
+      href: can(actor, 'payroll:view') ? '/payroll' : '/payroll/sales-tax',
+      label: 'Payroll & Tax',
+      show: can(actor, 'payroll:view') || can(actor, 'tax:view'),
+    },
     { key: 'marketing', href: '/marketing', label: 'Marketing', show: can(actor, 'marketing:view') },
     { key: 'studio', href: '/studio', label: 'Company Studio', show: can(actor, 'crm:view') },
     // Last, and only for those who administer it: the AI module is additive

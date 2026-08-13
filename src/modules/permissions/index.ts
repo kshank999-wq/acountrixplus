@@ -45,6 +45,15 @@ export const PERMISSIONS = [
   'jobs:view',
   'jobs:manage',
 
+  // Payroll and tax (spec §13, §19). Deliberately narrow: payroll is the most
+  // sensitive data a small business holds, and `payroll:view` is not implied
+  // by any general accounting permission.
+  'payroll:view',
+  'payroll:manage',
+  'payroll:run',
+  'tax:view',
+  'tax:manage',
+
   // The optional AI module (spec §11, §14)
   'ai:use',
   'ai:manage',
@@ -90,6 +99,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'marketing:manage',
     'jobs:view',
     'jobs:manage',
+    // No payroll. A manager who needs it gets it as an explicit grant, so the
+    // decision to show one colleague another's pay is always deliberate.
+    'tax:view',
     'ai:use',
     'ai:manage',
     'audit:view',
@@ -107,6 +119,11 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'crm:view',
     'jobs:view',
     'jobs:manage',
+    // A bookkeeper records the sales tax they collected and can see what is
+    // owed, but payroll is not theirs by default — it is the one part of the
+    // books that is also somebody's private pay.
+    'tax:view',
+    'tax:manage',
     'ai:use',
   ],
 
@@ -125,6 +142,12 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'reports:financial',
     'jobs:view',
     'jobs:manage',
+    // An accountant prepares the returns and posts the runs; that is the job.
+    'payroll:view',
+    'payroll:manage',
+    'payroll:run',
+    'tax:view',
+    'tax:manage',
     'ai:use',
     'audit:view',
   ],
