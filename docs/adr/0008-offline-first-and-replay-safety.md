@@ -234,12 +234,22 @@ named after it.
    scheduler (ADR 0005), the WIP adjusting entry (ADR 0007), and the review
    nudge. That is enough evidence that it is the next piece of infrastructure
    rather than another feature.
-2. ~~**A dependency audit.**~~ Done immediately after this ADR was written:
-   `drizzle-orm` went 0.36.4 → 0.45.2 and `drizzle-kit` 0.28.1 → 0.31.10,
-   clearing the SQL-injection advisory. The migrations produce a byte-identical
-   schema from empty and the suite passed unchanged. The remaining `postcss`
-   and `sharp` advisories are transitive through `next` and need a framework
-   upgrade rather than a dependency bump.
+2. ~~**A dependency audit.**~~ Done immediately after this ADR was written, in
+   two passes: `drizzle-orm` 0.36.4 → 0.45.2 with `drizzle-kit` 0.28.1 →
+   0.31.10, then `next` 15.1.3 → 16.3.0 and `vitest` 2.1.8 → 4.1.10 with an
+   `overrides` pin for a deprecated `@esbuild-kit` package inside drizzle-kit.
+   `npm audit` now reports zero vulnerabilities, runtime and dev alike. No
+   application source changed in any of it; the migrations still produce a
+   byte-identical schema from empty and the route table is unchanged.
+
+   The one thing that did break was the test harness, and it is worth
+   recording: Vitest 4 removed `poolOptions`, and with it the `singleFork`
+   setting that had been *implying* serial test files. This suite truncates
+   every table in `beforeEach`, so parallel files truncate each other mid-test
+   — 497 passing became 337 failing with deadlocks. `fileParallelism: false` is
+   now set explicitly. A guarantee a test suite depends on should be spelled
+   out rather than inherited from a pool implementation detail, and it took a
+   major upgrade to notice this one never was.
 3. **Conflict presentation.** The outbox parks an operation the server refused
    and shows the reason, which is honest but not helpful — a person who
    categorized something into a period that closed while they were offline gets

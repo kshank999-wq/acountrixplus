@@ -741,22 +741,46 @@ bookkeeping inbox. Nothing outside `modules/ai` imports a provider: permission, 
 ceiling, prompt resolution, output validation, and metering all happen in one gateway function,
 so no call site can skip them (spec §12).
 
-## Known security advisories
+## Dependency security
 
-`npm audit` reports the following against pinned dependencies. Each is recorded here with what was
-done about it rather than left for somebody to rediscover:
+`npm audit` reports **0 vulnerabilities**, across runtime and development dependencies alike.
 
-- **`drizzle-orm` — SQL injection via improperly escaped SQL identifiers** (high).
-  **Fixed.** Upgraded from 0.36.4 to 0.45.2 (with `drizzle-kit` 0.28.1 → 0.31.10). Verified three
-  ways: the committed migrations produce a byte-identical schema from an empty database,
-  `drizzle-kit generate` reports no drift and rewrites no snapshot, and the full suite passes
-  unchanged.
-- **`postcss` and `sharp`**, both transitive through `next` (high). Not taken: the only fix
-  `npm audit` offers is a `next` major upgrade, which is a framework migration rather than a
-  dependency bump. Neither is reachable from user input at runtime here — `postcss` runs at build
-  time, and `sharp` is used only by `scripts/generate-icons.mjs`, which is run by hand and whose
-  output is committed. They should be cleared by a deliberate Next upgrade with the suite run
-  before and after.
+Getting there took three upgrades, each verified rather than assumed:
+
+| Advisory | Resolution |
+| --- | --- |
+| `drizzle-orm` — SQL injection via improperly escaped SQL identifiers (high) | drizzle-orm 0.36.4 → 0.45.2, drizzle-kit 0.28.1 → 0.31.10. No source changes needed. |
+| `postcss`, `sharp` — transitive through `next` (high) | next 15.1.3 → 16.3.0. No source changes needed. |
+| `esbuild` — dev server readable cross-origin (moderate) | vitest 2.1.8 → 4.1.10 cleared its half; the other half is a deprecated `@esbuild-kit` package inside `drizzle-kit`, pinned forward with an `overrides` entry. |
+
+The `overrides` entry in `package.json` exists because `@esbuild-kit/core-utils` and
+`@esbuild-kit/esm-loader` are both deprecated — their maintainer merged them into `tsx` — so
+`drizzle-kit` will never ship an updated copy. `npm audit fix --force` "solves" this by proposing a
+downgrade to `drizzle-kit@0.18.1`, which would undo the SQL-injection fix above and cannot read this
+schema. Pinning the nested `esbuild` forward is the fix; `drizzle-kit generate` and a
+migrate-from-empty are checked after it to confirm the tooling still loads its config.
+
+**What was checked after each upgrade**, because a green test suite is not by itself evidence that
+a database toolchain or a rendering framework still behaves:
+
+- The committed migrations produce a **byte-identical schema** from an empty database, diffed
+  against a dump taken before any of this started.
+- `drizzle-kit generate` reports no drift and rewrites no snapshot.
+- The **route table is identical** — 45 routes, same names, same static/dynamic classification.
+- All 497 tests pass, and the seed produces figures identical to the pre-upgrade run.
+- Every route renders in a browser, with the ledger figures unmoved (AR nets $38,440 against an
+  identical aging total; the trial balance balances).
+- Write paths too: a categorization, a module toggle through its upsert-then-delete branch, the
+  mobile sync endpoint, and a full offline cycle — four decisions queued with the network off and
+  drained clean on reconnect.
+
+### One thing the Next 16 upgrade required
+
+Vitest 4 removed `poolOptions`, and with it the `singleFork` setting that had been *implying* serial
+test files. This suite shares one Postgres database and truncates every table in `beforeEach`, so
+parallel files truncate each other mid-test: the run went from 497 passing to 337 failing with
+deadlocks and vanishing rows. `vitest.config.ts` now sets `fileParallelism: false` explicitly, so
+the guarantee the suite depends on is stated rather than inherited from a pool detail.
 
 ## Not built yet
 
