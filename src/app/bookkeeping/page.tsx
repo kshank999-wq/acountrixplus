@@ -4,6 +4,7 @@ import { inboxCounts, listInbox, UNREVIEWED_STATES, type ReviewState } from '@/m
 import { categorizableAccounts } from '@/modules/coa/service'
 import { listFinancialAccounts } from '@/modules/banking/sync'
 import { logoutAction } from '@/app/actions/auth'
+import { AppShell } from '@/components/app-shell'
 import { Inbox } from './inbox'
 import { SyncButton } from './sync-button'
 
@@ -63,49 +64,32 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
   const canManageRules = can(actor, 'bookkeeping:rules')
 
   return (
-    <div className="min-h-screen">
-      <header className="sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold tracking-tight">
-              {session?.companyName ?? 'Accountrix Plus'}
-            </h1>
-            <p className="truncate text-xs text-muted">
-              Bookkeeping · {actor.userName} ({actor.role})
-            </p>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {can(actor, 'bookkeeping:import') && <SyncButton />}
-            <form action={logoutAction}>
-              <button className="btn text-xs">Sign out</button>
-            </form>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-        <Inbox
-          rows={inbox.rows}
-          total={inbox.total}
-          page={page}
-          pageSize={PAGE_SIZE}
-          counts={counts}
-          accounts={accounts.map((a) => ({ id: a.id, number: a.number, name: a.name }))}
-          financialAccounts={financialAccounts.map((a) => ({
-            id: a.id,
-            name: a.name,
-            mask: a.mask,
-          }))}
-          filters={{
-            q: params.q ?? '',
-            account: params.account ?? '',
-            state: params.state ?? 'unreviewed',
-          }}
-          canEdit={canEdit}
-          canManageRules={canManageRules}
-        />
-      </main>
-    </div>
+    <AppShell
+      actor={actor}
+      companyName={session?.companyName ?? 'Accountrix Plus'}
+      active="bookkeeping"
+      actions={can(actor, 'bookkeeping:import') ? <SyncButton /> : null}
+    >
+      <Inbox
+        rows={inbox.rows}
+        total={inbox.total}
+        page={page}
+        pageSize={PAGE_SIZE}
+        counts={counts}
+        accounts={accounts.map((a) => ({ id: a.id, number: a.number, name: a.name }))}
+        financialAccounts={financialAccounts.map((a) => ({
+          id: a.id,
+          name: a.name,
+          mask: a.mask,
+        }))}
+        filters={{
+          q: params.q ?? '',
+          account: params.account ?? '',
+          state: params.state ?? 'unreviewed',
+        }}
+        canEdit={canEdit}
+        canManageRules={canManageRules}
+      />
+    </AppShell>
   )
 }

@@ -16,6 +16,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { companies } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
+import { reconciliations } from './ledger'
 
 /** Review states enumerated in spec §3. */
 export const reviewStateEnum = pgEnum('review_state', [
@@ -120,6 +121,21 @@ export const bankTransactions = pgTable(
 
     excludeReason: text('exclude_reason'),
     notes: text('notes'),
+
+    /**
+     * Reconciliation (spec §4). `clearedAt` marks the transaction as seen on a
+     * statement; `reconciliationId` binds it to the session that cleared it.
+     *
+     * There is deliberately no journal-entry column here. The derived entry is
+     * found through `journal_entries.source_type/source_id`, so the link lives
+     * in one place and cannot drift out of sync.
+     */
+    clearedAt: timestamp('cleared_at', { withTimezone: true }),
+    // Nulled rather than cascaded if a reconciliation is ever removed: the
+    // transaction outlives the session that cleared it.
+    reconciliationId: uuid('reconciliation_id').references(() => reconciliations.id, {
+      onDelete: 'set null',
+    }),
     /** Receipt/document references (spec §3). */
     attachments: jsonb('attachments').$type<Attachment[]>().notNull().default([]),
     /** Untouched provider payload, kept for audit and re-processing. */

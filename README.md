@@ -3,12 +3,15 @@
 A unified business operating system for bookkeeping, accounting, clients, proposals, and
 marketing — an alternative to QuickBooks.
 
-This repository currently implements **Phase 0 (Foundation)** and **Phase 1 (Bookkeeping MVP)**
-from the [development specification](docs/SPEC.md), delivered as the vertical slice described in
-spec §21. Architecture decisions are recorded in
-[ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md).
+This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**, and
+**Phase 2 (Reconciliation + Accounting Core)** from the
+[development specification](docs/SPEC.md). Architecture decisions are recorded in
+[ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md) and
+[ADR 0002](docs/adr/0002-double-entry-ledger.md).
 
 ## What works today
+
+### Bookkeeping (Phase 1)
 
 - **Onboarding** — register a company, pick one of 14 industries, and get a full chart of
   accounts installed automatically (standard structure plus an industry pack).
@@ -24,6 +27,21 @@ spec §21. Architecture decisions are recorded in
   reversible. Bulk actions undo as one action.
 - **Roles and permissions** — seven roles with granular per-membership overrides. Sales and
   marketing users cannot see financial data at all.
+
+### Accounting (Phase 2)
+
+- **Double-entry ledger** — every categorized transaction, invoice, bill, and payment posts a
+  balanced journal entry automatically. Owners never write journal entries to keep their books;
+  accountants can, for adjustments.
+- **Trial balance, balance sheet, profit & loss, general ledger** — all summed live from posted
+  journal lines. No cached balances anywhere.
+- **Reconciliation** — per-account sessions with statement balance entry, live difference
+  calculation, and completion refused unless the difference is exactly zero. Completing locks the
+  cleared transactions; reopening is a separate permission.
+- **Period close** — closing a date range blocks entries, voids, and bookkeeping changes dated
+  inside it. Reopening is recorded, not erased.
+- **A/R and A/P** — customers, vendors, invoices, bills, payments with application across several
+  documents, and aging reports bucketed by days past due.
 
 No AI provider is required for any of it (spec §22).
 
@@ -94,6 +112,9 @@ Coverage matches what spec §21 asks for:
 | `tests/dedup.test.ts` | Repeated syncs, the database-level unique constraint, and two tenants importing identical provider ids |
 | `tests/rules.test.ts` | Condition evaluation, priority, merchant normalization, vendor memory, auto vs suggest |
 | `tests/integrity.test.ts` | Money arithmetic, chart-of-accounts consistency, split balancing, transfers, audit trail and undo |
+| `tests/ledger.test.ts` | Balanced-entry validation, normal balances, derived postings, void and reversal, period locking, statements |
+| `tests/reconciliation.test.ts` | Difference arithmetic, balance chaining, completion gating, locking and controlled reopen |
+| `tests/receivables.test.ts` | Invoice and bill posting, payment application, overpayment rejection, aging buckets |
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -129,6 +150,32 @@ A five-minute walkthrough proving the spec §22 definition of done. Start from a
 10. **Permissions** — the audit trail behind every one of these changes is attributed to your user.
     A `sales` or `marketing` member visiting `/bookkeeping` sees an explanation instead of data.
 
+### Accounting (Phase 2)
+
+Continue from the same session, or run `npm run db:seed` for a company that already has
+receivables, payables, and a partly-categorized ledger.
+
+11. **The ledger built itself** — open **Accounting → Journal**. Every transaction you
+    categorized in step 4 already posted a balanced entry. Nobody typed a journal entry.
+12. **Trial balance** — **Accounting → Reports → Trial balance**. Debits equal credits, and the
+    page says so explicitly.
+13. **Balance sheet** — switch to **Balance sheet**. Assets equal liabilities plus equity. Credit
+    card spending shows as a liability, not as negative cash.
+14. **Manual entry** — on the Journal tab, click **New journal entry** and enter an unbalanced
+    pair of lines. The running total flags the difference and **Post entry** stays disabled until
+    the two sides agree.
+15. **Reconcile** — **Accounting → Reconcile**. Start a session on Business Checking with any
+    statement end date and balance. Tick transactions: the difference updates on every click, and
+    **Complete reconciliation** is disabled until it reaches exactly zero.
+16. **Reconciliation lock** — complete a session, then return to `/bookkeeping` and try to
+    recategorize one of the cleared transactions. It is refused until the reconciliation is
+    reopened, which needs the accountant or owner role.
+17. **Period close** — on the Journal tab, close a date range covering some of your transactions.
+    Recategorizing anything dated inside it is now rejected, and the bookkeeping change rolls back
+    with the entry rather than leaving the two out of step.
+18. **Aging** — **Reports → A/R aging** on the seeded data shows one invoice current and one
+    overdue, bucketed by days past due.
+
 ## Project layout
 
 ```
@@ -136,6 +183,8 @@ src/
   app/                    Routes, server actions, and UI (no business logic)
     actions/              Server actions — resolve the actor, call one service
     bookkeeping/          Transaction Inbox
+    accounting/           Reports, journal, reconciliation workspace
+  components/             Shared app shell and navigation
   db/
     schema/               Drizzle table definitions (the migration source)
     migrate.ts, seed.ts
@@ -146,7 +195,10 @@ src/
     banking/              Provider interface, mock adapter, import and dedup
     bookkeeping/          Rule matching, categorization, splits, transfers
     coa/                  Chart of accounts and industry packs
+    ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
+    receivables/          Customers, vendors, invoices, bills, payments
+    reconciliation/       Statement sessions, clearing, locking
     tenancy/              Actor context, tenant scoping, onboarding
 drizzle/                  Generated SQL migrations
 docs/                     Specification and architecture decision records
@@ -172,16 +224,28 @@ No changes to import, dedup, categorization, or the inbox — that isolation is 
 
 Tracked against the spec §20 phases:
 
-- **Phase 2** — reconciliation, double-entry ledger and journals, trial balance, financial
-  statements, AR/AP
 - **Phase 3** — CRM, leads, opportunity pipeline
 - **Phase 4** — proposal designer, Company Studio brand kit
 - **Phase 5** — marketing, segments, campaigns
 - **Phase 6** — the optional AI module and its gateway
-- Infrastructure from spec §18 still open: background job queue (bank sync currently runs inline),
-  object storage for receipts, the outbox pattern
+
+Gaps within the phases already built:
+
+- **Cash-basis reporting.** All statements are accrual. Spec §13 asks for both "where supported by
+  the underlying transaction model"; doing cash basis correctly means looking through payment
+  applications to the accounts on the documents they settle. The `payment_applications` table was
+  designed to make that possible, but it is not implemented — deliberately left rather than
+  shipped as an approximation.
+- **Accounting dimensions** (classes, departments, locations, projects) are not on journal lines
+  yet. Job costing in the construction pack will want them.
+- Fixed assets and depreciation, recurring and closing entries, customer statements, write-offs,
+  and 1099 reporting remain open from spec §13. Vendor `taxId` and `is1099Vendor` columns exist so
+  the data is captured now.
+- Infrastructure from spec §18 still open: background job queue (bank sync runs inline and now
+  writes journal entries too, so this matters more than it did), object storage for receipts, the
+  outbox pattern.
 - Security from spec §14/§19 still open: MFA, session/device controls, row-level security as a
-  second isolation layer
+  second isolation layer.
 
 Per spec §19, a security review is required before any production use involving real financial
 integrations or payments.

@@ -22,6 +22,18 @@ beforeEach(async () => {
   await db.execute(sql`
     TRUNCATE TABLE
       audit_events,
+      payment_applications,
+      payments,
+      invoice_lines,
+      invoices,
+      bill_lines,
+      bills,
+      customers,
+      vendors,
+      journal_lines,
+      journal_entries,
+      accounting_periods,
+      reconciliations,
       transaction_splits,
       bank_transactions,
       categorization_rules,

@@ -16,6 +16,11 @@ import {
   recordAudit,
 } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import {
+  syncLedgerForTransaction,
+  syncLedgerForTransferPair,
+  unpostTransaction,
+} from '@/modules/ledger/posting'
 import { rememberVendor } from './rules-engine'
 
 export type ReviewState =
@@ -151,6 +156,46 @@ async function loadTransaction(ctx: ActorContext, transactionId: string) {
   return transaction
 }
 
+/** Raised when a transaction is locked by a completed reconciliation. */
+export class ReconciledTransactionError extends Error {
+  readonly status = 409
+  constructor() {
+    super(
+      'This transaction is part of a completed reconciliation. ' +
+        'Reopen the reconciliation before changing it.',
+    )
+    this.name = 'ReconciledTransactionError'
+  }
+}
+
+/**
+ * Blocks changes to a transaction that a completed reconciliation has locked
+ * (spec §4).
+ *
+ * Without this, recategorizing a reconciled transaction would move money
+ * between accounts after someone had already certified that the books agreed
+ * with the bank statement.
+ */
+function assertEditable(transaction: typeof bankTransactions.$inferSelect) {
+  if (transaction.reviewState === 'reconciled') {
+    throw new ReconciledTransactionError()
+  }
+}
+
+/**
+ * Loads a transaction and confirms it can still be changed.
+ *
+ * Period locks are enforced separately, by the ledger: posting an entry dated
+ * inside a closed period throws `ClosedPeriodError`, and because the ledger
+ * sync runs in the same database transaction as the bookkeeping change, the
+ * whole thing rolls back together.
+ */
+async function loadEditableTransaction(ctx: ActorContext, transactionId: string) {
+  const transaction = await loadTransaction(ctx, transactionId)
+  assertEditable(transaction)
+  return transaction
+}
+
 /** Snapshot of the fields undo needs to restore. */
 function snapshot(transaction: typeof bankTransactions.$inferSelect) {
   return {
@@ -178,7 +223,7 @@ export async function categorize(
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
-  const transaction = await loadTransaction(ctx, transactionId)
+  const transaction = await loadEditableTransaction(ctx, transactionId)
   await assertAccountInTenant(ctx, chartAccountId)
 
   const before = snapshot(transaction)
@@ -228,6 +273,10 @@ export async function categorize(
       },
       tx,
     )
+
+    // Same database transaction, so a closed-period rejection rolls the
+    // categorization back with it.
+    await syncLedgerForTransaction(ctx, transactionId, tx)
   })
 
   let vendorRule = null
@@ -267,6 +316,7 @@ export async function bulkCategorize(
 
   await db.transaction(async (tx) => {
     for (const transaction of transactions) {
+      assertEditable(transaction)
       const before = snapshot(transaction)
 
       if (transaction.isSplit) {
@@ -308,6 +358,8 @@ export async function bulkCategorize(
         },
         tx,
       )
+
+      await syncLedgerForTransaction(ctx, transaction.id, tx)
     }
   })
 
@@ -334,7 +386,7 @@ export async function splitTransaction(
     throw new Error('A split needs at least two lines.')
   }
 
-  const transaction = await loadTransaction(ctx, transactionId)
+  const transaction = await loadEditableTransaction(ctx, transactionId)
 
   const total = splits.reduce((sum, split) => sum + split.amountCents, 0)
   if (total !== transaction.amountCents) {
@@ -401,6 +453,8 @@ export async function splitTransaction(
       },
       tx,
     )
+
+    await syncLedgerForTransaction(ctx, transactionId, tx)
   })
 
   return { transactionId, lines: splits.length }
@@ -434,7 +488,7 @@ export async function excludeTransaction(
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
-  const transaction = await loadTransaction(ctx, transactionId)
+  const transaction = await loadEditableTransaction(ctx, transactionId)
   const before = snapshot(transaction)
 
   await db.transaction(async (tx) => {
@@ -463,6 +517,10 @@ export async function excludeTransaction(
       },
       tx,
     )
+
+    // Excluded is not a postable state, so this voids any entry the
+    // transaction had rather than posting a new one.
+    await syncLedgerForTransaction(ctx, transactionId, tx)
   })
 }
 
@@ -477,11 +535,11 @@ export async function markAsTransfer(
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
-  const transaction = await loadTransaction(ctx, transactionId)
+  const transaction = await loadEditableTransaction(ctx, transactionId)
   const before = snapshot(transaction)
 
   if (pairTransactionId) {
-    const pair = await loadTransaction(ctx, pairTransactionId)
+    const pair = await loadEditableTransaction(ctx, pairTransactionId)
 
     // The two legs must offset. Anything else is not a transfer.
     if (pair.amountCents !== -transaction.amountCents) {
@@ -536,6 +594,15 @@ export async function markAsTransfer(
       },
       tx,
     )
+
+    if (pairTransactionId) {
+      // One entry for the pair — posting each leg would double-count the move.
+      await syncLedgerForTransferPair(ctx, transactionId, pairTransactionId, tx)
+    } else {
+      // An unmatched transfer has no counterparty yet, so there is nothing
+      // correct to post. Any prior entry is withdrawn until it is paired.
+      await unpostTransaction(ctx, transactionId, tx)
+    }
   })
 }
 
@@ -543,7 +610,7 @@ export async function markAsTransfer(
 export async function acceptSuggestion(ctx: ActorContext, transactionId: string) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
-  const transaction = await loadTransaction(ctx, transactionId)
+  const transaction = await loadEditableTransaction(ctx, transactionId)
   if (transaction.reviewState !== 'suggested' || !transaction.chartAccountId) {
     throw new Error('That transaction has no pending suggestion.')
   }
@@ -572,6 +639,9 @@ export async function acceptSuggestion(ctx: ActorContext, transactionId: string)
       },
       tx,
     )
+
+    // A suggestion is not in the ledger until someone confirms it.
+    await syncLedgerForTransaction(ctx, transactionId, tx)
   })
 }
 
@@ -714,6 +784,10 @@ export async function undoLast(ctx: ActorContext) {
         },
         tx,
       )
+
+      // The restored state decides what the ledger should now say — which for
+      // an undone categorization means voiding the entry it created.
+      await syncLedgerForTransaction(ctx, target.entityId, tx)
 
       await markUndone(ctx, target.id, undoEvent.id, tx)
       undone++
