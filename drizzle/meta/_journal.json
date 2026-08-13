@@ -57,6 +57,13 @@
       "when": 1786636977333,
       "tag": "0007_phase7_industry_modules",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1786643878395,
+      "tag": "0008_phase8_mobile",
+      "breakpoints": true
     }
   ]
 }

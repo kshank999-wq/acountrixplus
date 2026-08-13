@@ -3,8 +3,25 @@ import { redirect } from 'next/navigation'
 import { currentActor } from '@/lib/current-user'
 import { LoginForm } from './login-form'
 
-export default async function LoginPage() {
-  if (await currentActor()) redirect('/bookkeeping')
+/**
+ * Sign in.
+ *
+ * `?next=` is honoured so the mobile app can send an unauthenticated visitor
+ * here and get them back — a phone that opened a notification link should land
+ * where the notification pointed, not on the desktop inbox.
+ */
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>
+}) {
+  const { next } = await searchParams
+
+  // Only same-origin paths, never a full URL: `?next=https://evil.example` on
+  // a login page is the classic open-redirect phishing setup.
+  const destination = next && /^\/[^/\\]/.test(next) ? next : '/bookkeeping'
+
+  if (await currentActor()) redirect(destination)
 
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
@@ -14,7 +31,7 @@ export default async function LoginPage() {
       </div>
 
       <div className="card p-6">
-        <LoginForm />
+        <LoginForm next={destination} />
       </div>
 
       <p className="mt-6 text-center text-sm text-muted">

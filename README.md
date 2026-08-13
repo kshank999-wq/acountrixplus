@@ -6,15 +6,23 @@ marketing — an alternative to QuickBooks.
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
-**Phase 6 (AI Add-on)**, and **Phase 7 (Industry Modules)** from the
+**Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, and the mobile app from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
 [ADR 0003](docs/adr/0003-crm-and-public-intake.md),
 [ADR 0004](docs/adr/0004-document-engine-and-brand.md),
 [ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md),
-[ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md), and
-[ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md).
+[ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md),
+[ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md), and
+[ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md).
+
+> **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
+> Integrations*; the mobile app is not a phase of its own there, and §18 asks
+> for "a responsive web/PWA interface **before committing to separate native
+> mobile apps**". The mobile work below is that PWA, plus the versioned API and
+> replay contract a native client would consume later. Payroll and tax remain
+> unbuilt.
 
 ## What works today
 
@@ -167,6 +175,46 @@ books. `tests/jobs.test.ts` asserts the reconciliation directly.
 - **Terminology** — each industry pack's vocabulary reaches the UI. A "Tenant", a "Patient", a
   "Production". Only the words change; the records are the ones every company keeps.
 
+### The mobile app
+
+An installable PWA at `/m`, not a second codebase. It is offline-first because
+the two facts that shape it are that a phone is sometimes offline and a pocket is
+sometimes emptied.
+
+- **Replay-safe operations** — every mutation a phone can queue carries a
+  client-generated idempotency key, and the key row is written *inside the
+  operation's own transaction*. Sending the same categorization six times
+  concurrently produces one journal entry. This is the phase's central claim and
+  `tests/mobile.test.ts` asserts it directly.
+- **An offline outbox** — decisions are queued in IndexedDB and drained on
+  reconnect. The ordering rules, retry policy, and permanent-versus-retryable
+  classification are pure functions in `modules/mobile/outbox.ts`, tested without
+  a browser. Later decisions about the same transaction supersede earlier ones;
+  two receipts do not.
+- **The same door, not a different building** — the mobile API calls the same
+  services the browser does, so a categorization from a phone produces the same
+  journal entry and the same audit event, attributed to the same person.
+  `/api/mobile/v1/sync` versions in the path, and one round trip both drains the
+  queue and returns fresh state.
+- **A phone-first review deck** — one transaction at a time, recently-used
+  categories first, 48px targets, and nothing awaiting the network. Spec §3's
+  "several transactions at a time" is what several looks like when the screen
+  fits one.
+- **Receipt capture** — the phone's own camera, downscaled to ~200 KB in the
+  browser before upload, attached through the queue. Receipts have their own
+  permission (`bookkeeping:categorize`) rather than the brand library's.
+- **Revocable devices** — a lost phone is signed out on its own, from the laptop
+  doing the revoking. Revocation takes effect on the next request, not whenever
+  the session expires.
+- **Notifications** — a `PushProvider` abstraction with a built-in mock, per-topic
+  preferences that default to *on* (granting browser permission is the opt-in),
+  and a log of every attempt including the suppressed ones. A client accepting a
+  proposal notifies everyone who can manage proposals.
+- **A hand-written service worker** — about 130 lines, because a generated one is
+  code nobody has read intercepting every request. `/api/**` is never cached, only
+  GET is considered, and the offline fallback is plain HTML rather than a page in
+  the app.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -243,6 +291,7 @@ Coverage matches what spec §21 asks for:
 | `tests/design.test.ts` | Block validation, merge-field resolution, template composition, brand colour validation, clause versioning |
 | `tests/acceptance.test.ts` | Server-side total recomputation, signature matching, expiry, double-acceptance, foreign item ids |
 | `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics denominators, tenant and role isolation |
+| `tests/mobile.test.ts` | Replay safety under sequential and concurrent retries, fingerprint conflicts, key scoping and rollback, the outbox's ordering/superseding/backoff/classification rules, device revocation and session invalidation, receipt permissions and idempotent attachment, notification defaults and delivery outcomes, the proposal-acceptance push, a full offline session, and a regression test for the journal-numbering deadlock |
 | `tests/jobs.test.ts` | Module resolution from pack plus override, workflow gating, terminology, the cost-code dimension end to end, budget vs actual, change-order approval posting nothing, application pricing and increments, retainage splitting AR from Retainage Receivable, the AR-control-equals-subledger identity, retainage release without double-recognizing revenue, WIP arithmetic, compliance expiry, and the no-forked-ledger reconciliation |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -503,6 +552,53 @@ key and the client proposal link — keep them for steps 22 and 24.
     entry they always did. That is spec §23's rule: industry customization extends the common
     platform rather than creating separate products.
 
+### The mobile app
+
+75. **Open it on a phone** — visit `/m`, or narrow a desktop window to 390px. Signed out, you land
+    on the login page with `?next=/m` and come straight back after signing in.
+76. **Install it** — Chrome offers an install button at the bottom of Today; iOS Safari gets an
+    explanation of where the Share menu is, because Safari has no programmatic install. Dismissing
+    it is remembered, so it does not come back.
+77. **Today answers one question** — how many transactions need a category, roughly how long that
+    will take, and what is owed to you. Not a dashboard: a phone opened for ninety seconds cannot
+    afford a screen of figures.
+78. **Review is a deck, not a table** — one transaction filling the screen, recently-used categories
+    surfacing after the first tap, 48px rows. Each decision advances immediately without waiting for
+    the network.
+79. **Now turn off your wifi.** A line appears: *"You are offline. Everything you do here is saved
+    and sent when the connection returns."* Keep reviewing — four or five transactions. The counter
+    reads *"4 changes saved on this device."*
+80. **Check that it is real** — open DevTools → Application → IndexedDB → `accountrix-outbox`. Your
+    decisions are there with their idempotency keys, `status: "pending"`.
+81. **Turn the wifi back on.** Within a second or two the queue empties, the badge disappears, and
+    the transactions are categorized in the desktop inbox with journal entries posted. Nothing was
+    lost and nothing was duplicated.
+82. **The claim, tested the hard way** — the seed categorizes two transactions through the mobile
+    API and then *replays the same operation with the same key*, exactly as a phone that lost the
+    first response would. The output reads "replayed, no second entry". Check
+    **Accounting → Journal**: one entry each.
+83. **Offline navigation degrades honestly** — with the wifi off, visit a page you have never
+    opened. You get a plain "You are offline" page that explains nothing is lost, not a browser
+    error and not a stale figure. Then go back to `/m`: it renders from cache, because you have
+    been there.
+84. **Capture a receipt** — the camera tab opens your phone's own camera app. The photo is
+    downscaled in the browser before it uploads; the size under the preview is typically around
+    200 KB rather than the 4 MB the camera produced. Choose what it belongs to and the attachment
+    goes through the queue.
+85. **Sign out a lost phone** — **Settings** lists every device signed in, with the current one
+    marked. Signing another one out ends its sessions immediately and leaves this one alone. The
+    device stays in the audit trail; it just stops working.
+86. **Notifications are two switches, not one** — a per-device subscription and a per-topic
+    preference. Turning off "An invoice was paid" does not silence proposals. The page says plainly
+    that the built-in provider records notifications and delivers none, so nobody concludes push
+    is broken.
+87. **A notification nobody triggered** — accept a proposal from its public link at `/p/<token>`.
+    Everyone who can manage proposals is notified, recorded in the log under **Settings**. That is
+    the event a mobile app exists for: it happens when nobody is looking at a screen.
+88. **The API is versioned in the path** — `POST /api/mobile/v1/sync` returns its contract version
+    and drains the queue and returns fresh state in one round trip. A native client would call
+    exactly this.
+
 ## Project layout
 
 ```
@@ -516,6 +612,8 @@ src/
     ai/                   AI module admin, usage ledger, insights, prompt registry
     jobs/                 WIP schedule, job detail, cost codes, subcontractors
     settings/modules/     Industry module switches
+    m/                    The mobile app — Today, review deck, receipts, devices
+    api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
     studio/               Company Studio — profile, brand, catalog, clauses
     api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
     api/proposals/        Public proposal acceptance (unauthenticated)
@@ -542,12 +640,15 @@ src/
     ai/                   Gateway, providers, prompts, retrieval, suggestions, metering
     industry/             Module resolution from industry packs and company overrides
     jobs/                 Cost codes, budgets, change orders, progress billing, WIP, compliance
+    mobile/               Idempotency, the pure outbox, devices, receipts, push, notifications
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
     tenancy/              Actor context, tenant scoping, onboarding
+public/                   PWA manifest, service worker, icons, offline fallback
+scripts/                  One-off generators (PWA icons)
 drizzle/                  Generated SQL migrations
 docs/                     Specification and architecture decision records
 tests/                    Vitest suites
@@ -555,6 +656,44 @@ tests/                    Vitest suites
 
 The rule that keeps this honest: **`src/app/` must not contain business logic**, and every service
 function takes an `ActorContext` first. See ADR 0001 for why.
+
+## Installing the mobile app
+
+The app lives at `/m` and is the same origin, the same session, and the same
+services as the desktop workspaces — there is no separate build and no store listing.
+
+- **Chrome / Edge (Android, desktop)** — an install button appears at the bottom of the
+  Today screen once the browser considers the app installable.
+- **iOS Safari** — Share → *Add to Home Screen*. Safari fires no install event and has
+  no programmatic install, so the app explains where the button is instead.
+
+Installing matters for more than the icon: **iOS delivers push notifications only to
+installed PWAs**, never to a tab.
+
+Service workers require HTTPS or `localhost`. A staging deployment behind plain HTTP
+will run the app fine and register no service worker, so nothing will work offline.
+
+### Push notifications
+
+`PUSH_PROVIDER=mock` is the default: it records every notification in the log and
+delivers none, which is what the demo and the tests run on. For real delivery, generate a
+VAPID key pair and set all three variables server-side:
+
+```bash
+npx web-push generate-vapid-keys
+```
+
+```
+PUSH_PROVIDER=webpush
+VAPID_PUBLIC_KEY=...
+VAPID_PRIVATE_KEY=...
+VAPID_SUBJECT=mailto:you@yourcompany.com
+```
+
+The private key never leaves the server (spec §12, §19); only the public key is sent to
+the browser, which is what it is for. An unconfigured `webpush` adapter reports itself as
+such and the registry falls back to the mock rather than throwing on every notification —
+the same degradation as the AI provider.
 
 ## Switching bank providers
 
@@ -602,9 +741,29 @@ bookkeeping inbox. Nothing outside `modules/ai` imports a provider: permission, 
 ceiling, prompt resolution, output validation, and metering all happen in one gateway function,
 so no call site can skip them (spec §12).
 
+## Known security advisories
+
+`npm audit` reports vulnerabilities in pinned dependencies that this repository has **not** taken,
+because each fix is a major-version upgrade and none has been evaluated against the ledger tests:
+
+- **`drizzle-orm` < 0.45.2 — SQL injection via improperly escaped SQL identifiers** (high).
+  This is the one that matters most: it is the data layer of an accounting product. Every query in
+  this codebase goes through the query builder with parameterized values rather than interpolated
+  identifiers, so the advisory's pattern does not appear here — but that is an argument for the
+  upgrade being safe, not for skipping it.
+- **`postcss` and `sharp`**, both transitively through `next` (high). Build-time and image
+  processing; neither is reachable from user input at runtime here.
+
+Upgrading `drizzle-orm` across a major version should be its own change, with the full suite run
+before and after — not folded into a feature phase.
+
 ## Not built yet
 
 Tracked against the spec §20 phases:
+
+- **Phase 8 — Payroll / Tax / Advanced Integrations.** Nothing built. Spec §19 requires a security
+  review before production use of payroll or tax filing, which makes it a poor candidate for a
+  phase that ends in a commit rather than an audit.
 
 
 Gaps within the phases already built:
@@ -643,6 +802,29 @@ Gaps within the phases already built:
   depends on a setting the person entering it cannot see is worse than typing the number.
 - **Lien waivers are not tied to payments.** They are a compliance document kind and can be filed
   against a job, but nothing blocks a payment for want of one.
+
+- **No native mobile apps.** The mobile experience is an installable PWA, which is what spec §18
+  asks for at this stage. The consequences are real: **iOS delivers push only to installed PWAs**,
+  never to a Safari tab, and Background Sync is Chromium-only — on Safari the outbox drains on
+  reconnect, on visibility, and on a slow timer, which covers everything except the app being
+  closed for the whole outage. `/api/mobile/v1` is versioned so a native client can be added
+  without a second contract.
+- **Receipt photos cannot be uploaded offline.** A megabyte of JPEG will not go in the outbox
+  without filling the device's storage quota, so capturing offline fails and says so. Attaching an
+  already-uploaded receipt *is* queueable.
+- **"Remember this vendor" is unavailable on the queued path.** Creating a rule writes outside the
+  operation's transaction and creating one twice is a mess to undo, so the phone offers the
+  checkbox only when online.
+- **The mobile deck does not split transactions.** The API accepts splits and they replay safely;
+  there is no phone UI for one, because a two-line split on a phone screen is worse than waiting
+  for a laptop.
+- **Nothing schedules the review nudge.** `nudgeReviewQueue` works and is tested; only the seed
+  calls it. Same missing background worker as the campaign scheduler.
+- **Idempotency keys are never pruned automatically.** `pruneIdempotencyKeys` exists and is tested;
+  nothing calls it on a schedule, for the same reason.
+- **A parked operation explains itself but cannot be repaired.** If a period closed while a phone
+  was offline, the outbox shows the error and offers retry or discard — not a way to redate the
+  entry. See ADR 0008.
 
 - **Campaign scheduling.** `scheduledFor` puts a campaign on the calendar and a nurture step's
   `delayDays` is recorded, but nothing fires on its own — sending is a button somebody presses.

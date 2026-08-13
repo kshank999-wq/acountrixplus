@@ -13,11 +13,12 @@ function SubmitButton() {
   )
 }
 
-export function LoginForm() {
+export function LoginForm({ next }: { next?: string }) {
   const [state, formAction] = useActionState<FormState, FormData>(loginAction, null)
 
   return (
     <form action={formAction} className="space-y-4">
+      {next && <input type="hidden" name="next" value={next} />}
       <div>
         <label htmlFor="email" className="mb-1.5 block text-sm font-medium">
           Email

@@ -172,12 +172,40 @@ export async function assertPeriodOpen(
 /**
  * Assigns the next entry number for a company.
  *
- * Locks the company row first so two concurrent posts cannot claim the same
- * number — the unique constraint would catch it, but a lock turns a failed
- * write into a brief wait.
+ * Serializes concurrent posts so two cannot claim the same number — the unique
+ * constraint would catch it, but a lock turns a failed write into a brief
+ * wait.
+ *
+ * ## Why an advisory lock and not `SELECT … FOR UPDATE` on the company row
+ *
+ * It used to be the company row, and that deadlocked. Every table in this
+ * schema has a foreign key to `companies`, so *inserting an audit event*, or a
+ * transaction, or an idempotency key, takes a `FOR KEY SHARE` lock on the same
+ * company row. Two concurrent postings therefore both hold KEY SHARE and then
+ * both ask for `FOR UPDATE`, each waiting for the other to let go:
+ *
+ *   T1: insert audit event  → KEY SHARE on companies
+ *   T2: insert audit event  → KEY SHARE on companies
+ *   T1: SELECT … FOR UPDATE → waits for T2
+ *   T2: SELECT … FOR UPDATE → waits for T1   → deadlock
+ *
+ * Two people categorizing transactions at the same moment was enough to hit
+ * it. An advisory lock is in a namespace of its own, so it cannot interact
+ * with the foreign-key locks at all, and `xact` scope releases it on commit
+ * or rollback without any unlock call to forget.
+ *
+ * The first argument is a fixed namespace so this lock cannot collide with any
+ * other advisory lock the application takes later; the second is a hash of the
+ * company id. A hash collision between two companies costs one of them a short
+ * wait and nothing else — the entry-number query below is still scoped by
+ * company, so correctness never depended on the lock being exclusive to one.
  */
+const JOURNAL_LOCK_NAMESPACE = 724_301
+
 async function nextEntryNumber(companyId: string, exec: Executor): Promise<number> {
-  await exec.execute(sql`SELECT id FROM companies WHERE id = ${companyId} FOR UPDATE`)
+  await exec.execute(
+    sql`SELECT pg_advisory_xact_lock(${JOURNAL_LOCK_NAMESPACE}, hashtext(${companyId}))`,
+  )
 
   const [row] = await exec
     .select({ max: sql<number | null>`max(${journalEntries.entryNumber})` })

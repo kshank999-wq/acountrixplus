@@ -2,6 +2,7 @@ import { and, desc, eq, inArray } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/db'
 import {
+  memberships,
   opportunities,
   opportunityActivities,
   proposalAcceptances,
@@ -10,6 +11,8 @@ import {
   proposals,
 } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { hasPermission, type Role } from '@/modules/permissions'
+import { notifyProposalDecided } from '@/modules/mobile/notifications'
 import { OPEN_STAGES } from './pipeline'
 import { computeTotals } from './proposals'
 
@@ -225,7 +228,45 @@ export async function acceptProposal(
     throw error
   }
 
+  // Told after the acceptance is committed, and never inside its transaction:
+  // a push service having a bad minute must not roll back a signature the
+  // client has already given (Phase 8).
+  await announceAcceptance(proposal, input.signerName).catch(() => {})
+
   return { ok: true, acceptedTotalCents: totals.totalCents }
+}
+
+/**
+ * Notifies the company that a client signed.
+ *
+ * This is the event the mobile app exists for: it happens when nobody is
+ * looking at a screen, and it is the one people actually want to be
+ * interrupted about. Everyone who can manage proposals is told, because a
+ * signature is not one person's business.
+ *
+ * Failures are swallowed by the caller. A notification is a courtesy; the
+ * acceptance is the record.
+ */
+async function announceAcceptance(
+  proposal: { id: string; companyId: string; number: string },
+  signerName: string,
+): Promise<void> {
+  const recipients = await db
+    .select({ userId: memberships.userId, role: memberships.role })
+    .from(memberships)
+    .where(and(eq(memberships.companyId, proposal.companyId), eq(memberships.isActive, true)))
+
+  for (const recipient of recipients) {
+    if (!hasPermission(recipient.role as Role, 'proposals:manage')) continue
+
+    await notifyProposalDecided({
+      companyId: proposal.companyId,
+      userId: recipient.userId,
+      proposalNumber: proposal.number,
+      clientName: signerName,
+      won: true,
+    })
+  }
 }
 
 function isUniqueViolation(error: unknown): boolean {

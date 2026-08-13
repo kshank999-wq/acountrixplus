@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { eq, sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { db, type Executor } from '@/db'
 import { bankTransactions, chartAccounts } from '@/db/schema'
 import { formatCents } from '@/lib/money'
 import { categorize } from '@/modules/bookkeeping/transactions'
@@ -125,7 +125,12 @@ export async function suggestCategory(ctx: ActorContext, transactionId: string) 
  * has succeeded. Marking first would leave a suggestion recorded as applied
  * against a change that never landed.
  */
-export async function acceptCategorization(ctx: ActorContext, suggestionId: string) {
+export async function acceptCategorization(
+  ctx: ActorContext,
+  suggestionId: string,
+  /** The mobile outbox's transaction, so accepting replays safely offline. */
+  exec?: Executor,
+) {
   const suggestion = await getSuggestion(ctx, suggestionId)
 
   if (!suggestion || suggestion.status !== 'pending') {
@@ -141,8 +146,8 @@ export async function acceptCategorization(ctx: ActorContext, suggestionId: stri
   // `categorize` runs its own permission check, its own tenant scoping, and
   // writes its own audit event under this actor. Nothing about the call says
   // it came from a suggestion, which is right — the person categorized it.
-  await categorize(ctx, suggestion.entityId, chartAccountId)
-  await markAccepted(ctx, suggestionId)
+  await categorize(ctx, suggestion.entityId, chartAccountId, {}, exec)
+  await markAccepted(ctx, suggestionId, undefined, exec)
 
   return { transactionId: suggestion.entityId, chartAccountId }
 }

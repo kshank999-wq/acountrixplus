@@ -1,6 +1,6 @@
 'use server'
 
-import { cookies } from 'next/headers'
+import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
@@ -15,6 +15,7 @@ import {
   SESSION_COOKIE,
 } from '@/modules/auth/session'
 import { companiesForUser, registerCompany } from '@/modules/tenancy/onboarding'
+import { registerDevice } from '@/modules/mobile/devices'
 import { industryEnum } from '@/db/schema'
 
 export type FormState = { error?: string } | null
@@ -51,7 +52,13 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
     return { error: error instanceof Error ? error.message : 'Could not create the company.' }
   }
 
-  const { cookieValue } = await createSession(userId, companyId)
+  const device = await registerDevice({
+    userId,
+    companyId,
+    userAgent: (await headers()).get('user-agent'),
+  })
+
+  const { cookieValue } = await createSession(userId, companyId, device.id)
   const cookieStore = await cookies()
   cookieStore.set(SESSION_COOKIE, cookieValue, sessionCookieOptions())
 
@@ -61,12 +68,15 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
 const loginSchema = z.object({
   email: z.string().email('Enter a valid email address.'),
   password: z.string().min(1, 'Enter your password.'),
+  /** Where to land afterwards. Same-origin paths only — see below. */
+  next: z.string().optional(),
 })
 
 export async function loginAction(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = loginSchema.safeParse({
     email: formData.get('email'),
     password: formData.get('password'),
+    next: formData.get('next') ?? undefined,
   })
 
   if (!parsed.success) {
@@ -87,11 +97,24 @@ export async function loginAction(_prev: FormState, formData: FormData): Promise
     return { error: 'That account is not a member of any company.' }
   }
 
-  const { cookieValue } = await createSession(user.id, memberships[0].companyId)
+  // Every sign-in is a device, so the list on the security page is a list of
+  // places this account is signed in — which is only true if it includes the
+  // browser as well as the phone.
+  const device = await registerDevice({
+    userId: user.id,
+    companyId: memberships[0].companyId,
+    userAgent: (await headers()).get('user-agent'),
+  })
+
+  const { cookieValue } = await createSession(user.id, memberships[0].companyId, device.id)
   const cookieStore = await cookies()
   cookieStore.set(SESSION_COOKIE, cookieValue, sessionCookieOptions())
 
-  redirect('/bookkeeping')
+  // Re-checked here rather than trusted from the form: a hidden field is user
+  // input, and `//evil.example` is a protocol-relative URL that a naive
+  // `startsWith('/')` would happily redirect to.
+  const next = parsed.data.next
+  redirect(next && /^\/[^/\\]/.test(next) ? next : '/bookkeeping')
 }
 
 export async function logoutAction() {

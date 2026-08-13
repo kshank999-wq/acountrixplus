@@ -1,7 +1,7 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { eq, and, gt } from 'drizzle-orm'
 import { db } from '@/db'
-import { sessions, memberships, users, companies } from '@/db/schema'
+import { sessions, memberships, users, companies, devices } from '@/db/schema'
 
 export const SESSION_COOKIE = 'accountrix_session'
 export const SESSION_TTL_DAYS = 30
@@ -45,12 +45,23 @@ export function verifySessionCookie(cookieValue: string): string | null {
   return timingSafeEqual(provided, expected) ? sessionId : null
 }
 
-export async function createSession(userId: string, activeCompanyId: string | null) {
+export async function createSession(
+  userId: string,
+  activeCompanyId: string | null,
+  /**
+   * The device this session belongs to (Phase 8).
+   *
+   * Optional, because a session without one still works — that is what every
+   * session created before devices existed is. Sign-in supplies it so a lost
+   * phone can be revoked on its own.
+   */
+  deviceId?: string | null,
+) {
   const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000)
 
   const [session] = await db
     .insert(sessions)
-    .values({ userId, activeCompanyId, expiresAt })
+    .values({ userId, activeCompanyId, expiresAt, deviceId: deviceId ?? null })
     .returning()
 
   return { session, cookieValue: signSessionId(session.id) }
@@ -78,13 +89,23 @@ export async function resolveSession(cookieValue: string | undefined) {
       userName: users.name,
       userEmail: users.email,
       activeCompanyId: sessions.activeCompanyId,
+      deviceId: sessions.deviceId,
+      deviceRevokedAt: devices.revokedAt,
     })
     .from(sessions)
     .innerJoin(users, eq(users.id, sessions.userId))
+    // Left, not inner: a session with no device is the normal case for a
+    // browser signed in before Phase 8, and must keep resolving.
+    .leftJoin(devices, eq(devices.id, sessions.deviceId))
     .where(and(eq(sessions.id, sessionId), gt(sessions.expiresAt, new Date())))
     .limit(1)
 
   if (!row || !row.activeCompanyId) return null
+
+  // Revocation takes effect on the next request, for the same reason the
+  // membership below is re-checked every time: a lock that waits for a session
+  // to expire is not a lock.
+  if (row.deviceRevokedAt) return null
 
   // The membership is re-checked on every request: revoking access must take
   // effect immediately, not whenever the session happens to expire.
@@ -118,6 +139,7 @@ export async function resolveSession(cookieValue: string | undefined) {
     companyIndustry: membership.companyIndustry,
     role: membership.role,
     overrides: membership.overrides,
+    deviceId: row.deviceId,
   }
 }
 

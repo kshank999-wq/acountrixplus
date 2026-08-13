@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Offline — Accountrix Plus</title>
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <!--
+      Plain HTML with inline styles, and not a page in the app.
+
+      This is the one document that has to render when nothing else can, so it
+      cannot depend on the framework: a Next.js page ships a JavaScript chunk,
+      and a chunk the person never downloaded is not in the cache when they go
+      offline. The first version of this file was a React page, and navigating
+      offline produced "Application error: a client-side exception has
+      occurred" — the framework failing to load its own error page.
+
+      No script, no stylesheet, no font. Everything it needs is in these bytes.
+    -->
+    <style>
+      :root {
+        color-scheme: light dark;
+        --ink: #0f172a;
+        --muted: #475569;
+        --canvas: #f8fafc;
+        --surface: #ffffff;
+        --line: #e2e8f0;
+        --brand: #0d6e60;
+        --brand-ink: #ffffff;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --ink: #e2e8f0;
+          --muted: #94a3b8;
+          --canvas: #090c14;
+          --surface: #111621;
+          --line: #2a3446;
+          --brand: #2dbfa5;
+          --brand-ink: #061412;
+        }
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 2rem 1.5rem;
+        background: var(--canvas);
+        color: var(--ink);
+        font: 16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      main { max-width: 22rem; width: 100%; text-align: center; }
+      h1 { margin: 0 0 0.75rem; font-size: 1.125rem; }
+      p { margin: 0 0 0.75rem; font-size: 0.875rem; color: var(--muted); }
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 3rem;
+        width: 100%;
+        margin-top: 1.5rem;
+        padding: 0 1rem;
+        border-radius: 0.5rem;
+        background: var(--brand);
+        color: var(--brand-ink);
+        font-size: 0.875rem;
+        font-weight: 500;
+        text-decoration: none;
+      }
+      .mark {
+        width: 3rem;
+        height: 3rem;
+        margin: 0 auto 1rem;
+        display: block;
+        border-radius: 0.75rem;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img class="mark" src="/icons/icon-192.png" alt="" />
+      <h1>You are offline</h1>
+      <p>This page has not been opened on this device yet, so there is nothing saved to show you.</p>
+      <p>
+        Anything you have already reviewed is saved on this phone and will be sent as soon as you
+        have a signal. Nothing is lost.
+      </p>
+      <a href="/m">Back to the app</a>
+    </main>
+  </body>
+</html>

@@ -1,5 +1,5 @@
 import { and, count, desc, eq, gte, ilike, inArray, lte, or, sql, type SQL } from 'drizzle-orm'
-import { db } from '@/db'
+import { db, type Executor } from '@/db'
 import {
   auditEvents,
   bankTransactions,
@@ -233,6 +233,7 @@ export async function categorize(
     projectId?: string | null
     costCodeId?: string | null
   } = {},
+  exec?: Executor,
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
@@ -248,7 +249,7 @@ export async function categorize(
   // reverses them as the single action the user actually took.
   const batchId = opts.rememberVendor ? newBatchId() : null
 
-  await db.transaction(async (tx) => {
+  const write = async (tx: Executor) => {
     // Categorizing a previously split transaction replaces the splits.
     if (transaction.isSplit) {
       await tx
@@ -306,7 +307,10 @@ export async function categorize(
     // Same database transaction, so a closed-period rejection rolls the
     // categorization back with it.
     await syncLedgerForTransaction(ctx, transactionId, tx)
-  })
+  }
+
+  if (exec) await write(exec)
+  else await db.transaction(write)
 
   let vendorRule = null
   if (opts.rememberVendor) {
@@ -415,6 +419,7 @@ export async function splitTransaction(
   ctx: ActorContext,
   transactionId: string,
   splits: SplitInput[],
+  exec?: Executor,
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
@@ -440,7 +445,7 @@ export async function splitTransaction(
 
   const before = snapshot(transaction)
 
-  await db.transaction(async (tx) => {
+  const write = async (tx: Executor) => {
     await tx
       .delete(transactionSplits)
       .where(
@@ -493,7 +498,10 @@ export async function splitTransaction(
     )
 
     await syncLedgerForTransaction(ctx, transactionId, tx)
-  })
+  }
+
+  if (exec) await write(exec)
+  else await db.transaction(write)
 
   return { transactionId, lines: splits.length }
 }
@@ -523,13 +531,14 @@ export async function excludeTransaction(
   ctx: ActorContext,
   transactionId: string,
   reason?: string,
+  exec?: Executor,
 ) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
   const transaction = await loadEditableTransaction(ctx, transactionId)
   const before = snapshot(transaction)
 
-  await db.transaction(async (tx) => {
+  const write = async (tx: Executor) => {
     await tx
       .update(bankTransactions)
       .set({
@@ -559,7 +568,10 @@ export async function excludeTransaction(
     // Excluded is not a postable state, so this voids any entry the
     // transaction had rather than posting a new one.
     await syncLedgerForTransaction(ctx, transactionId, tx)
-  })
+  }
+
+  if (exec) await write(exec)
+  else await db.transaction(write)
 }
 
 /**
@@ -684,13 +696,18 @@ export async function acceptSuggestion(ctx: ActorContext, transactionId: string)
 }
 
 /** Attaches a note. */
-export async function setNote(ctx: ActorContext, transactionId: string, note: string | null) {
+export async function setNote(
+  ctx: ActorContext,
+  transactionId: string,
+  note: string | null,
+  exec?: Executor,
+) {
   requirePermission(ctx, 'bookkeeping:categorize')
 
   const transaction = await loadTransaction(ctx, transactionId)
   const before = snapshot(transaction)
 
-  await db.transaction(async (tx) => {
+  const write = async (tx: Executor) => {
     await tx
       .update(bankTransactions)
       .set({ notes: note, updatedAt: new Date() })
@@ -712,7 +729,10 @@ export async function setNote(ctx: ActorContext, transactionId: string, note: st
       },
       tx,
     )
-  })
+  }
+
+  if (exec) await write(exec)
+  else await db.transaction(write)
 }
 
 /**

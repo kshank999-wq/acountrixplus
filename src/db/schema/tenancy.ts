@@ -108,6 +108,52 @@ export const memberships = pgTable(
   }),
 )
 
+/** Platform a device reports. Advisory — used for labels, never for trust. */
+export const devicePlatformEnum = pgEnum('device_platform', [
+  'ios',
+  'android',
+  'web',
+  'unknown',
+])
+
+/**
+ * A signed-in device (spec §19).
+ *
+ * Sessions already existed; this names them. The reason is narrow and
+ * practical: when a phone is lost, its owner needs to cut that one device off
+ * without signing out of the laptop they are doing it from.
+ */
+export const devices = pgTable(
+  'devices',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /** The company this device was last acting within, for the audit trail. */
+    companyId: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
+
+    /** What the person calls it. Defaults to something derived from the agent. */
+    label: text('label').notNull(),
+    platform: devicePlatformEnum('platform').notNull().default('unknown'),
+    /** Truncated: enough to recognize a device, not enough to fingerprint one. */
+    userAgent: text('user_agent'),
+
+    /** True once the PWA reports itself installed rather than in a tab. */
+    isInstalled: boolean('is_installed').notNull().default(false),
+
+    lastSeenAt: timestamp('last_seen_at', { withTimezone: true }).notNull().defaultNow(),
+    /** Set rather than deleted: a revoked device stays in the history. */
+    revokedAt: timestamp('revoked_at', { withTimezone: true }),
+    revokedBy: uuid('revoked_by').references(() => users.id, { onDelete: 'set null' }),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    userIdx: index('devices_user_idx').on(t.userId, t.lastSeenAt),
+  }),
+)
+
 /** Server-side session records. The cookie carries only a signed session id. */
 export const sessions = pgTable(
   'sessions',
@@ -120,6 +166,15 @@ export const sessions = pgTable(
     activeCompanyId: uuid('active_company_id').references(() => companies.id, {
       onDelete: 'cascade',
     }),
+    /**
+     * The device this session belongs to (spec §19, Phase 8).
+     *
+     * Nullable, because every session created before devices existed has no
+     * device and must keep working. Revoking a device deletes its sessions,
+     * which is the point: a lost phone is signed out without disturbing the
+     * laptop doing the revoking.
+     */
+    deviceId: uuid('device_id').references(() => devices.id, { onDelete: 'cascade' }),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

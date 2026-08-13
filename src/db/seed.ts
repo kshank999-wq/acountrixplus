@@ -56,6 +56,11 @@ import { createProgressBilling, scheduleFor, setScheduleOfValues } from '@/modul
 import { createSubcontractor, recordComplianceDocument } from '@/modules/jobs/compliance'
 import { wipSummary } from '@/modules/jobs/reports'
 import { moduleEnabled } from '@/modules/industry/modules'
+import { registerDevice } from '@/modules/mobile/devices'
+import { subscribe, nudgeReviewQueue } from '@/modules/mobile/notifications'
+import { uploadReceipt, attachReceipt } from '@/modules/mobile/receipts'
+import { applyOperation } from '@/modules/mobile/operations'
+import { listInbox as listInboxForMobile } from '@/modules/bookkeeping/transactions'
 import { postManualEntry } from '@/modules/ledger/journal'
 import { suggestCategory, summarizeInbox } from '@/modules/ai/bookkeeping'
 import type { ActorContext } from '@/modules/tenancy/context'
@@ -837,6 +842,76 @@ async function main() {
     )
   }
 
+  // --- Phase 8: the mobile app --------------------------------------------
+
+  console.log('Setting up the mobile app…')
+
+  await registerDevice({
+    userId: user.id,
+    companyId: company.id,
+    userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Mobile/15E148',
+    label: "Dana's iPhone",
+  })
+  console.log('  Registered a phone, so the devices list has something to revoke.')
+
+  await subscribe(ctx, {
+    endpoint: 'https://push.example/demo-owner-endpoint',
+    p256dh: 'BEl62iUYgUivxIkv69yViEuiBIa-Ib9-SkFbNZ4',
+    auth: 'tBHItJI5svbpez7KI4CCXg',
+  })
+  console.log('  Subscribed that phone to notifications (the mock provider delivers none).')
+
+  // Two transactions categorized the way the phone does it: through the
+  // mobile API with an idempotency key, into the same ledger.
+  const mobileCandidates = (
+    await listInboxForMobile(ctx, { states: ['new'], limit: 2 })
+  ).rows
+  const mobileAccount = await accountByNumber(company.id, '6800')
+
+  if (mobileAccount) {
+    for (const candidate of mobileCandidates) {
+      const key = randomUUID()
+      const payload = { transactionId: candidate.id, chartAccountId: mobileAccount.id }
+
+      await applyOperation(ctx, { key, operation: 'transaction.categorize', payload })
+      // Sent twice on purpose, exactly as a phone that lost the first response
+      // would. The second is a replay and changes nothing.
+      const replay = await applyOperation(ctx, {
+        key,
+        operation: 'transaction.categorize',
+        payload,
+      })
+
+      console.log(
+        `  Categorized "${candidate.description}" from the phone, then replayed it — ` +
+          `${replay.executed ? 'ran twice (wrong!)' : 'replayed, no second entry'}.`,
+      )
+    }
+  }
+
+  // A receipt on file, so the attachment path has something to show.
+  if (mobileCandidates[0]) {
+    const receipt = await uploadReceipt(ctx, {
+      filename: 'builders-supply.jpg',
+      contentType: 'image/jpeg',
+      // A minimal valid JPEG header — the store keeps bytes, not pictures.
+      data: Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00]),
+    })
+    await attachReceipt(ctx, mobileCandidates[0].id, receipt.id)
+    console.log('  Attached a receipt to one of them.')
+  }
+
+  const nudge = await nudgeReviewQueue({
+    companyId: company.id,
+    userId: user.id,
+    waiting: (await listInboxForMobile(ctx, { states: ['new'], limit: 200 })).rows.length,
+  })
+  console.log(
+    nudge.sent > 0
+      ? '  Sent a review nudge — recorded in the notification log, delivered nowhere.'
+      : '  Not enough waiting to be worth a nudge.',
+  )
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -851,6 +926,7 @@ async function main() {
   console.log('  /jobs                 the WIP schedule')
   console.log('  /jobs/subcontractors  insurance and W-9 compliance')
   console.log('  /settings/modules     industry modules, on and off')
+  console.log('  /m                    the mobile app — install it, then turn off your wifi')
 
   process.exit(0)
 }

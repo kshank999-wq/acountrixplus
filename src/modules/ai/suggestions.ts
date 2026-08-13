@@ -1,5 +1,5 @@
 import { and, desc, eq, sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { db, type Executor } from '@/db'
 import { aiSuggestions } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -136,8 +136,9 @@ export async function markAccepted(
   ctx: ActorContext,
   suggestionId: string,
   note?: string,
+  exec?: Executor,
 ) {
-  return decide(ctx, suggestionId, 'accepted', note)
+  return decide(ctx, suggestionId, 'accepted', note, exec)
 }
 
 /**
@@ -161,10 +162,12 @@ async function decide(
   suggestionId: string,
   status: 'accepted' | 'rejected',
   note?: string,
+  /** The mobile outbox's transaction, so the decision replays with its key. */
+  exec?: Executor,
 ) {
   requirePermission(ctx, 'ai:use')
 
-  return db.transaction(async (tx) => {
+  const write = async (tx: Executor) => {
     const [updated] = await tx
       .update(aiSuggestions)
       .set({
@@ -203,7 +206,9 @@ async function decide(
     )
 
     return updated
-  })
+  }
+
+  return exec ? write(exec) : db.transaction(write)
 }
 
 export type AcceptanceStats = {
