@@ -1,0 +1,1 @@
+ALTER TABLE "opportunities" ADD COLUMN "probability_overridden" boolean DEFAULT false NOT NULL;

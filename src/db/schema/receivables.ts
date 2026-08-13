@@ -17,6 +17,7 @@ import { sql } from 'drizzle-orm'
 import { companies } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { journalEntries } from './ledger'
+import { organizations } from './crm'
 
 /**
  * Accounts receivable and accounts payable (spec §13).
@@ -34,7 +35,14 @@ export const documentStatusEnum = pgEnum('document_status', [
   'void',
 ])
 
-/** A customer the company invoices. */
+/**
+ * A customer the company invoices.
+ *
+ * "Customer" is an accounting *role* an organization plays, not a separate
+ * party record — `organizationId` links back to the unified CRM record
+ * (spec §6). Nullable so a customer can be created directly from the
+ * accounting side without first existing in the CRM.
+ */
 export const customers = pgTable(
   'customers',
   {
@@ -42,6 +50,9 @@ export const customers = pgTable(
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'set null',
+    }),
     name: text('name').notNull(),
     email: text('email'),
     phone: text('phone'),
@@ -61,7 +72,7 @@ export const customers = pgTable(
   }),
 )
 
-/** A vendor the company receives bills from. */
+/** A vendor the company receives bills from — the other accounting role. */
 export const vendors = pgTable(
   'vendors',
   {
@@ -69,6 +80,9 @@ export const vendors = pgTable(
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id, { onDelete: 'cascade' }),
+    organizationId: uuid('organization_id').references(() => organizations.id, {
+      onDelete: 'set null',
+    }),
     name: text('name').notNull(),
     email: text('email'),
     phone: text('phone'),

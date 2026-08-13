@@ -16,6 +16,7 @@ import {
 import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
+import { projects } from './crm'
 
 /**
  * Where a journal entry came from (spec §13).
@@ -120,12 +121,20 @@ export const journalLines = pgTable(
     debitCents: bigint('debit_cents', { mode: 'number' }).notNull().default(0),
     creditCents: bigint('credit_cents', { mode: 'number' }).notNull().default(0),
 
+    /**
+     * Accounting dimension (spec §13). A project is also the job a won
+     * proposal creates (spec §6), so one record serves both — which is why
+     * this is the same `projects` table the CRM uses.
+     */
+    projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
+
     memo: text('memo'),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     entryIdx: index('journal_lines_entry_idx').on(t.journalEntryId),
+    projectIdx: index('journal_lines_project_idx').on(t.companyId, t.projectId),
     // Drives the general ledger and account balances.
     accountIdx: index('journal_lines_account_idx').on(t.companyId, t.chartAccountId),
     // A line is a debit or a credit — never both, never neither, never negative.

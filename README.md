@@ -3,11 +3,12 @@
 A unified business operating system for bookkeeping, accounting, clients, proposals, and
 marketing — an alternative to QuickBooks.
 
-This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**, and
-**Phase 2 (Reconciliation + Accounting Core)** from the
-[development specification](docs/SPEC.md). Architecture decisions are recorded in
-[ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md) and
-[ADR 0002](docs/adr/0002-double-entry-ledger.md).
+This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
+**Phase 2 (Reconciliation + Accounting Core)**, and **Phase 3 (CRM + Proposal Pipeline)** from
+the [development specification](docs/SPEC.md). Architecture decisions are recorded in
+[ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
+[ADR 0002](docs/adr/0002-double-entry-ledger.md), and
+[ADR 0003](docs/adr/0003-crm-and-public-intake.md).
 
 ## What works today
 
@@ -42,6 +43,23 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
   inside it. Reopening is recorded, not erased.
 - **A/R and A/P** — customers, vendors, invoices, bills, payments with application across several
   documents, and aging reports bucketed by days past due.
+
+### Clients and sales (Phase 3)
+
+- **Unified client records** — one organization record per party, carrying lifecycle stage and
+  the strategic-account flag. Being a customer or a vendor is an accounting *role* it plays, not
+  a separate record.
+- **Opportunity pipeline** — the ten stages from the spec, with owner, expected value,
+  probability that tracks the stage until someone overrides it, and structured loss reasons.
+- **Proposals** — line items with optional extras, an immutable snapshot on every send, a
+  client-facing link with view tracking, and statuses through to won or lost.
+- **Website lead intake** — a public endpoint and a paste-in form snippet that create leads
+  directly in the pipeline. Rate limited, honeypot-protected, origin-restricted, and write-only.
+- **Win/loss analytics** — win rate by count and by value, weighted forecast, average deal size
+  and time to decision, performance by source, owner, industry, or region, and a loss-reason
+  breakdown with re-engagement eligibility.
+- **Won deals become work** — one action creates the client, the job, and optionally an invoice
+  from the winning proposal's lines.
 
 No AI provider is required for any of it (spec §22).
 
@@ -115,6 +133,9 @@ Coverage matches what spec §21 asks for:
 | `tests/ledger.test.ts` | Balanced-entry validation, normal balances, derived postings, void and reversal, period locking, statements |
 | `tests/reconciliation.test.ts` | Difference arithmetic, balance chaining, completion gating, locking and controlled reopen |
 | `tests/receivables.test.ts` | Invoice and bill posting, payment application, overpayment rejection, aging buckets |
+| `tests/crm.test.ts` | Stage transitions, probability tracking, consent-based marketing eligibility, conversion idempotence, win/loss maths |
+| `tests/proposals.test.ts` | Optional-item pricing, send-time versioning, forward-only stage advances, view tracking, proposal-to-invoice |
+| `tests/intake.test.ts` | Honeypot, rate limiting, log ceiling, origin allowlist, address truncation, key scoping and enumeration |
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -176,6 +197,34 @@ receivables, payables, and a partly-categorized ledger.
 18. **Aging** — **Reports → A/R aging** on the seeded data shows one invoice current and one
     overdue, bucketed by days past due.
 
+### Clients and sales (Phase 3)
+
+Run `npm run db:seed` for a company with a populated pipeline. The seed prints the lead intake
+key and the client proposal link — keep them for steps 22 and 24.
+
+19. **Pipeline** — open **Clients & Sales**. Four deals sit across the stages with a weighted
+    forecast in the header. Move one to a later stage; its probability follows.
+20. **Loss reasons** — move a deal to **Lost**. It asks which reason before accepting the change,
+    because the dashboard reports on them.
+21. **Dashboard** — **Clients & Sales → Dashboard** shows win rate by count and by value,
+    weighted forecast, performance by source and owner, and how many lost deals may be
+    re-engaged (only those whose contact actually consented).
+22. **Lead intake** — **Lead intake → Get form snippet** gives a paste-in HTML form. Submit to it
+    from a terminal and watch the lead land in the pipeline:
+    ```bash
+    curl -X POST http://localhost:3000/api/intake/<key> \
+      -H 'Content-Type: application/json' \
+      -d '{"name":"Sam Okafor","email":"sam@newbuild.test","interest":"Retaining wall"}'
+    ```
+23. **Intake defences** — submit again with `"website":"http://spam.test"` (the honeypot). The
+    response is still `{"ok":true}` so an automated submitter learns nothing, but no lead is
+    created and the attempt appears in the submission log as `honeypot`.
+24. **Client proposal link** — open `/p/<token>` from the seed output. That is what a client sees:
+    read-only, no login, and opening it advances the deal to **Viewed**.
+25. **Won becomes work** — on the pipeline, a won deal offers **Create client & job**. It creates
+    the accounting customer linked to the CRM record, a job, and optionally an invoice from the
+    proposal's lines. Running it twice does not duplicate anything.
+
 ## Project layout
 
 ```
@@ -184,6 +233,9 @@ src/
     actions/              Server actions — resolve the actor, call one service
     bookkeeping/          Transaction Inbox
     accounting/           Reports, journal, reconciliation workspace
+    crm/                  Pipeline, dashboard, clients, proposals, lead intake
+    api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
+    p/[token]/            Public client-facing proposal link (unauthenticated)
   components/             Shared app shell and navigation
   db/
     schema/               Drizzle table definitions (the migration source)
@@ -195,6 +247,7 @@ src/
     banking/              Provider interface, mock adapter, import and dedup
     bookkeeping/          Rule matching, categorization, splits, transfers
     coa/                  Chart of accounts and industry packs
+    crm/                  Pipeline, proposals, lead intake, conversion, analytics
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
@@ -224,7 +277,6 @@ No changes to import, dedup, categorization, or the inbox — that isolation is 
 
 Tracked against the spec §20 phases:
 
-- **Phase 3** — CRM, leads, opportunity pipeline
 - **Phase 4** — proposal designer, Company Studio brand kit
 - **Phase 5** — marketing, segments, campaigns
 - **Phase 6** — the optional AI module and its gateway
@@ -236,11 +288,19 @@ Gaps within the phases already built:
   applications to the accounts on the documents they settle. The `payment_applications` table was
   designed to make that possible, but it is not implemented — deliberately left rather than
   shipped as an approximation.
-- **Accounting dimensions** (classes, departments, locations, projects) are not on journal lines
-  yet. Job costing in the construction pack will want them.
+- **E-signature and in-page acceptance** (spec §7). The client proposal link is read-only.
+  Accepting in-page means a second public write endpoint, which deserves the same scrutiny the
+  intake endpoint got rather than being tacked on.
+- **Project dimension is stored but not reported on.** `journal_lines.projectId` exists and is set
+  by conversion; filtering the statements by job is a query change still to make. Classes,
+  departments, and locations are not modelled at all.
 - Fixed assets and depreciation, recurring and closing entries, customer statements, write-offs,
   and 1099 reporting remain open from spec §13. Vendor `taxId` and `is1099Vendor` columns exist so
   the data is captured now.
+- Communications and file attachments on opportunities (spec §6) are not built;
+  `opportunity_activities` is the seam they will hang from.
+- Renaming an organization does not propagate to its linked customer or vendor record. Worth
+  fixing before the name appears on client-facing documents in Phase 4.
 - Infrastructure from spec §18 still open: background job queue (bank sync runs inline and now
   writes journal entries too, so this matters more than it did), object storage for receipts, the
   outbox pattern.

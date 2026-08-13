@@ -15,6 +15,20 @@
       "when": 1786603558442,
       "tag": "0001_phase2_ledger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786605692869,
+      "tag": "0002_phase3_crm",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786606239075,
+      "tag": "0003_probability_override",
+      "breakpoints": true
     }
   ]
 }

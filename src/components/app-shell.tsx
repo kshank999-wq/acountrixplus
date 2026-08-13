@@ -17,13 +17,14 @@ export function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting'
+  active: 'bookkeeping' | 'accounting' | 'crm'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
   const links = [
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
+    { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
   ].filter((link) => link.show)
 
   return (
