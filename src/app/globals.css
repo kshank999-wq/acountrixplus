@@ -1,0 +1,76 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/**
+ * Design tokens. Light is the default; dark redefines only the values, so
+ * every component picks up both themes without duplicated utilities.
+ */
+:root {
+  --canvas: 248 250 252;
+  --surface: 255 255 255;
+  --raised: 241 245 249;
+  --line: 226 232 240;
+  --ink: 15 23 42;
+  --muted: 71 85 105;
+  --faint: 148 163 184;
+  --brand: 13 110 96;
+  --brand-ink: 255 255 255;
+  --positive: 4 120 87;
+  --negative: 190 18 60;
+  --warning: 180 83 9;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --canvas: 9 12 20;
+    --surface: 17 22 33;
+    --raised: 27 34 48;
+    --line: 42 52 70;
+    --ink: 226 232 240;
+    --muted: 148 163 184;
+    --faint: 100 116 139;
+    --brand: 45 191 165;
+    --brand-ink: 6 20 18;
+    --positive: 52 211 153;
+    --negative: 251 113 133;
+    --warning: 251 191 36;
+  }
+}
+
+body {
+  background-color: rgb(var(--canvas));
+  color: rgb(var(--ink));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures keep money columns aligned digit-for-digit. */
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-line
+           px-3 py-2 text-sm font-medium transition
+           hover:bg-raised focus:outline-none focus:ring-2 focus:ring-brand/40
+           disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply border-transparent bg-brand text-brand-ink hover:opacity-90;
+  }
+
+  .field {
+    @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink
+           placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-brand/40;
+  }
+
+  .card {
+    @apply rounded-xl border border-line bg-surface;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium;
+  }
+}
