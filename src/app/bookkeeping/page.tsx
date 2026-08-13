@@ -3,10 +3,12 @@ import { can } from '@/modules/tenancy/context'
 import { inboxCounts, listInbox, UNREVIEWED_STATES, type ReviewState } from '@/modules/bookkeeping/transactions'
 import { categorizableAccounts } from '@/modules/coa/service'
 import { listFinancialAccounts } from '@/modules/banking/sync'
+import { aiAvailable } from '@/modules/ai/settings'
 import { logoutAction } from '@/app/actions/auth'
 import { AppShell } from '@/components/app-shell'
 import { Inbox } from './inbox'
 import { SyncButton } from './sync-button'
+import { AssistantPanel } from './assistant-panel'
 
 export const dynamic = 'force-dynamic'
 
@@ -62,6 +64,10 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
 
   const canEdit = can(actor, 'bookkeeping:categorize')
   const canManageRules = can(actor, 'bookkeeping:rules')
+  // The assistant appears only when the company has switched the module on
+  // and this person may use it — otherwise the inbox looks exactly as it did
+  // before Phase 6 existed (spec §23).
+  const aiEnabled = can(actor, 'ai:use') && (await aiAvailable(actor))
 
   return (
     <AppShell
@@ -70,6 +76,8 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
       active="bookkeeping"
       actions={can(actor, 'bookkeeping:import') ? <SyncButton /> : null}
     >
+      {aiEnabled && <AssistantPanel />}
+
       <Inbox
         rows={inbox.rows}
         total={inbox.total}
@@ -88,6 +96,7 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
           state: params.state ?? 'unreviewed',
         }}
         canEdit={canEdit}
+        aiEnabled={aiEnabled}
         canManageRules={canManageRules}
       />
     </AppShell>

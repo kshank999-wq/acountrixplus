@@ -78,6 +78,12 @@ export type AuditAction =
   | 'suppression.add'
   | 'suppression.remove'
   | 'task.complete'
+  // The optional AI module (spec §11, §12)
+  | 'ai.settings_update'
+  | 'ai_prompt.save'
+  | 'ai_prompt.activate'
+  | 'ai_suggestion.accept'
+  | 'ai_suggestion.reject'
   | 'company.create'
   | 'company.update'
   | 'membership.create'

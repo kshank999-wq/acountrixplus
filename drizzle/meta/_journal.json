@@ -43,6 +43,13 @@
       "when": 1786611006988,
       "tag": "0005_phase5_marketing",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1786619086359,
+      "tag": "0006_phase6_ai",
+      "breakpoints": true
     }
   ]
 }

@@ -10,6 +10,7 @@ import {
   noteAction,
   splitAction,
 } from '@/app/actions/bookkeeping'
+import { SuggestButton } from './suggest-button'
 import type { AccountOption, InboxRow } from './inbox'
 
 type Props = {
@@ -17,10 +18,12 @@ type Props = {
   accounts: AccountOption[]
   canEdit: boolean
   canManageRules: boolean
+  /** Whether the AI module is switched on for this company (spec §11). */
+  aiEnabled: boolean
   onResult: (result: { ok: boolean; message?: string; error?: string }) => void
 }
 
-type Tab = 'split' | 'rule' | 'other'
+type Tab = 'split' | 'rule' | 'other' | 'assistant'
 
 /**
  * The per-transaction action panel: split, exclude, mark as transfer, note,
@@ -51,11 +54,23 @@ export function TransactionDetail(props: Props) {
         <TabButton active={tab === 'other'} onClick={() => setTab('other')}>
           Exclude · Transfer · Note
         </TabButton>
+        {/* Absent, not disabled, when the module is off — see spec §23. */}
+        {props.aiEnabled && (
+          <TabButton active={tab === 'assistant'} onClick={() => setTab('assistant')}>
+            Assistant
+          </TabButton>
+        )}
       </div>
 
       {tab === 'split' && <SplitPanel {...props} />}
       {tab === 'rule' && props.canManageRules && <RulePanel {...props} />}
       {tab === 'other' && <OtherPanel {...props} />}
+      {tab === 'assistant' && props.aiEnabled && (
+        <SuggestButton
+          transactionId={props.row.id}
+          canManageRules={props.canManageRules}
+        />
+      )}
     </div>
   )
 }

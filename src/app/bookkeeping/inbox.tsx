@@ -45,6 +45,8 @@ type Props = {
   filters: { q: string; account: string; state: string }
   canEdit: boolean
   canManageRules: boolean
+  /** Whether the AI module is switched on for this company (spec §11). */
+  aiEnabled: boolean
 }
 
 const STATE_TABS = [
@@ -303,6 +305,7 @@ export function Inbox(props: Props) {
                   accounts={props.accounts}
                   canEdit={props.canEdit}
                   canManageRules={props.canManageRules}
+                  aiEnabled={props.aiEnabled}
                   pending={pending}
                   onToggle={() => toggle(row.id)}
                   onExpand={() => setExpandedId(expandedId === row.id ? null : row.id)}
@@ -326,6 +329,7 @@ export function Inbox(props: Props) {
                 accounts={props.accounts}
                 canEdit={props.canEdit}
                 canManageRules={props.canManageRules}
+                aiEnabled={props.aiEnabled}
                 pending={pending}
                 onToggle={() => toggle(row.id)}
                 onExpand={() => setExpandedId(expandedId === row.id ? null : row.id)}
@@ -404,6 +408,7 @@ type RowProps = {
   accounts: AccountOption[]
   canEdit: boolean
   canManageRules: boolean
+  aiEnabled: boolean
   pending: boolean
   onToggle: () => void
   onExpand: () => void
@@ -457,6 +462,7 @@ function RowGroup(props: RowProps) {
       accounts={props.accounts}
       canEdit={props.canEdit}
       canManageRules={props.canManageRules}
+      aiEnabled={props.aiEnabled}
       onResult={props.onResult}
     />
   )

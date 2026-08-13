@@ -41,6 +41,10 @@ export const PERMISSIONS = [
   'marketing:view',
   'marketing:manage',
 
+  // The optional AI module (spec §11, §14)
+  'ai:use',
+  'ai:manage',
+
   // Oversight
   'audit:view',
 ] as const
@@ -80,6 +84,8 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'proposals:manage',
     'marketing:view',
     'marketing:manage',
+    'ai:use',
+    'ai:manage',
     'audit:view',
   ],
 
@@ -93,6 +99,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'accounting:view',
     'reports:view',
     'crm:view',
+    'ai:use',
   ],
 
   accountant: [
@@ -108,12 +115,13 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'accounting:close',
     'reports:view',
     'reports:financial',
+    'ai:use',
     'audit:view',
   ],
 
-  sales: ['crm:view', 'crm:manage', 'proposals:view', 'proposals:manage'],
+  sales: ['crm:view', 'crm:manage', 'proposals:view', 'proposals:manage', 'ai:use'],
 
-  marketing: ['crm:view', 'marketing:view', 'marketing:manage'],
+  marketing: ['crm:view', 'marketing:view', 'marketing:manage', 'ai:use'],
 
   readonly: ['bookkeeping:view', 'reconciliation:view', 'accounting:view', 'reports:view'],
 }

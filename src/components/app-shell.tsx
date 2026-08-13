@@ -17,7 +17,7 @@ export function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting' | 'crm' | 'marketing' | 'studio'
+  active: 'bookkeeping' | 'accounting' | 'crm' | 'marketing' | 'studio' | 'ai'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -27,6 +27,9 @@ export function AppShell({
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
     { key: 'marketing', href: '/marketing', label: 'Marketing', show: can(actor, 'marketing:view') },
     { key: 'studio', href: '/studio', label: 'Company Studio', show: can(actor, 'crm:view') },
+    // Last, and only for those who administer it: the AI module is additive
+    // (spec §23), so it should never be the first thing a workspace offers.
+    { key: 'ai', href: '/ai', label: 'AI', show: can(actor, 'ai:manage') },
   ].filter((link) => link.show)
 
   return (

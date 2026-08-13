@@ -49,6 +49,8 @@ import {
 import { createSegment } from '@/modules/marketing/audience'
 import { addStep, createCampaign, sendStep } from '@/modules/marketing/campaigns'
 import { recordClick, recordOpen } from '@/modules/marketing/engagement'
+import { updateSettings } from '@/modules/ai/settings'
+import { suggestCategory, summarizeInbox } from '@/modules/ai/bookkeeping'
 import type { ActorContext } from '@/modules/tenancy/context'
 
 /** The checking account the demo payments move through. */
@@ -608,6 +610,47 @@ async function main() {
     console.log(`  ${nurtureRecipient.email} clicked — their lost deal is worth reopening.`)
   }
 
+  // --- Phase 6: the optional AI module -------------------------------------
+
+  console.log('Switching on the AI module…')
+
+  // Enabled here so the demo has something to show. A real company starts
+  // with it off — `registerCompany` writes no settings row at all, and no
+  // settings row means off (spec §23).
+  await updateSettings(ctx, {
+    enabled: true,
+    provider: 'mock',
+    monthlyCeilingMicros: 5_000_000,
+  })
+  console.log('  Enabled with the built-in heuristic provider — no API key needed.')
+
+  // A couple of suggestions, left pending, so the inbox shows the approval
+  // flow. Several are tried because the heuristic provider declines anything
+  // it cannot place confidently — which is the behaviour we want, but means
+  // the first transaction in the list is not always one it will answer for.
+  const candidates = (await listInbox(ctx, { states: ['new'], limit: 20 })).rows
+  let suggested = 0
+
+  for (const candidate of candidates) {
+    if (suggested >= 2) break
+
+    const suggestion = await suggestCategory(ctx, candidate.id)
+    if (!suggestion.ok) continue
+
+    suggested++
+    console.log(
+      `  Suggested ${suggestion.account.name} for "${candidate.description}" ` +
+        `(${(suggestion.confidenceBp / 100).toFixed(0)}% sure) — awaiting your decision.`,
+    )
+  }
+
+  if (suggested === 0) {
+    console.log('  Nothing in the inbox was clear enough to suggest a category for.')
+  }
+
+  const inboxSummary = await summarizeInbox(ctx)
+  if (inboxSummary.ok) console.log(`  Inbox summary: ${inboxSummary.summary}`)
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -618,6 +661,7 @@ async function main() {
   console.log('  /crm/dashboard        win/loss analytics')
   console.log('  /marketing            campaign results and the sales loop')
   console.log('  /marketing/segments   the audience builder')
+  console.log('  /ai                   the AI module, its meter, and its prompts')
 
   process.exit(0)
 }

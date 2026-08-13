@@ -5,13 +5,15 @@ marketing — an alternative to QuickBooks.
 
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
-**Phase 4 (Proposal Designer + Company Studio)**, and **Phase 5 (Marketing)** from the
+**Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**, and
+**Phase 6 (AI Add-on)** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
 [ADR 0003](docs/adr/0003-crm-and-public-intake.md),
-[ADR 0004](docs/adr/0004-document-engine-and-brand.md), and
-[ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md).
+[ADR 0004](docs/adr/0004-document-engine-and-brand.md),
+[ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md), and
+[ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md).
 
 ## What works today
 
@@ -100,7 +102,34 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 - **Analytics** — open, click, click-through, unsubscribe, and bounce rates per campaign and
   across the account, with a scheduled-campaign calendar.
 
-No AI provider is required for any of it (spec §22).
+### The optional AI module (Phase 6)
+
+**Off by default for every company, and nothing above depends on it** (spec §23). A company with
+no AI settings row has it disabled, the workspaces render no AI affordances at all, and the test
+suite asserts the full bookkeeping workflow runs with the module off.
+
+- **One gateway** — every AI call passes through a single function that checks permission, then
+  quota and cost ceiling, then resolves a prompt version, then calls a provider, then validates
+  the output against a schema, then writes a usage-ledger row. Blocked calls are recorded too.
+- **Provider adapters** — a built-in heuristic provider that needs no credentials (and is what
+  the demo and tests use), plus an Anthropic adapter loaded through a dynamic import so an
+  unconfigured deployment never parses a vendor SDK. Keys stay server-side.
+- **A suggestion is never an action** — model output lands in a review queue. Accepting it calls
+  the same service a person uses, under their own actor context, so the audit log records the
+  person who decided and a separate event records that a machine proposed it.
+- **Retrieval is permission-gated** — an assistant cannot show you a figure you would not be
+  allowed to look up. A sales role asking about cash flow gets nothing.
+- **Versioned prompts** — built-ins ship in code; a company can write its own version, and every
+  ledger row records which version answered. Saving appends rather than overwrites, so rolling
+  back is one press.
+- **Metering** — spend in millionths of a dollar (a call costs a fraction of a cent), per-capability
+  usage, an hourly rate limit, and a monthly ceiling enforced *before* a provider is reached.
+- **Capabilities** — category suggestions, duplicate and outlier review, rule proposals, inbox
+  summaries, reconciliation explanations, proposal drafting, campaign drafting, and business
+  insights in plain language.
+
+No AI provider is required for any of it (spec §22) — the built-in heuristic provider needs no
+API key, no network, and no configuration.
 
 ## Requirements
 
@@ -178,6 +207,7 @@ Coverage matches what spec §21 asks for:
 | `tests/design.test.ts` | Block validation, merge-field resolution, template composition, brand colour validation, clause versioning |
 | `tests/acceptance.test.ts` | Server-side total recomputation, signature matching, expiry, double-acceptance, foreign item ids |
 | `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics denominators, tenant and role isolation |
+| `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
 npm run typecheck   # tsc --noEmit
@@ -333,6 +363,53 @@ key and the client proposal link — keep them for steps 22 and 24.
     same designer serves both proposals and creative, but the document's own kind decides which
     permission governs it, so sales cannot edit a newsletter and marketing cannot edit a proposal.
 
+### The optional AI module (Phase 6)
+
+48. **It is off until you switch it on** — open **AI**. The seed enables it so there is something
+    to look at; a company created through **Set up a company** has no settings row at all, and no
+    settings row means off. Untick **Enable the AI module** and the assistant disappears from
+    Bookkeeping entirely — absent, not greyed out.
+49. **No API key needed** — the provider reads `mock`, and the model column reads
+    `mock-heuristic-v1`. It answers from readable heuristics, which is why the demo and all 408
+    tests run with no credentials and no network.
+50. **The meter is the page** — spend, request count, per-capability usage, and the raw usage
+    ledger. Every call is there, including the ones that were blocked, so "why did nothing happen"
+    has an answer.
+51. **Suggestions are proposals** — under **Awaiting a decision** are two the seed raised. Nothing
+    has been categorized. Go to **Bookkeeping**, open **More → Assistant** on any transaction, and
+    press **Suggest a category**: it returns an account, a confidence, and one sentence of
+    reasoning, and changes nothing.
+52. **Accepting is the person's action** — press **Accept**. The transaction is categorized and a
+    journal entry posts. Check the transaction's history: the event is `transaction.categorize` by
+    *you*, exactly as if you had used the dropdown, with a separate `ai_suggestion.accept` event
+    recording that a machine proposed it.
+53. **It declines rather than guessing** — try the assistant on a transaction like `POS 88213
+    XFER`. It returns "Nothing in the description identifies this reliably" instead of a wrong
+    account. The call still succeeded and was still metered — declining is an answer.
+54. **Rule proposals generalize your decision, not its own** — the assistant only proposes a rule
+    for a merchant you have already categorized the same way twice, so it is extending a pattern
+    you established.
+55. **Duplicates** — press **Check for duplicates** above the inbox. It looks for the same merchant
+    and amount within three days, and for charges far above a merchant's own typical size, and
+    explains each in one sentence.
+56. **Insights** — under **AI → Insights**, press **Explain my figures**. Every number is drawn
+    from the same records the reports page shows; this only says what they mean. The seed's data
+    produces a real concentration warning: one client is 89% of invoiced revenue.
+57. **AI cannot read what you cannot** — sign in as a `sales` or `marketing` role and the insights
+    assistant refuses, because those roles have no `reports:view`. The retrieval layer is gated on
+    the same permission the human would need.
+58. **Prompts are versioned** — under **AI → Prompts**, edit one and save. It becomes a new version
+    rather than overwriting, the ledger records which version answered each request, and
+    **Roll back to built-in** is one press.
+59. **The limits bite before a provider is reached** — set **Requests per hour** to `1`, save, and
+    press **Summarize the inbox** twice. The second is refused and lands in the ledger as
+    `Blocked — quota`, having cost nothing. The monthly spend ceiling works the same way, but note
+    it can only bite against a *priced* provider: the built-in heuristics are free, so on `mock`
+    there is never any spend to cap and the hourly limit is the control that matters.
+60. **A missing key degrades rather than breaks** — switch the provider to `anthropic` without
+    setting `ANTHROPIC_API_KEY`. The page warns that credentials are missing and suggestions keep
+    coming from the heuristics. Bookkeeping is unaffected either way.
+
 ## Project layout
 
 ```
@@ -343,6 +420,7 @@ src/
     accounting/           Reports, journal, reconciliation workspace
     crm/                  Pipeline, dashboard, clients, proposals, designer
     marketing/            Overview, campaigns, segments, creative, suppressions
+    ai/                   AI module admin, usage ledger, insights, prompt registry
     studio/               Company Studio — profile, brand, catalog, clauses
     api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
     api/proposals/        Public proposal acceptance (unauthenticated)
@@ -366,6 +444,7 @@ src/
     crm/                  Pipeline, proposals, intake, conversion, acceptance
     design/               Blocks, merge fields, templates, document composition
     marketing/            Segments, campaigns, email provider, engagement, analytics
+    ai/                   Gateway, providers, prompts, retrieval, suggestions, metering
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
@@ -406,13 +485,45 @@ No adapter is ever asked to decide *whether* someone may be emailed. Consent and
 enforced in the send pipeline before a message reaches a provider, so a misconfigured adapter
 cannot become a compliance failure (spec §10, §19).
 
+## Switching AI providers
+
+The AI module is **off for every company by default**, and switching it on is a per-company
+setting inside the app rather than an environment variable. `AI_PROVIDER` only decides which
+adapter is the default selection.
+
+The built-in `mock` adapter answers from readable heuristics — it needs no credentials, no
+network, and no configuration, and it is what the demo and the whole test suite run on. To add a
+real model provider:
+
+1. Implement the `AiProvider` interface from `src/modules/ai/provider.ts`.
+2. Register it in `src/modules/ai/registry.ts`.
+3. Set its credentials in the server environment and select it on `/ai`.
+
+An adapter that reports itself unconfigured is replaced by the mock at call time and the admin
+page says so — a missing API key degrades to heuristic suggestions rather than breaking the
+bookkeeping inbox. Nothing outside `modules/ai` imports a provider: permission, quota, cost
+ceiling, prompt resolution, output validation, and metering all happen in one gateway function,
+so no call site can skip them (spec §12).
+
 ## Not built yet
 
 Tracked against the spec §20 phases:
 
-- **Phase 6** — the optional AI module and its gateway
 
 Gaps within the phases already built:
+
+- **No tool-calling loop.** Spec §12's tool layer is implemented as the suggestion queue plus
+  permission-gated retrieval, not as a model invoking functions directly. Every consequential
+  action here is one a person should confirm anyway. See ADR 0006.
+- **No AI response caching.** Spec §12 asks for "caching where safe"; the `cache_hit` column
+  exists and nothing sets it. A safe key has to cover the prompt *and* the underlying records,
+  and getting it wrong serves a stale suggestion about a changed transaction.
+- **AI quotas are per company, not per plan.** There is no billing-plan model yet, so the ceiling
+  is a number an owner sets rather than a plan default.
+- **No prompt evaluation harness.** Versions can be created and rolled back, and the acceptance
+  rate tells you a version got worse — but nothing tells you before you ship it.
+- **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
+  figure computed at the time. It is a usage meter, not billing.
 
 - **Campaign scheduling.** `scheduledFor` puts a campaign on the calendar and a nurture step's
   `delayDays` is recorded, but nothing fires on its own — sending is a button somebody presses.
