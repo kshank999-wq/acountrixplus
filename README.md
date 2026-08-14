@@ -6,8 +6,8 @@ marketing — an alternative to QuickBooks.
 This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)**,
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
-**Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app, and
-**Payroll and Tax** from the
+**Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
+**Payroll and Tax**, and the **background worker and outbox** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -16,15 +16,18 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0005](docs/adr/0005-marketing-consent-and-engagement.md),
 [ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md),
 [ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md),
-[ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md), and
-[ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md).
+[ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md),
+[ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md), and
+[ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
 > for "a responsive web/PWA interface **before committing to separate native
 > mobile apps**". The mobile work below is that PWA, plus the versioned API and
 > replay contract a native client would consume later. Payroll and tax — §20's
-> actual Phase 8 — followed it, and is the last section below.
+> actual Phase 8 — followed it. The **background worker** after that is past the
+> roadmap's end: it is spec §18 infrastructure, and four consecutive ADRs had
+> recorded it as the thing blocking features already built.
 
 ## What works today
 
@@ -272,6 +275,61 @@ change annually — so the default adapter does not calculate it at all.
   and spec §19 requires a security review before it could. The notice saying so
   is at the top of every screen in the workspace, not only in this README.
 
+### Background work and the outbox
+
+`npm run worker`, and the operations page at `/settings/operations`. Spec §18
+asks for both a background queue and an event/outbox pattern; four ADRs in a row
+had ended with "the missing piece is a background worker".
+
+The queue's promise is deliberately narrow, and stating it plainly is the most
+useful thing about it: **a job runs at least once, never exactly once.** A
+worker can be killed between finishing work and recording that it finished, and
+no arrangement of tables closes that window. So every handler is written to be
+safe run twice — the same discipline the mobile app has followed since Phase 8.
+
+- **Concurrency that actually works** — claims use `FOR UPDATE SKIP LOCKED`, so
+  a second worker takes different jobs rather than blocking on the first or
+  duplicating it. A worker killed holding a job has its claim expire and the
+  job picked up again.
+- **Backoff that does not synchronise** — exponential, capped at an hour, and
+  jittered upward. A provider outage fails every queued job at once; without
+  jitter they all retry at the same instant and synchronise harder each round.
+- **Dead means dead** — out of attempts, a job stops and waits for a person.
+  Deleting destroys the evidence; retrying forever hides the healthy queue
+  behind one broken job. Housekeeping sweeps succeeded and cancelled jobs and
+  never touches dead ones.
+- **The outbox replaces a swallowed failure** — proposal acceptance used to
+  call the notifier and swallow anything it threw, because a push service must
+  not roll back a signature. Now an event is written *inside the acceptance's
+  transaction*, so it exists exactly when the acceptance does, and delivery
+  happens afterwards with retries. A delivery that fails five times is a row on
+  a page instead of silence.
+- **Schedules, not cron** — four cadences and an hour. A cron typo means
+  "never" rather than an error, and a schedule that silently never fires is
+  worse than one that cannot express every timing. `nextRunAt` is pure and
+  returns a time *strictly* after the one given — a scheduler that can return
+  "now" fires the same job forever.
+- **A scheduled task has a real identity** — its own user row, honest in the
+  audit trail, that cannot sign in (its stored hash is not in a format any
+  password could hash to) and is a member of no company. Both are asserted in
+  the tests rather than assumed. The alternative was putting an owner's name on
+  an entry they did not post.
+- **The four blocked features, now running** — campaign scheduling and nurture
+  delays (ADR 0005), the WIP adjusting entry (ADR 0007), the review nudge and
+  idempotency-key pruning (ADR 0008), and a remittance-due reminder (ADR 0009).
+  Plus bank sync, which spec §18 named first and which ran inline until now.
+- **A clock is not a licence to decide** — this is the part worth reading the
+  ADR for. ADR 0007 refused to post the WIP adjusting entry automatically, and
+  having a worker did not change that judgement. The objection was never that
+  the arithmetic was hard; it was about *who decides*. So the job writes a
+  **draft** — balanced, validated, numbered, and affecting no statement until an
+  accountant posts it.
+- **A page, because absence is invisible** — "the queue is empty" and "nothing
+  is draining the queue" look identical everywhere else, and the second is an
+  outage that presents as calm. Workers write a heartbeat every tick; the page
+  leads with whether one is alive, then with what failed, and puts the
+  successes last.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -301,6 +359,11 @@ npm run db:seed
 
 # 6. Start the app
 npm run dev
+
+# 7. In a second terminal, start the background worker.
+#    Without it nothing scheduled runs: no campaign sends, no reminders,
+#    no proposed entries. /settings/operations says so in as many words.
+npm run worker
 ```
 
 Open <http://localhost:3000>. If you seeded, sign in as `owner@ridgeline.test` with the password
@@ -351,6 +414,7 @@ Coverage matches what spec §21 asks for:
 | `tests/mobile.test.ts` | Replay safety under sequential and concurrent retries, fingerprint conflicts, key scoping and rollback, the outbox's ordering/superseding/backoff/classification rules, device revocation and session invalidation, receipt permissions and idempotent attachment, notification defaults and delivery outcomes, the proposal-acceptance push, a full offline session, and a regression test for the journal-numbering deadlock |
 | `tests/jobs.test.ts` | Module resolution from pack plus override, workflow gating, terminology, the cost-code dimension end to end, budget vs actual, change-order approval posting nothing, application pricing and increments, retainage splitting AR from Retainage Receivable, the AR-control-equals-subledger identity, retainage release without double-recognizing revenue, WIP arithmetic, compliance expiry, and the no-forked-ledger reconciliation |
 | `tests/payroll.test.ts` | The payroll identity and the arithmetic behind it, the entry's shape line by line (withholding never touching an expense account), negative net pay refused, voiding reversing rather than deleting, liability positions read from the ledger, over-remitting and kind/account mismatches refused, a remittance touching no expense, sales tax per jurisdiction with exempt sales and a frozen rate, an invoice pricing its own tax from its codes, contractor payments counted from payments not bills, a tax identifier never reaching the audit log, the manual adapter's refusal and the registry's absence of a fallback, illustrative runs marked in the database, the workpaper exceptions, and a filing blocked until its blocker is cleared |
+| `tests/worker.test.ts` | Backoff growth, cap, and upward-only jitter; concurrent workers claiming a job once; run-at honoured; dedupe dropping rather than stacking; dead-lettering and never sweeping a dead job; stealing an expired claim; priority; retry resetting attempts; the runner surviving one bad job in a batch; unknown kinds dying immediately; a tenant job with no company refused; a global handler getting no actor; heartbeat liveness; `nextRunAt` strictly after and across month rollovers; a due schedule firing exactly once; the outbox rolling back with its transaction, relaying idempotently, and `invoice.paid` on full settlement only; a scheduled task that cannot sign in and belongs to no company; and the draft entry that changes no report until a person posts it |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -718,6 +782,46 @@ key and the client proposal link — keep them for steps 22 and 24.
      **People**, no **Run payroll**. What people are paid is the most sensitive data a small
      business holds.
 
+### Background work (Phase 10)
+
+106. **Start it** — `npm run worker` in a second terminal. It logs each tick that did something and
+     nothing when there was nothing to do. Stop it with Ctrl-C: it finishes the tick it is in
+     rather than abandoning a job mid-flight.
+107. **See that it is alive** — `/settings/operations` leads with how many workers are running and
+     how many jobs each has done. Now stop the worker and reload after two minutes: the page turns
+     red and says nothing in the queue will run. That is the whole reason this page exists —
+     everywhere else, a dead worker looks exactly like a quiet one.
+108. **A failure that stopped trying** — the seed queues one job whose handler does not exist. It
+     is `dead` after a single attempt, not five, because retrying cannot conjure a handler back and
+     burning an hour of backoff to rediscover that hides the real problem. The error names every
+     handler that *is* registered.
+109. **Retry it and watch it die again** — press **Retry**, then **Run a tick now**. Attempts reset
+     to zero (somebody pressing retry has usually just fixed the cause), it runs, and it dies again
+     because the handler is still missing. Honest rather than optimistic.
+110. **The proposal a machine would not post** — under "waiting for a decision" is a WIP adjusting
+     entry, written by a scheduled task. Open **Accounting → Reports** first and note the figures.
+     Then press **Post it** and look again: *now* they move. Before you pressed it, the entry was
+     balanced, validated, numbered — and counted for nothing.
+111. **Discard one instead** — a draft can be thrown away; a posted entry cannot. Try **Discard** on
+     something already posted and it refuses: "a posted entry is voided, never deleted."
+112. **Who did it** — check **Settings → Audit** after posting. The draft was created by *Scheduled
+     task* and posted by you. An owner's name never appears on an entry they did not post.
+113. **The outbox, end to end** — pay an invoice in full from **Accounting**. A `invoice.paid` event
+     appears on the operations page marked *waiting*; run a tick and it becomes *relayed*, with a
+     notification job queued behind it. Pay one only partly and no event appears — "they paid some
+     of it" is a balance, not news.
+114. **It cannot come apart from the change** — the event is written inside the payment's own
+     transaction. If the payment rolls back, so does the event. `tests/worker.test.ts` asserts that
+     directly, because an event claiming something happened when it did not is worse than a lost
+     notification.
+115. **Pause a schedule** — the campaign check runs hourly. Pause it and it stops firing until
+     resumed; the row says so plainly rather than disappearing.
+116. **Two workers do not collide** — run `npm run worker` twice. They claim different jobs rather
+     than the same one or blocking on each other, which is what `FOR UPDATE SKIP LOCKED` buys.
+117. **Or no long-running process at all** — `npm run worker:once` does exactly one tick and exits,
+     for a deployment whose scheduler is a container platform's cron. It calls the same `runOnce`
+     the loop and the tests call, so there is no second behaviour to keep in step.
+
 ## Project layout
 
 ```
@@ -731,6 +835,7 @@ src/
     ai/                   AI module admin, usage ledger, insights, prompt registry
     jobs/                 WIP schedule, job detail, cost codes, subcontractors
     payroll/              Payroll runs, people, liabilities, sales tax, workpapers
+    settings/operations/  The queue, schedules, events, and proposed entries
     settings/modules/     Industry module switches
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
@@ -762,6 +867,7 @@ src/
     jobs/                 Cost codes, budgets, change orders, progress billing, WIP, compliance
     mobile/               Idempotency, the pure outbox, devices, receipts, push, notifications
     payroll/              Payroll provider, runs and the entry, remittance, sales tax, workpapers
+    worker/               Queue, handler registry, runner, schedules, outbox, system actor
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
     permissions/          Roles, permissions, overrides
@@ -769,6 +875,8 @@ src/
     reconciliation/       Statement sessions, clearing, locking
     tenancy/              Actor context, tenant scoping, onboarding
 public/                   PWA manifest, service worker, icons, offline fallback
+  worker.ts               The worker process entry point (npm run worker)
+  worker-once.ts          One tick, then exit (npm run worker:once)
 scripts/                  One-off generators (PWA icons)
 drizzle/                  Generated SQL migrations
 docs/                     Specification and architecture decision records
@@ -815,6 +923,34 @@ The private key never leaves the server (spec §12, §19); only the public key i
 the browser, which is what it is for. An unconfigured `webpush` adapter reports itself as
 such and the registry falls back to the mock rather than throwing on every notification —
 the same degradation as the AI provider.
+
+## The background worker
+
+```bash
+npm run worker        # the loop: poll, drain, repeat
+npm run worker:once   # exactly one tick, then exit
+```
+
+A separate process from the web app on purpose. A Next.js server that also
+drained the queue would run one copy per instance with no coordination, so
+scaling the website would scale the number of things sending campaigns.
+
+**Several can run at once.** Claims use `FOR UPDATE SKIP LOCKED`, so a second
+worker takes different jobs rather than blocking on the first or duplicating
+it. Stopping one with Ctrl-C finishes the tick it is in; killing it outright is
+survivable too — the claim expires and another worker picks the job up, which is
+safe precisely because every handler tolerates running twice.
+
+`worker:once` is for a deployment whose scheduler is external — a container
+platform's cron, a systemd timer. It calls the same `runOnce` the loop and the
+tests call, so there is no second code path.
+
+Tune with `WORKER_POLL_MS` (default 5000) and `WORKER_BATCH_SIZE` (default 10).
+
+If no worker is running, `/settings/operations` says so in as many words and
+offers a single tick from the browser. That is a development convenience and the
+page says as much — it runs inside a web request, which is not how this should
+work in production.
 
 ## Switching bank providers
 
@@ -940,6 +1076,10 @@ Tracked against the spec §20 phases:
   or submits a return. "Advanced integrations" remains open: there is no accounting-package import,
   no payments processor, and no e-filing.
 
+- **Past the roadmap — the background worker and outbox.** Spec §20 stops at Phase 8. The worker is
+  spec §18 infrastructure rather than a roadmap phase, and it was built next because four
+  consecutive ADRs had recorded it as the thing blocking features that were otherwise finished.
+
 
 Gaps within the phases already built:
 
@@ -960,10 +1100,10 @@ Gaps within the phases already built:
   `inventory`, `time_billing`, `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
   and `manufacturing` are declared, switched on by the packs that ask for them, and have no
   workflows. The module settings page lists them under "Not built yet" rather than hiding them.
-- **WIP does not post its adjusting entry.** The schedule reports over- and under-billings;
-  `1160 Costs in Excess of Billings` and `2560 Billings in Excess of Costs` install with the pack
-  and stay empty until an accountant posts to them. Automating a period-end adjustment nobody
-  reviewed is how a WIP schedule becomes a source of surprises. See ADR 0007.
+- **WIP still does not *post* its adjusting entry, and will not.** Since Phase 10 a monthly job
+  *proposes* one as a draft — balanced, validated, and affecting no statement until an accountant
+  posts it. Having a scheduler did not change ADR 0007's judgement: the objection was about who
+  decides, not about whether the arithmetic could be automated.
 - **Percent complete is cost-to-cost only.** Units-complete and effort-expended methods are not
   offered.
 - **An application for payment is issued immediately.** `priceApplication` gives the UI a preview,
@@ -993,10 +1133,8 @@ Gaps within the phases already built:
 - **The mobile deck does not split transactions.** The API accepts splits and they replay safely;
   there is no phone UI for one, because a two-line split on a phone screen is worse than waiting
   for a laptop.
-- **Nothing schedules the review nudge.** `nudgeReviewQueue` works and is tested; only the seed
-  calls it. Same missing background worker as the campaign scheduler.
-- **Idempotency keys are never pruned automatically.** `pruneIdempotencyKeys` exists and is tested;
-  nothing calls it on a schedule, for the same reason.
+- ~~**Nothing schedules the review nudge.**~~ Scheduled daily as of Phase 10.
+- ~~**Idempotency keys are never pruned automatically.**~~ Scheduled daily as of Phase 10.
 - **A parked operation explains itself but cannot be repaired.** If a period closed while a phone
   was offline, the outbox shows the error and offers retry or discard — not a way to redate the
   entry. See ADR 0008.
@@ -1024,12 +1162,34 @@ Gaps within the phases already built:
 - **Employer taxes are not allocated to jobs.** Wage lines carry the job dimensions; liabilities do
   not, because a tax owed to an agency does not belong to a job. Fully burdened job cost is a
   policy question rather than a missing feature.
-- **Nothing reminds anybody a remittance is due.** Same missing background worker — and this is the
-  one somebody would lose money over.
+- ~~**Nothing reminds anybody a remittance is due.**~~ Monthly since Phase 10, on the 5th, to
+  everyone who can manage tax. Net Pay Payable is excluded on purpose — it is outstanding between
+  posting payroll and paying people, and a reminder that is always on is a reminder nobody reads.
 
-- **Campaign scheduling.** `scheduledFor` puts a campaign on the calendar and a nurture step's
-  `delayDays` is recorded, but nothing fires on its own — sending is a button somebody presses.
-  The missing piece is a background worker calling the same `sendStep` that enforces consent.
+- **A deployment must run `npm run worker`.** Nothing schedules itself from the web process, and if
+  no worker is running then nothing in the queue happens. The operations page says so in as many
+  words rather than looking calm — but there is no supervisor, no restart policy, and no alerting
+  beyond that page.
+- **Nothing retries a dead job automatically, and nothing tells you about one.** Deliberate for the
+  retry; the missing digest is the obvious next handler now that the notification machinery it
+  needs exists.
+- **Jobs are polled, not pushed.** A five-second poll is five seconds of latency. `LISTEN/NOTIFY`
+  would remove it and is not worth the complexity while the most urgent queued thing is an hourly
+  campaign check.
+- **No per-kind concurrency limit.** One slow job kind can fill a batch and starve the others;
+  priority mitigates it and does not solve it.
+- **`opportunity.won` and `payroll.posted` are declared event types with no publisher.** Kept
+  because their obvious subscribers are near-term, but until then they are dead code and this is
+  the honest label for it.
+- **A handler that partly fails still succeeds.** `campaign.send_due` and `bank.sync_all` collect
+  per-item failures rather than throwing, so one broken feed does not stop the healthy ones. The
+  failures are in the stored result and on the page, but the job's status is `succeeded`.
+- **The system actor is one global row**, shared across every tenant. It writes only through
+  tenant-scoped services so it grants no cross-tenant read, but it is a shared identity.
+
+- ~~**Campaign scheduling.**~~ Built in Phase 10: an hourly job sends campaigns whose scheduled
+  time has passed, through the same `sendStep` that enforces consent, and queues each nurture step
+  at its own delay measured from when the first one actually went out.
 - **Provider delivery callbacks.** Bounces are recorded from the synchronous send result. Real
   ESPs report hard bounces and spam complaints by webhook hours later, so the suppression list
   under-counts until that endpoint exists.
@@ -1070,9 +1230,9 @@ Gaps within the phases already built:
   restyle existing documents: right for sent proposals, arguably surprising for drafts.
 - Assets are stored in Postgres through the default `AssetStore` adapter. Fine for logos; object
   storage is one adapter away when receipts arrive at volume.
-- Infrastructure from spec §18 still open: background job queue (bank sync runs inline and now
-  writes journal entries too, so this matters more than it did), object storage for receipts, the
-  outbox pattern.
+- Infrastructure from spec §18 still open: object storage for receipts, and server-side PDF
+  generation. The background job queue and the outbox pattern were built in Phase 10; bank sync now
+  runs on a schedule rather than inline.
 - Security from spec §14/§19 still open: MFA, session/device controls, row-level security as a
   second isolation layer.
 

@@ -22,6 +22,8 @@ export type AuditAction =
   | 'account.update'
   // Ledger and closing controls (spec §13)
   | 'journal.post'
+  | 'journal.draft'
+  | 'journal.discard_draft'
   | 'journal.void'
   | 'journal.reverse'
   | 'period.close'

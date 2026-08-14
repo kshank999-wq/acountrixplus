@@ -3,7 +3,7 @@ import { db } from '@/db'
 import { companies } from '@/db/schema'
 import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
-import { AppShell } from '@/components/app-shell'
+import { AppShell, SubNav } from '@/components/app-shell'
 import { industryPack } from '@/modules/coa/industry'
 import {
   IMPLEMENTED_MODULES,
@@ -56,6 +56,14 @@ export default async function ModuleSettingsPage() {
       companyName={session?.companyName ?? 'Accountrix Plus'}
       active="bookkeeping"
     >
+      <SubNav
+        items={[
+          { href: '/settings/modules', label: 'Modules' },
+          { href: '/settings/operations', label: 'Background work' },
+        ]}
+        active="/settings/modules"
+      />
+
       <div className="mx-auto max-w-3xl space-y-4">
         <header>
           {/* h2: the shell already owns the page's h1 (the company name). */}

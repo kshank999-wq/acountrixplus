@@ -64,6 +64,12 @@ export type JournalEntryInput = {
   sourceType?: string | null
   sourceId?: string | null
   reversalOfId?: string | null
+  /**
+   * Defaults to `posted`. `draft` writes a balanced, validated entry that
+   * affects no report until a person posts it — the shape a proposed
+   * period-end adjustment needs (ADR 0007, ADR 0010).
+   */
+  status?: 'draft' | 'posted'
 }
 
 /** Raised when an entry's debits and credits disagree. */
@@ -254,9 +260,14 @@ export async function createJournalEntry(
       sourceType: input.sourceType ?? null,
       sourceId: input.sourceId ?? null,
       reversalOfId: input.reversalOfId ?? null,
-      status: 'posted',
-      postedAt: new Date(),
-      postedBy: ctx.userId,
+      // A draft is written but not posted: every balance and statement query
+      // filters on `status = 'posted'`, so a draft affects no figure until
+      // somebody promotes it. That is what lets a background job *propose* an
+      // entry without ADR 0007's objection — nothing was decided on anybody's
+      // behalf, and the proposal is visible where journal entries live.
+      status: input.status ?? 'posted',
+      postedAt: input.status === 'draft' ? null : new Date(),
+      postedBy: input.status === 'draft' ? null : ctx.userId,
     })
     .returning({ id: journalEntries.id, entryNumber: journalEntries.entryNumber })
 
@@ -529,6 +540,140 @@ async function assertDimensionsInCompany(
       throw new Error('One or more cost codes were not found')
     }
   }
+}
+
+/**
+ * Writes a balanced entry that affects no report until somebody posts it.
+ *
+ * The point of a draft is who decides. ADR 0007 refused to have the WIP
+ * adjusting entry posted automatically — *"automating a period-end adjustment
+ * nobody reviewed is how a WIP schedule becomes a source of surprises"* — and
+ * that objection is about the deciding, not about the arithmetic. A machine is
+ * perfectly capable of working out the entry; what it must not do is put it in
+ * the books unasked.
+ *
+ * So a draft is fully validated: balanced, accounts checked, dimensions
+ * checked, period checked, entry number allocated. Everything a posted entry
+ * gets except the posting.
+ */
+export async function draftJournalEntry(ctx: ActorContext, input: JournalEntryInput) {
+  requirePermission(ctx, 'accounting:journal')
+
+  return db.transaction(async (tx) => {
+    const entry = await createJournalEntry(ctx, { ...input, status: 'draft' }, tx)
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'journal.draft',
+        entityType: 'journal_entry',
+        entityId: entry.id,
+        after: {
+          entryNumber: entry.entryNumber,
+          entryDate: input.entryDate,
+          totalCents: entry.totalCents,
+          memo: input.memo ?? null,
+          source: input.source ?? 'manual',
+        },
+      },
+      tx,
+    )
+
+    return entry
+  })
+}
+
+/**
+ * Promotes a draft to posted.
+ *
+ * The period is re-checked at this moment rather than trusted from when the
+ * draft was written — a draft proposed in an open period and posted after that
+ * period closed would otherwise slip past the lock.
+ */
+export async function postDraftEntry(ctx: ActorContext, entryId: string) {
+  requirePermission(ctx, 'accounting:journal')
+
+  return db.transaction(async (tx) => {
+    const [entry] = await tx
+      .select()
+      .from(journalEntries)
+      .where(scoped(ctx, journalEntries, eq(journalEntries.id, entryId)))
+      .limit(1)
+
+    if (!entry) throw new Error('Entry not found')
+    if (entry.status !== 'draft') {
+      throw new Error(`Entry ${entry.entryNumber} is ${entry.status}, not a draft.`)
+    }
+
+    await assertPeriodOpen(ctx, entry.entryDate, tx)
+
+    await tx
+      .update(journalEntries)
+      .set({ status: 'posted', postedAt: new Date(), postedBy: ctx.userId })
+      .where(eq(journalEntries.id, entryId))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'journal.post',
+        entityType: 'journal_entry',
+        entityId: entryId,
+        before: { status: 'draft' },
+        after: { status: 'posted', entryNumber: entry.entryNumber },
+      },
+      tx,
+    )
+
+    return { id: entryId, entryNumber: entry.entryNumber }
+  })
+}
+
+/** Discards a proposed entry. Only a draft — a posted entry is voided, never deleted. */
+export async function discardDraftEntry(ctx: ActorContext, entryId: string): Promise<void> {
+  requirePermission(ctx, 'accounting:journal')
+
+  await db.transaction(async (tx) => {
+    const [entry] = await tx
+      .select()
+      .from(journalEntries)
+      .where(scoped(ctx, journalEntries, eq(journalEntries.id, entryId)))
+      .limit(1)
+
+    if (!entry) throw new Error('Entry not found')
+    if (entry.status !== 'draft') {
+      throw new Error(
+        `Entry ${entry.entryNumber} is ${entry.status}. A posted entry is voided, never deleted.`,
+      )
+    }
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'journal.discard_draft',
+        entityType: 'journal_entry',
+        entityId: entryId,
+        before: { entryNumber: entry.entryNumber, memo: entry.memo },
+      },
+      tx,
+    )
+
+    // Lines cascade. Deleting is right for a draft specifically: it was a
+    // proposal, it was never part of the record, and keeping rejected
+    // proposals in the ledger table would mean every query grows a filter.
+    await tx.delete(journalEntries).where(eq(journalEntries.id, entryId))
+  })
+}
+
+/** Entries proposed and not yet decided. */
+export async function listDraftEntries(ctx: ActorContext, opts: { limit?: number } = {}) {
+  requirePermission(ctx, 'accounting:view')
+
+  return db
+    .select()
+    .from(journalEntries)
+    .where(scoped(ctx, journalEntries, eq(journalEntries.status, 'draft')))
+    .orderBy(desc(journalEntries.entryDate))
+    .limit(opts.limit ?? 50)
 }
 
 /** Journal entries for the accounting workspace, newest first. */

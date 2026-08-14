@@ -121,6 +121,11 @@ export const notificationTopicEnum = pgEnum('notification_topic', [
   'invoice_paid',
   'compliance_expiring',
   'reconciliation_ready',
+  // Added in Phase 10, when something finally existed to send it. A reminder
+  // about money owed to an agency is not the same kind of interruption as a
+  // review queue, and folding it into one would mean somebody switching off
+  // nudges also switches off the one that costs penalties.
+  'remittance_due',
 ])
 
 /**

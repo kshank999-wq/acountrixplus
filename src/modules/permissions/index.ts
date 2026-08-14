@@ -60,6 +60,16 @@ export const PERMISSIONS = [
 
   // Oversight
   'audit:view',
+  /**
+   * The background worker's queue and schedules (spec §18, Phase 10).
+   *
+   * Its own permission rather than folded into `audit:view`, because the
+   * operations page is not read-only: retrying a job re-runs real work, and
+   * pausing a schedule stops campaigns going out. Seeing what happened and
+   * being able to make it happen again are different powers.
+   */
+  'operations:view',
+  'operations:manage',
 ] as const
 
 export type Permission = (typeof PERMISSIONS)[number]
@@ -105,6 +115,9 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'ai:use',
     'ai:manage',
     'audit:view',
+    // Can see whether the campaigns they scheduled actually went out, and
+    // cannot retry a job — re-running work is an accountant's or owner's call.
+    'operations:view',
   ],
 
   bookkeeper: [
@@ -125,6 +138,7 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'tax:view',
     'tax:manage',
     'ai:use',
+    'operations:view',
   ],
 
   accountant: [
@@ -150,6 +164,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'tax:manage',
     'ai:use',
     'audit:view',
+    // An accountant retries the failed WIP proposal and pauses a schedule at a
+    // period end. Both are their work rather than an administrator's.
+    'operations:view',
+    'operations:manage',
   ],
 
   sales: [

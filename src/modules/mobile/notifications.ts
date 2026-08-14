@@ -38,6 +38,7 @@ export const TOPIC_LABELS: Record<NotificationTopic, string> = {
   invoice_paid: 'An invoice was paid',
   compliance_expiring: 'Subcontractor insurance expiring',
   reconciliation_ready: 'An account is ready to reconcile',
+  remittance_due: 'Payroll or sales tax owed to an agency',
 }
 
 export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
@@ -47,6 +48,8 @@ export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
   invoice_paid: 'When money lands against an invoice.',
   compliance_expiring: 'Before a certificate lapses, not after.',
   reconciliation_ready: 'When a statement period is complete enough to reconcile.',
+  remittance_due:
+    'While there is still time to pay it. This is the one that costs penalties if it is missed.',
 }
 
 /** How many transactions have to be waiting before a nudge is worth sending. */

@@ -21,6 +21,8 @@ import {
   recordDocumentTax,
   type DocumentTaxLineInput,
 } from '@/modules/payroll/sales-tax'
+import { recordEvent } from '@/modules/worker/outbox'
+import { formatCents } from '@/lib/money'
 
 /**
  * Accounts receivable and payable (spec §13, §20 "AR/AP basics").
@@ -618,6 +620,19 @@ export async function recordPayment(
   const controlAccount = await accountByNumber(ctx.companyId, controlNumber)
   if (!controlAccount) throw new Error('The AR/AP control account is missing from the chart.')
 
+  // Read before the transaction opens: the notification wants a name, and
+  // fetching it inside would add a query to the hot path of every payment for
+  // the sake of the ones that settle an invoice.
+  let customerName: string | null = null
+  if (input.kind === 'receipt' && input.customerId) {
+    const [customer] = await db
+      .select({ name: customers.name })
+      .from(customers)
+      .where(scoped(ctx, customers, eq(customers.id, input.customerId)))
+      .limit(1)
+    customerName = customer?.name ?? null
+  }
+
   return db.transaction(async (tx) => {
     const [payment] = await tx
       .insert(payments)
@@ -634,8 +649,11 @@ export async function recordPayment(
       })
       .returning()
 
+    const settlements: Array<{ documentId: string; number: string }> = []
+
     for (const application of input.applications) {
-      await applyToDocument(ctx, payment.id, application, input.kind, tx)
+      const applied = await applyToDocument(ctx, payment.id, application, input.kind, tx)
+      if (applied.settled) settlements.push(applied)
     }
 
     const entry = await createJournalEntry(
@@ -680,6 +698,29 @@ export async function recordPayment(
       tx,
     )
 
+    // An invoice going to zero is the event somebody wants to know about, and
+    // it is recorded inside this transaction so it cannot exist for a payment
+    // that rolled back (Phase 10, ADR 0010). A partial payment is not an
+    // event — "they paid some of it" is a balance, not news.
+    for (const settled of settlements) {
+      if (input.kind !== 'receipt') continue
+
+      await recordEvent(
+        ctx,
+        {
+          type: 'invoice.paid',
+          entityType: 'invoice',
+          entityId: settled.documentId,
+          payload: {
+            invoiceNumber: settled.number,
+            customerName: customerName ?? 'A customer',
+            amount: formatCents(input.amountCents),
+          },
+        },
+        tx,
+      )
+    }
+
     return { ...payment, journalEntryId: entry.id }
   })
 }
@@ -697,7 +738,7 @@ async function applyToDocument(
   application: PaymentApplicationInput,
   kind: 'receipt' | 'disbursement',
   tx: Executor,
-) {
+): Promise<{ settled: boolean; documentId: string; number: string }> {
   if (application.amountCents <= 0) {
     throw new Error('Each application amount must be greater than zero.')
   }
@@ -748,6 +789,8 @@ async function applyToDocument(
       updatedAt: new Date(),
     })
     .where(and(eq(table.id, documentId), eq(table.companyId, ctx.companyId)))
+
+  return { settled: newBalance === 0, documentId, number: document.number }
 }
 
 /**

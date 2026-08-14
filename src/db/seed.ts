@@ -68,6 +68,10 @@ import { recordRemittance } from '@/modules/payroll/remittance'
 import { createTaxCode } from '@/modules/payroll/sales-tax'
 import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
 import { workpaperPack } from '@/modules/payroll/workpapers'
+import { installCompanySchedules, installGlobalSchedules } from '@/modules/worker/defaults'
+import { enqueue } from '@/modules/worker/queue'
+import { runOnce } from '@/modules/worker/runner'
+import { listDraftEntries } from '@/modules/ledger/journal'
 import type { ActorContext } from '@/modules/tenancy/context'
 
 /** Cents as plain dollars, for the seed's console output. */
@@ -1087,6 +1091,52 @@ async function main() {
       `${warnings} worth checking.`,
   )
 
+  // --- Phase 10: the background worker and the outbox ----------------------
+
+  console.log('Installing background schedules…')
+
+  const installed = await installCompanySchedules(company.id)
+  const globals = await installGlobalSchedules()
+  console.log(
+    `  ${installed} company schedules and ${globals} housekeeping schedules — the clock four ADRs asked for.`,
+  )
+
+  // The outbox, with something real in it. Accepting a proposal above already
+  // recorded a `proposal.accepted` event inside its own transaction; this
+  // drains it so the demo has a delivered notification rather than a pending
+  // one to explain.
+  const tick = await runOnce({ workerId: 'seed' })
+  console.log(
+    `  Ran one tick: ${tick.eventsRelayed} events relayed, ${tick.jobsRun} jobs run ` +
+      `(${tick.jobsSucceeded} succeeded, ${tick.jobsDead} dead).`,
+  )
+
+  // A proposed WIP entry, so the demo shows the shape of the thing this phase
+  // is most careful about: a machine that worked out an entry and did not post
+  // it.
+  await enqueue({
+    kind: 'jobs.propose_wip_entry',
+    companyId: company.id,
+    payload: { asOfDate: '2026-07-31' },
+    dedupeKey: `seed-wip:${company.id}`,
+  })
+  const second = await runOnce({ workerId: 'seed' })
+  const drafts = await listDraftEntries(ctx)
+  console.log(
+    `  Proposed the WIP adjusting entry: ${drafts.length} draft waiting for a person ` +
+      `(${second.jobsSucceeded} job succeeded). It changes no report until somebody posts it.`,
+  )
+
+  // One job that fails on purpose, so the operations page has a dead row to
+  // show rather than an empty state that looks the same as a broken worker.
+  await enqueue({
+    kind: 'handler.removed.by.a.deploy',
+    companyId: company.id,
+    dedupeKey: `seed-dead:${company.id}`,
+  })
+  await runOnce({ workerId: 'seed' })
+  console.log('  Queued one job with no handler, so the operations page has a failure to show.')
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -1108,6 +1158,10 @@ async function main() {
   console.log('  /payroll/sales-tax    the return, per jurisdiction')
   console.log('  /payroll/contractors  who is reportable, and what is stopping it')
   console.log('  /payroll/workpapers   the pack, and the filing it refuses to prepare')
+  console.log('  /settings/operations  the queue, the schedules, and what failed')
+  console.log('')
+  console.log('Then, in a second terminal:')
+  console.log('  npm run worker        the thing that actually drains the queue')
 
   process.exit(0)
 }

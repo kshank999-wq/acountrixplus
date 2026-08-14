@@ -886,7 +886,9 @@ describe('notifications', () => {
     const fixture = await createCompanyFixture()
     const topics = await preferences(fixture.ctx)
 
-    expect(topics).toHaveLength(5)
+    // Six since Phase 10 added `remittance_due` — a reminder about money owed
+    // to an agency is not the same interruption as a review queue.
+    expect(topics).toHaveLength(6)
     expect(topics.every((topic) => topic.enabled)).toBe(true)
   })
 })
@@ -926,6 +928,18 @@ describe('the events that fire on their own', () => {
     })
 
     expect(result.ok).toBe(true)
+
+    // Phase 10 moved this off the acceptance's critical path. The acceptance
+    // now commits with an event beside it, and the worker delivers — so the
+    // push arrives after a tick rather than during the signature.
+    //
+    // This is a stronger assertion than the one it replaces, because it goes
+    // through the outbox, the relay, the queue, and the handler rather than a
+    // direct call that could not fail visibly.
+    expect(mockPush.sent).toHaveLength(0)
+
+    const { runOnce } = await import('@/modules/worker/runner')
+    await runOnce({ workerId: 'mobile-test' })
 
     // The whole reason the app is on a phone: this happened while nobody was
     // looking at a screen.

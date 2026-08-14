@@ -71,6 +71,13 @@
       "when": 1786657264074,
       "tag": "0009_phase9_payroll_tax",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1786664479380,
+      "tag": "0010_phase10_worker_outbox",
+      "breakpoints": true
     }
   ]
 }
