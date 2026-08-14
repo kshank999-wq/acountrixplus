@@ -12,6 +12,7 @@ import {
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import type { AccountType } from '@/modules/coa/standard'
 import { accountBalances, isDebitNormal, type AccountBalance } from './balances'
+import { balancesForBasis, type ReportingBasis } from './cash-basis'
 
 /**
  * Financial statements (spec §13, §20).
@@ -27,6 +28,8 @@ export type StatementSection = {
 }
 
 export type ProfitAndLoss = {
+  /** Which basis produced these figures. Always shown, never assumed. */
+  basis: ReportingBasis
   startDate: string
   endDate: string
   revenue: StatementSection
@@ -60,11 +63,14 @@ function ofTypes(rows: AccountBalance[], types: AccountType[]): AccountBalance[]
  */
 export async function profitAndLoss(
   ctx: ActorContext,
-  range: { startDate: string; endDate: string },
+  range: { startDate: string; endDate: string; basis?: ReportingBasis },
 ): Promise<ProfitAndLoss> {
   requirePermission(ctx, 'reports:financial')
 
-  const rows = await accountBalances(ctx, range)
+  // One seam for both bases (Phase 11). Defaulting to accrual keeps every
+  // existing caller — and every existing test — meaning what it used to.
+  const basis = range.basis ?? 'accrual'
+  const rows = await balancesForBasis(ctx, basis, range)
 
   const revenue = section('Revenue', ofTypes(rows, ['revenue']))
   const costOfSales = section('Cost of sales', ofTypes(rows, ['cogs']))
@@ -78,7 +84,9 @@ export async function profitAndLoss(
     operatingIncomeCents + otherIncome.totalCents - otherExpenses.totalCents
 
   return {
-    ...range,
+    startDate: range.startDate,
+    endDate: range.endDate,
+    basis,
     revenue,
     costOfSales,
     grossProfitCents,
@@ -92,6 +100,7 @@ export async function profitAndLoss(
 
 export type BalanceSheet = {
   asOfDate: string
+  basis: ReportingBasis
   assets: StatementSection
   liabilities: StatementSection
   equity: StatementSection
@@ -113,12 +122,17 @@ export type BalanceSheet = {
  */
 export async function balanceSheet(
   ctx: ActorContext,
-  opts: { asOfDate: string; fiscalYearStart?: string },
+  opts: { asOfDate: string; fiscalYearStart?: string; basis?: ReportingBasis },
 ): Promise<BalanceSheet> {
   requirePermission(ctx, 'reports:financial')
 
-  // Cumulative from the beginning of the books through the date.
-  const cumulative = await accountBalances(ctx, { endDate: opts.asOfDate })
+  const basis = opts.basis ?? 'accrual'
+
+  // Cumulative from the beginning of the books through the date. On a cash
+  // basis this is where Accounts Receivable and Payable disappear — they are
+  // the accounts cash basis claims do not exist, and the transformation
+  // removes them rather than leaving an unpaid balance on the statement.
+  const cumulative = await balancesForBasis(ctx, basis, { endDate: opts.asOfDate })
 
   const assets = section('Assets', ofTypes(cumulative, ['asset']))
   const liabilities = section('Liabilities', ofTypes(cumulative, ['liability']))
@@ -140,6 +154,7 @@ export async function balanceSheet(
 
   return {
     asOfDate: opts.asOfDate,
+    basis,
     assets,
     liabilities,
     equity,

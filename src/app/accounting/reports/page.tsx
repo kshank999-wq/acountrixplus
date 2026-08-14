@@ -5,12 +5,19 @@ import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
 import { trialBalance } from '@/modules/ledger/balances'
 import { apAging, arAging, balanceSheet, profitAndLoss } from '@/modules/ledger/reports'
+import {
+  BASIS_DESCRIPTIONS,
+  BASIS_LABELS,
+  cashBasisCaveats,
+  isReportingBasis,
+  type ReportingBasis,
+} from '@/modules/ledger/cash-basis'
 import { ACCOUNTING_NAV } from '../nav'
 import { ReportPicker } from './report-picker'
 
 export const dynamic = 'force-dynamic'
 
-type SearchParams = Promise<{ report?: string; start?: string; end?: string }>
+type SearchParams = Promise<{ report?: string; start?: string; end?: string; basis?: string }>
 
 /** Sensible default range: the current calendar year to date. */
 function defaultRange() {
@@ -35,6 +42,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const start = params.start || defaults.start
   const end = params.end || defaults.end
   const report = params.report ?? 'trial_balance'
+  const basis: ReportingBasis = isReportingBasis(params.basis) ? params.basis : 'accrual'
 
   const canSeeStatements = can(actor, 'reports:financial')
 
@@ -45,15 +53,21 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
       active="accounting"
     >
       <SubNav items={ACCOUNTING_NAV} active="/accounting/reports" />
-      <ReportPicker report={report} start={start} end={end} canSeeStatements={canSeeStatements} />
+      <ReportPicker
+        report={report}
+        start={start}
+        end={end}
+        basis={basis}
+        canSeeStatements={canSeeStatements}
+      />
 
       <div className="mt-4">
         {report === 'trial_balance' && <TrialBalanceReport actor={actor} start={start} end={end} />}
         {report === 'profit_loss' && canSeeStatements && (
-          <ProfitLossReport actor={actor} start={start} end={end} />
+          <ProfitLossReport actor={actor} start={start} end={end} basis={basis} />
         )}
         {report === 'balance_sheet' && canSeeStatements && (
-          <BalanceSheetReport actor={actor} end={end} />
+          <BalanceSheetReport actor={actor} end={end} basis={basis} />
         )}
         {report === 'ar_aging' && <AgingReport actor={actor} end={end} kind="ar" />}
         {report === 'ap_aging' && <AgingReport actor={actor} end={end} kind="ap" />}
@@ -143,12 +157,19 @@ async function ProfitLossReport({
   actor,
   start,
   end,
+  basis,
 }: {
   actor: Awaited<ReturnType<typeof requireActor>>
   start: string
   end: string
+  basis: ReportingBasis
 }) {
-  const pl = await profitAndLoss(actor, { startDate: start, endDate: end })
+  const [pl, caveats] = await Promise.all([
+    profitAndLoss(actor, { startDate: start, endDate: end, basis }),
+    basis === 'cash'
+      ? cashBasisCaveats(actor, { startDate: start, endDate: end })
+      : Promise.resolve([]),
+  ])
 
   const blocks = [
     pl.revenue,
@@ -159,7 +180,10 @@ async function ProfitLossReport({
   ].filter((block) => block.rows.length > 0)
 
   return (
-    <Card title="Profit and loss" subtitle={`${start} to ${end}`}>
+    <Card
+      title={`Profit and loss — ${BASIS_LABELS[pl.basis].toLowerCase()} basis`}
+      subtitle={`${start} to ${end}. ${BASIS_DESCRIPTIONS[pl.basis]}`}
+    >
       <table className="w-full text-sm">
         <tbody>
           {blocks.map((block) => (
@@ -191,6 +215,21 @@ async function ProfitLossReport({
           <SummaryRow label="Net income" cents={pl.netIncomeCents} emphasis />
         </tbody>
       </table>
+
+      {caveats.length > 0 && (
+        <div className="border-t border-line px-4 py-3">
+          <p className="text-xs font-medium text-warning">
+            What a cash-basis report of these books cannot represent
+          </p>
+          <ul className="mt-1 space-y-1">
+            {caveats.map((caveat) => (
+              <li key={caveat.area} className="text-xs text-muted">
+                <span className="font-medium">{caveat.area}:</span> {caveat.message}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </Card>
   )
 }
@@ -219,14 +258,23 @@ function SummaryRow({
 async function BalanceSheetReport({
   actor,
   end,
+  basis,
 }: {
   actor: Awaited<ReturnType<typeof requireActor>>
   end: string
+  basis: ReportingBasis
 }) {
-  const bs = await balanceSheet(actor, { asOfDate: end })
+  const bs = await balanceSheet(actor, { asOfDate: end, basis })
 
   return (
-    <Card title="Balance sheet" subtitle={`As of ${end}`}>
+    <Card
+      title={`Balance sheet — ${BASIS_LABELS[bs.basis].toLowerCase()} basis`}
+      subtitle={
+        bs.basis === 'cash'
+          ? `As of ${end}. Receivables and payables are absent by definition, not by omission.`
+          : `As of ${end}`
+      }
+    >
       <table className="w-full text-sm">
         <tbody>
           {/* Assets subtotal IS the grand total, so it carries the emphasis

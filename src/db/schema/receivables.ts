@@ -34,6 +34,15 @@ export const documentStatusEnum = pgEnum('document_status', [
   'partial',
   'paid',
   'void',
+  /**
+   * Real, owed, and not going to be collected (Phase 11).
+   *
+   * Deliberately not `void`. Voiding says the document should never have
+   * existed and takes the revenue back out; writing off says it was earned and
+   * then lost, which is a cost of doing business and belongs on the P&L as
+   * one. Collapsing the two would hide every bad debt a company ever had.
+   */
+  'written_off',
 ])
 
 /**

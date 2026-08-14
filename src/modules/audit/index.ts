@@ -23,6 +23,16 @@ export type AuditAction =
   // Ledger and closing controls (spec §13)
   | 'journal.post'
   | 'journal.draft'
+  // Receivables completeness (spec §13, Phase 11)
+  | 'credit_note.create'
+  | 'credit_note.apply'
+  | 'invoice.write_off'
+  | 'invoice.write_off_recovered'
+  | 'statement.create'
+  | 'recurring.create'
+  | 'recurring.update'
+  | 'year.close'
+  | 'year.reopen'
   | 'journal.discard_draft'
   | 'journal.void'
   | 'journal.reverse'

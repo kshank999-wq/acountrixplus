@@ -7,7 +7,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
-**Payroll and Tax**, and the **background worker and outbox** from the
+**Payroll and Tax**, the **background worker and outbox**, and the
+**completed accounting core** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -17,8 +18,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0006](docs/adr/0006-ai-gateway-and-human-approval.md),
 [ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md),
 [ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md),
-[ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md), and
-[ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md).
+[ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md),
+[ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md), and
+[ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -330,6 +332,52 @@ safe run twice — the same discipline the mobile app has followed since Phase 8
   leads with whether one is alive, then with what failed, and puts the
   successes last.
 
+### The accounting core completed (cash basis, credits, recurring, close)
+
+The §13 items that had been open since Phase 2. The centrepiece is
+**cash-basis reporting**, which ADR 0002 deferred by name and designed
+`payment_applications` to make possible — and which Phase 9's tax workpapers
+need, because most small businesses file on a cash basis.
+
+- **The same books, read two ways** — a basis switch on the profit & loss and
+  the balance sheet. Cash basis is a *transformation* of the accrual ledger,
+  not a second set of books: remove the invoice and bill entries, and replace
+  each payment's receivable leg with the settled document's own revenue lines,
+  scaled to what that payment covered. Both bases balance, and
+  `tests/cash-basis.test.ts` asserts it rather than arguing it.
+- **Not the shortcut that looks right** — reporting bank movements and calling
+  it cash basis puts every receipt on one line, so revenue appears as a single
+  "customer receipts" figure instead of split across the accounts the invoices
+  were raised against. Nobody can file from that.
+- **Caveats computed from your books, not printed on every report** — payroll
+  timing, unapplied payments, sales tax. A company with no payroll is not
+  warned about payroll.
+- **A credit note and a write-off are opposite things** — a credit says they
+  owe less and reverses revenue; a write-off says they owe it and will not pay,
+  keeps the revenue, and books Bad Debt. Conflating them is how a set of books
+  hides a collections problem: lower revenue, no bad debt, unchanged margin.
+  They sit side by side with their consequences stated.
+- **`written_off` is its own status**, not `paid`. Nobody paid, and a status
+  saying they did erases the fact from every report that reads it.
+- **Customer statements, open-item and balance-forward** — most software picks
+  one and calls it "the statement". They answer different questions. A saved
+  statement freezes its figures, because one regenerated from today's data is
+  not the document the customer is holding.
+- **Recurring entries** — a template plus a clock, which is why they needed
+  Phase 10. Whether an occurrence posts or waits as a draft is the template's
+  decision, made once: a rent accrual is safe unattended, an estimate is not.
+  Catch-up runs fully in one pass, so a template eight months behind arrives
+  with eight correctly dated entries rather than one a day for eight days.
+- **The year-end close** — empties revenue and expense into Retained Earnings,
+  so the next year opens from zero and the balance sheet's separate earnings
+  line is finally moved where it belongs. It refuses on a blocker with **no
+  override**: closing twice has one outcome and it is wrong. Reopening reverses
+  the entry rather than deleting it.
+- **Closing is not locking.** Locking stops entries being written; closing
+  writes one more. A company can do either without the other, and conflating
+  them would mean a correction to last year required unlocking something
+  unrelated.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -414,6 +462,8 @@ Coverage matches what spec §21 asks for:
 | `tests/mobile.test.ts` | Replay safety under sequential and concurrent retries, fingerprint conflicts, key scoping and rollback, the outbox's ordering/superseding/backoff/classification rules, device revocation and session invalidation, receipt permissions and idempotent attachment, notification defaults and delivery outcomes, the proposal-acceptance push, a full offline session, and a regression test for the journal-numbering deadlock |
 | `tests/jobs.test.ts` | Module resolution from pack plus override, workflow gating, terminology, the cost-code dimension end to end, budget vs actual, change-order approval posting nothing, application pricing and increments, retainage splitting AR from Retainage Receivable, the AR-control-equals-subledger identity, retainage release without double-recognizing revenue, WIP arithmetic, compliance expiry, and the no-forked-ledger reconciliation |
 | `tests/payroll.test.ts` | The payroll identity and the arithmetic behind it, the entry's shape line by line (withholding never touching an expense account), negative net pay refused, voiding reversing rather than deleting, liability positions read from the ledger, over-remitting and kind/account mismatches refused, a remittance touching no expense, sales tax per jurisdiction with exempt sales and a frozen rate, an invoice pricing its own tax from its codes, contractor payments counted from payments not bills, a tax identifier never reaching the audit log, the manual adapter's refusal and the registry's absence of a fallback, illustrative runs marked in the database, the workpaper exceptions, and a filing blocked until its blocker is cleared |
+| `tests/cash-basis.test.ts` | Splitting an amount without losing cents; an unpaid invoice as revenue on one basis and nothing on the other; a part payment split across the accounts it was raised against; instalments summing back to the whole; bills recognized when paid; transactions that were already cash left alone; the bank balance identical on both bases; both balance sheets balancing over busy books and agreeing once everything settles; and the three cases that broke the first implementation — a write-off's stranded receivable, a recovery's revenue, and a construction company's retainage |
+| `tests/accounting-core.test.ts` | A credit note reversing revenue against a write-off keeping it; `written_off` never reading as `paid`; a write-off refused without a reason, over the balance, or twice; a recovery reversing the expense rather than recognizing revenue; credits applying without a second entry and never across customers; open-item and balance-forward statements; a write-off shown as a write-off on a statement; frozen saved figures; recurring cadences always moving forward and not skipping a month; a template refused if it does not balance; posting versus drafting; catching up with correctly dated occurrences and running twice changing nothing; and the close emptying period accounts into Retained Earnings, refusing a second time, warning about drafts, handling a loss, and reversing on reopen |
 | `tests/worker.test.ts` | Backoff growth, cap, and upward-only jitter; concurrent workers claiming a job once; run-at honoured; dedupe dropping rather than stacking; dead-lettering and never sweeping a dead job; stealing an expired claim; priority; retry resetting attempts; the runner surviving one bad job in a batch; unknown kinds dying immediately; a tenant job with no company refused; a global handler getting no actor; heartbeat liveness; `nextRunAt` strictly after and across month rollovers; a due schedule firing exactly once; the outbox rolling back with its transaction, relaying idempotently, and `invoice.paid` on full settlement only; a scheduled task that cannot sign in and belongs to no company; and the draft entry that changes no report until a person posts it |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -822,6 +872,58 @@ key and the client proposal link — keep them for steps 22 and 24.
      for a deployment whose scheduler is a container platform's cron. It calls the same `runOnce`
      the loop and the tests call, so there is no second behaviour to keep in step.
 
+### The accounting core (Phase 11)
+
+118. **The same books, read two ways** — **Accounting → Reports → Profit & loss**, then flip the
+     **Basis** chip. Accrual shows $75,198.33 of revenue; cash shows $28,998.33. The difference is
+     exactly what has been invoiced and not yet paid, and it is the number most small businesses
+     actually file on.
+119. **A cash-basis balance sheet has no receivables** — switch to **Balance sheet** on each basis.
+     Accrual lists 1100 Accounts Receivable; cash does not list it at all. That is what cash basis
+     means, and the page says so rather than leaving somebody to wonder where a figure went.
+120. **Both of them balance** — the footer says "assets equal liabilities plus equity" on either
+     basis. That is the property the whole transformation rests on, and it took two attempts to get
+     right: see ADR 0011 for the retainage case that broke the first one.
+121. **The caveats come from your books** — on cash basis the P&L carries a note about payroll
+     timing and sales tax, because this company has both. A company with neither is not warned
+     about them.
+122. **Revenue is split, not lumped** — cash-basis revenue appears against 4200 Contract Revenue,
+     not against a single "receipts" line. Reporting bank movements would have been far easier and
+     would have produced a statement nobody can file from.
+123. **Credit note or write-off?** — **Accounting → Credits & statements** puts the two side by
+     side with what each does to the books. The seed has one of each: a mis-billed survey credited
+     (revenue reversed, never earned) and a culvert repair written off (revenue kept, $2,400 in Bad
+     Debt).
+124. **Check the P&L for both** — the credited invoice is gone from revenue entirely; the written-off
+     one is still in revenue with a matching Bad Debt expense. A company that wrote bad debt off as
+     a credit note would show lower revenue, no bad debt, and no sign it had a collections problem.
+125. **They paid after all** — press **They paid** on the write-off. It reverses the bad-debt
+     expense rather than recognizing new revenue, because the revenue was recognized when the
+     invoice was raised and never taken back.
+126. **A statement a customer would recognize** — pick a customer and save an open-item statement,
+     then a balance-forward one for the same period. Open-item lists what is unpaid; balance-forward
+     carries a total in and out. A write-off appears as "written off", never as a payment.
+127. **Saved statements do not move** — save one, raise another invoice, and look again. The saved
+     figures are unchanged, because a statement regenerated from today's data is not the document
+     the customer is holding.
+128. **Recurring entries, and who decides** — **Accounting → Recurring & close** has two templates.
+     The rent accrual posts automatically; the depreciation estimate is proposed as a draft. Both
+     have caught up from January, each occurrence correctly dated.
+129. **The drafts are waiting for you** — nine proposed entries sit at the top of the page, from the
+     estimate template and Phase 10's WIP proposal. None of them affects a single figure until
+     somebody presses **Post it**.
+130. **Close a year** — the page defaults to *last* year, because closing the year you are still in
+     is unusual. It shows revenue, expenses, and what would move to Retained Earnings, plus anything
+     worth checking first.
+131. **It will not close twice** — close it, then try again. Blocked, with no override: unlike a tax
+     filing there is no reason that makes closing a year twice correct.
+132. **Watch the balance sheet's earnings line empty** — before closing, equity carries "net income
+     for the period (not yet closed to retained earnings)". After, that line is zero and Retained
+     Earnings holds it. The balance sheet has shown it separately since Phase 2 precisely because
+     this entry had not been written yet.
+133. **Reopening leaves a trail** — reopen the year with a reason. The closing entry is voided, not
+     deleted, so an auditor asking why Retained Earnings moves twice in January has an answer.
+
 ## Project layout
 
 ```
@@ -836,6 +938,8 @@ src/
     jobs/                 WIP schedule, job detail, cost codes, subcontractors
     payroll/              Payroll runs, people, liabilities, sales tax, workpapers
     settings/operations/  The queue, schedules, events, and proposed entries
+    accounting/receivables/  Credit notes, write-offs, and customer statements
+    accounting/periods/   Recurring entries and the year-end close
     settings/modules/     Industry module switches
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
@@ -1166,6 +1270,21 @@ Gaps within the phases already built:
   everyone who can manage tax. Net Pay Payable is excluded on purpose — it is outstanding between
   posting payroll and paying people, and a reminder that is always on is a reminder nobody reads.
 
+- **Cash basis reads the whole ledger for the window.** No aggregate pushdown, so a company with
+  years of history and a wide date range will feel it. The accrual path still aggregates in SQL.
+- **The trial balance has no basis, on purpose.** It is a statement about the journal, and the
+  journal is kept on one basis. A switch there would imply a choice that does not exist.
+- **Credit notes are AR-only.** Spec §13 lists vendor credits too; a supplier credit note is the
+  mirror image and is not built.
+- **A statement is stored, never sent.** `sent_at` and `sent_to` exist and nothing populates them.
+- **Statements are not rendered through the document engine**, so they do not carry the company's
+  brand the way a proposal does. The engine exists; this is a template away.
+- **Recurring entries have fixed amounts.** No formulas and no percentage-of-account templates, so
+  an estimate that should move with a balance has to be edited.
+- **A closed year is not protected from new entries.** Post into one and the close's frozen figures
+  become stale, with no warning. Period locking is the existing control and the two are separate on
+  purpose, but the combination is a foot-gun.
+
 - **A deployment must run `npm run worker`.** Nothing schedules itself from the web process, and if
   no worker is running then nothing in the queue happens. The operations page says so in as many
   words rather than looking calm — but there is no supervisor, no restart policy, and no alerting
@@ -1199,11 +1318,11 @@ Gaps within the phases already built:
   shows a labelled placeholder naming what will be encoded. Sent and printed output is correct.
 - **A/B testing and send-time optimization** (spec §10) are not built.
 
-- **Cash-basis reporting.** All statements are accrual. Spec §13 asks for both "where supported by
-  the underlying transaction model"; doing cash basis correctly means looking through payment
-  applications to the accounts on the documents they settle. The `payment_applications` table was
-  designed to make that possible, but it is not implemented — deliberately left rather than
-  shipped as an approximation.
+- ~~**Cash-basis reporting.**~~ Built in Phase 11, as the transformation ADR 0002 described rather
+  than the bank-movements approximation it warned against. **Retainage under cash basis remains
+  approximate**: a progress billing's payment recognizes contract revenue and retainage receivable
+  in proportion, which balances and is defensible, but a purist would say cash basis has no
+  retainage receivable either.
 - **Server-side PDF generation** (spec §18). Print CSS gives a correct, paginated file through the
   browser's Save as PDF, but there is no server-rendered PDF. Adding it means either a headless
   browser in the deployment or a layout library re-implementing pagination the browser already
@@ -1219,9 +1338,10 @@ Gaps within the phases already built:
   real as of Phase 7 and reported on throughout the jobs workspace; the other §13 dimensions are
   not. The statements themselves still cannot be filtered by job — the WIP and job cost reports
   answer that question, but a P&L scoped to one job is a query change still to make.
-- Fixed assets and depreciation, recurring and closing entries, customer statements, and write-offs
-  remain open from spec §13. Contractor (1099) reporting is built as of Phase 9 — the figure and
-  the blockers, not the form.
+- Recurring entries, closing entries, customer statements, credits, and write-offs were built in
+  Phase 11. **Fixed assets and depreciation remain open** from spec §13 — §13 itself allows a
+  depreciation register to be a later professional module. Contractor (1099) reporting is built as
+  of Phase 9 — the figure and the blockers, not the form.
 - Communications and file attachments on opportunities (spec §6) are not built;
   `opportunity_activities` is the seam they will hang from.
 - Renaming an organization does not propagate to its linked customer or vendor record. Client-

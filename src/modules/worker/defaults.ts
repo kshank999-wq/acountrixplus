@@ -49,6 +49,12 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
     why: 'Early in the month, while there is still time to pay it.',
   },
   {
+    kind: 'accounting.run_recurring',
+    cadence: 'daily',
+    hourUtc: 1,
+    why: 'Daily, so a template dated the 1st posts on the 1st rather than whenever somebody looks.',
+  },
+  {
     kind: 'jobs.propose_wip_entry',
     cadence: 'monthly',
     hourUtc: 2,

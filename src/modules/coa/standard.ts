@@ -106,6 +106,10 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
 
   // --- Operating expenses -------------------------------------------------
   { number: '6000', name: 'Advertising and Marketing', type: 'expense' },
+  // Added in Phase 11 for write-offs. Kept apart from a credit note on
+  // purpose: a credit note says the customer owes less, a write-off says they
+  // owe it and will not pay, and only the second is a cost of doing business.
+  { number: '6025', name: 'Bad Debt', type: 'expense' },
   { number: '6050', name: 'Bank Service Charges', type: 'expense' },
   { number: '6100', name: 'Computer and Software', type: 'expense' },
   { number: '6150', name: 'Dues and Subscriptions', type: 'expense' },
@@ -151,6 +155,7 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
  */
 export const SYSTEM_ACCOUNTS = {
   accountsReceivable: '1100',
+  badDebt: '6025',
   undepositedFunds: '1200',
   accountsPayable: '2000',
   retainedEarnings: '3200',

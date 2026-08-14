@@ -218,6 +218,33 @@ export async function pendingDraftCount(companyId: string): Promise<number> {
   return Number(row?.count ?? 0)
 }
 
+/**
+ * Materializes recurring journal entries (spec §13, Phase 11).
+ *
+ * The clock a recurring entry always needed. Whether an occurrence posts or
+ * waits as a draft is the *template's* decision, made once when somebody set
+ * it up — the handler does not get an opinion, which is what keeps the
+ * "who decides" line in one place rather than two.
+ */
+registerHandler({
+  kind: 'accounting.run_recurring',
+  label: 'Post recurring journal entries that are due',
+  handler: async (context: JobContext) => {
+    const actor = context.actor!
+    const asOfDate = String(context.payload.asOfDate ?? today())
+
+    const { runDueRecurringEntries } = await import('@/modules/ledger/recurring')
+    const results = await runDueRecurringEntries(actor, asOfDate)
+
+    return {
+      due: results.length,
+      posted: results.filter((row) => row.posted).length,
+      drafted: results.filter((row) => row.journalEntryId && !row.posted).length,
+      skipped: results.filter((row) => row.skipped).map((row) => `${row.name}: ${row.skipped}`),
+    }
+  },
+})
+
 function today(): string {
   return new Date().toISOString().slice(0, 10)
 }

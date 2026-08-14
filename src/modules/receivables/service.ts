@@ -858,6 +858,7 @@ export async function listInvoices(ctx: ActorContext, opts: { limit?: number } =
     .select({
       id: invoices.id,
       number: invoices.number,
+      customerId: invoices.customerId,
       customerName: customers.name,
       issueDate: invoices.issueDate,
       dueDate: invoices.dueDate,

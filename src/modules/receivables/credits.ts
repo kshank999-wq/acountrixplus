@@ -1,0 +1,680 @@
+import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { db, type Executor } from '@/db'
+import {
+  chartAccounts,
+  creditApplications,
+  creditNoteLines,
+  creditNotes,
+  customers,
+  invoiceLines,
+  invoiceWriteOffs,
+  invoices,
+} from '@/db/schema'
+import { recordAudit } from '@/modules/audit'
+import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { accountByNumber } from '@/modules/coa/service'
+import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
+import { createJournalEntry } from '@/modules/ledger/journal'
+import { formatCents } from '@/lib/money'
+
+/**
+ * Credit notes and write-offs (spec §13).
+ *
+ * ## The distinction the whole file is built around
+ *
+ * Both reduce a receivable without money arriving. They mean opposite things,
+ * and conflating them is the commonest way a set of books hides a collections
+ * problem:
+ *
+ * ```
+ *   Credit note              Write-off
+ *   ─────────────────────    ─────────────────────
+ *   Dr  Revenue      100     Dr  Bad Debt     100
+ *       Cr  AR       100         Cr  AR       100
+ *
+ *   "They owe less."         "They owe it and will not pay."
+ *   Revenue was never        Revenue stays. The loss is a
+ *   earned.                  cost of doing business.
+ * ```
+ *
+ * A company that writes bad debt off as a credit note reports lower revenue and
+ * no bad debt at all. Its margin looks unchanged, and the fact that a customer
+ * stopped paying never appears anywhere. So these are two operations with two
+ * shapes, and neither can be reached through the other.
+ */
+
+export type CreditNoteLineInput = {
+  chartAccountId: string
+  description: string
+  quantityMilli?: number
+  unitPriceCents: number
+}
+
+export type CreditNoteInput = {
+  customerId: string
+  issueDate: string
+  /** When set, defaults the lines to this invoice's accounts and amounts. */
+  invoiceId?: string
+  lines?: CreditNoteLineInput[]
+  taxCents?: number
+  reason?: string
+  memo?: string
+  number?: string
+  /** Apply it to the named invoice immediately. Only with `invoiceId`. */
+  applyImmediately?: boolean
+}
+
+/**
+ * Issues a credit note.
+ *
+ * Posts `Dr` the revenue accounts, `Cr` Accounts Receivable — the exact mirror
+ * of the invoice entry. Reversing to *the same accounts the revenue landed on*
+ * is what makes a credited sale disappear from the right revenue line rather
+ * than from a single "sales returns" bucket that tells nobody which product
+ * was returned.
+ */
+export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput) {
+  requirePermission(ctx, 'accounting:journal')
+
+  const [customer] = await db
+    .select()
+    .from(customers)
+    .where(scoped(ctx, customers, eq(customers.id, input.customerId)))
+    .limit(1)
+
+  if (!customer) throw new Error('Customer not found')
+
+  const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable)
+  if (!arAccount) throw new Error('Accounts Receivable is missing from the chart.')
+
+  let invoice: typeof invoices.$inferSelect | null = null
+
+  if (input.invoiceId) {
+    const [row] = await db
+      .select()
+      .from(invoices)
+      .where(scoped(ctx, invoices, eq(invoices.id, input.invoiceId)))
+      .limit(1)
+
+    if (!row) throw new Error('Invoice not found')
+    if (row.customerId !== input.customerId) {
+      throw new Error('That invoice belongs to a different customer.')
+    }
+    if (row.status === 'void') throw new Error('That invoice is voided.')
+    invoice = row
+  }
+
+  // Lines default to the invoice's own, so the reversal lands where the
+  // revenue did without anybody having to look it up and retype it.
+  const lines = input.lines?.length
+    ? input.lines.map((line, index) => ({
+        ...line,
+        quantityMilli: line.quantityMilli ?? 1000,
+        amountCents: Math.round(((line.quantityMilli ?? 1000) * line.unitPriceCents) / 1000),
+        sortOrder: index,
+      }))
+    : await defaultLinesFromInvoice(ctx, invoice)
+
+  if (lines.length === 0) {
+    throw new Error('A credit note needs at least one line, or an invoice to credit.')
+  }
+
+  for (const line of lines) {
+    if (line.amountCents <= 0) {
+      throw new Error('Credit note amounts are positive; the direction is what makes it a credit.')
+    }
+  }
+
+  const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
+  const taxCents = input.taxCents ?? (input.lines?.length ? 0 : (invoice?.taxCents ?? 0))
+  const totalCents = subtotalCents + taxCents
+
+  if (invoice && totalCents > invoice.totalCents) {
+    throw new Error(
+      `A credit of ${formatCents(totalCents)} is more than invoice ${invoice.number} was for ` +
+        `(${formatCents(invoice.totalCents)}).`,
+    )
+  }
+
+  return db.transaction(async (tx) => {
+    const number = input.number ?? (await nextCreditNumber(ctx, tx))
+
+    const [note] = await tx
+      .insert(creditNotes)
+      .values({
+        companyId: ctx.companyId,
+        customerId: input.customerId,
+        number,
+        issueDate: input.issueDate,
+        invoiceId: invoice?.id ?? null,
+        status: 'open',
+        subtotalCents,
+        taxCents,
+        totalCents,
+        remainingCents: totalCents,
+        reason: input.reason ?? null,
+        memo: input.memo ?? null,
+        createdBy: ctx.userId,
+      })
+      .returning()
+
+    await tx.insert(creditNoteLines).values(
+      lines.map((line) => ({
+        companyId: ctx.companyId,
+        creditNoteId: note.id,
+        chartAccountId: line.chartAccountId,
+        description: line.description,
+        quantityMilli: line.quantityMilli,
+        unitPriceCents: line.unitPriceCents,
+        amountCents: line.amountCents,
+        sortOrder: line.sortOrder,
+      })),
+    )
+
+    // The mirror of the invoice entry: revenue back out, receivable down.
+    const journalLineInputs = [
+      ...lines.map((line) => ({
+        chartAccountId: line.chartAccountId,
+        debitCents: line.amountCents,
+        memo: line.description,
+      })),
+      { chartAccountId: arAccount.id, creditCents: totalCents, memo: `Credit note ${number}` },
+    ]
+
+    if (taxCents > 0) {
+      const taxAccount = await accountByNumber(ctx.companyId, '2200', tx)
+      if (!taxAccount) throw new Error('Sales Tax Payable is missing from the chart.')
+      journalLineInputs.splice(lines.length, 0, {
+        chartAccountId: taxAccount.id,
+        debitCents: taxCents,
+        memo: 'Sales tax credited',
+      })
+    }
+
+    const entry = await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.issueDate,
+        memo: `Credit note ${number} — ${customer.name}`,
+        source: 'invoice',
+        sourceType: 'credit_note',
+        sourceId: note.id,
+        lines: journalLineInputs,
+      },
+      tx,
+    )
+
+    await tx
+      .update(creditNotes)
+      .set({ journalEntryId: entry.id })
+      .where(eq(creditNotes.id, note.id))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'credit_note.create',
+        entityType: 'credit_note',
+        entityId: note.id,
+        after: {
+          number,
+          customer: customer.name,
+          totalCents,
+          againstInvoice: invoice?.number ?? null,
+          reason: input.reason ?? null,
+        },
+      },
+      tx,
+    )
+
+    if (input.applyImmediately && invoice) {
+      await applyCreditWithin(ctx, tx, {
+        creditNoteId: note.id,
+        invoiceId: invoice.id,
+        amountCents: Math.min(totalCents, invoice.balanceCents),
+        appliedOn: input.issueDate,
+      })
+    }
+
+    return { ...note, journalEntryId: entry.id }
+  })
+}
+
+/** An invoice's own lines, as the default content of a credit against it. */
+async function defaultLinesFromInvoice(
+  ctx: ActorContext,
+  invoice: typeof invoices.$inferSelect | null,
+) {
+  if (!invoice) return []
+
+  const rows = await db
+    .select()
+    .from(invoiceLines)
+    .where(and(eq(invoiceLines.companyId, ctx.companyId), eq(invoiceLines.invoiceId, invoice.id)))
+    .orderBy(asc(invoiceLines.sortOrder))
+
+  return rows.map((row, index) => ({
+    chartAccountId: row.chartAccountId,
+    description: row.description,
+    quantityMilli: row.quantityMilli,
+    unitPriceCents: row.unitPriceCents,
+    amountCents: row.amountCents,
+    sortOrder: index,
+  }))
+}
+
+/**
+ * Applies an open credit to an invoice.
+ *
+ * No journal entry: the credit note already moved the receivable when it was
+ * issued. Applying it is bookkeeping *within* Accounts Receivable — which
+ * invoice the reduction belongs to — and posting a second entry would halve
+ * the receivable twice.
+ */
+export async function applyCredit(
+  ctx: ActorContext,
+  input: { creditNoteId: string; invoiceId: string; amountCents: number; appliedOn: string },
+) {
+  requirePermission(ctx, 'accounting:journal')
+
+  return db.transaction((tx) => applyCreditWithin(ctx, tx, input))
+}
+
+async function applyCreditWithin(
+  ctx: ActorContext,
+  tx: Executor,
+  input: { creditNoteId: string; invoiceId: string; amountCents: number; appliedOn: string },
+) {
+  if (input.amountCents <= 0) throw new Error('An application must be greater than zero.')
+
+  const [note] = await tx
+    .select()
+    .from(creditNotes)
+    .where(and(eq(creditNotes.id, input.creditNoteId), eq(creditNotes.companyId, ctx.companyId)))
+    .limit(1)
+
+  if (!note) throw new Error('Credit note not found')
+  if (note.status === 'void') throw new Error('That credit note is voided.')
+
+  const [invoice] = await tx
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.id, input.invoiceId), eq(invoices.companyId, ctx.companyId)))
+    .limit(1)
+
+  if (!invoice) throw new Error('Invoice not found')
+  if (invoice.customerId !== note.customerId) {
+    throw new Error('A credit can only be applied to the same customer’s invoice.')
+  }
+
+  if (input.amountCents > note.remainingCents) {
+    throw new Error(
+      `Only ${formatCents(note.remainingCents)} of credit note ${note.number} is left to apply.`,
+    )
+  }
+  if (input.amountCents > invoice.balanceCents) {
+    throw new Error(
+      `Invoice ${invoice.number} has a balance of ${formatCents(invoice.balanceCents)}, ` +
+        `so ${formatCents(input.amountCents)} cannot be applied to it.`,
+    )
+  }
+
+  await tx.insert(creditApplications).values({
+    companyId: ctx.companyId,
+    creditNoteId: note.id,
+    invoiceId: invoice.id,
+    amountCents: input.amountCents,
+    appliedOn: input.appliedOn,
+  })
+
+  const noteRemaining = note.remainingCents - input.amountCents
+  await tx
+    .update(creditNotes)
+    .set({
+      remainingCents: noteRemaining,
+      status: noteRemaining === 0 ? 'applied' : 'open',
+      updatedAt: new Date(),
+    })
+    .where(eq(creditNotes.id, note.id))
+
+  const invoiceBalance = invoice.balanceCents - input.amountCents
+  await tx
+    .update(invoices)
+    .set({
+      balanceCents: invoiceBalance,
+      status: invoiceBalance === 0 ? 'paid' : 'partial',
+      updatedAt: new Date(),
+    })
+    .where(eq(invoices.id, invoice.id))
+
+  await recordAudit(
+    ctx,
+    {
+      action: 'credit_note.apply',
+      entityType: 'credit_note',
+      entityId: note.id,
+      after: {
+        invoice: invoice.number,
+        amountCents: input.amountCents,
+        creditRemainingCents: noteRemaining,
+      },
+    },
+    tx,
+  )
+
+  return { creditRemainingCents: noteRemaining, invoiceBalanceCents: invoiceBalance }
+}
+
+/**
+ * Writes an invoice off as uncollectable.
+ *
+ * `Dr` Bad Debt, `Cr` Accounts Receivable. The revenue stays where it is,
+ * because it was earned — what is being recorded is that the money will not
+ * arrive, and that is an expense.
+ *
+ * A reason is required and enforced by a database CHECK as well as here. A
+ * write-off with no stated reason is an unexplained loss, and by the time
+ * anybody asks about it the person who did it has forgotten.
+ */
+export async function writeOffInvoice(
+  ctx: ActorContext,
+  invoiceId: string,
+  input: { writtenOffOn: string; reason: string; amountCents?: number },
+) {
+  requirePermission(ctx, 'accounting:journal')
+
+  if (!input.reason.trim()) {
+    throw new Error('Say why it is being written off. An unexplained loss is worse than a loss.')
+  }
+
+  const [invoice] = await db
+    .select()
+    .from(invoices)
+    .where(scoped(ctx, invoices, eq(invoices.id, invoiceId)))
+    .limit(1)
+
+  if (!invoice) throw new Error('Invoice not found')
+  if (invoice.status === 'void') {
+    throw new Error('That invoice is voided — there is nothing owed to write off.')
+  }
+  if (invoice.balanceCents <= 0) {
+    throw new Error(`Invoice ${invoice.number} is settled. There is nothing to write off.`)
+  }
+
+  const amountCents = input.amountCents ?? invoice.balanceCents
+
+  if (amountCents > invoice.balanceCents) {
+    throw new Error(
+      `Invoice ${invoice.number} has ${formatCents(invoice.balanceCents)} outstanding, ` +
+        `so ${formatCents(amountCents)} cannot be written off.`,
+    )
+  }
+
+  const [arAccount, badDebtAccount] = await Promise.all([
+    accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable),
+    accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.badDebt),
+  ])
+
+  if (!arAccount) throw new Error('Accounts Receivable is missing from the chart.')
+  if (!badDebtAccount) {
+    throw new Error('Bad Debt (6025) is missing from the chart of accounts.')
+  }
+
+  return db.transaction(async (tx) => {
+    const [writeOff] = await tx
+      .insert(invoiceWriteOffs)
+      .values({
+        companyId: ctx.companyId,
+        invoiceId: invoice.id,
+        writtenOffOn: input.writtenOffOn,
+        amountCents,
+        reason: input.reason.trim(),
+        createdBy: ctx.userId,
+      })
+      .returning()
+
+    const entry = await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.writtenOffOn,
+        memo: `Write-off of invoice ${invoice.number} — ${input.reason.trim()}`,
+        source: 'adjusting',
+        sourceType: 'invoice_write_off',
+        sourceId: writeOff.id,
+        lines: [
+          { chartAccountId: badDebtAccount.id, debitCents: amountCents },
+          { chartAccountId: arAccount.id, creditCents: amountCents },
+        ],
+      },
+      tx,
+    )
+
+    await tx
+      .update(invoiceWriteOffs)
+      .set({ journalEntryId: entry.id })
+      .where(eq(invoiceWriteOffs.id, writeOff.id))
+
+    const balance = invoice.balanceCents - amountCents
+
+    await tx
+      .update(invoices)
+      .set({
+        balanceCents: balance,
+        // `written_off` rather than `paid`. Nobody paid, and a status saying
+        // they did would erase the fact from every report that reads it.
+        status: balance === 0 ? 'written_off' : 'partial',
+        updatedAt: new Date(),
+      })
+      .where(eq(invoices.id, invoice.id))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'invoice.write_off',
+        entityType: 'invoice',
+        entityId: invoice.id,
+        before: { balanceCents: invoice.balanceCents, status: invoice.status },
+        after: { amountCents, reason: input.reason.trim(), status: balance === 0 ? 'written_off' : 'partial' },
+      },
+      tx,
+    )
+
+    return { ...writeOff, journalEntryId: entry.id }
+  })
+}
+
+/**
+ * Records that a written-off debt was paid after all.
+ *
+ * Reverses the bad-debt expense rather than recognizing new revenue — the
+ * revenue was recognized when the invoice was raised and never taken back.
+ * Recognizing it again here would count the same sale twice.
+ */
+export async function recoverWriteOff(
+  ctx: ActorContext,
+  writeOffId: string,
+  input: { recoveredOn: string; amountCents: number; financialAccountId: string },
+) {
+  requirePermission(ctx, 'accounting:journal')
+
+  const [writeOff] = await db
+    .select()
+    .from(invoiceWriteOffs)
+    .where(scoped(ctx, invoiceWriteOffs, eq(invoiceWriteOffs.id, writeOffId)))
+    .limit(1)
+
+  if (!writeOff) throw new Error('Write-off not found')
+  if (writeOff.recoveredOn) throw new Error('That write-off has already been recovered.')
+  if (input.amountCents <= 0) throw new Error('A recovery must be greater than zero.')
+  if (input.amountCents > writeOff.amountCents) {
+    throw new Error(
+      `Only ${formatCents(writeOff.amountCents)} was written off, so ` +
+        `${formatCents(input.amountCents)} cannot be recovered.`,
+    )
+  }
+
+  const { financialAccounts } = await import('@/db/schema')
+  const [bank] = await db
+    .select()
+    .from(financialAccounts)
+    .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
+    .limit(1)
+
+  if (!bank) throw new Error('Financial account not found')
+
+  const badDebtAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.badDebt)
+  if (!badDebtAccount) throw new Error('Bad Debt (6025) is missing from the chart of accounts.')
+
+  return db.transaction(async (tx) => {
+    const entry = await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.recoveredOn,
+        memo: `Recovery of a written-off debt`,
+        source: 'adjusting',
+        sourceType: 'write_off_recovery',
+        sourceId: writeOff.id,
+        lines: [
+          { chartAccountId: bank.chartAccountId, debitCents: input.amountCents },
+          // Back out the expense. Not revenue — that was recognized when the
+          // invoice was raised and never reversed.
+          { chartAccountId: badDebtAccount.id, creditCents: input.amountCents },
+        ],
+      },
+      tx,
+    )
+
+    await tx
+      .update(invoiceWriteOffs)
+      .set({
+        recoveredOn: input.recoveredOn,
+        recoveredCents: input.amountCents,
+        recoveryJournalEntryId: entry.id,
+      })
+      .where(eq(invoiceWriteOffs.id, writeOff.id))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'invoice.write_off_recovered',
+        entityType: 'invoice',
+        entityId: writeOff.invoiceId,
+        after: { recoveredOn: input.recoveredOn, amountCents: input.amountCents },
+      },
+      tx,
+    )
+
+    return { ...writeOff, recoveryJournalEntryId: entry.id }
+  })
+}
+
+// --- Queries ---------------------------------------------------------------
+
+export async function listCreditNotes(
+  ctx: ActorContext,
+  opts: { customerId?: string; openOnly?: boolean; limit?: number } = {},
+) {
+  requirePermission(ctx, 'accounting:view')
+
+  return db
+    .select({
+      id: creditNotes.id,
+      number: creditNotes.number,
+      issueDate: creditNotes.issueDate,
+      customerId: creditNotes.customerId,
+      customerName: customers.name,
+      status: creditNotes.status,
+      totalCents: creditNotes.totalCents,
+      remainingCents: creditNotes.remainingCents,
+      reason: creditNotes.reason,
+    })
+    .from(creditNotes)
+    .innerJoin(customers, eq(customers.id, creditNotes.customerId))
+    .where(
+      scoped(
+        ctx,
+        creditNotes,
+        opts.customerId ? eq(creditNotes.customerId, opts.customerId) : undefined,
+        opts.openOnly ? sql`${creditNotes.remainingCents} > 0` : undefined,
+      ),
+    )
+    .orderBy(desc(creditNotes.issueDate))
+    .limit(opts.limit ?? 50)
+}
+
+export async function listWriteOffs(ctx: ActorContext, opts: { limit?: number } = {}) {
+  requirePermission(ctx, 'accounting:view')
+
+  return db
+    .select({
+      id: invoiceWriteOffs.id,
+      invoiceId: invoiceWriteOffs.invoiceId,
+      invoiceNumber: invoices.number,
+      customerName: customers.name,
+      writtenOffOn: invoiceWriteOffs.writtenOffOn,
+      amountCents: invoiceWriteOffs.amountCents,
+      reason: invoiceWriteOffs.reason,
+      recoveredOn: invoiceWriteOffs.recoveredOn,
+      recoveredCents: invoiceWriteOffs.recoveredCents,
+    })
+    .from(invoiceWriteOffs)
+    .innerJoin(invoices, eq(invoices.id, invoiceWriteOffs.invoiceId))
+    .innerJoin(customers, eq(customers.id, invoices.customerId))
+    .where(scoped(ctx, invoiceWriteOffs))
+    .orderBy(desc(invoiceWriteOffs.writtenOffOn))
+    .limit(opts.limit ?? 50)
+}
+
+/** Bad debt written off in a period, net of anything recovered. */
+export async function badDebtSummary(
+  ctx: ActorContext,
+  range: { startDate: string; endDate: string },
+) {
+  requirePermission(ctx, 'reports:financial')
+
+  const [row] = await db
+    .select({
+      count: sql<string>`count(*)`,
+      writtenOffCents: sql<string>`coalesce(sum(${invoiceWriteOffs.amountCents}), 0)`,
+      recoveredCents: sql<string>`coalesce(sum(${invoiceWriteOffs.recoveredCents}), 0)`,
+    })
+    .from(invoiceWriteOffs)
+    .where(
+      scoped(
+        ctx,
+        invoiceWriteOffs,
+        sql`${invoiceWriteOffs.writtenOffOn} BETWEEN ${range.startDate} AND ${range.endDate}`,
+      ),
+    )
+
+  const writtenOffCents = Number(row?.writtenOffCents ?? 0)
+  const recoveredCents = Number(row?.recoveredCents ?? 0)
+
+  return {
+    count: Number(row?.count ?? 0),
+    writtenOffCents,
+    recoveredCents,
+    netCents: writtenOffCents - recoveredCents,
+  }
+}
+
+async function nextCreditNumber(ctx: ActorContext, tx: Executor): Promise<string> {
+  const [row] = await tx
+    .select({ count: sql<string>`count(*)` })
+    .from(creditNotes)
+    .where(eq(creditNotes.companyId, ctx.companyId))
+
+  return `CN-${1001 + Number(row?.count ?? 0)}`
+}
+
+/** The accounts a credit note may be raised against, for the UI. */
+export async function creditableAccounts(ctx: ActorContext) {
+  requirePermission(ctx, 'accounting:view')
+
+  return db
+    .select({ id: chartAccounts.id, number: chartAccounts.number, name: chartAccounts.name })
+    .from(chartAccounts)
+    .where(
+      scoped(ctx, chartAccounts, sql`${chartAccounts.type} IN ('revenue', 'other_income')`),
+    )
+    .orderBy(asc(chartAccounts.number))
+}

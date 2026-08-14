@@ -72,6 +72,10 @@ import { installCompanySchedules, installGlobalSchedules } from '@/modules/worke
 import { enqueue } from '@/modules/worker/queue'
 import { runOnce } from '@/modules/worker/runner'
 import { listDraftEntries } from '@/modules/ledger/journal'
+import { createCreditNote, writeOffInvoice } from '@/modules/receivables/credits'
+import { saveStatement } from '@/modules/receivables/statements'
+import { createRecurringEntry, runDueRecurringEntries } from '@/modules/ledger/recurring'
+import { profitAndLoss } from '@/modules/ledger/reports'
 import type { ActorContext } from '@/modules/tenancy/context'
 
 /** Cents as plain dollars, for the seed's console output. */
@@ -1137,6 +1141,100 @@ async function main() {
   await runOnce({ workerId: 'seed' })
   console.log('  Queued one job with no handler, so the operations page has a failure to show.')
 
+  // --- Phase 11: the accounting core completed -----------------------------
+
+  console.log('Completing the accounting core…')
+
+  // A credit note and a write-off on two different invoices, so the demo shows
+  // the distinction rather than describing it.
+  if (contractRevenue) {
+    const disputed = await createInvoice(ctx, {
+      customerId: cityWorks.id,
+      issueDate: '2026-02-10',
+      dueDate: '2026-03-12',
+      lines: [
+        { chartAccountId: contractRevenue.id, description: 'Sidewalk survey', unitPriceCents: 180_000 },
+      ],
+    })
+
+    await createCreditNote(ctx, {
+      customerId: cityWorks.id,
+      issueDate: '2026-03-01',
+      invoiceId: disputed.id,
+      reason: 'Surveyed the wrong parcel — never should have been billed',
+      applyImmediately: true,
+    })
+    console.log('  Credit note against a mis-billed invoice: revenue reversed, never earned.')
+
+    const abandoned = await createInvoice(ctx, {
+      customerId: cityWorks.id,
+      issueDate: '2026-01-15',
+      dueDate: '2026-02-14',
+      lines: [
+        { chartAccountId: contractRevenue.id, description: 'Culvert repair', unitPriceCents: 240_000 },
+      ],
+    })
+
+    await writeOffInvoice(ctx, abandoned.id, {
+      writtenOffOn: '2026-07-31',
+      reason: 'Contractor entered administration; no prospect of recovery',
+    })
+    console.log('  Write-off on an uncollectable one: revenue stays, the loss is Bad Debt.')
+  }
+
+  // A statement a customer would actually be sent.
+  await saveStatement(ctx, { customerId: harborview.id, asOfDate: '2026-08-14' })
+  console.log('  Saved an open-item statement, with its figures frozen as at that date.')
+
+  // A recurring entry of each kind, so the autoPost distinction is visible.
+  const rentAccount = await accountByNumber(company.id, '6400')
+  const accrualsAccount = await accountByNumber(company.id, '2300')
+
+  if (rentAccount && accrualsAccount) {
+    await createRecurringEntry(ctx, {
+      name: 'Monthly rent accrual',
+      memo: 'Yard and office rent',
+      cadence: 'monthly',
+      dayOfMonth: 1,
+      autoPost: true,
+      startsOn: '2026-01-01',
+      lines: [
+        { chartAccountId: rentAccount.id, debitCents: 420_000 },
+        { chartAccountId: accrualsAccount.id, creditCents: 420_000 },
+      ],
+    })
+
+    await createRecurringEntry(ctx, {
+      name: 'Estimated equipment depreciation',
+      memo: 'Estimate — review before posting',
+      cadence: 'monthly',
+      dayOfMonth: 1,
+      autoPost: false,
+      startsOn: '2026-01-01',
+      lines: [
+        { chartAccountId: rentAccount.id, debitCents: 65_000 },
+        { chartAccountId: accrualsAccount.id, creditCents: 65_000 },
+      ],
+    })
+
+    const ran = await runDueRecurringEntries(ctx, '2026-08-14')
+    const posted = ran.filter((row) => row.posted).length
+    const drafted = ran.filter((row) => row.journalEntryId && !row.posted).length
+    console.log(
+      `  2 recurring templates, caught up to date: ${posted} posted, ${drafted} proposed as drafts.`,
+    )
+  }
+
+  // Cash versus accrual on the demo's own books, so the difference is a
+  // number rather than an explanation.
+  const range = { startDate: '2026-01-01', endDate: '2026-12-31' }
+  const accrualPl = await profitAndLoss(ctx, { ...range, basis: 'accrual' })
+  const cashPl = await profitAndLoss(ctx, { ...range, basis: 'cash' })
+  console.log(
+    `  Revenue 2026: ${formatCentsPlain(accrualPl.revenue.totalCents)} accrual, ` +
+      `${formatCentsPlain(cashPl.revenue.totalCents)} cash — the difference is what has been invoiced and not paid.`,
+  )
+
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)
   console.log(`  Password: ${DEMO_PASSWORD}`)
@@ -1159,6 +1257,9 @@ async function main() {
   console.log('  /payroll/contractors  who is reportable, and what is stopping it')
   console.log('  /payroll/workpapers   the pack, and the filing it refuses to prepare')
   console.log('  /settings/operations  the queue, the schedules, and what failed')
+  console.log('  /accounting/reports   switch the basis — cash and accrual, same books')
+  console.log('  /accounting/receivables  credits, write-offs, and statements')
+  console.log('  /accounting/periods   recurring entries and the year-end close')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')
