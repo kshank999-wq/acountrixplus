@@ -16,7 +16,7 @@ import {
 import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { chartAccounts } from './accounting'
-import { customers, invoices } from './receivables'
+import { bills, customers, invoices, vendors } from './receivables'
 import { journalEntries } from './ledger'
 
 /**
@@ -42,6 +42,18 @@ import { journalEntries } from './ledger'
  * note.
  */
 
+/**
+ * Which direction a credit runs (Phase 12, spec §13's AP list: "vendors,
+ * bills, **credits**, payments, aging").
+ *
+ * One table for both, the same way `payments` holds receipts and
+ * disbursements. A vendor credit is the exact mirror of a customer one — the
+ * supplier agreed we owe less — and giving it a separate table would mean two
+ * copies of the application logic, the aging treatment, and the cash-basis
+ * story, which would then drift apart the first time one was fixed.
+ */
+export const creditPartyEnum = pgEnum('credit_party', ['customer', 'vendor'])
+
 export const creditNoteStatusEnum = pgEnum('credit_note_status', [
   'draft',
   /** Issued, with some or all of it not yet applied to an invoice. */
@@ -65,9 +77,10 @@ export const creditNotes = pgTable(
     companyId: uuid('company_id')
       .notNull()
       .references(() => companies.id, { onDelete: 'cascade' }),
-    customerId: uuid('customer_id')
-      .notNull()
-      .references(() => customers.id, { onDelete: 'restrict' }),
+    party: creditPartyEnum('party').notNull().default('customer'),
+    /** Exactly one of these is set, matching `party`. */
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'restrict' }),
+    vendorId: uuid('vendor_id').references(() => vendors.id, { onDelete: 'restrict' }),
 
     number: text('number').notNull(),
     issueDate: date('issue_date').notNull(),
@@ -80,6 +93,8 @@ export const creditNotes = pgTable(
      * invoice's accounts so the reversal lands where the revenue did.
      */
     invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    /** The vendor-side equivalent: the bill this credit was raised against. */
+    billId: uuid('bill_id').references(() => bills.id, { onDelete: 'set null' }),
 
     status: creditNoteStatusEnum('status').notNull().default('open'),
 
@@ -103,7 +118,21 @@ export const creditNotes = pgTable(
   (t) => ({
     numberUnique: unique('credit_notes_number_unique').on(t.companyId, t.number),
     customerIdx: index('credit_notes_customer_idx').on(t.companyId, t.customerId),
+    vendorIdx: index('credit_notes_vendor_idx').on(t.companyId, t.vendorId),
     openIdx: index('credit_notes_open_idx').on(t.companyId, t.status),
+    // The party column and the party column have to agree. Without this a
+    // vendor credit could carry a customer, and every report that joins on one
+    // of the two would quietly return a different set of rows.
+    partyMatches: check(
+      'credit_notes_party_matches',
+      sql`(${t.party} = 'customer' AND ${t.customerId} IS NOT NULL AND ${t.vendorId} IS NULL)
+          OR (${t.party} = 'vendor' AND ${t.vendorId} IS NOT NULL AND ${t.customerId} IS NULL)`,
+    ),
+    documentMatches: check(
+      'credit_notes_document_matches',
+      sql`(${t.party} = 'customer' AND ${t.billId} IS NULL)
+          OR (${t.party} = 'vendor' AND ${t.invoiceId} IS NULL)`,
+    ),
     totalPositive: check('credit_notes_total_positive', sql`${t.totalCents} > 0`),
     // A credit note's amounts are stored positive and its *direction* is what
     // makes it a credit. Storing a negative invoice instead would mean every
@@ -159,9 +188,9 @@ export const creditApplications = pgTable(
     creditNoteId: uuid('credit_note_id')
       .notNull()
       .references(() => creditNotes.id, { onDelete: 'cascade' }),
-    invoiceId: uuid('invoice_id')
-      .notNull()
-      .references(() => invoices.id, { onDelete: 'cascade' }),
+    /** Exactly one of these, matching the credit note's party. */
+    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'cascade' }),
+    billId: uuid('bill_id').references(() => bills.id, { onDelete: 'cascade' }),
 
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     appliedOn: date('applied_on').notNull(),
@@ -171,7 +200,12 @@ export const creditApplications = pgTable(
   (t) => ({
     noteIdx: index('credit_applications_note_idx').on(t.creditNoteId),
     invoiceIdx: index('credit_applications_invoice_idx').on(t.invoiceId),
+    billIdx: index('credit_applications_bill_idx').on(t.billId),
     amountPositive: check('credit_applications_amount_positive', sql`${t.amountCents} > 0`),
+    exactlyOneDocument: check(
+      'credit_applications_one_document',
+      sql`(${t.invoiceId} IS NULL) <> (${t.billId} IS NULL)`,
+    ),
   }),
 )
 

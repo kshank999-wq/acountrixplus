@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   applyCreditAction,
   createCreditNoteAction,
+  createVendorCreditAction,
   recoverWriteOffAction,
   saveStatementAction,
   writeOffInvoiceAction,
@@ -15,7 +16,10 @@ type Credit = {
   id: string
   number: string
   issueDate: string
-  customerId: string
+  // Nullable on the table since Phase 12, because a vendor credit shares it
+  // and carries a vendor instead. Every row this list shows is a customer
+  // credit, so it is never null in practice.
+  customerId: string | null
   customerName: string
   status: string
   totalCents: number
@@ -60,6 +64,27 @@ type OpenInvoice = {
   dueDate: string
 }
 
+type VendorCredit = {
+  id: string
+  number: string
+  issueDate: string
+  vendorId: string | null
+  vendorName: string
+  status: string
+  totalCents: number
+  remainingCents: number
+  reason: string | null
+}
+
+type OpenBill = {
+  id: string
+  number: string
+  vendorId: string
+  vendorName: string
+  balanceCents: number
+  dueDate: string
+}
+
 /**
  * Credits, write-offs, and statements.
  *
@@ -77,6 +102,9 @@ export function ReceivablesBoard({
   statements,
   openInvoices,
   banks,
+  vendorCredits,
+  vendors,
+  openBills,
   canManage,
 }: {
   badDebt: { count: number; writtenOffCents: number; recoveredCents: number; netCents: number }
@@ -86,6 +114,9 @@ export function ReceivablesBoard({
   statements: StatementRow[]
   openInvoices: OpenInvoice[]
   banks: Array<{ id: string; name: string }>
+  vendorCredits: VendorCredit[]
+  vendors: Array<{ id: string; name: string }>
+  openBills: OpenBill[]
   canManage: boolean
 }) {
   const router = useRouter()
@@ -101,6 +132,10 @@ export function ReceivablesBoard({
   const [statementKind, setStatementKind] = useState<'open_item' | 'balance_forward'>('open_item')
   const [statementFrom, setStatementFrom] = useState('')
   const [statementAsOf, setStatementAsOf] = useState(new Date().toISOString().slice(0, 10))
+
+  const [vendorBillId, setVendorBillId] = useState('')
+  const [vendorCreditDate, setVendorCreditDate] = useState(new Date().toISOString().slice(0, 10))
+  const [vendorReason, setVendorReason] = useState('')
 
   const [recovering, setRecovering] = useState<string | null>(null)
   const [recoveryAmount, setRecoveryAmount] = useState('')
@@ -496,6 +531,110 @@ export function ReceivablesBoard({
           </table>
         )}
       </Card>
+
+      <Card
+        title="Vendor credits"
+        subtitle="The mirror: the supplier agreed you owe less, so the cost comes back off the account the bill was booked to."
+      >
+        {canManage && (
+          <div className="flex flex-wrap items-end gap-3 border-b border-line px-4 py-3">
+            <label className="text-xs text-muted">
+              <span className="mb-1 block">Against bill</span>
+              <select
+                value={vendorBillId}
+                onChange={(event) => setVendorBillId(event.target.value)}
+                className="field py-1.5 text-sm"
+              >
+                <option value="">Choose a bill…</option>
+                {openBills.map((bill) => (
+                  <option key={bill.id} value={bill.id}>
+                    {bill.number} — {bill.vendorName} ({formatCents(bill.balanceCents)})
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs text-muted">
+              <span className="mb-1 block">Date</span>
+              <input
+                type="date"
+                value={vendorCreditDate}
+                onChange={(event) => setVendorCreditDate(event.target.value)}
+                className="field py-1.5 text-sm"
+              />
+            </label>
+
+            <label className="grow text-xs text-muted">
+              <span className="mb-1 block">Reason</span>
+              <input
+                value={vendorReason}
+                onChange={(event) => setVendorReason(event.target.value)}
+                placeholder="Damaged in transit, short delivery…"
+                className="field w-full py-1.5 text-sm"
+              />
+            </label>
+
+            <button
+              className="btn btn-primary"
+              disabled={pending || !vendorBillId}
+              onClick={() => {
+                const bill = openBills.find((row) => row.id === vendorBillId)
+                if (!bill) return
+                act(() =>
+                  createVendorCreditAction({
+                    vendorId: bill.vendorId,
+                    billId: bill.id,
+                    issueDate: vendorCreditDate,
+                    reason: vendorReason.trim() || undefined,
+                    applyImmediately: true,
+                  }),
+                )
+              }}
+            >
+              Issue vendor credit
+            </button>
+          </div>
+        )}
+
+        {vendorCredits.length === 0 ? (
+          <Empty>No vendor credits issued.</Empty>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="px-4 py-2 font-medium">Number</th>
+                <th className="px-4 py-2 font-medium">Vendor</th>
+                <th className="px-4 py-2 font-medium">Issued</th>
+                <th className="px-4 py-2 font-medium">Reason</th>
+                <th className="px-4 py-2 text-right font-medium">Total</th>
+                <th className="px-4 py-2 text-right font-medium">Left</th>
+              </tr>
+            </thead>
+            <tbody>
+              {vendorCredits.map((row) => (
+                <tr key={row.id} className="border-t border-line">
+                  <td className="px-4 py-1.5">{row.number}</td>
+                  <td className="px-4 py-1.5 font-medium">{row.vendorName}</td>
+                  <td className="px-4 py-1.5 text-muted">{row.issueDate}</td>
+                  <td className="px-4 py-1.5 text-muted">{row.reason ?? '—'}</td>
+                  <td className="tnum px-4 py-1.5 text-right">{formatCents(row.totalCents)}</td>
+                  <td className="tnum px-4 py-1.5 text-right">
+                    {formatCents(row.remainingCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+
+        <p className="border-t border-line px-4 py-3 text-xs text-faint">
+          There is no vendor write-off to match the customer one. A debt the supplier stopped
+          chasing is a judgement about whether the obligation is really gone, not a bookkeeping
+          operation — so it stays a manual journal entry.
+        </p>
+      </Card>
+
+      {vendors.length === 0 && null}
     </div>
   )
 }

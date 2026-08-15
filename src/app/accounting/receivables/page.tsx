@@ -3,7 +3,8 @@ import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { badDebtSummary, listCreditNotes, listWriteOffs } from '@/modules/receivables/credits'
 import { customersWithBalances, listStatements } from '@/modules/receivables/statements'
-import { listInvoices } from '@/modules/receivables/service'
+import { listVendorCredits } from '@/modules/receivables/vendor-credits'
+import { listBills, listInvoices, listVendors } from '@/modules/receivables/service'
 import { remittanceAccounts } from '@/modules/payroll/remittance'
 import { ACCOUNTING_NAV } from '../nav'
 import { ReceivablesBoard } from './board'
@@ -36,7 +37,18 @@ export default async function ReceivablesPage() {
 
   const year = new Date().getUTCFullYear()
 
-  const [credits, writeOffs, badDebt, customers, statements, openInvoices, banks] = await Promise.all([
+  const [
+    credits,
+    writeOffs,
+    badDebt,
+    customers,
+    statements,
+    openInvoices,
+    banks,
+    vendorCredits,
+    vendors,
+    openBills,
+  ] = await Promise.all([
     listCreditNotes(actor, { limit: 25 }),
     listWriteOffs(actor, { limit: 25 }),
     badDebtSummary(actor, { startDate: `${year}-01-01`, endDate: `${year}-12-31` }).catch(() => ({
@@ -50,6 +62,12 @@ export default async function ReceivablesPage() {
     listInvoices(actor, { limit: 100 }),
     // Bank accounts, for recording that a written-off debt was paid after all.
     can(actor, 'tax:view') ? remittanceAccounts(actor) : Promise.resolve([]),
+    // The AP mirror (Phase 12). Same page as the customer side deliberately:
+    // the two are the same operation in opposite directions, and somebody who
+    // has just learned one should not have to find the other somewhere else.
+    listVendorCredits(actor, { limit: 25 }),
+    listVendors(actor),
+    listBills(actor, { limit: 100 }),
   ])
 
   return (
@@ -109,6 +127,28 @@ export default async function ReceivablesPage() {
             dueDate: row.dueDate,
           }))}
         banks={banks.map((row) => ({ id: row.id, name: row.name }))}
+        vendorCredits={vendorCredits.map((row) => ({
+          id: row.id,
+          number: row.number,
+          issueDate: row.issueDate,
+          vendorId: row.vendorId,
+          vendorName: row.vendorName,
+          status: row.status,
+          totalCents: row.totalCents,
+          remainingCents: row.remainingCents,
+          reason: row.reason,
+        }))}
+        vendors={vendors.map((row) => ({ id: row.id, name: row.name }))}
+        openBills={openBills
+          .filter((row) => row.balanceCents > 0 && row.status !== 'void')
+          .map((row) => ({
+            id: row.id,
+            number: row.number,
+            vendorId: row.vendorId,
+            vendorName: row.vendorName,
+            balanceCents: row.balanceCents,
+            dueDate: row.dueDate,
+          }))}
         canManage={can(actor, 'accounting:journal')}
       />
     </AppShell>

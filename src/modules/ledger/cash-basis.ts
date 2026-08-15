@@ -11,6 +11,8 @@ import {
 } from '@/db/schema'
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { INDUSTRY_ACCOUNTS, SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
+import { cashFlowClass, isAccrualOnly, isCashAccount } from '@/modules/coa/classification'
+import { formatCents } from '@/lib/money'
 import { normalBalance, type AccountBalance } from './balances'
 import type { AccountType } from '@/modules/coa/standard'
 
@@ -125,6 +127,224 @@ const CONTROL_ACCOUNT_NUMBERS: string[] = [
   SYSTEM_ACCOUNTS.accountsPayable,
 ]
 
+/** A basket of income-statement legs, keyed by account, with its signed net. */
+type Basket = { entries: Array<[string, number]>; net: number }
+
+export type AccrualPlan = {
+  /** Recognition entries: the accrual claim itself, which cash basis rejects. */
+  removedEntryIds: Set<string>
+  /**
+   * Cash entries whose accrual-only legs are replaced.
+   *
+   * Keyed by entry, then by the accrual-only account, because one entry can
+   * settle two different accruals and each takes its own basket.
+   */
+  replacedLegs: Map<string, Map<string, Basket>>
+  /**
+   * Entries touching an accrual-only account that neither rule could handle —
+   * a reclass between two balance-sheet accounts, or a settlement made before
+   * anything said what the accrual was for. Left untouched, and reported by
+   * `cashBasisCaveats` so the report says where it is approximate.
+   */
+  unresolvedCents: number
+}
+
+/**
+ * Works out what to do with every entry that touches an accrual-only account.
+ *
+ * ## The two shapes
+ *
+ * Every timing difference is written down twice — once when the cash moves and
+ * once when the amount is recognized — and cash basis keeps the first and
+ * discards the second. Which entry is which is not a matter of dates or signs;
+ * it is visible in what the entry's *other* legs are:
+ *
+ * ```
+ *   Accrued expense                     Prepayment
+ *   ─────────────────────────────       ─────────────────────────────
+ *   Dr  Rent          5000   ← recog.   Dr  Prepaid      12000  ← cash
+ *       Cr  Accrued   5000                  Cr  Bank     12000
+ *
+ *   Dr  Accrued       5000   ← cash     Dr  Rent          1000  ← recog.
+ *       Cr  Bank      5000                  Cr  Prepaid   1000
+ * ```
+ *
+ * The recognition entry's other legs are income-statement accounts; the cash
+ * entry's include cash. So the rule is: **remove the recognition entry and
+ * keep what it said the money was for; then, on the cash entry, put that back
+ * in place of the accrual-only leg.**
+ *
+ * Deferred revenue is the same machinery upside down — a deposit is the cash
+ * entry, and earning it later is the recognition — and it comes out right
+ * without a special case, because the basket carries its own direction.
+ *
+ * ## Why the whole ledger, and not the window
+ *
+ * A prepayment made in one period is recognized in another. The basket has to
+ * be assembled from every recognition entry there has ever been, or a report
+ * whose window happens to exclude the amortizations would silently drop them.
+ * Only entries touching an accrual-only account are read, which on a typical
+ * set of books is a small fraction of the journal.
+ *
+ * ## What this does not attempt
+ *
+ * Recognition entries are pooled per account rather than matched to a specific
+ * prepayment. A company running two prepaid insurance policies through one
+ * account gets the pool, not the policy. Doing better needs the accrual and
+ * its settlement linked the way `payment_applications` links a payment to its
+ * invoice, and that link does not exist for something typed as a journal
+ * entry — which is exactly why receivables and payables are *not* handled by
+ * this code path.
+ */
+async function accrualPlan(
+  ctx: ActorContext,
+  sets: {
+    accrualAccountIds: Set<string>
+    cashAccountIds: Set<string>
+    incomeAccountIds: Set<string>
+  },
+): Promise<AccrualPlan> {
+  const empty: AccrualPlan = {
+    removedEntryIds: new Set(),
+    replacedLegs: new Map(),
+    unresolvedCents: 0,
+  }
+
+  if (sets.accrualAccountIds.size === 0) return empty
+
+  const accrualIds = [...sets.accrualAccountIds]
+
+  // Every line of every entry that touches an accrual-only account, whenever
+  // it was posted. The inner select finds the entries; the outer one takes
+  // all their lines, because the decision needs the legs on the other side.
+  const rows = await db
+    .select({
+      journalEntryId: journalLines.journalEntryId,
+      chartAccountId: journalLines.chartAccountId,
+      debitCents: journalLines.debitCents,
+      creditCents: journalLines.creditCents,
+      source: journalEntries.source,
+    })
+    .from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.journalEntryId))
+    .where(
+      and(
+        eq(journalEntries.companyId, ctx.companyId),
+        eq(journalEntries.status, 'posted'),
+        // Invoices, bills, and payments already have an exact path through
+        // payment applications. Running them through inference as well would
+        // transform the same amount twice.
+        sql`${journalEntries.source} NOT IN ('invoice', 'bill', 'payment')`,
+        sql`${journalLines.journalEntryId} IN (
+          SELECT ${journalLines.journalEntryId} FROM ${journalLines}
+          WHERE ${journalLines.companyId} = ${ctx.companyId}
+            AND ${inArray(journalLines.chartAccountId, accrualIds)}
+        )`,
+      ),
+    )
+
+  const byEntry = new Map<string, typeof rows>()
+  for (const row of rows) {
+    const existing = byEntry.get(row.journalEntryId) ?? []
+    existing.push(row)
+    byEntry.set(row.journalEntryId, existing)
+  }
+
+  const plan: AccrualPlan = {
+    removedEntryIds: new Set(),
+    replacedLegs: new Map(),
+    unresolvedCents: 0,
+  }
+
+  // Per accrual-only account, what the recognition entries said the money was
+  // for. Signed, so a reversal cancels the accrual it reverses.
+  const baskets = new Map<string, Map<string, number>>()
+  const cashEntries: Array<{ entryId: string; legs: Map<string, number> }> = []
+
+  for (const [entryId, lines] of byEntry) {
+    const accrualLegs = lines.filter((line) => sets.accrualAccountIds.has(line.chartAccountId))
+    const otherLegs = lines.filter((line) => !sets.accrualAccountIds.has(line.chartAccountId))
+
+    if (accrualLegs.length === 0 || otherLegs.length === 0) continue
+
+    const touchesCash = otherLegs.some((line) => sets.cashAccountIds.has(line.chartAccountId))
+    const allIncome = otherLegs.every((line) => sets.incomeAccountIds.has(line.chartAccountId))
+
+    if (!touchesCash && allIncome) {
+      plan.removedEntryIds.add(entryId)
+
+      // The whole entry's income legs go into the basket of whichever accrual
+      // account it moved. Split across accounts when it moved more than one,
+      // by the size of each accrual leg.
+      const accrualNet = accrualLegs.reduce(
+        (sum, line) => sum + line.debitCents - line.creditCents,
+        0,
+      )
+      if (accrualNet === 0) continue
+
+      for (const accrualLeg of accrualLegs) {
+        const legNet = accrualLeg.debitCents - accrualLeg.creditCents
+        const basket = baskets.get(accrualLeg.chartAccountId) ?? new Map<string, number>()
+
+        for (const income of otherLegs) {
+          const incomeNet = income.debitCents - income.creditCents
+          const share = Math.round((incomeNet * legNet) / accrualNet)
+          basket.set(income.chartAccountId, (basket.get(income.chartAccountId) ?? 0) + share)
+        }
+
+        baskets.set(accrualLeg.chartAccountId, basket)
+      }
+      continue
+    }
+
+    if (touchesCash) {
+      const legs = new Map<string, number>()
+      for (const accrualLeg of accrualLegs) {
+        legs.set(
+          accrualLeg.chartAccountId,
+          (legs.get(accrualLeg.chartAccountId) ?? 0) +
+            accrualLeg.debitCents -
+            accrualLeg.creditCents,
+        )
+      }
+      cashEntries.push({ entryId, legs })
+      continue
+    }
+
+    // Neither shape: a reclass between two balance-sheet accounts, or an
+    // accrual settled against something that is not cash and not income.
+    plan.unresolvedCents += accrualLegs.reduce(
+      (sum, line) => sum + Math.abs(line.debitCents - line.creditCents),
+      0,
+    )
+  }
+
+  for (const cashEntry of cashEntries) {
+    const perAccount = new Map<string, Basket>()
+
+    for (const [accrualAccountId, legNet] of cashEntry.legs) {
+      const basket = baskets.get(accrualAccountId)
+      const entries = basket ? [...basket.entries()].filter(([, signed]) => signed !== 0) : []
+      const net = entries.reduce((sum, [, signed]) => sum + signed, 0)
+
+      if (net === 0) {
+        // Nothing has said what this money was for yet — a prepayment made and
+        // not amortized, or an accrual settled before it was accrued. The leg
+        // stays where it is, which puts the accrual-only account on a cash
+        // balance sheet. That is the honest answer and it is reported as one.
+        plan.unresolvedCents += Math.abs(legNet)
+        continue
+      }
+
+      perAccount.set(accrualAccountId, { entries, net })
+    }
+
+    if (perAccount.size > 0) plan.replacedLegs.set(cashEntry.entryId, perAccount)
+  }
+
+  return plan
+}
+
 /**
  * Splits an amount across weights, preserving the total exactly.
  *
@@ -219,6 +439,7 @@ export async function cashBasisBalances(
         number: chartAccounts.number,
         name: chartAccounts.name,
         type: chartAccounts.type,
+        subtype: chartAccounts.subtype,
       })
       .from(chartAccounts)
       .where(eq(chartAccounts.companyId, ctx.companyId)),
@@ -227,6 +448,7 @@ export async function cashBasisBalances(
     // the two edits below can find what they need without a second pass.
     db
       .select({
+        journalEntryId: journalLines.journalEntryId,
         chartAccountId: journalLines.chartAccountId,
         debitCents: journalLines.debitCents,
         creditCents: journalLines.creditCents,
@@ -268,11 +490,42 @@ export async function cashBasisBalances(
     accounts.filter((a) => CONTROL_ACCOUNT_NUMBERS.includes(a.number)).map((a) => a.id),
   )
 
+  const accrualAccountIds = new Set(
+    accounts.filter((a) => isAccrualOnly(a.type as AccountType, a.subtype)).map((a) => a.id),
+  )
+  const cashAccountIds = new Set(
+    accounts.filter((a) => isCashAccount(a.type as AccountType, a.subtype)).map((a) => a.id),
+  )
+  const incomeAccountIds = new Set(
+    accounts.filter((a) => cashFlowClass(a.type as AccountType, a.subtype) === 'income').map((a) => a.id),
+  )
+
+  const accrual = await accrualPlan(ctx, {
+    accrualAccountIds,
+    cashAccountIds,
+    incomeAccountIds,
+  })
+
   const deltas = new Map<string, Delta>()
 
   // --- Edit 1: everything except invoice and bill entries -------------------
   for (const line of allLines) {
     if (line.source === 'invoice' || line.source === 'bill') continue
+
+    // --- Edit 3: accruals and prepayments ---------------------------------
+    // A recognition entry moved an amount into the period it was earned or
+    // incurred in. That is the accrual claim itself, so on a cash basis the
+    // entry never happened.
+    if (accrual.removedEntryIds.has(line.journalEntryId)) continue
+
+    // On a cash entry, the accrual-only leg is replaced below by whatever the
+    // recognition entries said the money was for.
+    if (
+      accrual.replacedLegs.has(line.journalEntryId) &&
+      accrualAccountIds.has(line.chartAccountId)
+    ) {
+      continue
+    }
 
     // A bad debt is a non-event on a cash basis. The revenue was never taken
     // into account, so there is nothing to write off — which is also why a
@@ -382,6 +635,31 @@ export async function cashBasisBalances(
     })
   }
 
+  // --- Edit 3, second half: what the accrual-only legs are replaced with ----
+  for (const line of allLines) {
+    const replacement = accrual.replacedLegs.get(line.journalEntryId)
+    if (!replacement) continue
+    if (!accrualAccountIds.has(line.chartAccountId)) continue
+
+    const legNet = line.debitCents - line.creditCents
+    const basket = replacement.get(line.chartAccountId)
+    if (!basket || basket.net === 0) continue
+
+    // Scale the basket to exactly what this leg was worth, so the amount put
+    // back equals the amount taken out and the entry still balances.
+    const shares = scaleSigned(
+      legNet,
+      basket.entries.map(([, signed]) => signed),
+    )
+
+    basket.entries.forEach(([accountId], index) => {
+      const share = shares[index]
+      if (share === 0) return
+      if (share > 0) add(deltas, accountId, share, 0)
+      else add(deltas, accountId, 0, -share)
+    })
+  }
+
   return accounts
     .map((account) => {
       const delta = deltas.get(account.id) ?? { debitCents: 0, creditCents: 0 }
@@ -392,6 +670,7 @@ export async function cashBasisBalances(
         number: account.number,
         name: account.name,
         type,
+        subtype: account.subtype,
         debitCents: delta.debitCents,
         creditCents: delta.creditCents,
         balanceCents: normalBalance(type, delta.debitCents, delta.creditCents),
@@ -507,6 +786,42 @@ export async function cashBasisCaveats(
       message:
         'Sales tax collected is a liability on both bases and revenue on neither. It is excluded ' +
         'from the figures here, which is why cash received exceeds cash-basis revenue.',
+    })
+  }
+
+  // Accruals and prepayments the transformation could not resolve. Computed
+  // by running the plan rather than by a heuristic, so the figure printed is
+  // the amount that actually stayed put.
+  const accounts = await db
+    .select({
+      id: chartAccounts.id,
+      type: chartAccounts.type,
+      subtype: chartAccounts.subtype,
+    })
+    .from(chartAccounts)
+    .where(eq(chartAccounts.companyId, ctx.companyId))
+
+  const plan = await accrualPlan(ctx, {
+    accrualAccountIds: new Set(
+      accounts.filter((a) => isAccrualOnly(a.type as AccountType, a.subtype)).map((a) => a.id),
+    ),
+    cashAccountIds: new Set(
+      accounts.filter((a) => isCashAccount(a.type as AccountType, a.subtype)).map((a) => a.id),
+    ),
+    incomeAccountIds: new Set(
+      accounts
+        .filter((a) => cashFlowClass(a.type as AccountType, a.subtype) === 'income')
+        .map((a) => a.id),
+    ),
+  })
+
+  if (plan.unresolvedCents > 0) {
+    caveats.push({
+      area: 'Accruals and prepayments',
+      message:
+        `${formatCents(plan.unresolvedCents)} sits in accrual accounts that nothing has yet said ` +
+        'what it was for — a prepayment not amortized, or an accrual settled before it was ' +
+        'recorded. Those amounts stay on the balance sheet instead of becoming income or expense.',
     })
   }
 

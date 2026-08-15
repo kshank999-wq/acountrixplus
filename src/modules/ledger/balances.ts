@@ -51,6 +51,12 @@ export type AccountBalance = {
   number: string
   name: string
   type: AccountType
+  /**
+   * Carried since Phase 12 because the cash flow statement and cash-basis
+   * reporting both classify by it, and a report that has the balances but not
+   * the subtype has to go back to the database for something it just read.
+   */
+  subtype: string | null
   debitCents: number
   creditCents: number
   /** Signed in the account's normal direction. */
@@ -96,6 +102,7 @@ export async function accountBalances(
         number: chartAccounts.number,
         name: chartAccounts.name,
         type: chartAccounts.type,
+        subtype: chartAccounts.subtype,
       })
       .from(chartAccounts)
       .where(eq(chartAccounts.companyId, ctx.companyId))
@@ -127,6 +134,7 @@ export async function accountBalances(
         number: account.number,
         name: account.name,
         type,
+        subtype: account.subtype,
         debitCents,
         creditCents,
         balanceCents: normalBalance(type, debitCents, creditCents),

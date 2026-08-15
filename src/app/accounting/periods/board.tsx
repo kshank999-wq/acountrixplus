@@ -33,6 +33,12 @@ type Close = {
   reopenReason: string | null
 }
 
+type StaleClose = {
+  fiscalYear: number
+  entriesSinceCloseCount: number
+  netIncomeDriftCents: number
+}
+
 type Template = {
   id: string
   name: string
@@ -68,6 +74,7 @@ export function PeriodsBoard({
   year,
   closingDate,
   preview,
+  stale,
   closes,
   templates,
   drafts,
@@ -78,6 +85,7 @@ export function PeriodsBoard({
   year: number
   closingDate: string
   preview: Preview
+  stale: StaleClose[]
   closes: Close[]
   templates: Template[]
   drafts: Draft[]
@@ -139,6 +147,42 @@ export function PeriodsBoard({
         <p className={`card p-3 text-sm ${message.ok ? 'text-positive' : 'text-negative'}`} role="status">
           {message.text}
         </p>
+      )}
+
+      {/* Closing does not lock the period, so entries can still land in a
+          closed year. Nothing refuses them — but the figures the close froze
+          are now wrong, and that used to be silent. */}
+      {stale.length > 0 && (
+        <div className="card border-warning/40 p-4">
+          <h2 className="text-sm font-semibold text-warning">
+            {stale.length === 1 ? 'A closed year has' : 'Closed years have'} moved since closing
+          </h2>
+          <ul className="mt-2 space-y-1.5 text-sm">
+            {stale.map((row) => (
+              <li key={row.fiscalYear}>
+                <span className="font-medium">{row.fiscalYear}</span>: {row.entriesSinceCloseCount}{' '}
+                {row.entriesSinceCloseCount === 1 ? 'entry' : 'entries'} posted after the close.
+                {row.netIncomeDriftCents === 0 ? (
+                  <span className="text-muted">
+                    {' '}
+                    They cancel out, so the transfer to Retained Earnings is still right.
+                  </span>
+                ) : (
+                  <span className="text-muted">
+                    {' '}
+                    Net income for the year is now {formatCents(row.netIncomeDriftCents)} away from
+                    what was transferred to Retained Earnings.
+                  </span>
+                )}
+              </li>
+            ))}
+          </ul>
+          <p className="mt-2 text-xs text-faint">
+            Not a blocker. Locking the period is the control that stops entries; this only says the
+            frozen figures no longer match the books. Reopening and closing again brings them back
+            into line.
+          </p>
+        </div>
       )}
 
       {/* Proposals waiting on a person. */}

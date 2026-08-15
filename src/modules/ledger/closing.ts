@@ -1,6 +1,6 @@
-import { desc, eq, gte, isNull, lte } from 'drizzle-orm'
+import { and, desc, eq, gt, gte, isNull, lte, ne, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { fiscalYearCloses, journalEntries } from '@/db/schema'
+import { chartAccounts, fiscalYearCloses, journalEntries, journalLines } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { accountByNumber } from '@/modules/coa/service'
@@ -339,4 +339,117 @@ export async function listCloses(ctx: ActorContext) {
     .from(fiscalYearCloses)
     .where(scoped(ctx, fiscalYearCloses))
     .orderBy(desc(fiscalYearCloses.fiscalYear))
+}
+
+export type StaleClose = {
+  closeId: string
+  fiscalYear: number
+  closingDate: string
+  closedAt: Date
+  /** Posted entries dated inside the closed year, written after the close. */
+  entriesSinceCloseCount: number
+  /** How much the year's net income would move if it were closed again. */
+  netIncomeDriftCents: number
+}
+
+/**
+ * Closes whose figures have gone stale (ADR 0011, follow-up 1).
+ *
+ * ## Why this is a warning and not a block
+ *
+ * Closing and locking are deliberately separate. Locking stops entries being
+ * written; closing writes one more — the last of the year. Conflating them
+ * would mean a correction to last year needed somebody to unlock something
+ * that was never locked, so posting into a closed year stays possible.
+ *
+ * But it has a consequence nothing was saying: the close moved a *number* into
+ * Retained Earnings, and an entry landing in that year afterwards makes the
+ * number wrong. The books still balance — the new entry has its own two sides
+ * — and the year's profit no longer matches what was transferred, which is the
+ * kind of error that surfaces a year later as an equity figure nobody can
+ * explain.
+ *
+ * So: the entries are counted, the drift is measured, and the person who has
+ * to decide gets told. Reopening and re-closing is the fix, and it is theirs
+ * to choose.
+ */
+export async function staleCloses(ctx: ActorContext): Promise<StaleClose[]> {
+  requirePermission(ctx, 'accounting:view')
+
+  const closes = await db
+    .select()
+    .from(fiscalYearCloses)
+    .where(scoped(ctx, fiscalYearCloses, isNull(fiscalYearCloses.reopenedAt)))
+    .orderBy(desc(fiscalYearCloses.fiscalYear))
+
+  const stale: StaleClose[] = []
+
+  for (const close of closes) {
+    const yearStart = `${close.fiscalYear}-01-01`
+
+    // `created_at`, not `entry_date`: an entry dated inside the year is only a
+    // problem if it was *written* after the close froze the figures. The
+    // closing entry itself is excluded, since it is what the close is.
+    const [row] = await db
+      .select({ count: sql<string>`count(*)` })
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.companyId, ctx.companyId),
+          eq(journalEntries.status, 'posted'),
+          gte(journalEntries.entryDate, yearStart),
+          lte(journalEntries.entryDate, close.closingDate),
+          gt(journalEntries.createdAt, close.closedAt),
+          close.journalEntryId ? ne(journalEntries.id, close.journalEntryId) : undefined,
+        ),
+      )
+
+    const count = Number(row?.count ?? 0)
+    if (count === 0) continue
+
+    // Recompute the year's profit and compare it with what was transferred.
+    // Reading it rather than inferring it means the figure shown is the drift
+    // that actually exists, not the size of the entries that might have caused
+    // one — two corrections in opposite directions cancel, and saying so is
+    // more useful than raising an alarm about them.
+    //
+    // `accountBalances` cannot be reused here: it would include the closing
+    // entry, which zeroes every revenue and expense account by design, and the
+    // recomputed profit would come out as nothing every time.
+    const [profit] = await db
+      .select({
+        income: sql<string>`coalesce(sum(
+          CASE WHEN ${chartAccounts.type} IN ('revenue', 'other_income')
+               THEN ${journalLines.creditCents} - ${journalLines.debitCents} ELSE 0 END), 0)`,
+        expense: sql<string>`coalesce(sum(
+          CASE WHEN ${chartAccounts.type} IN ('expense', 'cogs', 'other_expense')
+               THEN ${journalLines.debitCents} - ${journalLines.creditCents} ELSE 0 END), 0)`,
+      })
+      .from(journalLines)
+      .innerJoin(journalEntries, eq(journalEntries.id, journalLines.journalEntryId))
+      .innerJoin(chartAccounts, eq(chartAccounts.id, journalLines.chartAccountId))
+      .where(
+        and(
+          eq(journalEntries.companyId, ctx.companyId),
+          eq(journalEntries.status, 'posted'),
+          gte(journalEntries.entryDate, yearStart),
+          lte(journalEntries.entryDate, close.closingDate),
+          ne(journalEntries.source, 'closing'),
+        ),
+      )
+
+    const income = Number(profit?.income ?? 0)
+    const expense = Number(profit?.expense ?? 0)
+
+    stale.push({
+      closeId: close.id,
+      fiscalYear: close.fiscalYear,
+      closingDate: close.closingDate,
+      closedAt: close.closedAt,
+      entriesSinceCloseCount: count,
+      netIncomeDriftCents: income - expense - close.netIncomeCents,
+    })
+  }
+
+  return stale
 }

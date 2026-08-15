@@ -143,10 +143,13 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
       .insert(creditNotes)
       .values({
         companyId: ctx.companyId,
+        party: 'customer',
         customerId: input.customerId,
+        vendorId: null,
         number,
         issueDate: input.issueDate,
         invoiceId: invoice?.id ?? null,
+        billId: null,
         status: 'open',
         subtotalCents,
         taxCents,
@@ -227,12 +230,22 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
     )
 
     if (input.applyImmediately && invoice) {
-      await applyCreditWithin(ctx, tx, {
+      const applied = await applyCreditWithin(ctx, tx, {
         creditNoteId: note.id,
         invoiceId: invoice.id,
         amountCents: Math.min(totalCents, invoice.balanceCents),
         appliedOn: input.issueDate,
       })
+
+      // `note` was read before the application ran, so its `remainingCents` is
+      // the figure from before. Returning it would tell the caller the credit
+      // is fully available at the moment it was spent.
+      return {
+        ...note,
+        journalEntryId: entry.id,
+        remainingCents: applied.creditRemainingCents,
+        status: applied.creditRemainingCents === 0 ? ('applied' as const) : note.status,
+      }
     }
 
     return { ...note, journalEntryId: entry.id }
@@ -293,6 +306,9 @@ async function applyCreditWithin(
     .limit(1)
 
   if (!note) throw new Error('Credit note not found')
+  if (note.party !== 'customer') {
+    throw new Error('That is a vendor credit. It cannot be applied to an invoice.')
+  }
   if (note.status === 'void') throw new Error('That credit note is voided.')
 
   const [invoice] = await tx
@@ -593,6 +609,7 @@ export async function listCreditNotes(
       scoped(
         ctx,
         creditNotes,
+        eq(creditNotes.party, 'customer'),
         opts.customerId ? eq(creditNotes.customerId, opts.customerId) : undefined,
         opts.openOnly ? sql`${creditNotes.remainingCents} > 0` : undefined,
       ),
@@ -661,7 +678,10 @@ async function nextCreditNumber(ctx: ActorContext, tx: Executor): Promise<string
   const [row] = await tx
     .select({ count: sql<string>`count(*)` })
     .from(creditNotes)
-    .where(eq(creditNotes.companyId, ctx.companyId))
+    // Scoped to the customer side since Phase 12: the table holds vendor
+    // credits too, and counting them here would skip CN numbers every time a
+    // vendor credit was raised.
+    .where(and(eq(creditNotes.companyId, ctx.companyId), eq(creditNotes.party, 'customer')))
 
   return `CN-${1001 + Number(row?.count ?? 0)}`
 }

@@ -19,8 +19,10 @@ import {
   createCustomer,
   createInvoice,
   createVendor,
+  listInvoices,
   recordPayment,
 } from '@/modules/receivables/service'
+import { cashFlowStatement } from '@/modules/ledger/cash-flow'
 import {
   changeStage,
   createContact,
@@ -1225,6 +1227,87 @@ async function main() {
     )
   }
 
+  // --- Phase 12: the statements an accountant asks for ---------------------
+
+  // Depreciation, so the cash flow statement has the add-back that the whole
+  // indirect method is built around. Without it the operating section is just
+  // net income and the point is invisible.
+  const accumulatedDepreciation = await accountByNumber(company.id, '1510')
+  const depreciationExpense = await accountByNumber(company.id, '9100')
+  if (accumulatedDepreciation && depreciationExpense) {
+    await postManualEntry(ctx, {
+      entryDate: '2026-06-30',
+      memo: 'Depreciation, six months',
+      source: 'adjusting',
+      lines: [
+        { chartAccountId: depreciationExpense.id, debitCents: 480_000 },
+        { chartAccountId: accumulatedDepreciation.id, creditCents: 480_000 },
+      ],
+    })
+  }
+
+  // An accrual and its reversal — the pattern cash basis is supposed to see
+  // through, and the one that used to show as an expense in the wrong month.
+  const accruedLiabilities = await accountByNumber(company.id, '2150')
+  const siteRentAccount = await accountByNumber(company.id, '6400')
+  const checkingChart = await accountByNumber(company.id, '1000')
+  if (accruedLiabilities && siteRentAccount && checkingChart) {
+    await postManualEntry(ctx, {
+      entryDate: '2026-05-31',
+      memo: 'Accrue May site rent, invoice not yet received',
+      source: 'adjusting',
+      lines: [
+        { chartAccountId: siteRentAccount.id, debitCents: 285_000 },
+        { chartAccountId: accruedLiabilities.id, creditCents: 285_000 },
+      ],
+    })
+    await postManualEntry(ctx, {
+      entryDate: '2026-06-15',
+      memo: 'Settle May site rent',
+      source: 'manual',
+      lines: [
+        { chartAccountId: accruedLiabilities.id, debitCents: 285_000 },
+        { chartAccountId: checkingChart.id, creditCents: 285_000 },
+      ],
+    })
+  }
+
+  // Two receipts waiting to be banked, so the deposits screen has an envelope
+  // to fill rather than an empty state.
+  const bankableInvoices = await listInvoices(ctx, { limit: 200 })
+  const waiting = bankableInvoices
+    .filter((invoice) => invoice.balanceCents > 0 && invoice.status !== 'void')
+    .slice(0, 2)
+
+  for (const invoice of waiting) {
+    await recordPayment(ctx, {
+      kind: 'receipt',
+      customerId: invoice.customerId,
+      paymentDate: '2026-07-06',
+      amountCents: invoice.balanceCents,
+      // No financial account: the cheque arrived and has not been banked.
+      applications: [{ invoiceId: invoice.id, amountCents: invoice.balanceCents }],
+      reference: 'Cheque',
+    })
+  }
+
+  if (waiting.length > 0) {
+    console.log(
+      `  ${waiting.length} receipt(s) waiting to be deposited — the bank will show one line for all of them.`,
+    )
+  }
+
+  const flow = await cashFlowStatement(ctx, {
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+  })
+  console.log(
+    `  Cash flow 2026: operating ${formatCentsPlain(flow.operating.totalCents)}, ` +
+      `investing ${formatCentsPlain(flow.investing.totalCents)}, ` +
+      `financing ${formatCentsPlain(flow.financing.totalCents)} — ` +
+      `${flow.reconciles ? 'reconciles' : 'DOES NOT RECONCILE'} to the cash accounts.`,
+  )
+
   // Cash versus accrual on the demo's own books, so the difference is a
   // number rather than an explanation.
   const range = { startDate: '2026-01-01', endDate: '2026-12-31' }
@@ -1260,6 +1343,7 @@ async function main() {
   console.log('  /accounting/reports   switch the basis — cash and accrual, same books')
   console.log('  /accounting/receivables  credits, write-offs, and statements')
   console.log('  /accounting/periods   recurring entries and the year-end close')
+  console.log('  /accounting/deposits  receipts waiting to be banked, and the slip')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

@@ -48,7 +48,10 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
     isSystem: true,
     description: 'Payments received but not yet deposited to a bank account.',
   },
-  { number: '1300', name: 'Prepaid Expenses', type: 'asset', subtype: 'other_current_asset' },
+  // Subtype `prepaid_expense`, not `other_current_asset`, since Phase 12: it is
+  // what tells cash-basis reporting this account holds a timing difference
+  // rather than an asset the business owns. See `coa/classification.ts`.
+  { number: '1300', name: 'Prepaid Expenses', type: 'asset', subtype: 'prepaid_expense' },
   { number: '1400', name: 'Inventory', type: 'asset', subtype: 'inventory' },
   { number: '1500', name: 'Fixed Assets', type: 'asset', subtype: 'fixed_asset' },
   {
@@ -69,9 +72,20 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
     description: 'Amounts the company owes to vendors.',
   },
   { number: '2100', name: 'Credit Card', type: 'liability', subtype: 'credit_card' },
+  {
+    number: '2150',
+    name: 'Accrued Liabilities',
+    type: 'liability',
+    subtype: 'accrued_liability',
+    description:
+      'Expenses incurred but not yet billed. Accrue at period end and reverse at the start of the next one.',
+  },
   { number: '2200', name: 'Sales Tax Payable', type: 'liability', subtype: 'sales_tax' },
   { number: '2300', name: 'Payroll Liabilities', type: 'liability', subtype: 'payroll' },
   { number: '2400', name: 'Loans Payable', type: 'liability', subtype: 'long_term_liability' },
+  // Deferred revenue: money taken before the work is done. Subtype matters —
+  // it is what makes a deposit revenue on a cash-basis report and not on an
+  // accrual one.
   { number: '2500', name: 'Unearned Revenue', type: 'liability', subtype: 'deferred_revenue' },
 
   // --- Equity -------------------------------------------------------------
@@ -156,6 +170,7 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
 export const SYSTEM_ACCOUNTS = {
   accountsReceivable: '1100',
   badDebt: '6025',
+  accruedLiabilities: '2150',
   undepositedFunds: '1200',
   accountsPayable: '2000',
   retainedEarnings: '3200',

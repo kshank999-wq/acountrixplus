@@ -275,8 +275,16 @@ export const payments = pgTable(
 
     paymentDate: date('payment_date').notNull(),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
-    /** The bank account the money moved through. */
-    financialAccountId: uuid('financial_account_id').notNull(),
+    /**
+     * The bank account the money moved through.
+     *
+     * Null since Phase 12 means the receipt is **undeposited**: the money has
+     * arrived but has not been taken to a bank, so it sits in Undeposited
+     * Funds until a deposit batches it. Which bank it will land in is not
+     * known yet and guessing would put a figure on a reconciliation that
+     * nothing at the bank matches.
+     */
+    financialAccountId: uuid('financial_account_id'),
     reference: text('reference'),
     memo: text('memo'),
 
@@ -294,6 +302,14 @@ export const payments = pgTable(
       foreignColumns: [financialAccounts.id],
     }).onDelete('restrict'),
     amountPositive: check('payments_amount_positive', sql`${t.amountCents} > 0`),
+    // Only money coming in can be undeposited. There is no such thing as
+    // paying a vendor out of funds you have not banked yet, and allowing it
+    // would let a disbursement post against Undeposited Funds and drive that
+    // account negative with nothing to reconcile it against.
+    undepositedIsReceipt: check(
+      'payments_undeposited_is_receipt',
+      sql`${t.financialAccountId} IS NOT NULL OR ${t.kind} = 'receipt'`,
+    ),
   }),
 )
 

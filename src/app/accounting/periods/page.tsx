@@ -2,7 +2,7 @@ import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listRecurringEntries } from '@/modules/ledger/recurring'
-import { listCloses, previewClose } from '@/modules/ledger/closing'
+import { listCloses, previewClose, staleCloses } from '@/modules/ledger/closing'
 import { listDraftEntries } from '@/modules/ledger/journal'
 import { listAccounts } from '@/modules/coa/service'
 import { ACCOUNTING_NAV } from '../nav'
@@ -43,7 +43,7 @@ export default async function PeriodsPage({
   const year = Number(params.year) || new Date().getUTCFullYear() - 1
   const closingDate = `${year}-12-31`
 
-  const [templates, closes, drafts, accounts, preview] = await Promise.all([
+  const [templates, closes, drafts, accounts, preview, stale] = await Promise.all([
     listRecurringEntries(actor),
     listCloses(actor),
     listDraftEntries(actor, { limit: 20 }),
@@ -51,6 +51,10 @@ export default async function PeriodsPage({
     can(actor, 'accounting:close')
       ? previewClose(actor, { closingDate }).catch(() => null)
       : Promise.resolve(null),
+    // Closing does not lock the period — that is a separate control by design
+    // — so an entry can land in a closed year and make its figures stale
+    // without anything refusing. This is the something that says so.
+    staleCloses(actor),
   ])
 
   return (
@@ -65,6 +69,11 @@ export default async function PeriodsPage({
         year={year}
         closingDate={closingDate}
         preview={preview}
+        stale={stale.map((row) => ({
+          fiscalYear: row.fiscalYear,
+          entriesSinceCloseCount: row.entriesSinceCloseCount,
+          netIncomeDriftCents: row.netIncomeDriftCents,
+        }))}
         closes={closes.map((row) => ({
           id: row.id,
           fiscalYear: row.fiscalYear,

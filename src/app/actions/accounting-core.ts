@@ -16,6 +16,13 @@ import {
   setRecurringActive,
 } from '@/modules/ledger/recurring'
 import { CloseBlockedError, closeFiscalYear, reopenFiscalYear } from '@/modules/ledger/closing'
+import {
+  createDeposit,
+  voidDeposit,
+  type DepositItemInput,
+} from '@/modules/banking/deposits'
+import { applyVendorCredit, createVendorCredit } from '@/modules/receivables/vendor-credits'
+import { formatCents } from '@/lib/money'
 
 /**
  * Server actions for the accounting core (Phase 11).
@@ -26,7 +33,13 @@ import { CloseBlockedError, closeFiscalYear, reopenFiscalYear } from '@/modules/
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
-const PATHS = ['/accounting', '/accounting/reports', '/accounting/receivables', '/accounting/journal']
+const PATHS = [
+  '/accounting',
+  '/accounting/reports',
+  '/accounting/receivables',
+  '/accounting/journal',
+  '/accounting/deposits',
+]
 
 async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
   try {
@@ -240,5 +253,96 @@ export async function reopenFiscalYearAction(
     const actor = await requireActor()
     await reopenFiscalYear(actor, uuid.parse(closeId), reason)
     return 'Reopened. The closing entry is reversed, not deleted — the reopen is part of the record.'
+  })
+}
+
+// --- Deposits and vendor credits (Phase 12) --------------------------------
+
+const depositSchema = z.object({
+  financialAccountId: uuid,
+  depositDate: isoDate,
+  paymentIds: z.array(uuid),
+  // A fee is stored as the negative number it is. One place to get the sign
+  // wrong is better than a positive amount plus a flag saying to subtract it.
+  feeAccountId: uuid.optional(),
+  feeCents: z.number().int().positive().optional(),
+  memo: z.string().trim().optional(),
+})
+
+export async function createDepositAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = depositSchema.parse(input)
+
+    const items: DepositItemInput[] = parsed.paymentIds.map((paymentId) => ({ paymentId }))
+    if (parsed.feeAccountId && parsed.feeCents) {
+      items.push({
+        chartAccountId: parsed.feeAccountId,
+        amountCents: -parsed.feeCents,
+        memo: 'Processing fee',
+      })
+    }
+
+    const deposit = await createDeposit(actor, {
+      financialAccountId: parsed.financialAccountId,
+      depositDate: parsed.depositDate,
+      items,
+      memo: parsed.memo || undefined,
+    })
+
+    return `${deposit.number} recorded. The bank will show one line for ${formatCents(deposit.totalCents)}.`
+  })
+}
+
+export async function voidDepositAction(
+  depositId: string,
+  reversalDate: string,
+): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const deposit = await voidDeposit(actor, uuid.parse(depositId), isoDate.parse(reversalDate))
+    return `${deposit.number} reversed. Its receipts are waiting to be deposited again.`
+  })
+}
+
+const vendorCreditSchema = z.object({
+  vendorId: uuid,
+  billId: uuid.optional(),
+  issueDate: isoDate,
+  reason: z.string().trim().optional(),
+  applyImmediately: z.boolean().optional(),
+})
+
+export async function createVendorCreditAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = vendorCreditSchema.parse(input)
+
+    const credit = await createVendorCredit(actor, {
+      vendorId: parsed.vendorId,
+      billId: parsed.billId,
+      issueDate: parsed.issueDate,
+      reason: parsed.reason || undefined,
+      applyImmediately: parsed.applyImmediately ?? false,
+    })
+
+    return `${credit.number} issued. The cost is reversed on the accounts the bill was booked to.`
+  })
+}
+
+const applyVendorCreditSchema = z.object({
+  creditNoteId: uuid,
+  billId: uuid,
+  amountCents: z.number().int().positive(),
+  appliedOn: isoDate,
+})
+
+export async function applyVendorCreditAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = applyVendorCreditSchema.parse(input)
+
+    const result = await applyVendorCredit(actor, parsed)
+    return `Applied. ${result.creditRemainingCents === 0 ? 'The credit is used up.' : 'Some credit is still available.'}`
   })
 }

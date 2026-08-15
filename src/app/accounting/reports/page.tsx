@@ -12,12 +12,25 @@ import {
   isReportingBasis,
   type ReportingBasis,
 } from '@/modules/ledger/cash-basis'
+import { cashFlowStatement } from '@/modules/ledger/cash-flow'
+import {
+  COMPARISON_LABELS,
+  comparativeProfitAndLoss,
+  comparisonWindows,
+  type ComparisonKind,
+} from '@/modules/ledger/comparative'
 import { ACCOUNTING_NAV } from '../nav'
 import { ReportPicker } from './report-picker'
 
 export const dynamic = 'force-dynamic'
 
-type SearchParams = Promise<{ report?: string; start?: string; end?: string; basis?: string }>
+type SearchParams = Promise<{
+  report?: string
+  start?: string
+  end?: string
+  basis?: string
+  compare?: string
+}>
 
 /** Sensible default range: the current calendar year to date. */
 function defaultRange() {
@@ -43,6 +56,10 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   const end = params.end || defaults.end
   const report = params.report ?? 'trial_balance'
   const basis: ReportingBasis = isReportingBasis(params.basis) ? params.basis : 'accrual'
+  const compare: ComparisonKind =
+    params.compare === 'prior_year' || params.compare === 'year_to_date_prior_year'
+      ? params.compare
+      : 'prior_period'
 
   const canSeeStatements = can(actor, 'reports:financial')
 
@@ -58,6 +75,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         start={start}
         end={end}
         basis={basis}
+        compare={compare}
         canSeeStatements={canSeeStatements}
       />
 
@@ -68,6 +86,12 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         )}
         {report === 'balance_sheet' && canSeeStatements && (
           <BalanceSheetReport actor={actor} end={end} basis={basis} />
+        )}
+        {report === 'cash_flow' && canSeeStatements && (
+          <CashFlowReport actor={actor} start={start} end={end} />
+        )}
+        {report === 'comparative' && canSeeStatements && (
+          <ComparativeReport actor={actor} start={start} end={end} basis={basis} compare={compare} />
         )}
         {report === 'ar_aging' && <AgingReport actor={actor} end={end} kind="ar" />}
         {report === 'ap_aging' && <AgingReport actor={actor} end={end} kind="ap" />}
@@ -380,6 +404,195 @@ function SectionBlock({
         </td>
       </tr>
     </>
+  )
+}
+
+async function CashFlowReport({
+  actor,
+  start,
+  end,
+}: {
+  actor: Awaited<ReturnType<typeof requireActor>>
+  start: string
+  end: string
+}) {
+  const statement = await cashFlowStatement(actor, { startDate: start, endDate: end })
+
+  const sections = [statement.operating, statement.investing, statement.financing]
+
+  return (
+    <div className="space-y-3">
+      {!statement.reconciles && (
+        <p className="card border-danger/40 p-3 text-xs text-danger">
+          The sections come to {formatCents(statement.netChangeInCashCents)} but the cash accounts
+          moved by {formatCents(statement.closingCashCents - statement.openingCashCents)}. The
+          statement is derived from the same movements as the balance sheet, so this can only mean
+          something wrote to the ledger outside the journal service.
+        </p>
+      )}
+
+      <Card title="Statement of cash flows" subtitle={`${start} to ${end} · indirect method`}>
+        <table className="w-full text-sm">
+          <tbody>
+            {sections.map((section, index) => (
+              <Fragment key={section.title}>
+                <tr className="bg-raised/60">
+                  <td className="px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted">
+                    {section.title}
+                  </td>
+                  <td />
+                </tr>
+                {index === 0 && (
+                  <tr className="border-t border-line">
+                    <td className="px-4 py-1.5">Net income</td>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(statement.netIncomeCents)}
+                    </td>
+                  </tr>
+                )}
+                {section.lines.map((line) => (
+                  <tr key={line.chartAccountId} className="border-t border-line">
+                    <td className="px-4 py-1.5 pl-8">
+                      <span className="tnum text-faint">{line.number}</span> {line.name}
+                    </td>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(line.cashEffectCents)}
+                    </td>
+                  </tr>
+                ))}
+                <tr className="border-t border-line font-medium">
+                  <td className="px-4 py-1.5">Net cash from {section.title.toLowerCase()}</td>
+                  <td className="tnum px-4 py-1.5 text-right">
+                    {formatCents(section.totalCents)}
+                  </td>
+                </tr>
+              </Fragment>
+            ))}
+
+            <tr className="border-t-2 border-line font-semibold">
+              <td className="px-4 py-2">Net change in cash</td>
+              <td className="tnum px-4 py-2 text-right">
+                {formatCents(statement.netChangeInCashCents)}
+              </td>
+            </tr>
+            <tr className="border-t border-line">
+              <td className="px-4 py-1.5 text-muted">Cash at {start}</td>
+              <td className="tnum px-4 py-1.5 text-right">
+                {formatCents(statement.openingCashCents)}
+              </td>
+            </tr>
+            <tr className="border-t border-line font-semibold">
+              <td className="px-4 py-2">Cash at {end}</td>
+              <td className="tnum px-4 py-2 text-right">
+                {formatCents(statement.closingCashCents)}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </Card>
+
+      <p className="text-xs text-faint">
+        Indirect method: the change in cash is the negated movement of every other account, grouped
+        into three sections. Depreciation appears in operating because it moved an account and no
+        cash — not as a rule applied afterwards.
+      </p>
+    </div>
+  )
+}
+
+async function ComparativeReport({
+  actor,
+  start,
+  end,
+  basis,
+  compare,
+}: {
+  actor: Awaited<ReturnType<typeof requireActor>>
+  start: string
+  end: string
+  basis: ReportingBasis
+  compare: ComparisonKind
+}) {
+  const periods = comparisonWindows({ startDate: start, endDate: end }, compare)
+  const report = await comparativeProfitAndLoss(actor, { periods, basis })
+
+  const sections = [
+    report.revenue,
+    report.costOfSales,
+    report.operatingExpenses,
+    report.otherIncome,
+    report.otherExpenses,
+  ].filter((section) => section.rows.length > 0)
+
+  return (
+    <Card
+      title={`Comparative profit & loss — ${COMPARISON_LABELS[compare]}`}
+      subtitle={`${BASIS_LABELS[basis]} basis`}
+    >
+      <table className="w-full text-sm">
+        <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+          <tr>
+            <th className="px-4 py-2 font-medium">Account</th>
+            {report.periods.map((period) => (
+              <th key={period.label} className="px-4 py-2 text-right font-medium">
+                {period.label}
+              </th>
+            ))}
+            <th className="px-4 py-2 text-right font-medium">Variance</th>
+            <th className="px-4 py-2 text-right font-medium">%</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sections.map((section) => (
+            <Fragment key={section.title}>
+              <tr className="bg-raised/40">
+                <td
+                  colSpan={report.periods.length + 3}
+                  className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted"
+                >
+                  {section.title}
+                </td>
+              </tr>
+              {section.rows.map((row) => (
+                <tr key={row.chartAccountId} className="border-t border-line">
+                  <td className="px-4 py-1.5">
+                    <span className="tnum text-faint">{row.number}</span> {row.name}
+                  </td>
+                  {row.amountsCents.map((amount, index) => (
+                    <td key={index} className="tnum px-4 py-1.5 text-right">
+                      {formatCents(amount)}
+                    </td>
+                  ))}
+                  <td className="tnum px-4 py-1.5 text-right">{formatCents(row.varianceCents)}</td>
+                  <td className="tnum px-4 py-1.5 text-right text-muted">
+                    {/* No prior figure means no percentage. Printing one would
+                        invite somebody to act on an infinity. */}
+                    {row.varianceBasisPoints === null
+                      ? '—'
+                      : `${(row.varianceBasisPoints / 100).toFixed(1)}%`}
+                  </td>
+                </tr>
+              ))}
+            </Fragment>
+          ))}
+
+          <tr className="border-t-2 border-line font-semibold">
+            <td className="px-4 py-2">Net income</td>
+            {report.netIncomeCents.map((amount, index) => (
+              <td key={index} className="tnum px-4 py-2 text-right">
+                {formatCents(amount)}
+              </td>
+            ))}
+            <td className="tnum px-4 py-2 text-right">
+              {formatCents(
+                report.netIncomeCents[0] - report.netIncomeCents[report.netIncomeCents.length - 1],
+              )}
+            </td>
+            <td />
+          </tr>
+        </tbody>
+      </table>
+    </Card>
   )
 }
 

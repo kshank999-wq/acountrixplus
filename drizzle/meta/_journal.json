@@ -85,6 +85,13 @@
       "when": 1786667741205,
       "tag": "0011_phase11_accounting_core",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1786829603509,
+      "tag": "0012_phase12_statements",
+      "breakpoints": true
     }
   ]
 }

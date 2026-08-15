@@ -6,8 +6,16 @@ const REPORTS = [
   { key: 'trial_balance', label: 'Trial balance', financial: false },
   { key: 'profit_loss', label: 'Profit & loss', financial: true },
   { key: 'balance_sheet', label: 'Balance sheet', financial: true },
+  { key: 'cash_flow', label: 'Cash flow', financial: true },
+  { key: 'comparative', label: 'Comparative P&L', financial: true },
   { key: 'ar_aging', label: 'A/R aging', financial: false },
   { key: 'ap_aging', label: 'A/P aging', financial: false },
+]
+
+const COMPARISONS = [
+  { key: 'prior_period', label: 'Prior period' },
+  { key: 'prior_year', label: 'Same period last year' },
+  { key: 'year_to_date_prior_year', label: 'Year to date vs last year' },
 ]
 
 /** Report selector and date range. Balance-sheet style reports use only the end date. */
@@ -16,12 +24,14 @@ export function ReportPicker({
   start,
   end,
   basis,
+  compare,
   canSeeStatements,
 }: {
   report: string
   start: string
   end: string
   basis: string
+  compare: string
   canSeeStatements: boolean
 }) {
   const router = useRouter()
@@ -40,7 +50,11 @@ export function ReportPicker({
   // Only the statements have a basis. A trial balance is a statement about the
   // journal, and the journal is kept on one basis — offering a switch there
   // would imply a choice that does not exist.
-  const hasBasis = report === 'profit_loss' || report === 'balance_sheet'
+  //
+  // Nor does the cash flow statement. The indirect method exists to explain the
+  // gap between accrual profit and cash; on a cash basis there is no gap, so
+  // every adjustment line would be zero.
+  const hasBasis = report === 'profit_loss' || report === 'balance_sheet' || report === 'comparative'
 
   return (
     <div className="card p-3">
@@ -102,6 +116,27 @@ export function ReportPicker({
                   }`}
                 >
                   {option === 'accrual' ? 'Accrual' : 'Cash'}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {report === 'comparative' && (
+          <div className="text-xs text-muted">
+            <span className="mb-1 block">Compare against</span>
+            <div className="flex flex-wrap gap-1">
+              {COMPARISONS.map((option) => (
+                <button
+                  key={option.key}
+                  onClick={() => setParam('compare', option.key)}
+                  className={`chip px-3 py-1.5 ${
+                    compare === option.key
+                      ? 'bg-brand text-brand-ink'
+                      : 'bg-raised text-muted hover:text-ink'
+                  }`}
+                >
+                  {option.label}
                 </button>
               ))}
             </div>

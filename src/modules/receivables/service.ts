@@ -577,6 +577,11 @@ export type PaymentApplicationInput = {
  * Dr Accounts Payable / Cr bank. Neither touches revenue or expense — those
  * were already recognized when the invoice or bill was issued, and hitting
  * them again would double-count.
+ *
+ * Since Phase 12 a receipt may omit `financialAccountId`, which means the
+ * money arrived but has not been banked: the debit goes to Undeposited Funds
+ * and a deposit moves the batch across later. See `banking/deposits.ts` for
+ * why that is worth a table.
  */
 export async function recordPayment(
   ctx: ActorContext,
@@ -586,7 +591,8 @@ export async function recordPayment(
     vendorId?: string
     paymentDate: string
     amountCents: number
-    financialAccountId: string
+    /** Omit on a receipt to hold it in Undeposited Funds. */
+    financialAccountId?: string
     applications: PaymentApplicationInput[]
     reference?: string
     memo?: string
@@ -605,13 +611,30 @@ export async function recordPayment(
     )
   }
 
-  const [account] = await db
-    .select()
-    .from(financialAccounts)
-    .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
-    .limit(1)
+  if (!input.financialAccountId && input.kind !== 'receipt') {
+    throw new Error('A disbursement has to say which account the money left.')
+  }
 
-  if (!account) throw new Error('Financial account not found')
+  // Undeposited receipts debit Undeposited Funds instead of a bank account.
+  // Resolved to a chart account here so the entry below does not care which
+  // of the two cases it is posting.
+  let debitAccountId: string
+  if (input.financialAccountId) {
+    const [account] = await db
+      .select()
+      .from(financialAccounts)
+      .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
+      .limit(1)
+
+    if (!account) throw new Error('Financial account not found')
+    debitAccountId = account.chartAccountId
+  } else {
+    const undeposited = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.undepositedFunds)
+    if (!undeposited) {
+      throw new Error('The Undeposited Funds account is missing from the chart.')
+    }
+    debitAccountId = undeposited.id
+  }
 
   const controlNumber =
     input.kind === 'receipt'
@@ -643,7 +666,7 @@ export async function recordPayment(
         vendorId: input.vendorId ?? null,
         paymentDate: input.paymentDate,
         amountCents: input.amountCents,
-        financialAccountId: input.financialAccountId,
+        financialAccountId: input.financialAccountId ?? null,
         reference: input.reference ?? null,
         memo: input.memo ?? null,
       })
@@ -667,12 +690,12 @@ export async function recordPayment(
         lines:
           input.kind === 'receipt'
             ? [
-                { chartAccountId: account.chartAccountId, debitCents: input.amountCents },
+                { chartAccountId: debitAccountId, debitCents: input.amountCents },
                 { chartAccountId: controlAccount.id, creditCents: input.amountCents },
               ]
             : [
                 { chartAccountId: controlAccount.id, debitCents: input.amountCents },
-                { chartAccountId: account.chartAccountId, creditCents: input.amountCents },
+                { chartAccountId: debitAccountId, creditCents: input.amountCents },
               ],
       },
       tx,
@@ -880,6 +903,9 @@ export async function listBills(ctx: ActorContext, opts: { limit?: number } = {}
     .select({
       id: bills.id,
       number: bills.number,
+      // Carried since Phase 12 so a vendor credit can be raised from the list
+      // without a second lookup per bill.
+      vendorId: bills.vendorId,
       vendorName: vendors.name,
       issueDate: bills.issueDate,
       dueDate: bills.dueDate,

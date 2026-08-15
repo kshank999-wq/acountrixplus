@@ -52,6 +52,11 @@ export type AuditAction =
   | 'payment.record'
   | 'customer.create'
   | 'vendor.create'
+  // Deposits and vendor credits (spec §13, Phase 12)
+  | 'deposit.create'
+  | 'deposit.void'
+  | 'vendor_credit.create'
+  | 'vendor_credit.apply'
   // CRM and proposals (spec §6, §9)
   | 'organization.create'
   | 'organization.update'

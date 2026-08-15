@@ -51,7 +51,7 @@ export const INDUSTRY_PACKS: Record<Industry, IndustryPack> = {
     modules: ['projects', 'time_billing'],
     terminology: { customer: 'Client', job: 'Engagement' },
     accounts: [
-      { number: '1150', name: 'Unbilled Work in Progress', type: 'asset', subtype: 'other_current_asset' },
+      { number: '1150', name: 'Unbilled Work in Progress', type: 'asset', subtype: 'unbilled_revenue' },
       { number: '2550', name: 'Client Retainers Held', type: 'liability', subtype: 'deferred_revenue' },
       { number: '4110', name: 'Consulting Revenue', type: 'revenue' },
       { number: '4120', name: 'Retainer Revenue', type: 'revenue' },
@@ -67,7 +67,7 @@ export const INDUSTRY_PACKS: Record<Industry, IndustryPack> = {
     modules: ['job_costing', 'projects'],
     terminology: { customer: 'Customer', job: 'Job' },
     accounts: [
-      { number: '1160', name: 'Costs in Excess of Billings', type: 'asset', subtype: 'other_current_asset' },
+      { number: '1160', name: 'Costs in Excess of Billings', type: 'asset', subtype: 'unbilled_revenue' },
       { number: '1170', name: 'Retainage Receivable', type: 'asset', subtype: 'accounts_receivable' },
       { number: '2560', name: 'Billings in Excess of Costs', type: 'liability', subtype: 'deferred_revenue' },
       { number: '2570', name: 'Retainage Payable', type: 'liability' },

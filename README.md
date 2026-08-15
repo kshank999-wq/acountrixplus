@@ -7,8 +7,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 2 (Reconciliation + Accounting Core)**, **Phase 3 (CRM + Proposal Pipeline)**,
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
-**Payroll and Tax**, the **background worker and outbox**, and the
-**completed accounting core** from the
+**Payroll and Tax**, the **background worker and outbox**, the
+**completed accounting core**, and the **statements an accountant asks for** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -19,8 +19,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0007](docs/adr/0007-industry-modules-without-forking-the-ledger.md),
 [ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md),
 [ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md),
-[ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md), and
-[ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md).
+[ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md),
+[ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md), and
+[ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -378,6 +379,50 @@ need, because most small businesses file on a cash basis.
   them would mean a correction to last year required unlocking something
   unrelated.
 
+### The statements an accountant asks for (cash flow, comparatives, deposits)
+
+The rest of §13's list, plus the fix for a defect the demo data found in the
+last phase.
+
+- **Statement of Cash Flows, indirect method.** Not a list of adjustment rules
+  to memorise — one identity. Because every entry balances, the movements of
+  all accounts sum to zero, so the change in cash *is* the negated movement of
+  every other account, and the three sections are a grouping of those accounts.
+  "Add back depreciation" is not a rule: Accumulated Depreciation moved by a
+  credit, so its negated movement is positive and it lands in operating because
+  that is where the account is classified. `reconciles` asserts the sections
+  come to what the cash accounts actually moved.
+- **Comparative periods** on the profit & loss, with prior period, same period
+  last year, and year to date. An account with activity in only one column
+  survives with a zero rather than vanishing — "we stopped spending on this" is
+  exactly what a comparative is read to find out.
+- **Undeposited funds and deposits.** Three cheques banked together are one
+  line on the statement. Without a deposit they are three in the books and
+  reconciliation cannot match them; the usual workaround is one lump receipt,
+  which loses which customer paid what and breaks the receivable, the
+  statement, and the aging report at once. A processing fee is a negative line,
+  so the bank account carries the figure the bank processed rather than the
+  gross.
+- **Vendor credits**, the AP mirror of a credit note — same table, one `party`
+  column, the way `payments` holds receipts and disbursements. There is
+  deliberately **no vendor write-off**: a debt the supplier stopped chasing is
+  a judgement about whether the obligation is really gone, not a bookkeeping
+  operation.
+- **Cash basis now understands accruals** — the Phase 11 defect. A manual
+  accrual used to show as an expense on a cash-basis P&L. Every timing
+  difference is written down twice, and which entry is the cash one is visible
+  in what its *other* legs are: a recognition entry's are income-statement
+  accounts, a cash entry's include cash. So the recognition entry is removed
+  and what it said the money was for is put back on the cash entry. A
+  prepayment is deducted when paid, a deposit taken in advance is revenue when
+  it arrives, and depreciation is untouched — it looks identical to an accrual
+  and is not one, which is why the rule is by account and not by shape.
+- **A closed year that has moved says so.** Closing does not lock the period,
+  by design, so an entry can still land in a closed year — and it makes the
+  figure transferred to Retained Earnings wrong. The drift is recomputed and
+  reported rather than the entry being blocked, and two corrections that cancel
+  are reported as cancelling.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -465,6 +510,7 @@ Coverage matches what spec §21 asks for:
 | `tests/cash-basis.test.ts` | Splitting an amount without losing cents; an unpaid invoice as revenue on one basis and nothing on the other; a part payment split across the accounts it was raised against; instalments summing back to the whole; bills recognized when paid; transactions that were already cash left alone; the bank balance identical on both bases; both balance sheets balancing over busy books and agreeing once everything settles; and the three cases that broke the first implementation — a write-off's stranded receivable, a recovery's revenue, and a construction company's retainage |
 | `tests/accounting-core.test.ts` | A credit note reversing revenue against a write-off keeping it; `written_off` never reading as `paid`; a write-off refused without a reason, over the balance, or twice; a recovery reversing the expense rather than recognizing revenue; credits applying without a second entry and never across customers; open-item and balance-forward statements; a write-off shown as a write-off on a statement; frozen saved figures; recurring cadences always moving forward and not skipping a month; a template refused if it does not balance; posting versus drafting; catching up with correctly dated occurrences and running twice changing nothing; and the close emptying period accounts into Retained Earnings, refusing a second time, warning about drafts, handling a loss, and reversing on reopen |
 | `tests/worker.test.ts` | Backoff growth, cap, and upward-only jitter; concurrent workers claiming a job once; run-at honoured; dedupe dropping rather than stacking; dead-lettering and never sweeping a dead job; stealing an expired claim; priority; retry resetting attempts; the runner surviving one bad job in a batch; unknown kinds dying immediately; a tenant job with no company refused; a global handler getting no actor; heartbeat liveness; `nextRunAt` strictly after and across month rollovers; a due schedule firing exactly once; the outbox rolling back with its transaction, relaying idempotently, and `invoice.paid` on full settlement only; a scheduled task that cannot sign in and belongs to no company; and the draft entry that changes no report until a person posts it |
+| `tests/statements.test.ts` | Account classification, including the two that look wrong and are right — accumulated depreciation in operating, and depreciation not being a timing difference; the cash flow statement reconciling to what the cash accounts moved, and an unpaid invoice as profit that is not yet cash; comparison windows including 29 February; an account surviving in only one column; a comparative balancing in every column; three cheques banked as one line, a processing fee, the same cheque refused twice, a deposit a fee has eaten, and a reversal making the receipts depositable again; a vendor credit reversing the cost on the bill's own account, a customer credit refused against a bill, and the two numbering series kept apart; an accrual not being an expense on a cash basis, an accrual settled straight from the bank still becoming one, a prepayment deducted when paid, a deposit taken in advance as revenue when it arrives, the transformation still balancing, and the caveat naming what it could not resolve; and a closed year reporting its drift rather than blocking the entry |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -924,6 +970,47 @@ key and the client proposal link — keep them for steps 22 and 24.
 133. **Reopening leaves a trail** — reopen the year with a reason. The closing entry is voided, not
      deleted, so an auditor asking why Retained Earnings moves twice in January has an answer.
 
+### The statements an accountant asks for (Phase 12)
+
+134. **Run a cash flow statement** — **Accounting → Reports → Cash flow**. Three sections and, at
+     the bottom, cash at the start of the range and cash at the end. There is no basis switch here
+     on purpose: the indirect method exists to explain the gap between accrual profit and cash, and
+     on a cash basis there is no gap.
+135. **Find the depreciation add-back** — the seeded books carry a depreciation charge. It is the
+     first line under operating activities, and no cash left for it. That line is not a rule applied
+     afterwards; it is Accumulated Depreciation's own movement, negated.
+136. **Check it against the balance sheet** — the closing cash figure equals the bank and cash
+     accounts on the balance sheet for the same date. If it ever did not, the page would say so
+     above the report rather than let you find out later.
+137. **Compare two periods** — **Reports → Comparative P&L**, then *Same period last year*. Every
+     account the two periods share appears once with both figures and a variance. Accounts with
+     activity in only one of them still appear, with a zero and a dash where a percentage would be
+     meaningless.
+138. **Bank three cheques as one line** — **Accounting → Deposits** lists receipts that arrived and
+     have not been banked. Tick them and watch the slip total: that is the figure the bank statement
+     will carry, and matching it is the whole reason the screen exists.
+139. **Add a processing fee** — enter one and choose Merchant and Processing Fees. The bank is
+     debited for the net, the fee for its cut, and Undeposited Funds credited with the gross the
+     customers actually paid. Reconciliation now has one line to match, not three.
+140. **Try to bank the same cheque twice** — reverse a deposit, then include one of its receipts in
+     two deposits. Refused by a unique index rather than a check, because two people clicking at
+     once would both pass a read-then-check.
+141. **Issue a vendor credit** — **Accounting → Credits & statements**, bottom of the page. Pick a
+     bill; the credit defaults to that bill's own lines, so the cost comes back off the account it
+     was booked to rather than into a "purchase returns" bucket that tells nobody which cost went
+     away. Note there is no vendor *write-off* beside it, and why.
+142. **The accrual that is not a cash expense** — post `Dr Rent / Cr Accrued Liabilities` dated
+     today, then run the P&L for this month on both bases. Accrual shows the cost; cash shows
+     nothing, because no money moved. Before Phase 12 both showed it.
+143. **Then settle it from the bank** — post `Dr Accrued Liabilities / Cr Checking`. Now the
+     cash-basis P&L shows the expense, on the account the accrual named, in the month the money
+     left. Dropping the accrual and stopping there would have lost it permanently.
+144. **Post into a closed year** — after closing 2025 above, post an entry dated inside it.
+     **Recurring & close** now carries a warning naming the year, the number of entries, and how far
+     net income has drifted from what was transferred to Retained Earnings. It is not a block:
+     locking is the control that stops entries, and this only says the frozen figures no longer
+     match the books.
+
 ## Project layout
 
 ```
@@ -1187,6 +1274,22 @@ Tracked against the spec §20 phases:
 
 Gaps within the phases already built:
 
+- **§13's accounting workspace, what is left.** Cash Flow, comparative periods, deposits and
+  undeposited funds, and vendor credits are built. Still open: a **classes / departments /
+  locations dimension** — §13 asks for those "**or equivalent**", and projects plus cost codes are
+  the equivalent that exists, which leaves a restaurant with three locations and no projects
+  unserved — and a **fixed asset register with depreciation schedules**, which §13 explicitly
+  allows as a later professional module. Comparative *balance sheets* have a tested service and no
+  screen; only the P&L has one.
+- **Accruals are pooled per account, not matched per item.** Cash basis works out what a
+  prepayment or accrual was for by reading the recognition entries on that account. A company
+  running two prepaid insurance policies through one account gets the pool, not the policy, and one
+  that has never amortized a prepayment gets it left on the balance sheet with a caveat naming the
+  amount. Matching per item needs the accrual linked to its settlement the way
+  `payment_applications` links a payment to its invoice.
+- **No MFA, session/device controls, or login history for web users.** Spec §14 asks for all
+  three. The mobile app has device sessions and revocation (Phase 8); the web side has neither, and
+  there is no export of accounting records that §19 asks for either.
 - **No tool-calling loop.** Spec §12's tool layer is implemented as the suggestion queue plus
   permission-gated retrieval, not as a model invoking functions directly. Every consequential
   action here is one a person should confirm anyway. See ADR 0006.
