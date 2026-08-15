@@ -2,6 +2,7 @@ import Link from 'next/link'
 import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
+import { SETTINGS_NAV } from '../nav'
 import { listJobs, oldestQueuedAt, queueCounts } from '@/modules/worker/queue'
 import { listSchedules } from '@/modules/worker/schedules'
 import { listEvents, pendingEventCount } from '@/modules/worker/outbox'
@@ -62,13 +63,7 @@ export default async function OperationsPage() {
       companyName={session?.companyName ?? 'Accountrix Plus'}
       active="bookkeeping"
     >
-      <SubNav
-        items={[
-          { href: '/settings/modules', label: 'Modules' },
-          { href: '/settings/operations', label: 'Background work' },
-        ]}
-        active="/settings/operations"
-      />
+      <SubNav items={SETTINGS_NAV} active="/settings/operations" />
 
       <OperationsBoard
         counts={counts}

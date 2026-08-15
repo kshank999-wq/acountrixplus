@@ -2,6 +2,7 @@ import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { eq, and, gt } from 'drizzle-orm'
 import { db } from '@/db'
 import { sessions, memberships, users, companies, devices } from '@/db/schema'
+import { securityPolicy } from './login-history'
 
 export const SESSION_COOKIE = 'accountrix_session'
 export const SESSION_TTL_DAYS = 30
@@ -57,7 +58,16 @@ export async function createSession(
    */
   deviceId?: string | null,
 ) {
-  const expiresAt = new Date(Date.now() + SESSION_TTL_DAYS * 24 * 60 * 60 * 1000)
+  // The company's policy governs how long a session lasts, falling back to the
+  // default where there is none (Phase 13, spec §14). Read here rather than
+  // enforced at resolve time so a shortened policy does not retroactively end
+  // sessions that were legitimate when they were created — a company tightening
+  // its policy should not sign everybody out mid-sentence.
+  const ttlDays = activeCompanyId
+    ? (await securityPolicy(activeCompanyId)).sessionTtlDays
+    : SESSION_TTL_DAYS
+
+  const expiresAt = new Date(Date.now() + ttlDays * 24 * 60 * 60 * 1000)
 
   const [session] = await db
     .insert(sessions)

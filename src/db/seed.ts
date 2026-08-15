@@ -1344,6 +1344,7 @@ async function main() {
   console.log('  /accounting/receivables  credits, write-offs, and statements')
   console.log('  /accounting/periods   recurring entries and the year-end close')
   console.log('  /accounting/deposits  receipts waiting to be banked, and the slip')
+  console.log('  /settings/security    two-factor, sessions, sign-in history, and the export')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

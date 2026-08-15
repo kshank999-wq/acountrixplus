@@ -1,6 +1,8 @@
 import { cookies, headers } from 'next/headers'
 import { redirect } from 'next/navigation'
 import { resolveSession, SESSION_COOKIE } from '@/modules/auth/session'
+import { securityPolicy } from '@/modules/auth/login-history'
+import { hasConfirmedMfa } from '@/modules/auth/mfa'
 import type { ActorContext } from '@/modules/tenancy/context'
 
 /**
@@ -27,10 +29,34 @@ export async function currentActor(): Promise<ActorContext | null> {
   }
 }
 
-/** Same, but sends anonymous visitors to the login page. */
-export async function requireActor(): Promise<ActorContext> {
+/**
+ * Same, but sends anonymous visitors to the login page — and, where the
+ * company requires a second factor, sends members who have not enrolled to go
+ * and do it (spec §14).
+ *
+ * ## Why the enforcement is here
+ *
+ * Every page and every server action already starts at this function. A policy
+ * checked anywhere else is a policy with as many holes as there are routes
+ * that forgot it, and the one that forgets is the one that matters.
+ *
+ * `allowUnenrolled` is for the two places that must stay reachable without a
+ * second factor: the enrolment page itself, and signing out. Without those the
+ * policy is not a requirement, it is a lockout.
+ */
+export async function requireActor(
+  opts: { allowUnenrolled?: boolean } = {},
+): Promise<ActorContext> {
   const actor = await currentActor()
   if (!actor) redirect('/login')
+
+  if (!opts.allowUnenrolled) {
+    const policy = await securityPolicy(actor.companyId)
+    if (policy.requireMfa && !(await hasConfirmedMfa(actor.userId))) {
+      redirect('/settings/security?enrol=required')
+    }
+  }
+
   return actor
 }
 

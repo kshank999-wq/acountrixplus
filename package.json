@@ -2,7 +2,7 @@
   "name": "accountrix-plus",
   "version": "0.1.0",
   "private": true,
-  "description": "Accountrix Plus — a unified business operating system for bookkeeping, accounting, clients, proposals, and marketing.",
+  "description": "Accountrix Plus \u2014 a unified business operating system for bookkeeping, accounting, clients, proposals, and marketing.",
   "scripts": {
     "dev": "next dev",
     "build": "next build",
@@ -17,7 +17,9 @@
     "worker": "tsx src/worker.ts",
     "worker:once": "tsx src/worker-once.ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "db:backup": "bash scripts/backup.sh",
+    "db:verify-restore": "bash scripts/verify-restore.sh"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

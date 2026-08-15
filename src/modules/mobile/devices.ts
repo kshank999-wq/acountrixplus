@@ -1,4 +1,4 @@
-import { and, desc, eq, isNull } from 'drizzle-orm'
+import { and, desc, eq, isNull, ne, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { devices, sessions } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
@@ -223,4 +223,75 @@ export async function renameDevice(
     .returning({ id: devices.id })
 
   if (result.length === 0) throw new Error('Device not found')
+}
+
+/**
+ * Signs out everywhere except here (spec §14: "revocation").
+ *
+ * The single button somebody actually wants after a scare: they do not know
+ * *which* device is the problem, only that something is wrong. Offering only
+ * per-device revocation asks them to identify the attacker's device from a
+ * list, which they cannot do.
+ *
+ * The current device is kept so the person is not signed out mid-panic and
+ * left unable to change their password.
+ */
+export async function revokeAllOtherDevices(
+  ctx: ActorContext,
+  currentDeviceId: string | null | undefined,
+): Promise<{ devicesRevoked: number; sessionsEnded: number }> {
+  return db.transaction(async (tx) => {
+    const others = await tx
+      .select({ id: devices.id })
+      .from(devices)
+      .where(
+        and(
+          eq(devices.userId, ctx.userId),
+          isNull(devices.revokedAt),
+          currentDeviceId ? ne(devices.id, currentDeviceId) : undefined,
+        ),
+      )
+
+    const now = new Date()
+    for (const device of others) {
+      await tx
+        .update(devices)
+        .set({ revokedAt: now, revokedBy: ctx.userId })
+        .where(eq(devices.id, device.id))
+    }
+
+    // Sessions are deleted by user rather than by device, deliberately. A
+    // session whose device is null — every session created before Phase 8 —
+    // would survive a device-by-device sweep, which is exactly the session an
+    // attacker would rather keep.
+    //
+    // `IS DISTINCT FROM`, not `<>`. In SQL, `NULL <> 'some-uuid'` evaluates to
+    // NULL rather than true, so a plain inequality silently keeps every
+    // session that has no device — the precise rows this sweep exists to
+    // remove. A test asserts it, because the bug leaves no trace.
+    const ended = await tx
+      .delete(sessions)
+      .where(
+        and(
+          eq(sessions.userId, ctx.userId),
+          currentDeviceId
+            ? sql`${sessions.deviceId} IS DISTINCT FROM ${currentDeviceId}`
+            : undefined,
+        ),
+      )
+      .returning({ id: sessions.id })
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'device.revoke_all',
+        entityType: 'user',
+        entityId: ctx.userId,
+        after: { devicesRevoked: others.length, sessionsEnded: ended.length },
+      },
+      tx,
+    )
+
+    return { devicesRevoked: others.length, sessionsEnded: ended.length }
+  })
 }

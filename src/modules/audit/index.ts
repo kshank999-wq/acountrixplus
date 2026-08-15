@@ -52,6 +52,14 @@ export type AuditAction =
   | 'payment.record'
   | 'customer.create'
   | 'vendor.create'
+  // Security controls (spec §14, §19, Phase 13)
+  | 'device.revoke_all'
+  | 'mfa.enable'
+  | 'mfa.disable'
+  | 'mfa.recovery_codes_regenerated'
+  | 'password.change'
+  | 'security_policy.update'
+  | 'data.export'
   // Deposits and vendor credits (spec §13, Phase 12)
   | 'deposit.create'
   | 'deposit.void'

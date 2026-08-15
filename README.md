@@ -8,7 +8,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
 **Payroll and Tax**, the **background worker and outbox**, the
-**completed accounting core**, and the **statements an accountant asks for** from the
+**completed accounting core**, the **statements an accountant asks for**, and the
+**security controls** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -20,8 +21,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0008](docs/adr/0008-offline-first-and-replay-safety.md),
 [ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md),
 [ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md),
-[ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md), and
-[ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md).
+[ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md),
+[ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md), and
+[ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -423,6 +425,58 @@ last phase.
   reported rather than the entry being blocked, and two corrections that cancel
   are reported as cancelling.
 
+### The security controls (two-factor, login history, export, backups)
+
+Spec §19 names a security review as the gate in front of production use of
+payroll, tax filing, payment features, and automated financial actions — most of
+what the last five phases built. This is the part of that gate which is code.
+The claim: **a stolen password is not enough, and every attempt to use one is on
+the record.**
+
+- **Two-factor authentication (TOTP)**, tested against RFC 6238's published
+  vectors. Four details are load-bearing and each is a way sixty lines could be
+  quietly wrong: constant-time comparison, so timing does not leak how many
+  digits were right; ±1 step of drift and no more; the counter floored to
+  30-second steps; and **a used code cannot be used again**, which is the one
+  most implementations skip — without it a code read over a shoulder works for a
+  full minute.
+- **Enrolment is two steps.** The secret is stored unconfirmed and MFA only
+  switches on after a code from it has worked. Enabling on generation would lock
+  out everybody who scanned the wrong QR code, and they would find out at their
+  next sign-in with no way back in.
+- **Ten single-use recovery codes**, shown once, hashed the way passwords are.
+  Without them, MFA is one dropped phone away from a support process that
+  consists of switching it off for whoever asks.
+- **The half-signed-in state is not a session.** It is a five-minute signed
+  token that grants exactly one thing — the right to present a second factor —
+  bound to the password hash, so changing the password kills it.
+- **The policy is enforced at `requireActor`**, the one function every page and
+  action already starts at. A company can require two-factor for everybody;
+  members without it can reach the security page and nothing else. Opt-in MFA is
+  adopted by the people who were never the risk.
+- **Login history and lockout.** Every attempt is recorded with a named outcome,
+  because "twelve wrong passwords for one address" and "twelve addresses that do
+  not exist" are the same under a boolean and mean different things. Failures
+  are counted since the last success, so a bad typing day does not accumulate a
+  lockout. Addresses are kept to the network, never the host.
+- **Changing a password ends every other session.** On its own a new password
+  achieves nothing — the attacker's cookie is still valid, and they stay signed
+  in while the victim congratulates themselves.
+- **Export everything** as CSV another package can read. Judged by whether an
+  accountant could rebuild the books from it, which is why journal lines carry
+  their account number and name rather than ids, and why money is in units.
+- **A tested restore, not a documented one.** `npm run db:verify-restore` dumps,
+  restores into a scratch database, and compares row counts table by table. It
+  reports **PASS — 93 tables and 656 rows restored identically** on this
+  repository's own database. Everybody has backups; the organisations that lose
+  data are the ones whose backups had never been restored.
+
+Two bugs the tests caught, both of which leave no trace in production: `NULL <>
+'uuid'` is NULL rather than true, so "sign out everywhere else" silently spared
+every session that had no device — exactly the one an attacker would keep; and a
+burst of retries could push real failures out of the lockout window and lift the
+lock it had just triggered.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -511,12 +565,25 @@ Coverage matches what spec §21 asks for:
 | `tests/accounting-core.test.ts` | A credit note reversing revenue against a write-off keeping it; `written_off` never reading as `paid`; a write-off refused without a reason, over the balance, or twice; a recovery reversing the expense rather than recognizing revenue; credits applying without a second entry and never across customers; open-item and balance-forward statements; a write-off shown as a write-off on a statement; frozen saved figures; recurring cadences always moving forward and not skipping a month; a template refused if it does not balance; posting versus drafting; catching up with correctly dated occurrences and running twice changing nothing; and the close emptying period accounts into Retained Earnings, refusing a second time, warning about drafts, handling a loss, and reversing on reopen |
 | `tests/worker.test.ts` | Backoff growth, cap, and upward-only jitter; concurrent workers claiming a job once; run-at honoured; dedupe dropping rather than stacking; dead-lettering and never sweeping a dead job; stealing an expired claim; priority; retry resetting attempts; the runner surviving one bad job in a batch; unknown kinds dying immediately; a tenant job with no company refused; a global handler getting no actor; heartbeat liveness; `nextRunAt` strictly after and across month rollovers; a due schedule firing exactly once; the outbox rolling back with its transaction, relaying idempotently, and `invoice.paid` on full settlement only; a scheduled task that cannot sign in and belongs to no company; and the draft entry that changes no report until a person posts it |
 | `tests/statements.test.ts` | Account classification, including the two that look wrong and are right — accumulated depreciation in operating, and depreciation not being a timing difference; the cash flow statement reconciling to what the cash accounts moved, and an unpaid invoice as profit that is not yet cash; comparison windows including 29 February; an account surviving in only one column; a comparative balancing in every column; three cheques banked as one line, a processing fee, the same cheque refused twice, a deposit a fee has eaten, and a reversal making the receipts depositable again; a vendor credit reversing the cost on the bill's own account, a customer credit refused against a bill, and the two numbering series kept apart; an accrual not being an expense on a cash basis, an accrual settled straight from the bank still becoming one, a prepayment deducted when paid, a deposit taken in advance as revenue when it arrives, the transformation still balancing, and the caveat naming what it could not resolve; and a closed year reporting its drift rather than blocking the entry |
+| `tests/security.test.ts` | TOTP against RFC 6238's published vectors, base32 round-tripping, ±1 step of drift and no more, a used code refused inside its own window, and non-numeric codes rejected; secrets round-tripping under encryption with a fresh IV each time and a tampered ciphertext throwing rather than decrypting to something else; enrolment not switching on until a code has worked, the secret never stored in the clear, recovery codes single-use and never stored in the clear and invalidated when regenerated, the password required to switch MFA off, and a working factor never silently replaced; the challenge token rejecting tampering, dying when the password changes, and expiring; the network kept and the host discarded, lockout after repeated failures cleared by a success and not extended by retries, and the window expiring; signing out everywhere else keeping this session, ending a device-less session a device sweep would miss, a password change ending every other session, the company session length honoured, and a forged cookie rejected; CSV quoting fields that would otherwise shift every column, an export an accountant could rebuild the books from, the export recorded in two places, a role without ledger access refused, and one company's export containing nothing of another's; and the policy refusing settings that would lock everybody out |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
 npm run typecheck   # tsc --noEmit
 npm run build       # production build
 ```
+
+### Backups
+
+```bash
+npm run db:backup           # pg_dump -Fc into ./backups, with retention
+npm run db:verify-restore   # dump, restore into a scratch database, compare row counts
+```
+
+`db:verify-restore` is the tested half of spec §19's "tested restore
+procedure". It never writes to the source database and drops its scratch copy
+afterwards. Run it on a schedule beside the backup itself — a backup nobody has
+restored is a belief, not a control.
 
 ## Demo checklist
 
@@ -1011,6 +1078,33 @@ key and the client proposal link — keep them for steps 22 and 24.
      locking is the control that stops entries, and this only says the frozen figures no longer
      match the books.
 
+### The security controls (Phase 13)
+
+145. **Turn on two-factor** — **Settings → Security → Set up**. Add the secret to any authenticator
+     app, then enter the code it shows. Note that it does *not* switch on until a code has worked:
+     a mistyped secret cannot lock you out.
+146. **Save the recovery codes** — ten of them, shown once. They are hashed on the way in, so the
+     server cannot show them again even if you ask.
+147. **Sign out and back in** — the password alone now lands you on `/login/verify` rather than in
+     the books. Try navigating straight to `/bookkeeping` from there: you are sent back to the
+     login page, because the half-signed-in state is not a session.
+148. **Enter the wrong code** — refused, and recorded. Then enter a recovery code and watch it work
+     once and never again.
+149. **Read your own sign-in history** — every attempt, with what happened to it. Addresses are
+     kept to the network only, not the exact host.
+150. **Change your password** — the message tells you how many other sessions it just ended. That
+     is the point: on its own a new password leaves whoever stole the old one still signed in.
+151. **Require two-factor for everybody** — tick the company policy. A member without it can reach
+     the security page and nothing else until they set it up.
+152. **Export the books** — the whole chart of accounts, journal, transactions, customers,
+     invoices, vendors, bills, and payments as CSV. Open `journal.csv` in a spreadsheet: it shows
+     account numbers and names, and `1080.00` rather than `108000`.
+153. **Check the export was recorded** — it appears under the button, and in the audit log. It is
+     the broadest read anybody can perform.
+154. **Prove the backup restores** — `npm run db:verify-restore`. It dumps, restores into a scratch
+     database, compares every table's row count, and drops the scratch copy. Everybody has backups;
+     the ones who lose data are the ones who never restored one.
+
 ## Project layout
 
 ```
@@ -1287,9 +1381,17 @@ Gaps within the phases already built:
   that has never amortized a prepayment gets it left on the balance sheet with a caveat naming the
   amount. Matching per item needs the accrual linked to its settlement the way
   `payment_applications` links a payment to its invoice.
-- **No MFA, session/device controls, or login history for web users.** Spec §14 asks for all
-  three. The mobile app has device sessions and revocation (Phase 8); the web side has neither, and
-  there is no export of accounting records that §19 asks for either.
+- **No password reset by email.** Two-factor, lockout, and a password change are built; "I forgot
+  my password" still needs the email provider wiring and a single-use token. A half-built reset flow
+  is a bypass for everything above it, so it is absent rather than approximate.
+- **No WebAuthn or passkeys.** TOTP works with any authenticator app and no hardware, but it is
+  phishable in a way a passkey is not.
+- **`login_attempts` is never pruned.** The table grows with every failed sign-in on the internet
+  and an attacker controls that rate. A retention job belongs on the Phase 10 scheduler.
+- **The export is built in memory.** Fine for a small company, wrong for a large one — it needs the
+  object store §18 asks for and this repository does not have.
+- **Accountant practice mode is not built**, which spec §14 itself defers ("can later allow one
+  accountant to switch securely among multiple client companies").
 - **No tool-calling loop.** Spec §12's tool layer is implemented as the suggestion queue plus
   permission-gated retrieval, not as a model invoking functions directly. Every consequential
   action here is one a person should confirm anyway. See ADR 0006.
