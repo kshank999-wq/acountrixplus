@@ -12,6 +12,7 @@ import {
   brandKits,
   campaignRecipients,
   chartAccounts,
+  documents,
   financialAccounts,
   journalEntries,
   journalLines,
@@ -557,8 +558,37 @@ async function main() {
     console.log(`  Composed the ${label} proposal from the "${templateKey}" template.`)
   }
 
+  // --- Phase 21: the PDF a client actually receives -------------------------
+  //
+  // The proposals above were sent before the brand kit and the clause library
+  // existed, so their documents were composed afterwards and those first
+  // versions carry no PDF — which is the real "sent before it had a document"
+  // case, left in on purpose.
+  //
+  // Re-sending the open one now issues version 2 *with* a snapshot, and that
+  // snapshot is what the client link serves from here on, whatever anybody
+  // does to the brand or the price list afterwards.
+  if (openProposalId) {
+    const reissued = await sendProposal(ctx, openProposalId)
+    const [snapshot] = reissued.pdfDocumentId
+      ? await db
+          .select({ filename: documents.filename, sizeBytes: documents.sizeBytes })
+          .from(documents)
+          .where(eq(documents.id, reissued.pdfDocumentId))
+      : []
+
+    console.log(
+      snapshot
+        ? `  Re-sent as version ${reissued.versionNumber} with a rendered PDF ` +
+            `(${snapshot.filename}, ${snapshot.sizeBytes} bytes). Version 1 has none — ` +
+            'it was sent before the document existed.'
+        : '  Re-sent, but NO PDF WAS RENDERED — the document is missing.',
+    )
+  }
+
   if (openProposalToken) {
     console.log(`  Open proposal, ready to accept: /p/${openProposalToken}`)
+    console.log(`  The client's copy, exactly as sent: /p/${openProposalToken}/pdf`)
   }
 
   // --- Phase 5: segments, creative, and a sent campaign --------------------

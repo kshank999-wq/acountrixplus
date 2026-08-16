@@ -1,0 +1,140 @@
+import { and, asc, eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { companies, companyProfiles, customers, invoiceLines, invoices } from '@/db/schema'
+import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
+import { renderDocumentPdf, type BrandTokens } from './layout'
+import type { Block } from '@/modules/design/blocks'
+
+/**
+ * An invoice as a PDF (spec §13, §18).
+ *
+ * Built out of the same block model the proposal designer uses rather than a
+ * second layout engine. An invoice is a cover line, a few key/value rows, a
+ * priced table and some payment wording — which is a document this application
+ * already knows how to lay out. Writing a bespoke invoice renderer would mean
+ * two things to fix every time the page-break logic is wrong.
+ *
+ * Unlike a proposal, an invoice is **not** snapshotted. It is regenerated from
+ * the record every time, because an invoice is not a negotiating position: if
+ * it was wrong it gets credited and reissued, and the ledger — not a PDF — is
+ * the authority for what is owed. Snapshotting one would create a second
+ * answer to "how much does this customer owe", which ADR 0002 spent a whole
+ * phase refusing.
+ */
+
+const INVOICE_BRAND: BrandTokens = {
+  primaryColor: '#0d6e60',
+  accentColor: '#0f766e',
+  textColor: '#0f172a',
+  mutedColor: '#64748b',
+  headingFont: 'Georgia, serif',
+  bodyFont: 'system-ui, sans-serif',
+  baseSizePt: 11,
+}
+
+export class NoInvoiceError extends Error {
+  readonly status = 404
+  constructor() {
+    super('That invoice does not exist.')
+    this.name = 'NoInvoiceError'
+  }
+}
+
+export async function renderInvoicePdf(
+  ctx: ActorContext,
+  invoiceId: string,
+  at: Date,
+): Promise<{ bytes: Buffer; filename: string }> {
+  requirePermission(ctx, 'accounting:view')
+
+  const [row] = await db
+    .select({
+      invoice: invoices,
+      customer: customers,
+      company: companies,
+      profile: companyProfiles,
+    })
+    .from(invoices)
+    .innerJoin(customers, eq(customers.id, invoices.customerId))
+    .innerJoin(companies, eq(companies.id, invoices.companyId))
+    .leftJoin(companyProfiles, eq(companyProfiles.companyId, invoices.companyId))
+    .where(and(eq(invoices.id, invoiceId), eq(invoices.companyId, ctx.companyId)))
+    .limit(1)
+
+  if (!row) throw new NoInvoiceError()
+
+  const lines = await db
+    .select()
+    .from(invoiceLines)
+    .where(eq(invoiceLines.invoiceId, invoiceId))
+    .orderBy(asc(invoiceLines.sortOrder))
+
+  const address = [
+    row.customer.name,
+    row.customer.addressLine1,
+    [row.customer.city, row.customer.region, row.customer.postalCode].filter(Boolean).join(' '),
+  ]
+    .filter(Boolean)
+    .join('\n')
+
+  const blocks: Block[] = [
+    {
+      id: 'cover',
+      type: 'cover',
+      title: 'Invoice',
+      subtitle: row.invoice.number,
+      preparedFor: row.company.name,
+      showLogo: false,
+      useBrandBackground: true,
+    },
+    {
+      id: 'details',
+      type: 'keyValue',
+      title: '',
+      rows: [
+        { label: 'Billed to', value: address.replace(/\n/g, ', ') },
+        { label: 'Issued', value: row.invoice.issueDate },
+        { label: 'Due', value: row.invoice.dueDate },
+        ...(row.invoice.memo ? [{ label: 'Reference', value: row.invoice.memo }] : []),
+      ],
+    },
+    { id: 'table', type: 'pricingTable', title: '', showQuantity: true, showUnitPrice: true, allowOptionalSelection: false, showTotals: true },
+  ]
+
+  if (row.profile?.paymentInstructions) {
+    blocks.push(
+      { id: 'pay-heading', type: 'heading', text: 'How to pay', level: 3, align: 'left' },
+      { id: 'pay', type: 'text', text: row.profile.paymentInstructions, align: 'left', emphasis: false },
+    )
+  }
+
+  const bytes = renderDocumentPdf({
+    blocks,
+    brand: INVOICE_BRAND,
+    merge: {},
+    pageSize: 'letter',
+    orientation: 'portrait',
+    headerText: null,
+    footerText: row.company.name,
+    showPageNumbers: true,
+    lines: lines.map((line) => ({
+      description: line.description,
+      quantityMilli: line.quantityMilli,
+      unitPriceCents: line.unitPriceCents,
+      amountCents: line.amountCents,
+      isOptional: false,
+      isSelected: true,
+    })),
+    totals: {
+      subtotalCents: row.invoice.subtotalCents,
+      discountCents: 0,
+      taxCents: row.invoice.taxCents,
+      totalCents: row.invoice.totalCents,
+    },
+    title: `Invoice ${row.invoice.number}`,
+    author: row.company.name,
+    createdAt: at,
+  })
+
+  return { bytes, filename: `invoice-${row.invoice.number}.pdf` }
+}

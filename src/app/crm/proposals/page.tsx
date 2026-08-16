@@ -5,6 +5,7 @@ import { listProposals } from '@/modules/crm/proposals'
 import { listOpportunities } from '@/modules/crm/opportunities'
 import { categorizableAccounts } from '@/modules/coa/service'
 import { CRM_NAV } from '../nav'
+import { sentVersions } from '@/modules/pdf/service'
 import { ProposalList } from './proposal-list'
 
 export const dynamic = 'force-dynamic'
@@ -35,6 +36,11 @@ export default async function ProposalsPage() {
     can(actor, 'bookkeeping:view') ? categorizableAccounts(actor) : Promise.resolve([]),
   ])
 
+  // One query for every sent version across the page, rather than one per
+  // proposal. What a client was sent is the question this list is most often
+  // opened to answer, so it belongs here and not behind a click.
+  const versions = await sentVersions(actor)
+
   return (
     <AppShell
       actor={actor}
@@ -55,6 +61,12 @@ export default async function ProposalsPage() {
           viewCount: p.viewCount,
           expiresOn: p.expiresOn,
           publicToken: p.publicToken,
+          versions: (versions.get(p.id) ?? []).map((version) => ({
+            id: version.id,
+            versionNumber: version.versionNumber,
+            sentAt: version.sentAt.toISOString().slice(0, 10),
+            hasPdf: version.pdfDocumentId !== null,
+          })),
         }))}
         opportunities={opportunities.map((o) => ({
           id: o.id,

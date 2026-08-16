@@ -399,6 +399,22 @@ export const proposalVersions = pgTable(
     snapshot: jsonb('snapshot').$type<Record<string, unknown>>().notNull(),
     totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
 
+    /**
+     * The rendered PDF, as sent (spec §18, Phase 21).
+     *
+     * The data snapshot above records what the numbers were; this records what
+     * the client actually looked at — the brand, the wording, the clause text,
+     * the page breaks. They are different questions and the second one is the
+     * one a dispute turns on.
+     *
+     * A bare uuid rather than a foreign key to `documents`: this schema module
+     * is imported by the evidence tables, and pointing back at them would make
+     * the import cycle that `memberships.practiceEngagementId` already avoids
+     * for the same reason. Null when a proposal was sent before it had a
+     * design document.
+     */
+    pdfDocumentId: uuid('pdf_document_id'),
+
     sentAt: timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
     sentBy: uuid('sent_by').references(() => users.id, { onDelete: 'set null' }),
   },

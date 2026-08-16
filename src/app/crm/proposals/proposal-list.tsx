@@ -21,6 +21,7 @@ type Proposal = {
   viewCount: number
   expiresOn: string | null
   publicToken: string
+  versions: Array<{ id: string; versionNumber: number; sentAt: string; hasPdf: boolean }>
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -154,6 +155,33 @@ export function ProposalList({
                     Client link
                   </Link>
                 </div>
+
+                {proposal.versions.length > 0 && (
+                  <p className="mt-1.5 text-xs text-muted">
+                    Sent:{' '}
+                    {proposal.versions.map((version, index) => (
+                      <span key={version.id}>
+                        {index > 0 && ' · '}
+                        {version.hasPdf ? (
+                          <a
+                            href={`/api/pdf/version/${version.id}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-brand hover:underline"
+                            title={`Exactly what the client received on ${version.sentAt}`}
+                          >
+                            v{version.versionNumber}
+                          </a>
+                        ) : (
+                          <span className="text-faint" title="Sent before this proposal had a document">
+                            v{version.versionNumber}
+                          </span>
+                        )}{' '}
+                        <span className="text-faint">{version.sentAt}</span>
+                      </span>
+                    ))}
+                  </p>
+                )}
 
                 {canManage && (
                   <div className="mt-1.5 flex flex-wrap gap-1.5">

@@ -10,6 +10,7 @@ import { truncateIp } from '@/modules/crm/intake'
 import { DocumentPage, brandTokens } from '@/components/design/document-page'
 import { AcceptancePanel } from './acceptance-panel'
 import { PrintButton } from './print-button'
+import { latestSentPdf } from '@/modules/pdf/service'
 
 export const dynamic = 'force-dynamic'
 
@@ -97,13 +98,25 @@ export default async function PublicProposalPage({
     footerText: null,
   }
 
+  // The download offers the snapshot taken when this was sent — not a render
+  // of the live record, which may since have moved. Absent for a proposal sent
+  // before it had a design document, and the button is simply not offered.
+  const hasIssuedPdf = Boolean(await latestSentPdf(proposal.companyId, proposal.id))
+
   return (
     <div className="min-h-screen bg-canvas py-6 print:bg-white print:py-0">
       <div className="doc-screen-only mx-auto mb-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4">
         <p className="text-xs text-muted">
           Proposal {proposal.number} for {organizationName}
         </p>
-        <PrintButton />
+        <div className="flex items-center gap-2">
+          {hasIssuedPdf && (
+            <a href={`/p/${token}/pdf`} target="_blank" rel="noreferrer" className="btn text-xs">
+              Download the PDF
+            </a>
+          )}
+          <PrintButton />
+        </div>
       </div>
 
       <div className="mx-auto max-w-3xl bg-white shadow-sm print:max-w-none print:shadow-none">

@@ -20,6 +20,7 @@ export const EVIDENCE_SUBJECT_LABELS: Record<string, string> = {
   expense: 'Expense',
   customer: 'Customer',
   vendor: 'Vendor',
+  proposal_version: 'Sent proposal',
 }
 
 /** Where a record of each kind can be looked at, for the documents page. */
@@ -35,6 +36,7 @@ export const EVIDENCE_SUBJECT_PATHS: Record<string, string | null> = {
   expense: '/time',
   customer: '/crm',
   vendor: '/crm',
+  proposal_version: '/crm/proposals',
 }
 
 /** Bytes as something a person reads, without a library for it. */

@@ -12,6 +12,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { logActivity } from './opportunities'
+import { snapshotProposalPdf } from '@/modules/pdf/service'
 import { PIPELINE_STAGES, STAGE_PROBABILITY, stageIndex } from './pipeline'
 
 /**
@@ -205,7 +206,13 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
       .from(proposalVersions)
       .where(eq(proposalVersions.proposalId, proposalId))
 
-    await tx.insert(proposalVersions).values({
+    // One timestamp for the whole send, used for the version row *and* stamped
+    // into the PDF. Two calls to `new Date()` would differ by milliseconds and
+    // make the rendered bytes irreproducible, which is the one thing this
+    // document must not be.
+    const sentAt = new Date()
+
+    const [version] = await tx.insert(proposalVersions).values({
       companyId: ctx.companyId,
       proposalId,
       versionNumber: nextVersion,
@@ -231,12 +238,24 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
         })),
       },
       totalCents: proposal.totalCents,
+      sentAt,
       sentBy: ctx.userId,
-    })
+    }).returning({ id: proposalVersions.id })
+
+    // Rendered inside the transaction that records the send, so a proposal is
+    // never marked sent without the document the client was sent. Doing it
+    // afterwards leaves a window in which the client has the link and the
+    // snapshot does not exist — which is exactly the window in which somebody
+    // edits the price list.
+    const snapshot = await snapshotProposalPdf(
+      ctx,
+      { proposalId, versionId: version.id, sentAt },
+      tx,
+    )
 
     const [updated] = await tx
       .update(proposals)
-      .set({ status: 'sent', sentAt: new Date(), updatedAt: new Date() })
+      .set({ status: 'sent', sentAt, updatedAt: new Date() })
       .where(and(eq(proposals.id, proposalId), eq(proposals.companyId, ctx.companyId)))
       .returning()
 
@@ -280,12 +299,25 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
         entityType: 'proposal',
         entityId: proposalId,
         before: { status: proposal.status },
-        after: { status: 'sent', version: nextVersion, totalCents: proposal.totalCents },
+        after: {
+          status: 'sent',
+          version: nextVersion,
+          totalCents: proposal.totalCents,
+          // The digest is the point: it is what proves, later, that the file a
+          // client downloads is the file that was rendered at this moment.
+          pdfDigest: snapshot?.digest ?? null,
+        },
       },
       tx,
     )
 
-    return { proposal: updated, versionNumber: nextVersion }
+    return {
+      proposal: updated,
+      versionNumber: nextVersion,
+      versionId: version.id,
+      /** Null when the proposal had no design document to render. */
+      pdfDocumentId: snapshot?.documentId ?? null,
+    }
   })
 }
 

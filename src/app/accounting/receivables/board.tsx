@@ -246,6 +246,16 @@ export function ReceivablesBoard({
                   value={date}
                   onChange={(event) => setDate(event.target.value)}
                 />
+                {invoiceId && (
+                  <a
+                    href={`/api/pdf/invoice/${invoiceId}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="btn text-xs"
+                  >
+                    Invoice PDF
+                  </a>
+                )}
               </div>
 
               <input

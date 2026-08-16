@@ -12,8 +12,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **security controls**, **inventory**, **time and billing**,
 **accounting dimensions with the fixed asset register**, **bringing an
 existing business's books in**, **accountant practice mode**,
-**transactional mail with password reset and invitations**, and
-**attachments and accountant notes on a content-addressed object store** from the
+**transactional mail with password reset and invitations**,
+**attachments and accountant notes on a content-addressed object store**, and
+**server-side PDF generation with immutable sent-document snapshots** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -34,7 +35,8 @@ existing business's books in**, **accountant practice mode**,
 [ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md),
 [ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md),
 [ADR 0019](docs/adr/0019-a-reset-is-not-marketing-and-an-invitation-carries-no-password.md), and
-[ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md).
+[ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md), and
+[ADR 0021](docs/adr/0021-a-sent-document-never-changes.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -790,6 +792,45 @@ record could carry evidence, as a `jsonb` array written for the mobile app.
   safety moved from a read-then-write into a unique index, which is stronger
   than what it replaced.
 
+### Server-side PDF and immutable snapshots (Phase 21)
+
+§18's last unbuilt infrastructure line: *"server-side PDF generation and immutable
+proposal-version snapshots."* ADR 0004 deferred it with a real choice — a headless browser in the
+deployment, or a layout library re-implementing pagination — and shipped a print stylesheet
+instead. Two holes were left: a client's browser cannot produce the *server's* copy, so nothing
+knew what anybody received; and `proposal_versions` snapshotted the data while the brand kit, the
+layout and the clause text stayed live, so restyling proposals in June silently restyled every
+proposal ever sent.
+
+- **The same input produces the same bytes.** The writer is a few hundred lines of PDF 1.4 with no
+  clock and no randomness; the creation date is a parameter all the way down. A browser cannot make
+  that promise — Chromium stamps its own version and a wall-clock date into every file, so
+  upgrading it would rewrite the bytes of every historical document. Determinism is what makes a
+  digest usable as evidence, and it is the property neither option in ADR 0004 was judged on.
+- **What the client was sent never changes.** The PDF is rendered inside the transaction that
+  records the send, so a proposal is never marked sent without the document that was sent. A test
+  sends one, then moves the brand kit, the wording and the prices underneath it, and asserts the
+  digest is unchanged — and asserts that a *live preview* does move, because otherwise the first
+  assertion would be equally true of a renderer that ignored its inputs.
+- **The digest is the proof, and Phase 20 supplies it.** Sending the same unchanged proposal twice
+  within one second produces byte-identical files, so the content-addressed store hands back the
+  same document to both versions: two rows in `proposal_versions`, one row in `documents`, one
+  blob. The two phases compose rather than merely coexist.
+- **The public link serves the snapshot, never a live render.** A client opening their link a month
+  after the price list moved downloads what they were sent.
+- **A proposal with no document can still be sent.** The record of what was sent matters more than
+  the rendering of it, so the version simply carries no PDF and the download is not offered.
+- **Invoices are rendered, not snapshotted.** An invoice is not a negotiating position: if it was
+  wrong it is credited and reissued, and the ledger is the authority for what is owed. Snapshotting
+  one would create a second answer to "how much does this customer owe".
+- **Real typography, not ASCII folding.** The first rendered proposal came out titled
+  "Reroofing -- North Wing". WinAnsiEncoding has the actual em dash, curly quotes and ellipsis, so
+  they are emitted as bytes with their own width entries. Only characters with no glyph fold, and
+  the last resort is `?` — visibly wrong beats invisibly missing.
+- **Measure, then place.** Every block reports its height before anything is drawn; a heading keeps
+  with what follows it, a long paragraph splits by line rather than jumping a page whole, and
+  inter-block spacing is dropped at the top of a page so a document never starts an inch too low.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -887,6 +928,7 @@ Coverage matches what spec §21 asks for:
 | `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; and one company's engagements invisible to another |
 | `tests/notify.test.ts` | **A transactional letter carrying no unsubscribe link**, in the type and at runtime; the URL written out in full so a person can read where it goes; a bounce recorded rather than swallowed; the hourly limit per address per kind, and an invitation not blocked by somebody hammering the reset form; tokens stored as hashes with only an eight-character prefix in the clear, **spent exactly once by two simultaneous claims**, a new one superseding the last, an hour for a reset against a week for an invitation, and old ones pruned while live ones survive; **the reset form saying the same thing whether or not the address exists**, and **reaching somebody who unsubscribed from marketing company-wide**; a reset changing the password, ending every session, and auditing into each company the person belongs to; the same link refused twice with the first password left standing; a link dying once the address is no longer theirs; a dead link reported before anybody types, and checking not spending it; **an invitation creating no user and no membership until it is accepted**, the offer shown before anybody types, the invitee's own password taking effect, a short password refused with the link still usable, **an existing account never asked for a password**, **one account created when the same link is clicked twice at once**, somebody already inside told rather than mailed, another company unable to withdraw the invitation by id, and a practice invitee landing with access at every client the firm already serves |
 | `tests/evidence.test.ts` | Bytes addressed by what they are; both store adapters round-tripping, putting twice being a no-op, and deleting what is not there not being an error; **the same bytes uploaded twice returning the one document that already exists**, two companies sharing a blob and each counted, **one company deleting its copy leaving the other's downloading**, and the bytes going only when the last of them does; an orphan collected after a simulated crash between commit and free, and **bytes a document still points at never freed however far the count has drifted**; a type that can carry script, an empty file, and one over 10 MB all refused; one document on a transaction and a fixed asset at once with detaching one leaving the other, **three concurrent attachments of the same file leaving one link**, deleting a document taking it off every record, a page of records counted in one query, and the bare ones named; **a record from another company refused, a document from another company refused, and another company's bytes not served on a known id**; each kind of record guarded by its own permission, and a read-only auditor seeing the evidence and refused the removal; a note recorded and audited, an empty one refused, **a question on the work list until answered with the answer added beside it rather than over it**, one answer between two simultaneous clicks, a remark refused by the CHECK constraint, one company's questions invisible to another, and the list filtered kind by kind; and the mobile path uploading, attaching idempotently, reading back as an ordinary document, and keeping the phone's tighter limit |
+| `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions**; and an invoice rendered from the record with another company's refused |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1633,6 +1675,25 @@ key and the client proposal link — keep them for steps 22 and 24.
      same document, in the same list, with the same delete path. Before this phase a receipt lived
      in a `jsonb` array on the transaction and appeared in no list at all.
 
+### Server-side PDF and immutable snapshots (Phase 21)
+
+210. **Open the client link the seed printed and press "Download the PDF".** A real PDF, rendered
+     on the server — cover band in the company's colours, wrapped prose, the fee table with its
+     optional items priced or struck, page numbers in the footer.
+211. **Open Clients & Sales → Proposals.** Under the open proposal, the sent versions are listed:
+     v1 in grey because it was sent before the document existed, v2 as a link to exactly what the
+     client received. Click it.
+212. **Now change something.** Open Company Studio, change the brand's primary colour, then open
+     the designer and rewrite a paragraph. Reload the client's PDF link: **it is unchanged.** The
+     web view beside it has moved; the file the client was sent has not.
+213. **Send it again.** A new version appears with a new PDF carrying the new brand — and the old
+     one still says what it said. Both are downloadable, side by side.
+214. **Look at Accounting → Documents.** The snapshots are ordinary documents, listed with the
+     receipts, each attached to the sent version it belongs to.
+215. **Open an invoice PDF** from Accounting → Credits & statements: choose an invoice and press
+     Invoice PDF. Rendered from the record on every request, not snapshotted — an invoice that was
+     wrong is credited and reissued, and the ledger is the authority for what is owed.
+
 ## Project layout
 
 ```
@@ -1651,6 +1712,8 @@ src/
     accounting/periods/   Recurring entries and the year-end close
     settings/modules/     Industry module switches
     accounting/documents/  Every file, what it hangs on, and the open questions
+    api/pdf/               Invoice and sent-version PDFs, session-scoped
+    p/[token]/pdf/         The client's copy of a proposal, exactly as sent
     accounting/dimensions/  Profit and loss by location, and the reclassify work list
     accounting/assets/    The fixed asset register and its reconciliation
     settings/import/      The migration wizard and the opening-balance check
@@ -1703,6 +1766,7 @@ src/
     practice/             Firms, engagements, company switching, the cross-tenant work queue
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
+    pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -2156,10 +2220,11 @@ Gaps within the phases already built:
   approximate**: a progress billing's payment recognizes contract revenue and retainage receivable
   in proportion, which balances and is defensible, but a purist would say cash basis has no
   retainage receivable either.
-- **Server-side PDF generation** (spec §18). Print CSS gives a correct, paginated file through the
-  browser's Save as PDF, but there is no server-rendered PDF. Adding it means either a headless
-  browser in the deployment or a layout library re-implementing pagination the browser already
-  does. See ADR 0004.
+- **The PDF renderer has no font embedding.** Built in Phase 21 — deterministic, dependency-free,
+  and limited to the standard 14 fonts, so a company's brand font does not reach the printed page
+  and anything outside Windows-1252 renders as `?`. Images and QR codes are labelled placeholders
+  rather than pictures, there are no link annotations, and streams are uncompressed. All named in
+  ADR 0021, and font embedding is the one change that unblocks most of them.
 - **Illustrator-class vector editing** (spec §7). Deliberately deferred — §7 itself says to
   prioritize business-document layout first. No arbitrary positioning, layering, or path editing;
   a `canvas` block type is the extension point.
@@ -2205,8 +2270,15 @@ Gaps within the phases already built:
 - **Row-level security as a second isolation layer** (spec §19) is still not in place; tenant
   isolation rests on `scoped()` at every query and on the tests that assert it. MFA, session and
   device controls were built in Phase 13.
-- Infrastructure from spec §18 still open: **server-side PDF generation**. Object storage arrived in
-  Phase 20; the background job queue and the outbox pattern in Phase 10.
+- **Spec §18's infrastructure list is now complete.** Object storage arrived in Phase 20,
+  server-side PDF generation and immutable snapshots in Phase 21, the background job queue and the
+  outbox pattern in Phase 10.
+- **Older sent proposals have no PDF**, and deliberately no backfill: rendering today's document
+  and calling it the March file would be exactly the lie Phase 21 exists to prevent. Those versions
+  show greyed out in the history.
+- **A snapshot is not signed.** It proves what the system rendered, and the digest is in the audit
+  log — but nothing external timestamps or countersigns it, so it is evidence of a system's own
+  record rather than a notarised document.
 
 Per spec §19, a security review is required before any production use involving real financial
 integrations or payments.

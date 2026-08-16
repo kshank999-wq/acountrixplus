@@ -137,6 +137,10 @@ export const evidenceSubjectEnum = pgEnum('evidence_subject', [
   'expense',
   'customer',
   'vendor',
+  // Added in Phase 21. A sent proposal version carries the PDF the client was
+  // actually shown, which is evidence in exactly the sense the rest of this
+  // enum means it.
+  'proposal_version',
 ])
 
 /**

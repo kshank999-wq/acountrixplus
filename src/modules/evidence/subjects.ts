@@ -11,6 +11,7 @@ import {
   journalEntries,
   payments,
   payrollRuns,
+  proposalVersions,
   reconciliations,
   vendors,
 } from '@/db/schema'
@@ -52,6 +53,7 @@ export type EvidenceSubject =
   | 'expense'
   | 'customer'
   | 'vendor'
+  | 'proposal_version'
 
 type SubjectDefinition = {
   /** What a person sees in a list: "Bill" rather than "bill". */
@@ -172,6 +174,18 @@ const SUBJECTS: Record<EvidenceSubject, SubjectDefinition> = {
     idColumn: vendors.id,
     companyColumn: vendors.companyId,
     describe: vendors.name,
+  },
+  proposal_version: {
+    label: 'Sent proposal',
+    view: 'proposals:view',
+    // Attaching to a sent version is how the send path files the PDF it just
+    // rendered. Nothing else should be adding to the record of what a client
+    // received, which is why this is the send permission and not a general one.
+    manage: 'proposals:manage',
+    table: proposalVersions,
+    idColumn: proposalVersions.id,
+    companyColumn: proposalVersions.companyId,
+    describe: null,
   },
 }
 
