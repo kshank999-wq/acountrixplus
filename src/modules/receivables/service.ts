@@ -17,6 +17,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS, SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/modules/ledger/journal'
+import type { DimensionAssignment } from '@/modules/dimensions/service'
 import {
   priceDocumentTax,
   recordDocumentTax,
@@ -57,6 +58,16 @@ export type DocumentLineInput = {
    * is every line that existed before this phase.
    */
   itemId?: string | null
+  /**
+   * User-defined dimensions (Phase 16): `{ [dimensionId]: dimensionValueId }`.
+   *
+   * Phase 16 built the model and wired it to manual entries only, so a
+   * company slicing its books by Location could tag a journal entry and not
+   * an invoice — which meant the dimensional profit and loss saw costs and
+   * missed revenue. Phase 23 needs both halves for property-level reporting,
+   * and the fix is this one field: the journal line already accepts it.
+   */
+  dimensions?: DimensionAssignment
 }
 
 /**
@@ -333,6 +344,7 @@ export async function createInvoice(
         memo: line.description,
         projectId: line.projectId,
         costCodeId: line.costCodeId,
+        dimensions: line.dimensions,
       })),
     ]
 
@@ -538,6 +550,7 @@ export async function createBill(
         memo: line.description,
         projectId: line.projectId,
         costCodeId: line.costCodeId,
+        dimensions: line.dimensions,
       })),
       {
         chartAccountId: apAccount.id,
@@ -808,17 +821,14 @@ async function applyToDocument(
     .limit(1)
 
   if (!document) throw new Error(isInvoice ? 'Invoice not found' : 'Bill not found')
-  if (document.status === 'void') {
-    throw new Error('That document is voided.')
-  }
 
-  if (application.amountCents > document.balanceCents) {
-    throw new Error(
-      `Cannot apply ${application.amountCents} to a document with a balance of ${document.balanceCents}.`,
-    )
-  }
-
-  const newBalance = document.balanceCents - application.amountCents
+  const reduced = await reduceDocumentBalance(
+    ctx,
+    table,
+    document,
+    application.amountCents,
+    tx,
+  )
 
   await tx.insert(paymentApplications).values({
     companyId: ctx.companyId,
@@ -828,6 +838,37 @@ async function applyToDocument(
     amountCents: application.amountCents,
   })
 
+  return { settled: reduced.settled, documentId, number: document.number }
+}
+
+/**
+ * Takes an amount off a document's balance and moves its status.
+ *
+ * Extracted so there is exactly one implementation of the rule. A settlement
+ * that is not cash — a security deposit kept against unpaid rent (Phase 23) —
+ * has to move a balance the same way a payment does, and a second copy of
+ * "zero means paid, anything else means partial" is a second thing to get
+ * wrong when the rule changes.
+ */
+async function reduceDocumentBalance(
+  ctx: ActorContext,
+  table: typeof invoices | typeof bills,
+  document: { id: string; status: string; balanceCents: number },
+  amountCents: number,
+  tx: Executor,
+): Promise<{ settled: boolean; balanceCents: number }> {
+  if (document.status === 'void') {
+    throw new Error('That document is voided.')
+  }
+
+  if (amountCents > document.balanceCents) {
+    throw new Error(
+      `Cannot apply ${amountCents} to a document with a balance of ${document.balanceCents}.`,
+    )
+  }
+
+  const newBalance = document.balanceCents - amountCents
+
   await tx
     .update(table)
     .set({
@@ -835,9 +876,43 @@ async function applyToDocument(
       status: newBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })
-    .where(and(eq(table.id, documentId), eq(table.companyId, ctx.companyId)))
+    .where(and(eq(table.id, document.id), eq(table.companyId, ctx.companyId)))
 
-  return { settled: newBalance === 0, documentId, number: document.number }
+  return { settled: newBalance === 0, balanceCents: newBalance }
+}
+
+/**
+ * Settles part of an invoice with something that is not cash.
+ *
+ * Deliberately **not** a `payments` row. A receipt with no financial account
+ * means "cash in hand, not yet banked" — it appears on the undeposited funds
+ * list and the bank deposit screen offers to pay it in. A security deposit
+ * being kept is not cash in hand; it is money already in the bank months ago,
+ * moving out of a liability. Recording it as a payment would invent cash that
+ * nobody can deposit, and the first person to notice would be whoever tried.
+ *
+ * The caller posts its own journal entry for the other side of the settlement,
+ * because only the caller knows what that side is.
+ */
+export async function settleInvoiceWithoutCash(
+  ctx: ActorContext,
+  input: { invoiceId: string; amountCents: number },
+  tx: Executor,
+): Promise<{ settled: boolean; balanceCents: number; number: string }> {
+  if (input.amountCents <= 0) {
+    throw new Error('A settlement amount must be greater than zero.')
+  }
+
+  const [invoice] = await tx
+    .select()
+    .from(invoices)
+    .where(and(eq(invoices.id, input.invoiceId), eq(invoices.companyId, ctx.companyId)))
+    .limit(1)
+
+  if (!invoice) throw new Error('Invoice not found')
+
+  const reduced = await reduceDocumentBalance(ctx, invoices, invoice, input.amountCents, tx)
+  return { ...reduced, number: invoice.number }
 }
 
 /**

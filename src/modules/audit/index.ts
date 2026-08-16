@@ -92,6 +92,18 @@ export type AuditAction =
   | 'fixed_asset.register'
   | 'fixed_asset.depreciate'
   | 'fixed_asset.dispose'
+  // Property management (spec §5, Phase 23). The deposit actions are here
+  // because a deposit is somebody else's money: who took it, who gave it back,
+  // and who decided to keep it are exactly the privileged decisions §19 asks
+  // to be able to reconstruct.
+  | 'property.create'
+  | 'property.retire'
+  | 'lease.create'
+  | 'lease.end'
+  | 'rent.run'
+  | 'deposit.receive'
+  | 'deposit.refund'
+  | 'deposit.apply'
   // Inventory (spec §5, Phase 14)
   | 'stock.adjust'
   | 'stock.receive'

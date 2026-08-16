@@ -65,7 +65,8 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
   time_billing:
     'Timesheets with approval, reimbursable expenses, retainers, and invoices built from unbilled work.',
   pos_import: 'Daily sales summaries imported from a point-of-sale system.',
-  properties: 'Units, leases, and recurring rent.',
+  properties:
+    'Properties and units, tenancies, a monthly rent run, and security deposits held as a liability.',
   funds: 'Restricted and unrestricted fund tracking for nonprofits.',
   appointments: 'Scheduling that feeds the invoice.',
   vehicles: 'Per-vehicle cost and mileage tracking.',
@@ -91,6 +92,10 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   'projects',
   'inventory',
   'time_billing',
+  // Phase 23. Properties, units, leases, the rent run and security deposits —
+  // and no per-property report, because a property is a dimension and Phase 16
+  // already reports on those.
+  'properties',
 ]
 
 type CompanyRow = { id: string; industry: Industry }

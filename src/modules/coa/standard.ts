@@ -233,4 +233,16 @@ export const INDUSTRY_ACCOUNTS = {
   changeOrderRevenue: '4210',
   costsInExcessOfBillings: '1160',
   billingsInExcessOfCosts: '2560',
+
+  // Real estate (Phase 23). Installed by the pack since Phase 0 and used for
+  // the first time here — the same story the professional-services accounts
+  // above had in Phase 15.
+  //
+  // `tenantSecurityDeposits` is a liability and that is the whole point: it is
+  // the tenant's money, held. It never appears on a profit and loss until a
+  // deposit is applied, and applying it is the moment it stops being theirs.
+  tenantSecurityDeposits: '2580',
+  rentalIncome: '4300',
+  camReimbursements: '4310',
+  lateFeeIncome: '4320',
 } as const

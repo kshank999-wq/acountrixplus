@@ -14,8 +14,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 existing business's books in**, **accountant practice mode**,
 **transactional mail with password reset and invitations**,
 **attachments and accountant notes on a content-addressed object store**,
-**server-side PDF generation with immutable sent-document snapshots**, and the
-**communications log with the follow-up list** from the
+**server-side PDF generation with immutable sent-document snapshots**, the
+**communications log with the follow-up list**, and **property management** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -38,7 +38,8 @@ existing business's books in**, **accountant practice mode**,
 [ADR 0019](docs/adr/0019-a-reset-is-not-marketing-and-an-invitation-carries-no-password.md), and
 [ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md),
 [ADR 0021](docs/adr/0021-a-sent-document-never-changes.md), and
-[ADR 0022](docs/adr/0022-what-was-said-and-what-was-promised.md).
+[ADR 0022](docs/adr/0022-what-was-said-and-what-was-promised.md), and
+[ADR 0023](docs/adr/0023-somebody-elses-money.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -890,6 +891,56 @@ reachable from one screen nobody in sales opens.
   this week — and every client row on `/crm/organizations` expands into its own timeline with the
   two things somebody does next: log what was said, raise what was promised.
 
+### Property management (Phase 23)
+
+Spec §5's Real Estate / Property row asks for "properties, tenants, rents, CAM/expenses,
+property-level reporting". The `properties` module was declared in Phase 0, switched on by that
+pack, and did nothing — and so did the four accounts the pack has been installing ever since:
+`2580 Tenant Security Deposits`, `4300 Rental Income`, `4310 CAM Reimbursements`,
+`4320 Late Fee Income`. It is the fifth of ten industry modules to become real.
+
+- **A security deposit is somebody else's money.** It credits a liability on the way in and never
+  reaches the profit and loss; refunding it debits that liability and is **not an expense**, because
+  money that was never income cannot become a cost on the way out. Booking a refund to an expense
+  account is how property books show a loss in every month somebody moves out.
+- **Keeping it is the only moment it becomes income — and even then it depends.** Applied against an
+  unpaid invoice it settles the receivable and recognises nothing, because the rent was already
+  recognised when the invoice was raised; recognising it again would count the same month twice.
+  Applied against damage that nothing has billed, it is income at that moment. Both are asserted
+  against the profit and loss rather than against journal lines.
+- **A settled deposit is not a payment.** A receipt with no financial account means *cash in hand,
+  not yet banked* — it appears on Phase 12's undeposited funds list and the bank deposit screen
+  offers to pay it in. A deposit being kept is money banked months ago moving out of a liability, so
+  it settles the invoice directly, and a test asserts the undeposited list stays empty.
+- **The held balance is derived, never stored.** `Σ received − Σ refunded − Σ applied`, from the
+  movement rows. Phase 20's cached `reference_count` taught the lesson; here the stakes are higher
+  than storage, because a drifted balance is a landlord refunding money they no longer hold.
+- **The register reconciles to the account.** `Σ movements === the 2580 balance`, the same shape as
+  Phase 16's fixed asset reconciliation, and shown on the screen rather than buried in a report.
+- **Rent is billed once per lease per period.** `unique(lease_id, period_start)`, and the charge row
+  is inserted *before* the invoice so a losing run rolls back having raised nothing. Two runs fired
+  at the same instant produce one invoice between them — asserted, not assumed. One transaction per
+  lease, so a block of forty flats where the thirty-ninth has a problem bills thirty-nine.
+- **Prorated by day, and never prorated whole.** A tenancy starting on the 15th pays from the 15th
+  inclusive; one ending on the 10th pays to the 10th. A whole month never divides, so the common
+  case returns exactly the rent on the lease. `Math.round`, not the landlord's favour. The rent day
+  is capped at 28 so February never shifts a due date.
+- **A property is a dimension, not a report.** `propertyProfitAndLoss` is four lines that call
+  Phase 16's dimensional report. A per-property report written inside the module would miss the
+  insurance premium somebody coded from the transaction inbox — a test posts a roof repair through
+  no part of this module and asserts it lands on the property's column.
+- **Occupancy is measured against units.** Four flats and one tenant is 25% let; measuring against
+  leases would report 100%, which is why units are a table separate from tenancies. A unit held back
+  for refurbishment stays in the denominator.
+- **The module installs the accounts it needs.** A contractor who bought the yard next door and
+  switched it on has no `4300`. Without this, everything works until the first rent run fails with a
+  message about a chart of accounts the application could have fixed itself.
+
+**A gap closed on the way.** `DocumentLineInput` carried job dimensions and not user-defined ones,
+so an invoice could not be tagged with a Location or a Property — the README has called that "the
+largest gap in Phase 16" ever since, because a company slicing its books by Location saw its costs
+and missed its revenue. Invoices and bills now carry `dimensions` through to their journal lines.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -989,6 +1040,7 @@ Coverage matches what spec §21 asks for:
 | `tests/evidence.test.ts` | Bytes addressed by what they are; both store adapters round-tripping, putting twice being a no-op, and deleting what is not there not being an error; **the same bytes uploaded twice returning the one document that already exists**, two companies sharing a blob and each counted, **one company deleting its copy leaving the other's downloading**, and the bytes going only when the last of them does; an orphan collected after a simulated crash between commit and free, and **bytes a document still points at never freed however far the count has drifted**; a type that can carry script, an empty file, and one over 10 MB all refused; one document on a transaction and a fixed asset at once with detaching one leaving the other, **three concurrent attachments of the same file leaving one link**, deleting a document taking it off every record, a page of records counted in one query, and the bare ones named; **a record from another company refused, a document from another company refused, and another company's bytes not served on a known id**; each kind of record guarded by its own permission, and a read-only auditor seeing the evidence and refused the removal; a note recorded and audited, an empty one refused, **a question on the work list until answered with the answer added beside it rather than over it**, one answer between two simultaneous clicks, a remark refused by the CHECK constraint, one company's questions invisible to another, and the list filtered kind by kind; and the mobile path uploading, attaching idempotently, reading back as an ordinary document, and keeping the phone's tighter limit |
 | `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions** — against a pinned clock, because the PDF's timestamp has one-second resolution and the test was relying on both sends landing inside the same second; and an invoice rendered from the record with another company's refused |
 | `tests/engagement.test.ts` | An exchange recorded with the client derived from the person spoken to, and a call logged against a contact or a deal appearing on that client's timeline; the day it happened kept rather than the day it was typed; an exchange with nobody and one with no summary refused, another company's client refused, and `crm:manage` needed to write against `crm:view` to read; **when each client was last spoken to, with a note to self not counted as contact**; **a letter the system sends landing on the timeline of the person it went to**, a bounce shown as such, nothing recorded for an address the CRM does not know, **a send never failed because the log could not be written**, and **the caller's transaction still usable after one fails**; a follow-up surviving with no owner and staying on the shared list, **closed once however many people click at the same moment**, a dropped one kept with its reason, reopened when it turns out it was not done, and what is late measured against a date rather than the clock; work refused to somebody who does not work here, a task about another company's client and an empty title refused, and one company's work off another's list; a client's follow-ups with the open ones first, **a follow-up raised on a deal belonging to that deal's client**; **what was closed listed with its reason and reopened from the same place**, work closed before the window neither listed nor counted, and one company's closed work off another's list; and the timeline merging what the system did, what people said and what is owed, **an open follow-up placed at its due date rather than when it was typed**, and nothing of another company shown |
+| `tests/properties.test.ts` | Rent arithmetic against a pure core: a whole month charged exactly what the lease says without ever dividing, a tenancy starting on the 15th charged 17 days rather than 16 and one ending on the 10th charged to the 10th, nothing charged for a period the tenancy does not touch, February in a leap year and out of one, **a proration that rounds away to nothing raising no charge at all**, periods walked inclusively across a year boundary, and a due date that stays inside its own month; a property reportable the moment it exists with one Property dimension however many properties, two live tenancies on one unit refused while back-to-back ones are allowed, a unit occupied while let and available after, a property with somebody living in it refused retirement and kept rather than deleted once empty, and **the module installing the four accounts a pack that never had them cannot supply**; the industry gate, the terminology seam calling a customer a Tenant while the record stays a `customers` row, and one landlord's properties off another's books; **one invoice per tenancy raised against Rental Income**, **a period billed once however many times the run fires**, **one invoice between two runs fired at the same instant**, the first month prorated and the rest whole, an agreed-but-unstarted tenancy billing nothing, the month taken as a parameter rather than read from the clock, and the permissions on running against previewing; **a deposit as a liability with the profit and loss unmoved**, **a refund that is not an expense**, more refused than is held either way round, **unpaid rent settled without recognising the rent twice**, **a settled deposit kept off the undeposited funds list**, income recognised only when a deposit is kept for something unbilled, **what is held reconciled to account 2580**, a shortfall reported, every movement tied to the entry that posted it, and one landlord's deposits off another's reconciliation; a rent roll counting the empty flat, billed and outstanding per unit, and a unit held back for works kept in the denominator; and property-level reporting through the dimensional profit and loss, **seeing a roof repair this module never posted**, footing to the ordinary profit and loss, and **the rent invoice itself carrying the property tag** |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1785,6 +1837,37 @@ key and the client proposal link — keep them for steps 22 and 24.
      the CRM has never seen, is recorded as mail and appears on no timeline — which is the same rule
      working, not a different one.
 
+### Property management (Phase 23)
+
+225. **Open Properties.** Ridgeline is a contractor who bought the yard next door — the tab is there
+     because the *module* is on, not because the industry is real estate, and the four accounts the
+     real-estate pack would have supplied were created when the property was.
+226. **Read the rent roll.** Two units, one let: `DEPOT A` to Foxglove Cabinetry, `DEPOT B` empty
+     and marked so. The header says **50.0% let** and names the rent the empty unit is not earning.
+     Occupancy is measured against units, so the void is a row rather than an omission.
+227. **Open the Rent run tab.** Four charges, and the March one marked *prorated* — the tenancy
+     started on the 10th, so 22 of 31 days. The billed total is $6,491.94: three whole months plus
+     that fraction.
+228. **Press the rent run for a month already billed.** *Nothing to bill — every tenancy already has
+     an invoice for that month.* The seed does this once on purpose; the second attempt loses on a
+     unique index rather than being filtered out and hoped over.
+229. **Open Deposits held.** Register $1,750.00, account 2580 $1,750.00, **Agrees: Yes**. That is
+     the figure a landlord has to be able to show, and it is derived from the movement rows rather
+     than read from a column that could have drifted.
+230. **Look at the balance sheet.** Tenant Security Deposits sits in liabilities at $1,750.00 and
+     appears nowhere on the profit and loss. Take a deposit and check again: revenue does not move.
+231. **Give one back** from *Take, return or keep*. Expenses do not move either — money that was
+     never income cannot become a cost. Then try to return more than is held: refused, because the
+     books would otherwise show a tenant owing the landlord their own deposit.
+232. **Keep some instead.** *Kept, and recognised as income now* — the one moment somebody else's
+     money becomes the landlord's, and only because nothing had billed the damage. Apply a deposit
+     to an unpaid rent invoice instead and the message is different: the rent was already
+     recognised, so the invoice settles and revenue stays where it was.
+233. **Open Accounting → Dimensions and pick Property.** DEPOT has its own column, built from the
+     rent invoices this module raised. Post a repair by hand against the property from the journal,
+     and it lands in the same column — which is why there is no per-property report in the
+     properties module at all.
+
 ## Project layout
 
 ```
@@ -1815,6 +1898,7 @@ src/
     invite/              Accepting an invitation and choosing a first password
     inventory/            Stock on hand, receiving, counts
     time/                 Timesheets, unbilled work, billing, retainers
+    properties/           Rent roll and occupancy, the rent run, deposits held
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
     studio/               Company Studio — profile, brand, catalog, clauses
@@ -1860,6 +1944,7 @@ src/
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
     engagement/           The communications log, follow-up tasks, and the merged timeline
+    properties/           Properties and units, tenancies, the rent run, security deposits
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -2076,10 +2161,12 @@ Gaps within the phases already built:
 - **§13's accounting workspace is complete.** Cash Flow, comparative periods (both statements,
   both with screens), deposits and undeposited funds, vendor credits, user-defined dimensions, and
   the fixed asset register are all built. What remains inside them is listed below.
-- **Dimension defaults are built and unused by the document paths.** `dimension_defaults` and
-  `resolveDefaults` are tested; the invoice, bill and payroll paths do not call them, so a
-  dimension is set by hand on a manual entry or by reclassifying afterwards. The largest gap in
-  Phase 16.
+- **Invoices and bills can carry a dimension; nothing fills one in for them.** Phase 23 threaded
+  `dimensions` through `DocumentLineInput` to the journal line, so the revenue side of a
+  dimensional report is no longer blank — but `dimension_defaults` and `resolveDefaults` are still
+  called by nothing, so a dimension is set by whatever raises the document, by hand on a manual
+  entry, or by reclassifying afterwards. Payroll still sets none. Half of what used to be the
+  largest gap in Phase 16.
 - **A dimension cannot be reported hierarchically.** Values nest and `parentId` is validated; no
   report rolls a child into its parent, so "West / Portland" and "West / Seattle" are two columns
   rather than one with a subtotal.
@@ -2169,10 +2256,12 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Five of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`, and
-  `time_billing` are implemented; `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
-  and `manufacturing` are declared, switched on by the packs that ask for them, and have no
-  workflows. The module settings page lists them under "Not built yet" rather than hiding them.
+- **Five of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
+  `time_billing` and `properties` are implemented; `pos_import`, `funds`, `appointments`,
+  `vehicles`, and `manufacturing` are declared, switched on by the packs that ask for them, and
+  have no workflows. The module settings page lists them under "Not built yet" rather than hiding
+  them. Of the five, `funds` is the one with real accounting content behind it — restricted fund
+  balances are a reporting model, not a screen — and the other four are workflow surfaces.
 - **A retainer is not modelled on a cash basis.** Strictly, cash basis has no unearned revenue —
   money received in April is April's revenue. What happens instead is that the receipt has no
   recognition entry to take accounts from, so it stays on the balance sheet and the caveat names
@@ -2354,6 +2443,29 @@ Gaps within the phases already built:
   is outstanding" and surprising for "what happened when".
 - **No timeline on a contact or a job**, only on a client and a deal. The data supports both; the
   screens do not exist.
+
+- **Rent is monthly.** Weekly tenancies, quarterly commercial rents and annual ground rents are not
+  expressible. The period is a month because the idempotency key is a month, and widening it means
+  a period *type* on the lease and a rethink of proration.
+- **Nothing schedules the rent run.** It is a button. The Phase 10 queue is right there and the run
+  is already idempotent — which is the hard half — so this is a handler registration away, and the
+  fourth job now owed after `login_attempts`, `action_tokens` and `sweepOrphanedBlobs`.
+- **No late fees, and no CAM.** `4310 CAM Reimbursements` and `4320 Late Fee Income` are installed
+  and unused. Service-charge apportionment by floor area is what `areaUnits` was recorded for, and
+  half of it is worse than none.
+- **No rent reviews.** Changing the rent means editing the lease, which correctly restates nothing
+  already billed — but there is no record of what it was before or when it changed.
+- **A deposit is not held per protection scheme.** Many jurisdictions require deposits in a
+  registered scheme with a reference and statutory deadlines. Phase 23 models the money, not the
+  compliance.
+- **No tenant statement of its own.** Phase 11's customer statement covers a tenant, because a
+  tenant is a customer — but it says "Invoice" rather than "Rent for March" and it does not show
+  the deposit held.
+- **Occupancy is by unit count, not by area or by rent.** One large unit and three small ones
+  reports 25% let when the large one is empty, which understates the problem.
+- **A property is not a fixed asset.** Phase 16's register would depreciate the building and this
+  module does not link to it, so the same address can exist in both places with nothing reconciling
+  them.
 - Renaming an organization does not propagate to its linked customer or vendor record. Client-
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not

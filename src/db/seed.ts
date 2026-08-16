@@ -31,6 +31,15 @@ import { attachDocument, storeDocument } from '@/modules/evidence/service'
 import { logCommunication } from '@/modules/engagement/communications'
 import { createTask, workSummary } from '@/modules/engagement/tasks'
 import { writeNote } from '@/modules/evidence/notes'
+import {
+  createLease,
+  createProperty,
+  createUnit,
+} from '@/modules/properties/service'
+import { runRent } from '@/modules/properties/billing'
+import { applyDeposit, depositsHeld, receiveDeposit } from '@/modules/properties/deposits'
+import { occupancy } from '@/modules/properties/reporting'
+import { listRentCharges } from '@/modules/properties/billing'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
@@ -525,6 +534,94 @@ async function main() {
         `(${work.overdue} late, ${work.unassigned} unclaimed).`,
     )
   }
+
+  // --- Phase 23: property management ---------------------------------------
+  //
+  // Ridgeline is a contractor who bought the yard next door and let the two
+  // units in it. Switched on here rather than seeding a fourth company,
+  // because that is the point the module registry keeps making: industry is a
+  // starting point, not a cage — and the four accounts the real-estate pack
+  // would have installed are created on demand for a chart that never had
+  // them.
+  await setModuleEnabled(ctx, 'properties', true)
+
+  const yard = await createProperty(ctx, {
+    code: 'DEPOT',
+    name: 'Depot Road Units',
+    addressLine1: '48 Depot Road',
+    city: 'Portland',
+    acquiredOn: '2026-01-15',
+  })
+
+  const unitA = await createUnit(ctx, {
+    propertyId: yard.id,
+    code: 'A',
+    name: 'Front workshop',
+    marketRentCents: 180_000,
+    areaUnits: 1_800,
+  })
+  const unitB = await createUnit(ctx, {
+    propertyId: yard.id,
+    code: 'B',
+    name: 'Rear store',
+    marketRentCents: 95_000,
+    areaUnits: 900,
+  })
+
+  const workshopTenant = await createCustomer(ctx, {
+    name: 'Foxglove Cabinetry',
+    email: 'accounts@foxglovecabinetry.test',
+    paymentTermsDays: 5,
+  })
+
+  const workshopLease = await createLease(ctx, {
+    unitId: unitA.id,
+    customerId: workshopTenant.id,
+    startsOn: '2026-03-10',
+    rentCents: 175_000,
+    dueDay: 1,
+    depositRequiredCents: 175_000,
+    activate: true,
+  })
+
+  // Unit B is deliberately left empty. A rent roll where every unit is let is
+  // a rent roll that never shows the row that matters — occupancy is measured
+  // against units, so the void is the point.
+  void unitB
+
+  const depotBank = await firstCheckingAccountId(company.id)
+  if (depotBank) {
+    await receiveDeposit(ctx, {
+      leaseId: workshopLease.id,
+      amountCents: 175_000,
+      occurredOn: '2026-03-06',
+      financialAccountId: depotBank,
+      memo: 'One month, held under the tenancy agreement',
+    })
+  }
+
+  // March is prorated — the tenancy starts on the 10th, so 22 of 31 days.
+  for (const month of ['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01']) {
+    await runRent(ctx, { month })
+  }
+
+  // Running one of them again on purpose: it bills nothing, because the
+  // unique index has already spoken.
+  const repeated = await runRent(ctx, { month: '2026-04-01' })
+
+  const charges = await listRentCharges(ctx, { limit: 10 })
+  const held = await depositsHeld(ctx, { asOf: '2026-06-30' })
+  const let_ = await occupancy(ctx, { asOf: '2026-06-30' })
+
+  console.log(
+    `  Properties: ${charges.length} rent charges raised (one prorated), ` +
+      `a repeat run billed ${repeated.invoicesRaised}.`,
+  )
+  console.log(
+    `  Deposits held ${formatCentsPlain(held.registerCents)} against account 2580 ` +
+      `at ${formatCentsPlain(held.ledgerCents)} — ${held.agrees ? 'agrees' : 'DISAGREES'}. ` +
+      `${let_.occupied}/${let_.units} units let.`,
+  )
 
   const intakeKey = await createIntakeKey(ctx, {
     name: 'Website contact form',
