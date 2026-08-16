@@ -8,7 +8,7 @@
 import { randomUUID } from 'node:crypto'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { brandKits, campaignRecipients, financialAccounts } from '@/db/schema'
+import { brandKits, campaignRecipients, financialAccounts, serviceItems } from '@/db/schema'
 import { registerCompany } from '@/modules/tenancy/onboarding'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
@@ -23,6 +23,9 @@ import {
   recordPayment,
 } from '@/modules/receivables/service'
 import { cashFlowStatement } from '@/modules/ledger/cash-flow'
+import { setModuleEnabled } from '@/modules/industry/modules'
+import { adjustStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
+import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
 import {
   changeStage,
   createContact,
@@ -1308,6 +1311,91 @@ async function main() {
       `${flow.reconciles ? 'reconciles' : 'DOES NOT RECONCILE'} to the cash accounts.`,
   )
 
+  // --- Phase 14: inventory -------------------------------------------------
+  //
+  // Ridgeline is a contractor, so the construction pack does not switch stock
+  // on. It is enabled here anyway: a contractor who keeps fittings on a shelf
+  // is exactly the case the module gate exists for — industry is a starting
+  // point, not a cage.
+  await setModuleEnabled(ctx, 'inventory', true)
+
+  const inventoryRevenue = await accountByNumber(company.id, '4200')
+  const grniAccount = await accountByNumber(company.id, '2050')
+
+  if (inventoryRevenue && grniAccount) {
+    const stockItems = [
+      { code: 'FIX-100', name: 'Bathroom fixture set', unit: 'each', price: 48_000, cost: 26_500 },
+      { code: 'TILE-SQ', name: 'Porcelain tile', unit: 'sq ft', price: 1_200, cost: 620 },
+      { code: 'LUM-2X4', name: 'Framing lumber 2x4', unit: 'each', price: 1_150, cost: 690 },
+    ]
+
+    const created = []
+    for (const stock of stockItems) {
+      const [item] = await db
+        .insert(serviceItems)
+        .values({
+          companyId: company.id,
+          code: stock.code,
+          name: stock.name,
+          unit: stock.unit,
+          unitPriceCents: stock.price,
+          unitCostCents: stock.cost,
+          isInventoried: true,
+          reorderPointMilli: 20_000,
+          chartAccountId: inventoryRevenue.id,
+        })
+        .returning()
+      created.push({ ...stock, id: item.id })
+    }
+
+    // Two deliveries at different costs, so the average is a real average and
+    // the two cost methods would genuinely differ.
+    //
+    // Through `receiveGoods` rather than the lower-level `receiveStock`, so the
+    // Goods Received Not Invoiced balance has receipts itemising it. A balance
+    // in that account with nothing behind it is the exact thing the screen
+    // exists to prevent.
+    const stockVendorId = (await createVendor(ctx, { name: 'Cascade Building Supply' })).id
+
+    for (const [receivedOn, multiplier] of [
+      ['2026-05-04', 1],
+      ['2026-07-02', 1.08],
+    ] as const) {
+      await receiveGoods(ctx, {
+        vendorId: stockVendorId,
+        receivedOn,
+        reference: multiplier === 1 ? 'Opening stock' : 'Restock at the new price',
+        lines: created.map((item) => ({
+          itemId: item.id,
+          quantityMilli: multiplier === 1 ? 60_000 : 40_000,
+          unitCostCents: Math.round(item.cost * multiplier),
+        })),
+      })
+    }
+
+    // A count that came up short, with a reason — which the service insists on.
+    await adjustStock(ctx, {
+      itemId: created[1].id,
+      countedMilli: 78_000,
+      adjustedOn: '2026-07-31',
+      reason: 'Quarterly count — two boxes cracked in the van',
+    })
+
+    const positions = await stockOnHand(ctx)
+    const reconciliation = await reconcileInventory(ctx)
+    const stockValue = positions.reduce((sum, position) => sum + position.valueCents, 0)
+
+    const awaiting = await unbilledReceipts(ctx)
+    console.log(
+      `  ${positions.length} stocked items worth ${formatCentsPlain(stockValue)} — ` +
+        `subledger and the Inventory account ${reconciliation.agrees ? 'agree' : 'DISAGREE'}.`,
+    )
+    console.log(
+      `  ${awaiting.length} deliveries awaiting a supplier bill, ` +
+        `${formatCentsPlain(awaiting.reduce((sum, row) => sum + row.totalCents, 0))} in Goods Received Not Invoiced.`,
+    )
+  }
+
   // Cash versus accrual on the demo's own books, so the difference is a
   // number rather than an explanation.
   const range = { startDate: '2026-01-01', endDate: '2026-12-31' }
@@ -1345,6 +1433,7 @@ async function main() {
   console.log('  /accounting/periods   recurring entries and the year-end close')
   console.log('  /accounting/deposits  receipts waiting to be banked, and the slip')
   console.log('  /settings/security    two-factor, sessions, sign-in history, and the export')
+  console.log('  /inventory            stock on hand, receiving, and counts')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

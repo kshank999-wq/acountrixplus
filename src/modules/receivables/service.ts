@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   billLines,
@@ -9,6 +9,7 @@ import {
   invoices,
   paymentApplications,
   payments,
+  serviceItems,
   vendors,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
@@ -47,6 +48,15 @@ export type DocumentLineInput = {
    */
   projectId?: string | null
   costCodeId?: string | null
+  /**
+   * The catalogue item this line sells (Phase 14, spec §5).
+   *
+   * When it is a stocked item, issuing the invoice also relieves inventory and
+   * posts the cost — in this invoice's own transaction, so a sale cannot exist
+   * with its cost of sales missing. Optional and ignored for services, which
+   * is every line that existed before this phase.
+   */
+  itemId?: string | null
 }
 
 /**
@@ -306,6 +316,7 @@ export async function createInvoice(
         amountCents: line.amountCents,
         projectId: line.projectId,
         costCodeId: line.costCodeId,
+        itemId: line.itemId ?? null,
         sortOrder: line.sortOrder,
       })),
     )
@@ -373,6 +384,19 @@ export async function createInvoice(
       .set({ journalEntryId: entry.id })
       .where(eq(invoices.id, invoice.id))
 
+    // Relieve stock and post the cost, in this same transaction (Phase 14).
+    //
+    // Inside, not after: a sale whose cost of sales is missing overstates the
+    // margin on every report until somebody notices, and "after" is where a
+    // crash between the two writes leaves it. Lines with no item, or with an
+    // item that carries no stock, cost nothing extra — the query below finds
+    // nothing and the whole block is skipped.
+    const stockShortfalls = await relieveStockForInvoice(
+      ctx,
+      { invoiceId: invoice.id, issueDate: input.issueDate, lines, number },
+      tx,
+    )
+
     await recordAudit(
       ctx,
       {
@@ -384,7 +408,7 @@ export async function createInvoice(
       tx,
     )
 
-    return { ...invoice, journalEntryId: entry.id }
+    return { ...invoice, journalEntryId: entry.id, stockShortfalls }
   }
 
   return exec ? write(exec) : db.transaction(write)
@@ -942,4 +966,98 @@ function addDays(isoDate: string, days: number): string {
   const date = new Date(`${isoDate}T00:00:00Z`)
   date.setUTCDate(date.getUTCDate() + days)
   return date.toISOString().slice(0, 10)
+}
+
+/**
+ * Relieves stock and posts cost of sales for an invoice's stocked lines.
+ *
+ * ## Why this lives here rather than in the inventory module
+ *
+ * It is the seam between two modules, and it has to run inside the invoice's
+ * transaction. Putting it in `inventory/` and calling it from here would be
+ * the same code with a longer import; putting the *decision* here — which
+ * lines carry stock — keeps invoicing in charge of what an invoice does.
+ *
+ * The inventory module still owns the costing and the posting. This function
+ * only decides who to ask.
+ *
+ * Returns any shortfalls so the caller can tell somebody that they have just
+ * sold stock the books say does not exist. The sale is not refused: it
+ * happened, and a system that refuses to record it teaches people to record
+ * something else instead.
+ */
+async function relieveStockForInvoice(
+  ctx: ActorContext,
+  input: {
+    invoiceId: string
+    issueDate: string
+    number: string
+    lines: Array<{ itemId?: string | null; quantityMilli: number; description: string }>
+  },
+  tx: Executor,
+): Promise<Array<{ itemId: string; description: string; shortfallMilli: number }>> {
+  const itemIds = input.lines
+    .map((line) => line.itemId)
+    .filter((id): id is string => typeof id === 'string')
+
+  if (itemIds.length === 0) return []
+
+  const stocked = await tx
+    .select({ id: serviceItems.id })
+    .from(serviceItems)
+    .where(
+      and(
+        eq(serviceItems.companyId, ctx.companyId),
+        inArray(serviceItems.id, itemIds),
+        eq(serviceItems.isInventoried, true),
+      ),
+    )
+
+  if (stocked.length === 0) return []
+
+  const stockedIds = new Set(stocked.map((row) => row.id))
+  const { consumeStockForSale } = await import('@/modules/inventory/service')
+  const { invoiceCostings } = await import('@/db/schema')
+
+  const shortfalls: Array<{ itemId: string; description: string; shortfallMilli: number }> = []
+
+  for (const line of input.lines) {
+    if (!line.itemId || !stockedIds.has(line.itemId)) continue
+
+    const result = await consumeStockForSale(
+      ctx,
+      {
+        itemId: line.itemId,
+        quantityMilli: line.quantityMilli,
+        soldOn: input.issueDate,
+        sourceType: 'invoice',
+        sourceId: input.invoiceId,
+        memo: `Invoice ${input.number}`,
+      },
+      tx,
+    )
+
+    if (result.consumed.length > 0) {
+      // Frozen, so a return can put the stock back at the cost it left at
+      // rather than at whatever today's average happens to be.
+      await tx.insert(invoiceCostings).values({
+        companyId: ctx.companyId,
+        invoiceId: input.invoiceId,
+        itemId: line.itemId,
+        quantityMilli: line.quantityMilli - result.shortfallMilli,
+        costCents: result.costCents,
+        lotBreakdown: JSON.stringify(result.consumed),
+      })
+    }
+
+    if (result.shortfallMilli > 0) {
+      shortfalls.push({
+        itemId: line.itemId,
+        description: line.description,
+        shortfallMilli: result.shortfallMilli,
+      })
+    }
+  }
+
+  return shortfalls
 }

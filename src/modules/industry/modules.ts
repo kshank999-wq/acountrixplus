@@ -59,7 +59,8 @@ export const MODULE_LABELS: Record<IndustryModule, string> = {
 export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
   job_costing:
     'Cost codes, job budgets, change orders, progress billing with retainage, WIP, and subcontractor compliance.',
-  inventory: 'Stock quantities, valuation, and cost of goods sold on sale.',
+  inventory:
+    'Stock quantities and valuation, purchase orders and receiving, cost of goods sold on sale, and counts.',
   projects: 'Jobs as an accounting dimension, so revenue and cost can be reported per job.',
   time_billing: 'Timesheets that become billable lines on an invoice.',
   pos_import: 'Daily sales summaries imported from a point-of-sale system.',
@@ -70,8 +71,21 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
   manufacturing: 'Bills of materials and work orders.',
 }
 
-/** True for modules Phase 7 actually implements. */
-export const IMPLEMENTED_MODULES: IndustryModule[] = ['job_costing', 'projects']
+/**
+ * Modules with workflows behind them.
+ *
+ * `inventory` joined in Phase 14, and it is the one that carries five industry
+ * packs: retail, restaurant, manufacturing, e-commerce, and wholesale all name
+ * stock first. They are not five features — a restaurant's food cost and a
+ * wholesaler's warehouse are the same perpetual inventory with different words
+ * on the screen, which is what the terminology map is for.
+ *
+ * The rest are declared, switched on by the packs that ask for them, and do
+ * nothing. Listed under "Not built yet" on the settings page rather than
+ * hidden, because a module that is silently absent is worse than one that says
+ * so.
+ */
+export const IMPLEMENTED_MODULES: IndustryModule[] = ['job_costing', 'projects', 'inventory']
 
 type CompanyRow = { id: string; industry: Industry }
 

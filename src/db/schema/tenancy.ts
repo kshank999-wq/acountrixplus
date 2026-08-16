@@ -55,6 +55,21 @@ export const companies = pgTable('companies', {
   /** 1 = January. Drives period/close boundaries later. */
   fiscalYearStartMonth: integer('fiscal_year_start_month').notNull().default(1),
   currency: text('currency').notNull().default('USD'),
+  /**
+   * How stock is costed (Phase 14, spec §5).
+   *
+   * One setting for the company, not one per item. Mixing methods within a set
+   * of books makes the cost of sales figure unexplainable — an accountant
+   * asked "how is this valued" has to answer "it depends which line", which is
+   * not an answer. Weighted average by default: it is the simpler of the two
+   * to explain, and it is what a business that has never thought about the
+   * question is implicitly doing.
+   */
+  inventoryCostMethod: text('inventory_cost_method', {
+    enum: ['fifo', 'weighted_average'],
+  })
+    .notNull()
+    .default('weighted_average'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
 })

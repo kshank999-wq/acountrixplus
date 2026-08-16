@@ -52,6 +52,12 @@ export type AuditAction =
   | 'payment.record'
   | 'customer.create'
   | 'vendor.create'
+  // Inventory (spec §5, Phase 14)
+  | 'stock.adjust'
+  | 'stock.receive'
+  | 'item.update'
+  | 'purchase_order.create'
+  | 'purchase_order.receive'
   // Security controls (spec §14, §19, Phase 13)
   | 'device.revoke_all'
   | 'mfa.enable'

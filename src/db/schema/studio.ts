@@ -201,6 +201,30 @@ export const serviceItems = pgTable(
     /** Longer copy dropped into a proposal when this item is added. */
     defaultProposalCopy: text('default_proposal_copy'),
 
+    // --- Stocked goods (Phase 14, spec §5) --------------------------------
+    //
+    // Added here rather than in a parallel `products` table. A business sells
+    // a mix of services and things off a shelf, and the person building an
+    // invoice does not think of them as living in two catalogues. One table
+    // with a flag is what spec §23 means by extending the common platform.
+    /**
+     * True when this item is counted and costed.
+     *
+     * Off by default, so every existing item and every service stays exactly
+     * what it was: a description and a price with no stock behind it.
+     */
+    isInventoried: boolean('is_inventoried').notNull().default(false),
+    /** Where its value sits on the balance sheet. Defaults to 1400 Inventory. */
+    inventoryAccountId: uuid('inventory_account_id').references(() => chartAccounts.id, {
+      onDelete: 'set null',
+    }),
+    /** Where its cost lands when it sells. Defaults to 5000 Cost of Goods Sold. */
+    cogsAccountId: uuid('cogs_account_id').references(() => chartAccounts.id, {
+      onDelete: 'set null',
+    }),
+    /** Below this, the item appears on the reorder report. Null means never. */
+    reorderPointMilli: bigint('reorder_point_milli', { mode: 'number' }),
+
     isActive: boolean('is_active').notNull().default(true),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

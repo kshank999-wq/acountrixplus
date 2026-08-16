@@ -71,6 +71,14 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
     isSystem: true,
     description: 'Amounts the company owes to vendors.',
   },
+  {
+    number: '2050',
+    name: 'Goods Received Not Invoiced',
+    type: 'liability',
+    subtype: 'accrued_liability',
+    description:
+      'Stock that has arrived and not yet been billed. Cleared when the supplier’s invoice lands.',
+  },
   { number: '2100', name: 'Credit Card', type: 'liability', subtype: 'credit_card' },
   {
     number: '2150',
@@ -117,6 +125,10 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
   { number: '5100', name: 'Materials and Supplies', type: 'cogs' },
   { number: '5200', name: 'Subcontracted Services', type: 'cogs' },
   { number: '5300', name: 'Freight and Shipping', type: 'cogs' },
+  // Phase 14. Its own account rather than folded into Cost of Goods Sold:
+  // stock that went missing and stock that was sold are different facts, and a
+  // margin that quietly includes theft explains nothing.
+  { number: '5400', name: 'Inventory Shrinkage', type: 'cogs' },
 
   // --- Operating expenses -------------------------------------------------
   { number: '6000', name: 'Advertising and Marketing', type: 'expense' },
@@ -171,6 +183,10 @@ export const SYSTEM_ACCOUNTS = {
   accountsReceivable: '1100',
   badDebt: '6025',
   accruedLiabilities: '2150',
+  goodsReceivedNotInvoiced: '2050',
+  inventory: '1400',
+  costOfGoodsSold: '5000',
+  inventoryShrinkage: '5400',
   undepositedFunds: '1200',
   accountsPayable: '2000',
   retainedEarnings: '3200',

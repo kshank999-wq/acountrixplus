@@ -186,6 +186,14 @@ export const invoiceLines = pgTable(
     /** Job costing dimensions, copied onto the derived journal lines. */
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
     costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
+    /**
+     * The catalogue item sold (Phase 14).
+     *
+     * Set on a stocked line, which is what tells the invoice to relieve
+     * inventory. Null for a free-text line, which is every line raised before
+     * this phase and most lines raised after it.
+     */
+    itemId: uuid('item_id'),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => ({
@@ -251,6 +259,14 @@ export const billLines = pgTable(
     /** Job costing dimensions, copied onto the derived journal lines. */
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
     costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
+    /**
+     * The catalogue item sold (Phase 14).
+     *
+     * Set on a stocked line, which is what tells the invoice to relieve
+     * inventory. Null for a free-text line, which is every line raised before
+     * this phase and most lines raised after it.
+     */
+    itemId: uuid('item_id'),
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => ({

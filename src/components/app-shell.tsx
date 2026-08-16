@@ -18,7 +18,16 @@ export async function AppShell({
 }: {
   actor: ActorContext
   companyName: string
-  active: 'bookkeeping' | 'accounting' | 'crm' | 'jobs' | 'payroll' | 'marketing' | 'studio' | 'ai'
+  active:
+    | 'bookkeeping'
+    | 'accounting'
+    | 'crm'
+    | 'jobs'
+    | 'inventory'
+    | 'payroll'
+    | 'marketing'
+    | 'studio'
+    | 'ai'
   actions?: React.ReactNode
   children: React.ReactNode
 }) {
@@ -29,11 +38,19 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'job_costing')
     : false
 
+  // Its own workspace rather than a tab under Jobs (Phase 14). A retailer has
+  // stock and no jobs; a contractor has jobs and often no stock. Nesting one
+  // inside the other would hide it from half the companies that need it.
+  const inventoryEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'inventory')
+    : false
+
   const links = [
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
     { key: 'jobs', href: '/jobs', label: 'Jobs', show: jobsEnabled },
+    { key: 'inventory', href: '/inventory', label: 'Inventory', show: inventoryEnabled },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

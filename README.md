@@ -8,8 +8,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 4 (Proposal Designer + Company Studio)**, **Phase 5 (Marketing)**,
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
 **Payroll and Tax**, the **background worker and outbox**, the
-**completed accounting core**, the **statements an accountant asks for**, and the
-**security controls** from the
+**completed accounting core**, the **statements an accountant asks for**, the
+**security controls**, and **inventory** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -22,8 +22,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0009](docs/adr/0009-payroll-the-entry-not-the-tax.md),
 [ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md),
 [ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md),
-[ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md), and
-[ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md).
+[ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md),
+[ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md), and
+[ADR 0014](docs/adr/0014-one-inventory-five-industries.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -477,6 +478,48 @@ every session that had no device — exactly the one an attacker would keep; and
 burst of retries could push real failures out of the lockout window and lift the
 lock it had just triggered.
 
+### Inventory (Phase 14)
+
+Eight of the ten industry modules were declared and empty. Inventory is the one
+that carries five of them: retail, restaurant, manufacturing, e-commerce, and
+wholesale all name stock first, and they are **not five features** — a
+restaurant's food cost and a wholesaler's warehouse are the same perpetual
+inventory with different words on the screen.
+
+The claim: **the inventory subledger equals the Inventory account in the ledger,
+always.**
+
+- **A lot carries its value, not a rate to recompute from.** The first
+  implementation derived value as `quantity × unit cost` and passed 29 of 31
+  tests. It was out by 25 cents on one ordinary sale, because deriving re-rounds
+  on every read against a rate a pooled consumption never used. The lot now
+  stores its remaining value; the rate is for reading only. See ADR 0014 for the
+  worked example.
+- **FIFO and weighted average**, one setting for the company. Mixing them makes
+  cost of sales unexplainable — asked "how is this valued", nobody wants the
+  answer "it depends which line".
+- **Lots are kept under both methods**, so changing method is a setting rather
+  than a migration, and so a cost can be explained to an auditor with four
+  receipts rather than an average.
+- **A purchase order posts nothing.** It is a commitment, not a transaction.
+  What it buys is the first leg of the three-way match: ordered 100, received
+  96, billed for 100 says a supplier is charging for four units that never
+  arrived.
+- **Receiving posts to Goods Received Not Invoiced**, not Accounts Payable.
+  Systems that wait for the bill leave stock physically on the shelf and absent
+  from the books for weeks — misstating inventory, cost of sales, and margin at
+  the same time.
+- **The cost posts inside the invoice's own transaction**, so a sale can never
+  exist with its cost of sales missing.
+- **Selling stock you do not have is recorded, not refused**, and the shortfall
+  is reported. A shop that sells the last one twice on a busy Saturday has a
+  real problem, and refusing to record it teaches people to record a lie.
+- **A return goes back at the cost it left at.** Restoring at today's average
+  invents value from nothing.
+- **Shrinkage is its own account.** Stock sold and stock stolen are different
+  facts, and a margin quietly containing theft explains nothing. Every count
+  needs a reason.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -566,6 +609,7 @@ Coverage matches what spec §21 asks for:
 | `tests/worker.test.ts` | Backoff growth, cap, and upward-only jitter; concurrent workers claiming a job once; run-at honoured; dedupe dropping rather than stacking; dead-lettering and never sweeping a dead job; stealing an expired claim; priority; retry resetting attempts; the runner surviving one bad job in a batch; unknown kinds dying immediately; a tenant job with no company refused; a global handler getting no actor; heartbeat liveness; `nextRunAt` strictly after and across month rollovers; a due schedule firing exactly once; the outbox rolling back with its transaction, relaying idempotently, and `invoice.paid` on full settlement only; a scheduled task that cannot sign in and belongs to no company; and the draft entry that changes no report until a person posts it |
 | `tests/statements.test.ts` | Account classification, including the two that look wrong and are right — accumulated depreciation in operating, and depreciation not being a timing difference; the cash flow statement reconciling to what the cash accounts moved, and an unpaid invoice as profit that is not yet cash; comparison windows including 29 February; an account surviving in only one column; a comparative balancing in every column; three cheques banked as one line, a processing fee, the same cheque refused twice, a deposit a fee has eaten, and a reversal making the receipts depositable again; a vendor credit reversing the cost on the bill's own account, a customer credit refused against a bill, and the two numbering series kept apart; an accrual not being an expense on a cash basis, an accrual settled straight from the bank still becoming one, a prepayment deducted when paid, a deposit taken in advance as revenue when it arrives, the transformation still balancing, and the caveat naming what it could not resolve; and a closed year reporting its drift rather than blocking the entry |
 | `tests/security.test.ts` | TOTP against RFC 6238's published vectors, base32 round-tripping, ±1 step of drift and no more, a used code refused inside its own window, and non-numeric codes rejected; secrets round-tripping under encryption with a fresh IV each time and a tampered ciphertext throwing rather than decrypting to something else; enrolment not switching on until a code has worked, the secret never stored in the clear, recovery codes single-use and never stored in the clear and invalidated when regenerated, the password required to switch MFA off, and a working factor never silently replaced; the challenge token rejecting tampering, dying when the password changes, and expiring; the network kept and the host discarded, lockout after repeated failures cleared by a success and not extended by retries, and the window expiring; signing out everywhere else keeping this session, ending a device-less session a device sweep would miss, a password change ending every other session, the company session length honoured, and a forged cookie rejected; CSV quoting fields that would otherwise shift every column, an export an accountant could rebuild the books from, the export recorded in two places, a role without ledger access refused, and one company's export containing nothing of another's; and the policy refusing settings that would lock everybody out |
+| `tests/inventory.test.ts` | FIFO taking oldest first against weighted average pooling, the parts summing to the whole across a thousand awkward quantities under both methods, consuming everything costing exactly the pool, a shortfall reported rather than thrown, receipt-date ties broken deterministically, and a return valued at what left; the subledger equalling the Inventory account after a busy month under both cost methods; the cost posting inside the invoice's transaction, a service line left alone, an empty shelf still recording the sale, and a return restored at its original cost while prices moved; a shortage booked to Shrinkage and not to Cost of Goods Sold, a count with no reason refused, a count that found the right quantity posting nothing, and a surplus valued at the current average; an order posting nothing, a receipt landing in Goods Received Not Invoiced rather than payables, a short shipment surfacing in the match, unbilled receipts itemised, and an order closing once every line is satisfied; and the guards — a service refused as stock, a negative cost refused, the module gate, and one company's stock invisible to another |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1105,6 +1149,31 @@ key and the client proposal link — keep them for steps 22 and 24.
      database, compares every table's row count, and drops the scratch copy. Everybody has backups;
      the ones who lose data are the ones who never restored one.
 
+### Inventory (Phase 14)
+
+155. **Switch inventory on** — the retail, restaurant, manufacturing, e-commerce, and wholesale
+     packs switch it on themselves; on any other pack, **Settings → Modules**. An **Inventory**
+     workspace appears in the top navigation.
+156. **Add an item and receive some stock** — the receipt posts `Dr Inventory / Cr Goods Received
+     Not Invoiced`. Check the trial balance: the stock is on the balance sheet and Accounts Payable
+     is untouched, because no supplier has invoiced yet.
+157. **Raise a purchase order** — and note the trial balance does not move. An order is a
+     commitment, not a transaction.
+158. **Receive 96 of 100** — the order goes to *partial*, and the three-way match shows the four
+     units that never arrived. That comparison is the whole control.
+159. **Sell some** — put the item on an invoice. The cost of sales posts in the same transaction as
+     the revenue, so the P&L shows a real margin rather than revenue with no cost against it.
+160. **Watch the identity hold** — the banner at the top of the workspace compares the stock records
+     against the Inventory account. They are computed separately, so agreeing is evidence.
+161. **Count the shelf and find it short** — the difference goes to *Inventory Shrinkage*, not Cost
+     of Goods Sold, and the count refuses to save without a reason. Stock sold and stock stolen are
+     different facts.
+162. **Sell more than you have** — it is recorded, and the shortfall is reported back. Refusing
+     would teach somebody to record something else instead.
+163. **Switch the cost method** — set `inventory_cost_method` to `fifo` on the company and sell
+     again. FIFO follows what you actually paid, in order; weighted average pools it. The subledger
+     still equals the ledger either way, which is the point.
+
 ## Project layout
 
 ```
@@ -1405,10 +1474,20 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Eight of ten industry modules do nothing.** `job_costing` and `projects` are implemented;
-  `inventory`, `time_billing`, `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
+- **Six of ten industry modules do nothing.** `job_costing`, `projects`, and now `inventory` are
+  implemented; `time_billing`, `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
   and `manufacturing` are declared, switched on by the packs that ask for them, and have no
   workflows. The module settings page lists them under "Not built yet" rather than hiding them.
+- **Inventory has one location.** No warehouses, no bins, no transfers between them — which
+  wholesale and multi-site retail both need. The movement table has the shape to carry them.
+- **No bill of materials.** The manufacturing pack gets stock without the ability to consume
+  components into a finished good, which is the half of manufacturing that makes it manufacturing.
+- **Landed cost is not apportioned.** Freight and duty go to their own expense accounts rather
+  than into the cost of the stock they arrived with, so margin on imported goods is flattered.
+- **Clearing Goods Received Not Invoiced has no screen.** `attachBillToReceipts` does it correctly
+  and nothing in the interface calls it, so in practice the account is cleared by a manual entry.
+- **A negative stock position values at zero.** Selling into a shortfall relieves what exists and
+  no more, so cost of sales is understated until the replenishment arrives.
 - **WIP still does not *post* its adjusting entry, and will not.** Since Phase 10 a monthly job
   *proposes* one as a draft — balanced, validated, and affecting no statement until an accountant
   posts it. Having a scheduler did not change ADR 0007's judgement: the objection was about who
