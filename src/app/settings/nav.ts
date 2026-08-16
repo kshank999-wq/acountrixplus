@@ -2,5 +2,6 @@
 export const SETTINGS_NAV = [
   { href: '/settings/security', label: 'Security' },
   { href: '/settings/modules', label: 'Modules' },
+  { href: '/settings/import', label: 'Bring in your books' },
   { href: '/settings/operations', label: 'Background work' },
 ]

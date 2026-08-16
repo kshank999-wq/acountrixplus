@@ -60,6 +60,9 @@ export type AuditAction =
   | 'expense.mark_billable'
   | 'retainer.receive'
   | 'retainer.apply'
+  // Bringing an existing business's books in (spec §20 Phase 8, Phase 17)
+  | 'import.commit'
+  | 'import.revert'
   // Accounting dimensions and fixed assets (spec §13, Phase 16)
   | 'dimension.create'
   | 'dimension.update'

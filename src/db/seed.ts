@@ -1625,6 +1625,7 @@ async function main() {
   console.log('  /time                 timesheets, unbilled work, and billing it')
   console.log('  /accounting/dimensions  profit and loss by location, and the Unassigned column')
   console.log('  /accounting/assets    the register, and whether it agrees with the ledger')
+  console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

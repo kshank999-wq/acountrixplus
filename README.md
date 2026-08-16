@@ -9,8 +9,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
 **Payroll and Tax**, the **background worker and outbox**, the
 **completed accounting core**, the **statements an accountant asks for**, the
-**security controls**, **inventory**, **time and billing**, and
-**accounting dimensions with the fixed asset register** from the
+**security controls**, **inventory**, **time and billing**,
+**accounting dimensions with the fixed asset register**, and **bringing an
+existing business's books in** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -26,8 +27,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md),
 [ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md),
 [ADR 0014](docs/adr/0014-one-inventory-five-industries.md),
-[ADR 0015](docs/adr/0015-an-hour-is-billed-once.md), and
-[ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md).
+[ADR 0015](docs/adr/0015-an-hour-is-billed-once.md),
+[ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md), and
+[ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -607,6 +609,48 @@ books printed on the same paper.
   rather than from the schedule, and lands in Other income or Other expense
   rather than flattering the trading margin.
 
+### Bringing your books in (Phase 17)
+
+Every phase before this one built something for a company that starts from
+zero. No such company exists among the ones this is for. A business that adopts
+a new accounting system in August has seven months behind it, a customer list,
+and a set of balances that have to still be true afterwards — and until now the
+only company that could use Accountrix Plus was one that had never traded.
+
+There is also an account that has been waiting the whole time. `3900 Opening
+Balance Equity` has been in the standard chart since the first commit,
+described as *"Offsets opening balances during setup. Should clear to zero."*
+Nothing had ever written to it. That description turns out to be the
+specification.
+
+- **Nothing is imported until all of it can be.** Every importer builds a plan
+  first, and one error anywhere stops the whole file. The alternative leaves a
+  company with 137 of 400 customers and no way to tell which 137 — and on a
+  trial balance, with an unbalanced ledger caused by the tool they would have
+  to use to find it.
+- **Opening Balance Equity clears to zero, or names the gap.** That is the
+  whole migration in one number, and its value is in the failure case: a
+  non-zero balance is *exactly* the amount by which the customer detail
+  disagrees with the receivables the old system reported.
+- **The trial balance does not post receivables or payables.** It reads them
+  and keeps them to check against; the open documents supply the balances. A
+  receivable is not a number — it is a list of people who owe you, and the
+  total without the list gives an aging report that agrees with nothing.
+  Posting both was the first version's arithmetic, and it doubled the
+  receivable.
+- **An open invoice recognises no revenue.** The sale happened in the old
+  system and was reported there.
+- **Refuse rather than guess.** `1.234,56` is rejected because it means two
+  different amounts on two continents; `1,23` because reading the comma as a
+  separator turns $1.23 into $123.00; `02/31/2026` because it is not a day. An
+  ambiguous numeric date is read by a setting the wizard asks for, and the
+  preview says how many rows depended on it.
+- **The delimiter is found by consistency, not frequency.** A tab-separated
+  file of addresses has more commas than tabs.
+- **An import can be undone**, by name rather than by timestamp — and it
+  refuses when what it created has since been used, rather than cascading and
+  taking the newer work with it. Journal entries are voided, never deleted.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -700,6 +744,7 @@ Coverage matches what spec §21 asks for:
 | `tests/timebilling.test.ts` | Rate resolution most-specific-first with zero treated as a rate and null as its absence; money computed from minutes rather than displayed hours, and the three-cent divergence demonstrated; every duration format people type; markup in basis points; utilization measured against time recorded; recording time posting nothing; a description and a sane duration insisted on; the draft/submitted/approved path; billed time refusing to be edited; written-off time kept with a reason; **two concurrent billings producing exactly one invoice**, a second attempt finding nothing, the invoice footing to the preview, unapproved and non-billable time left alone, a cut-off date honoured, and the rate frozen at what was billed; all four groupings footing to the same total; an expense posting nothing and billing at cost plus markup to its own revenue account; a retainer as a liability, drawn down without cash moving, capped at what is left and what is owed, refused across clients, and its cash-basis limitation asserted and named; unbilled work with its age; and the guards |
 | `tests/assets.test.ts` | 756 depreciation schedules across every method, convention, life and awkward cost, each summing exactly to the depreciable base and ending on the salvage value with no zero-amount period; a half-year convention giving exactly half a year in year one and a mid-month one half a month at each end; declining balance front-loading and still landing on salvage, and the crossover removing the final lump; month arithmetic across leap years; registering an asset posting nothing, sequential tags, and salvage above cost refused; arrears charged to their own months rather than the run date, **a month that has not finished not charged**, the same period run twice charging once, two concurrent runs posting one set between them, one entry a month covering every asset, and an exhausted schedule marking the asset; **cost and accumulated depreciation both reconciling to the ledger** across several assets on different methods, and a disagreement reported when an asset was never posted; disposal charging the arrears first so book value comes from the ledger, a gain landing in Other income rather than Sales Revenue, a loss in Other expense, the asset leaving the balance sheet entirely, and disposal through the same account list the screen offers |
 | `tests/dimensions.test.ts` | Code normalization, a parent from another dimension refused, and a retired dimension keeping its history; values attached at posting time, **each line of a two-site entry keeping its own value**, a value from the wrong dimension or another company refused; **every row's columns summing to the ordinary profit and loss**, checked against a report built by a different query; untagged activity as a column rather than an omission, the Unassigned column dropped when nothing is untagged, an unused value left off the page, and each site getting its own bottom line; coverage measured on gross movement so offsetting amounts cannot hide, reported only for dimensions marked expected, and null when nothing happened; reclassifying leaving the trial balance untouched, replacing rather than duplicating, clearing back to Unassigned, and silently ignoring another company's lines; defaults filling an unset dimension, never overriding a choice, the more specific owner winning, and replacing rather than duplicating; and balance-sheet movement by value with no equity row |
+| `tests/importing.test.ts` | Quoted commas, embedded newlines, doubled quotes, CRLF and the byte-order mark Excel writes; the delimiter found by consistency so a tab-separated file of addresses is not shredded by its own commas; blank rows dropped, short rows padded, unclosed quotes and empty files refused; money in every shape an accounting package writes it, and **European notation, a comma that is not a thousands separator, and sub-cent precision all refused rather than guessed**; dates in five formats with the ambiguous ones settled by the row where it can and by a setting where it cannot, 31 February and 29 February in a non-leap year refused; a QuickBooks chart export mapped unasked, one header serving one field, missing required columns named; four hundred identical problems collapsed to one line; account types translated from what other systems call them and an unknown one refused; a duplicate account number refused, and an existing account's type never changed; contacts matched across `Acme, Inc.` and `Acme Inc` without merging `Acme Northwest` into `Acme North West`, a bad email warned about but imported, and an update filling gaps without blanking newer values; **a trial balance that does not balance refusing and posting nothing**, a balance for a non-existent account refused, a row with both a debit and a credit refused, a signed balance column read; **Opening Balance Equity clearing to exactly zero when the detail agrees**, and naming the $3,200 gap when it does not; an open invoice bringing its receivable without recognising revenue again; an unknown customer refused; ambiguous dates warned about across the file; undo removing only what it created, voiding entries rather than deleting them, refusing when an imported customer has since been invoiced, refusing twice, keeping the history, and one company's imports invisible to another |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1319,6 +1364,66 @@ key and the client proposal link — keep them for steps 22 and 24.
      with net income shown inside equity because it is what makes the columns balance, and a line
      stating whether each one does.
 
+### Bringing your books in (Phase 17)
+
+182. **Open Settings → Bring in your books** on the demo company. It says no opening balances have
+     been imported — which is honest, because Ridgeline was born inside the application. It does
+     *not* say the opening position is complete, because that would be congratulating somebody on a
+     migration they never attempted.
+183. **Register a second company** and migrate it, in this order. Paste each file in turn:
+
+     ```
+     Account #,Account Name,Account Type
+     1000,Business Checking,Bank
+     1400,Timber and Materials,Other Current Asset
+     4000,Joinery Sales,Income
+     5000,Materials Used,Cost of Goods Sold
+     6400,Workshop Rent,Expense
+     ```
+     ```
+     Display Name,Main Email
+     Harborview LLC,jo@harborview.test
+     Cityworks Inc.,dana@cityworks.test
+     ```
+     ```
+     Name
+     Timberline Supply
+     ```
+     ```
+     Account,Description,Debit,Credit
+     1000,Business Checking,"25,000.00",
+     1100,Accounts Receivable,"8,400.00",
+     1400,Timber and Materials,"3,600.00",
+     2000,Accounts Payable,,"5,200.00"
+     4000,Joinery Sales,,"31,800.00"
+     ```
+     ```
+     Customer,Invoice No,Date,Due Date,Open Balance
+     Harborview LLC,INV-9001,01/15/2026,02/14/2026,"5,200.00"
+     Cityworks Inc,INV-9002,01/28/2026,02/27/2026,"3,200.00"
+     ```
+     ```
+     Vendor,Bill No,Date,Open Balance
+     Timberline Supply,B-7781,01/20/2026,"5,200.00"
+     ```
+
+184. **Watch Opening Balance Equity reach zero.** After the trial balance it carries $3,200; after
+     the invoices it swings the other way; after the bills it lands on nothing. That last figure is
+     the whole migration in one number.
+185. **Import only one of the two invoices** instead, and read the diagnosis: "the customer detail
+     is $3,200.00 less than the receivables balance the trial balance reported." A non-zero Opening
+     Balance Equity is never a mystery.
+186. **Paste a file with real problems** — a bad account type, a missing number, a duplicate — and
+     notice there is no Import button. Every problem is listed at once, because fixing them one
+     round-trip at a time is how a four-hundred-row file takes an afternoon.
+187. **Try a trial balance that does not balance.** Refused, and nothing posts. Check the trial
+     balance afterwards: unchanged.
+188. **Undo an import** from the history. The chart import comes straight back out; the customers
+     say "in use", because invoices were imported against them and deleting them would take the
+     invoices too.
+189. **Look at the balance sheet of the migrated company** — it is exactly the trial balance that
+     went in, with the receivable built from two named invoices rather than typed as a total.
+
 ## Project layout
 
 ```
@@ -1338,6 +1443,7 @@ src/
     settings/modules/     Industry module switches
     accounting/dimensions/  Profit and loss by location, and the reclassify work list
     accounting/assets/    The fixed asset register and its reconciliation
+    settings/import/      The migration wizard and the opening-balance check
     inventory/            Stock on hand, receiving, counts
     time/                 Timesheets, unbilled work, billing, retainers
     m/                    The mobile app — Today, review deck, receipts, devices
@@ -1377,6 +1483,7 @@ src/
     timebilling/          Rates, time entries, reimbursable expenses, retainers
     dimensions/           User-defined dimensions, assignment, dimensional reporting
     assets/               Depreciation schedules and the fixed asset register
+    importing/            Delimited parsing, coercion, column mapping, opening balances
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -1580,8 +1687,8 @@ Tracked against the spec §20 phases:
 - **Phase 8 — Payroll / Tax / Advanced Integrations.** Payroll, sales tax, contractor reporting,
   and tax workpapers are built (see *Payroll and tax* above). What is **not** built, and will not
   be without the spec §19 security review, is anything that calculates a real person's withholding
-  or submits a return. "Advanced integrations" remains open: there is no accounting-package import,
-  no payments processor, and no e-filing.
+  or submits a return. Of "advanced integrations", CSV migration is built (see *Bringing your books
+  in*); there is still no payments processor and no e-filing.
 
 - **Past the roadmap — the background worker and outbox.** Spec §20 stops at Phase 8. The worker is
   spec §18 infrastructure rather than a roadmap phase, and it was built next because four
@@ -1614,6 +1721,23 @@ Gaps within the phases already built:
   impairment, or componentisation either.
 - **A part-month disposal charges no part-month.** Only completed months are charged, so an asset
   sold on the 15th gets nothing for that month.
+- **An import brings balances, not history.** A company's opening position and its open documents
+  come across; five years of transaction detail does not. Any report before the opening date will
+  be empty, and prior-period comparatives have nothing to compare to.
+- **No credit notes or part-paid documents on import.** An open document is a number outstanding,
+  so an invoice originally for $10,000 with $4,000 paid arrives as a $6,000 invoice — the balance
+  is right and the payment history is lost. A negative outstanding amount is refused rather than
+  turned into a credit note.
+- **No inventory or fixed-asset detail on import.** The trial balance carries both *totals*, and
+  the subledgers Phases 14 and 16 built start empty — so both reconciliations report a
+  disagreement until somebody enters the detail by hand. The readiness diagnosis names this case
+  rather than leaving it to be discovered.
+- **CSV only, and single-currency.** No `.xlsx`, no QuickBooks `.qbo`/`.iif`, no API pull from
+  another product, and a file of euro balances imports as dollars without complaint.
+- **The import file is held in memory.** Fine for the tens of thousands of rows a small business
+  has, wrong for a hundred-megabyte file.
+- **Reversal is all-or-nothing per run.** There is no way to undo forty rows of a four-hundred-row
+  import.
 - **Accruals are pooled per account, not matched per item.** Cash basis works out what a
   prepayment or accrual was for by reading the recognition entries on that account. A company
   running two prepaid insurance policies through one account gets the pool, not the policy, and one
