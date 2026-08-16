@@ -60,6 +60,13 @@ export type AuditAction =
   | 'expense.mark_billable'
   | 'retainer.receive'
   | 'retainer.apply'
+  // Attachments and accountant notes (spec §13, §18, Phase 20)
+  | 'document.store'
+  | 'document.attach'
+  | 'document.detach'
+  | 'document.delete'
+  | 'note.write'
+  | 'note.resolve'
   // Transactional mail, invitations and password reset (spec §19, Phase 19)
   | 'password.reset'
   | 'invitation.send'

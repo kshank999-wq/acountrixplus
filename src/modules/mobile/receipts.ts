@@ -1,10 +1,11 @@
-import { randomUUID, createHash } from 'node:crypto'
-import { and, eq } from 'drizzle-orm'
-import { db, type Executor } from '@/db'
-import { assets, bankTransactions, type Attachment } from '@/db/schema'
-import { recordAudit } from '@/modules/audit'
-import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
-import { getAssetStore, ALLOWED_IMAGE_TYPES } from '@/modules/studio/assets'
+import type { Executor } from '@/db'
+import { type ActorContext } from '@/modules/tenancy/context'
+import {
+  attachDocument,
+  detachDocument,
+  evidenceFor,
+  storeDocument,
+} from '@/modules/evidence/service'
 
 /**
  * Receipt capture (spec §3 "attach receipts/documents").
@@ -14,31 +15,44 @@ import { getAssetStore, ALLOWED_IMAGE_TYPES } from '@/modules/studio/assets'
  * a desk. Photographing it there is the whole feature, and everything below is
  * in service of that moment working on a bad connection.
  *
- * ## Why receipts do not go through `uploadAsset`
+ * ## What this is now
  *
- * `uploadAsset` requires `company:manage`, because it is the brand asset
- * library — a bookkeeper has no business replacing the logo. A bookkeeper has
- * every business photographing a receipt, so this is a separate entry point
- * with its own permission (`bookkeeping:categorize`) writing into the same
- * store. Sharing the storage and splitting the permission is the right way
- * round; sharing the permission would have meant either widening it for
- * everyone or refusing the person who actually holds the receipt.
+ * As of Phase 20 this is a thin front on `modules/evidence`, not its own
+ * storage. Phase 8 built receipts before anything else could carry a document,
+ * so it wrote its own upload path into the brand asset library and its own
+ * `jsonb` array on the transaction row. Both were the right size then and both
+ * were wrong in the same way: a receipt is evidence, evidence belongs to more
+ * than bank transactions, and an array on a row cannot answer "which of these
+ * has no paperwork?"
+ *
+ * What survives is the part that was about *phones*: a tighter file-size
+ * ceiling than the desk gets, a narrower list of accepted types, and the split
+ * between uploading and attaching. Those are still right, and they are still
+ * here.
  */
 
 /**
  * Receipts are photographs and scans. PDF is included because a supplier
- * emailing one is the second most common case; SVG is excluded for the same
- * reason it is excluded from the asset library — it can carry script.
+ * emailing one is the second most common case; SVG is excluded because it can
+ * carry script and these files are served back to browsers.
  */
-export const RECEIPT_CONTENT_TYPES = [...ALLOWED_IMAGE_TYPES, 'application/pdf'] as const
+export const RECEIPT_CONTENT_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/heic',
+  'application/pdf',
+] as const
 
 /**
  * The ceiling on an uploaded receipt.
  *
- * Smaller than the 5 MB asset limit on purpose. A phone camera produces 4 MB
- * of JPEG for a piece of till paper; the client downscales before sending, and
- * this limit is what makes a client that forgot to fail loudly rather than
- * burning somebody's mobile data.
+ * Deliberately a fifth of the 10 MB the evidence store allows. A phone camera
+ * produces 4 MB of JPEG for a piece of till paper; the client downscales before
+ * sending, and this limit is what makes a client that forgot to fail loudly
+ * rather than burning somebody's mobile data. The desk limit protects the
+ * server; this one protects the person.
  */
 export const MAX_RECEIPT_BYTES = 2 * 1024 * 1024
 
@@ -49,208 +63,82 @@ export type ReceiptUpload = {
 }
 
 /**
- * Stores a receipt image and returns the asset.
+ * Stores a receipt and returns it.
  *
  * Separate from attaching it, because on a phone the two happen at different
  * times: the photo uploads while the person is still choosing a category, and
  * the attachment is queued with the rest of their decisions.
+ *
+ * The return shape keeps `id`, `filename`, `contentType` and `sizeBytes`,
+ * because the mobile v1 response is built from them and a versioned contract
+ * does not change underneath a phone that has not been updated.
  */
 export async function uploadReceipt(ctx: ActorContext, input: ReceiptUpload) {
-  requirePermission(ctx, 'bookkeeping:categorize')
-
   if (!(RECEIPT_CONTENT_TYPES as readonly string[]).includes(input.contentType)) {
     throw new Error(
       `Unsupported file type ${input.contentType}. Use a photo (PNG, JPEG, WebP) or a PDF.`,
     )
   }
-  if (input.data.byteLength === 0) throw new Error('That file is empty.')
   if (input.data.byteLength > MAX_RECEIPT_BYTES) {
     throw new Error('That receipt is larger than 2 MB. Try again with a smaller photo.')
   }
 
-  // Same key shape as the asset library: content hash for stability, tenant
-  // prefix so one company's key can never collide with another's.
-  const digest = createHash('sha256').update(input.data).digest('hex').slice(0, 32)
-  const storageKey = `${ctx.companyId}/receipts/${digest}-${randomUUID().slice(0, 8)}`
+  const document = await storeDocument(ctx, input)
 
-  const store = getAssetStore()
-  await store.put(storageKey, input.data, input.contentType)
-
-  const [asset] = await db
-    .insert(assets)
-    .values({
-      companyId: ctx.companyId,
-      kind: 'document',
-      filename: input.filename.slice(0, 200),
-      contentType: input.contentType,
-      sizeBytes: input.data.byteLength,
-      storageProvider: store.key,
-      storageKey,
-      uploadedBy: ctx.userId,
-    })
-    .returning()
-
-  await recordAudit(ctx, {
-    action: 'asset.upload',
-    entityType: 'asset',
-    entityId: asset.id,
-    after: { filename: asset.filename, sizeBytes: asset.sizeBytes, kind: 'receipt' },
-  })
-
-  return asset
+  return {
+    id: document.id,
+    filename: document.filename,
+    contentType: document.contentType,
+    sizeBytes: document.sizeBytes,
+  }
 }
 
 /**
- * Attaches an already-uploaded asset to a transaction.
+ * Attaches an already-uploaded receipt to a transaction.
  *
- * Idempotent by construction: attaching the same asset twice leaves one
- * attachment. That is not politeness — it is what lets this operation sit in
- * the offline outbox and be replayed, and it means the guarantee holds even
- * for a client that lost its idempotency key.
+ * Idempotent by construction — the unique index on `document_links` decides,
+ * not a read-then-write. That is not politeness: it is what lets this operation
+ * sit in the offline outbox and be replayed, and it means the guarantee holds
+ * even for a client that lost its idempotency key.
+ *
+ * Answers with the document id rather than a link id, because that is what a
+ * later detach names and what the phone already holds.
  */
 export async function attachReceipt(
   ctx: ActorContext,
   transactionId: string,
-  assetId: string,
+  documentId: string,
   exec?: Executor,
-): Promise<Attachment> {
-  requirePermission(ctx, 'bookkeeping:categorize')
+): Promise<{ documentId: string; alreadyAttached: boolean }> {
+  const result = await attachDocument(
+    ctx,
+    { subjectType: 'bank_transaction', subjectId: transactionId, documentId },
+    exec,
+  )
 
-  const write = async (tx: Executor): Promise<Attachment> => {
-    const [transaction] = await tx
-      .select()
-      .from(bankTransactions)
-      .where(
-        and(
-          eq(bankTransactions.id, transactionId),
-          eq(bankTransactions.companyId, ctx.companyId),
-        ),
-      )
-      .limit(1)
-
-    if (!transaction) throw new Error('Transaction not found')
-
-    // Looked up under the tenant filter rather than trusted from the request:
-    // an asset id from a phone is a string until the database agrees it is
-    // this company's (spec §19).
-    const [asset] = await tx
-      .select()
-      .from(assets)
-      .where(and(eq(assets.id, assetId), eq(assets.companyId, ctx.companyId)))
-      .limit(1)
-
-    if (!asset) throw new Error('Receipt not found')
-
-    const existing = transaction.attachments.find((entry) => entry.id === asset.id)
-    if (existing) return existing
-
-    const attachment: Attachment = {
-      id: asset.id,
-      filename: asset.filename,
-      contentType: asset.contentType,
-      sizeBytes: asset.sizeBytes,
-      storageKey: asset.storageKey,
-      uploadedAt: new Date().toISOString(),
-    }
-
-    await tx
-      .update(bankTransactions)
-      .set({
-        attachments: [...transaction.attachments, attachment],
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(bankTransactions.id, transactionId),
-          eq(bankTransactions.companyId, ctx.companyId),
-        ),
-      )
-
-    await recordAudit(
-      ctx,
-      {
-        action: 'receipt.attach',
-        entityType: 'bank_transaction',
-        entityId: transactionId,
-        after: { assetId: asset.id, filename: asset.filename },
-      },
-      tx,
-    )
-
-    return attachment
-  }
-
-  return exec ? write(exec) : db.transaction(write)
+  return { documentId, alreadyAttached: result.alreadyAttached }
 }
 
 /**
- * Removes an attachment from a transaction.
+ * Removes a receipt from a transaction.
  *
- * The asset itself stays. A receipt attached to the wrong transaction is the
- * common case, and deleting the bytes would mean re-photographing a piece of
- * paper that is now in a bin.
+ * The document itself stays. A receipt attached to the wrong transaction is
+ * the common case, and deleting the bytes would mean re-photographing a piece
+ * of paper that is now in a bin.
  */
 export async function detachReceipt(
   ctx: ActorContext,
   transactionId: string,
-  assetId: string,
+  documentId: string,
 ): Promise<void> {
-  requirePermission(ctx, 'bookkeeping:categorize')
-
-  await db.transaction(async (tx) => {
-    const [transaction] = await tx
-      .select()
-      .from(bankTransactions)
-      .where(
-        and(
-          eq(bankTransactions.id, transactionId),
-          eq(bankTransactions.companyId, ctx.companyId),
-        ),
-      )
-      .limit(1)
-
-    if (!transaction) throw new Error('Transaction not found')
-
-    const remaining = transaction.attachments.filter((entry) => entry.id !== assetId)
-    if (remaining.length === transaction.attachments.length) return
-
-    await tx
-      .update(bankTransactions)
-      .set({ attachments: remaining, updatedAt: new Date() })
-      .where(
-        and(
-          eq(bankTransactions.id, transactionId),
-          eq(bankTransactions.companyId, ctx.companyId),
-        ),
-      )
-
-    await recordAudit(
-      ctx,
-      {
-        action: 'receipt.detach',
-        entityType: 'bank_transaction',
-        entityId: transactionId,
-        before: { assetId },
-      },
-      tx,
-    )
+  await detachDocument(ctx, {
+    subjectType: 'bank_transaction',
+    subjectId: transactionId,
+    documentId,
   })
 }
 
-/** Attachments on a transaction, for the detail view. */
+/** Receipts on a transaction, for the detail view. */
 export async function receiptsFor(ctx: ActorContext, transactionId: string) {
-  requirePermission(ctx, 'bookkeeping:view')
-
-  const [transaction] = await db
-    .select({ attachments: bankTransactions.attachments })
-    .from(bankTransactions)
-    .where(
-      and(
-        eq(bankTransactions.id, transactionId),
-        eq(bankTransactions.companyId, ctx.companyId),
-      ),
-    )
-    .limit(1)
-
-  return transaction?.attachments ?? []
+  return evidenceFor(ctx, { subjectType: 'bank_transaction', subjectId: transactionId })
 }

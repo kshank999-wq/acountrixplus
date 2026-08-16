@@ -2,6 +2,11 @@
 
 import { useMemo, useState, useTransition } from 'react'
 import {
+  EvidencePanel,
+  type EvidenceItemView,
+  type NoteView,
+} from '@/components/evidence-panel'
+import {
   disposeAssetAction,
   registerAssetAction,
   runDepreciationAction,
@@ -67,6 +72,8 @@ export function AssetBoard({
   due,
   reconciliation,
   banks,
+  evidence,
+  notes,
   canPost,
 }: {
   today: string
@@ -74,12 +81,15 @@ export function AssetBoard({
   due: Due[]
   reconciliation: Reconciliation
   banks: Named[]
+  evidence: Record<string, EvidenceItemView[]>
+  notes: Record<string, NoteView[]>
   canPost: boolean
 }) {
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
   const [showRegister, setShowRegister] = useState(false)
   const [disposing, setDisposing] = useState<string | null>(null)
+  const [showingPaperwork, setShowingPaperwork] = useState<string | null>(null)
 
   function act(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
@@ -254,11 +264,12 @@ export function AssetBoard({
                 <th className="px-4 py-2 text-right font-medium">Depreciated</th>
                 <th className="px-4 py-2 text-right font-medium">Book value</th>
                 <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 text-right font-medium">Paperwork</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody>
-              {register.map((asset) => (
+              {register.flatMap((asset) => [
                 <tr key={asset.id} className="border-t border-line">
                   <td className="px-4 py-1.5 text-muted">{asset.tag}</td>
                   <td className="px-4 py-1.5">
@@ -278,6 +289,24 @@ export function AssetBoard({
                     {asset.disposedOn && <span className="text-faint"> {asset.disposedOn}</span>}
                   </td>
                   <td className="px-4 py-1.5 text-right">
+                    <button
+                      className={`btn btn-ghost text-xs ${
+                        (evidence[asset.id]?.length ?? 0) === 0 ? 'text-faint' : ''
+                      }`}
+                      onClick={() =>
+                        setShowingPaperwork(showingPaperwork === asset.id ? null : asset.id)
+                      }
+                    >
+                      {evidence[asset.id]?.length
+                        ? `${evidence[asset.id].length} file${
+                            evidence[asset.id].length === 1 ? '' : 's'
+                          }`
+                        : 'none'}
+                      {(notes[asset.id]?.filter((note) => note.isQuestion && !note.resolved)
+                        .length ?? 0) > 0 && <span className="text-warning"> ?</span>}
+                    </button>
+                  </td>
+                  <td className="px-4 py-1.5 text-right">
                     {canPost && asset.status !== 'disposed' && (
                       <button
                         className="btn btn-ghost text-xs"
@@ -287,8 +316,22 @@ export function AssetBoard({
                       </button>
                     )}
                   </td>
-                </tr>
-              ))}
+                </tr>,
+                showingPaperwork === asset.id ? (
+                  <tr key={`${asset.id}-paperwork`} className="border-t border-line bg-raised/40">
+                    <td colSpan={9} className="px-4 py-3">
+                      <EvidencePanel
+                        subjectType="fixed_asset"
+                        subjectId={asset.id}
+                        documents={evidence[asset.id] ?? []}
+                        notes={notes[asset.id] ?? []}
+                        canManage={canPost}
+                        compact
+                      />
+                    </td>
+                  </tr>
+                ) : null,
+              ])}
             </tbody>
           </table>
         )}

@@ -8,4 +8,5 @@ export const ACCOUNTING_NAV = [
   { href: '/accounting/assets', label: 'Fixed assets' },
   { href: '/accounting/periods', label: 'Recurring & close' },
   { href: '/accounting/reconcile', label: 'Reconcile' },
+  { href: '/accounting/documents', label: 'Documents' },
 ]

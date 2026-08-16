@@ -127,8 +127,8 @@ async function execute(
 
     case 'receipt.attach': {
       const input = schemas['receipt.attach'].parse(payload)
-      const attachment = await attachReceipt(ctx, input.transactionId, input.assetId, tx)
-      return { transactionId: input.transactionId, attachmentId: attachment.id }
+      const attached = await attachReceipt(ctx, input.transactionId, input.assetId, tx)
+      return { transactionId: input.transactionId, attachmentId: attached.documentId }
     }
 
     case 'suggestion.accept': {

@@ -11,8 +11,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **completed accounting core**, the **statements an accountant asks for**, the
 **security controls**, **inventory**, **time and billing**,
 **accounting dimensions with the fixed asset register**, **bringing an
-existing business's books in**, **accountant practice mode**, and
-**transactional mail with password reset and invitations** from the
+existing business's books in**, **accountant practice mode**,
+**transactional mail with password reset and invitations**, and
+**attachments and accountant notes on a content-addressed object store** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -31,8 +32,9 @@ existing business's books in**, **accountant practice mode**, and
 [ADR 0015](docs/adr/0015-an-hour-is-billed-once.md),
 [ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md),
 [ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md),
-[ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md), and
-[ADR 0019](docs/adr/0019-a-reset-is-not-marketing-and-an-invitation-carries-no-password.md).
+[ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md),
+[ADR 0019](docs/adr/0019-a-reset-is-not-marketing-and-an-invitation-carries-no-password.md), and
+[ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -739,6 +741,55 @@ share owner credentials" in a subtler form.
   dev server is genuinely locked out: the token is hashed the moment it is
   stored, and nothing anywhere can show them the link.
 
+### Attachments and accountant notes (Phase 20)
+
+§13's list ends *"period close/lock controls, audit trail, accountant notes,
+attachments, exports"*. Four of those five had existed since Phase 12. The two
+that had not turn out to be one problem — a thing that hangs off *any* record
+and belongs to whoever may read that record — and until now exactly one kind of
+record could carry evidence, as a `jsonb` array written for the mobile app.
+
+- **One file, stored once.** The storage key is the SHA-256 of the content, so
+  a supplier invoice attached to the bill, the payment and the month's journal
+  entry is one blob, one document, three links. Re-sending the same emailed
+  receipt returns the document that already exists rather than filling the
+  evidence list with copies of one thing.
+- **Removing one reference never breaks another.** Two companies holding
+  identical bytes share them; one deleting its copy leaves the other's
+  downloading. The delete path consults the `documents` rows rather than the
+  cached reference count — a count that has drifted upwards leaks storage for
+  ever and one that has drifted downwards destroys somebody's evidence, and
+  rows cannot drift. A foreign key sits underneath as a third line of defence,
+  and it is what caught the first version of this during its own test.
+- **Bytes are freed after the transaction commits, never inside it.** No object
+  store can join a Postgres transaction, so a rollback would restore the row and
+  leave the file gone. The other order leaves an orphaned blob a sweep collects.
+  Where two orders are not symmetric, take the recoverable one.
+- **A document is reachable only through a record you may read.** The store is
+  content-addressed and therefore *not* partitioned by tenant, so every
+  guarantee rests on one lookup — and `readDocument` is the only function
+  anywhere that reads the store. Knowing another company's document id gets a
+  404.
+- **What may carry evidence is a registry, not a switch in each caller.** Eleven
+  kinds of record, each naming the table that proves it exists and the two
+  permissions that guard it. A read-only auditor sees the receipt and cannot
+  remove it; a bookkeeper attaches one to a transaction and is refused at the
+  payroll run, where the evidence is what individual people are paid.
+- **A note is not an audit event.** The audit log records what the software did
+  and answers no question beginning with *why*. A note records what a person
+  concluded, is never edited and never deleted, and carries the practice name
+  when an accountant writes it.
+- **A question is a different thing from a remark.** A question goes on a
+  company-wide work list until somebody answers it; answering adds a note beside
+  it rather than overwriting what was asked. A CHECK constraint refuses to
+  resolve a remark, so nothing can quietly hide a statement from a list it was
+  never on.
+- **The mobile receipt path became a front, not a fork.** It keeps the part that
+  was about phones — a 2 MB ceiling against the desk's 10 MB, because one
+  protects a data allowance and the other protects the server — and its replay
+  safety moved from a read-then-write into a unique index, which is stronger
+  than what it replaced.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -835,6 +886,7 @@ Coverage matches what spec §21 asks for:
 | `tests/importing.test.ts` | Quoted commas, embedded newlines, doubled quotes, CRLF and the byte-order mark Excel writes; the delimiter found by consistency so a tab-separated file of addresses is not shredded by its own commas; blank rows dropped, short rows padded, unclosed quotes and empty files refused; money in every shape an accounting package writes it, and **European notation, a comma that is not a thousands separator, and sub-cent precision all refused rather than guessed**; dates in five formats with the ambiguous ones settled by the row where it can and by a setting where it cannot, 31 February and 29 February in a non-leap year refused; a QuickBooks chart export mapped unasked, one header serving one field, missing required columns named; four hundred identical problems collapsed to one line; account types translated from what other systems call them and an unknown one refused; a duplicate account number refused, and an existing account's type never changed; contacts matched across `Acme, Inc.` and `Acme Inc` without merging `Acme Northwest` into `Acme North West`, a bad email warned about but imported, and an update filling gaps without blanking newer values; **a trial balance that does not balance refusing and posting nothing**, a balance for a non-existent account refused, a row with both a debit and a credit refused, a signed balance column read; **Opening Balance Equity clearing to exactly zero when the detail agrees**, and naming the $3,200 gap when it does not; an open invoice bringing its receivable without recognising revenue again; an unknown customer refused; ambiguous dates warned about across the file; undo removing only what it created, voiding entries rather than deleting them, refusing when an imported customer has since been invoiced, refusing twice, keeping the history, and one company's imports invisible to another |
 | `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; and one company's engagements invisible to another |
 | `tests/notify.test.ts` | **A transactional letter carrying no unsubscribe link**, in the type and at runtime; the URL written out in full so a person can read where it goes; a bounce recorded rather than swallowed; the hourly limit per address per kind, and an invitation not blocked by somebody hammering the reset form; tokens stored as hashes with only an eight-character prefix in the clear, **spent exactly once by two simultaneous claims**, a new one superseding the last, an hour for a reset against a week for an invitation, and old ones pruned while live ones survive; **the reset form saying the same thing whether or not the address exists**, and **reaching somebody who unsubscribed from marketing company-wide**; a reset changing the password, ending every session, and auditing into each company the person belongs to; the same link refused twice with the first password left standing; a link dying once the address is no longer theirs; a dead link reported before anybody types, and checking not spending it; **an invitation creating no user and no membership until it is accepted**, the offer shown before anybody types, the invitee's own password taking effect, a short password refused with the link still usable, **an existing account never asked for a password**, **one account created when the same link is clicked twice at once**, somebody already inside told rather than mailed, another company unable to withdraw the invitation by id, and a practice invitee landing with access at every client the firm already serves |
+| `tests/evidence.test.ts` | Bytes addressed by what they are; both store adapters round-tripping, putting twice being a no-op, and deleting what is not there not being an error; **the same bytes uploaded twice returning the one document that already exists**, two companies sharing a blob and each counted, **one company deleting its copy leaving the other's downloading**, and the bytes going only when the last of them does; an orphan collected after a simulated crash between commit and free, and **bytes a document still points at never freed however far the count has drifted**; a type that can carry script, an empty file, and one over 10 MB all refused; one document on a transaction and a fixed asset at once with detaching one leaving the other, **three concurrent attachments of the same file leaving one link**, deleting a document taking it off every record, a page of records counted in one query, and the bare ones named; **a record from another company refused, a document from another company refused, and another company's bytes not served on a known id**; each kind of record guarded by its own permission, and a read-only auditor seeing the evidence and refused the removal; a note recorded and audited, an empty one refused, **a question on the work list until answered with the answer added beside it rather than over it**, one answer between two simultaneous clicks, a remark refused by the CHECK constraint, one company's questions invisible to another, and the list filtered kind by kind; and the mobile path uploading, attaching idempotently, reading back as an ordinary document, and keeping the phone's tighter limit |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1560,6 +1612,27 @@ key and the client proposal link — keep them for steps 22 and 24.
      is dead, and no other company could have withdrawn it: the query is scoped, so an invitation id
      is not a lever on somebody else's books.
 
+### Attachments and accountant notes (Phase 20)
+
+204. **Open Accounting → Fixed assets and click the paperwork count on the Ford F-350.** The dealer
+     invoice is attached, with a remark explaining the five-year life and one open question about
+     the extended warranty. The seed uploaded that invoice *twice* under different names; there is
+     one file, because the second upload returned the document the first one made.
+205. **Attach something of your own**, then attach the same file again to a second asset. The
+     documents page shows one file used twice, not two files.
+206. **Open Accounting → Documents.** Every file, how many records each hangs on, and the open
+     questions across the whole company. A file attached to nothing is called out — that is one
+     somebody uploaded and forgot.
+207. **Press Remove on one record, then Delete on the same file.** Remove takes it off that record
+     and leaves the file; Delete removes it everywhere it was attached and frees the bytes. The
+     button says which it will be, and how many records it touches.
+208. **Ask a question and then answer it.** The question stays on the list until answered, and the
+     answer is added beside it rather than replacing it — what was asked is half of why the
+     exchange is worth keeping. Try to mark a plain remark answered: the database refuses.
+209. **Attach a receipt from the phone** at `/m`, then look at Accounting → Documents. It is the
+     same document, in the same list, with the same delete path. Before this phase a receipt lived
+     in a `jsonb` array on the transaction and appeared in no list at all.
+
 ## Project layout
 
 ```
@@ -1577,6 +1650,7 @@ src/
     accounting/receivables/  Credit notes, write-offs, and customer statements
     accounting/periods/   Recurring entries and the year-end close
     settings/modules/     Industry module switches
+    accounting/documents/  Every file, what it hangs on, and the open questions
     accounting/dimensions/  Profit and loss by location, and the reclassify work list
     accounting/assets/    The fixed asset register and its reconciliation
     settings/import/      The migration wizard and the opening-balance check
@@ -1594,9 +1668,11 @@ src/
     api/track/[token]/    Public open pixel and click redirect (unauthenticated)
     api/unsubscribe/      Public RFC 8058 one-click unsubscribe (unauthenticated)
     api/assets/[id]/      Asset serving, authorized by session or proposal token
+    api/documents/[id]/   Attachment serving — session only, never a public token
     p/[token]/            Public client-facing proposal link (unauthenticated)
     u/[token]/            Public unsubscribe confirmation (unauthenticated)
   components/
+    evidence-panel.tsx    Paperwork and notes on any record, one component for all of them
     design/               Block renderer, the designer, and the document stylesheet
   db/
     schema/               Drizzle table definitions (the migration source)
@@ -1626,6 +1702,7 @@ src/
     importing/            Delimited parsing, coercion, column mapping, opening balances
     practice/             Firms, engagements, company switching, the cross-tenant work queue
     notify/               Transactional mail, single-use tokens, reset, invitations
+    evidence/             Object store, attachments, the subject registry, accountant notes
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -2090,27 +2167,46 @@ Gaps within the phases already built:
   and inline links need their own decision about format.
 - **Comments and questions on a proposal** (spec §7). The acceptance endpoint is the model to
   copy when they are built.
-- **Classes, departments, and locations are not modelled.** The job and cost-code dimensions are
-  real as of Phase 7 and reported on throughout the jobs workspace; the other §13 dimensions are
-  not. The statements themselves still cannot be filtered by job — the WIP and job cost reports
-  answer that question, but a P&L scoped to one job is a query change still to make.
-- Recurring entries, closing entries, customer statements, credits, and write-offs were built in
-  Phase 11. **Fixed assets and depreciation remain open** from spec §13 — §13 itself allows a
-  depreciation register to be a later professional module. Contractor (1099) reporting is built as
-  of Phase 9 — the figure and the blockers, not the form.
+- **The statements cannot be filtered by job.** Classes, departments and locations were built as
+  user-defined dimensions in Phase 16, with their own dimensional P&L; the job and cost-code
+  dimensions have been real since Phase 7. But a *statement* scoped to one job is still a query
+  change to make — the WIP and job cost reports answer that question by another route.
 - Communications and file attachments on opportunities (spec §6) are not built;
   `opportunity_activities` is the seam they will hang from.
 - Renaming an organization does not propagate to its linked customer or vendor record. Client-
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not
   restyle existing documents: right for sent proposals, arguably surprising for drafts.
-- Assets are stored in Postgres through the default `AssetStore` adapter. Fine for logos; object
-  storage is one adapter away when receipts arrive at volume.
-- Infrastructure from spec §18 still open: object storage for receipts, and server-side PDF
-  generation. The background job queue and the outbox pattern were built in Phase 10; bank sync now
-  runs on a schedule rather than inline.
-- Security from spec §14/§19 still open: MFA, session/device controls, row-level security as a
-  second isolation layer.
+- **Brand assets still use the Phase 4 `AssetStore`**, which is a separate adapter from Phase 20's
+  content-addressed object store and still gives every duplicate its own copy. Fine for logos, and
+  one of the two should eventually absorb the other.
+- **Object storage bytes are shared across tenants.** Content addressing means two companies with
+  the same file share a blob, so storage cost is not attributable per company and physical
+  separation between tenants is not available with this store. The tenancy guarantee is the
+  `documents` row and nothing else.
+- **`sweepOrphanedBlobs` is not scheduled.** It exists and is safe to run at any time; the Phase 10
+  queue is right there and nothing calls it. The third retention job now owed, after
+  `login_attempts` and `action_tokens`.
+- **No virus scanning.** Uploaded files are served back with `nosniff` and a restrictive CSP, which
+  stops a text file becoming a script and does nothing about a malicious PDF.
+- **No previews and no search inside documents.** A receipt is a link that opens in a new tab —
+  worse than an inline image on a phone — and the filter is on filenames, so "find the invoice with
+  88412 on it" needs OCR and an index and has neither.
+- **The `jsonb` → tables backfill is exercised, not covered.** It was run against
+  a database built at the Phase 19 schema and seeded by hand with the case that
+  matters — two byte-identical receipts on two different transactions — which is
+  how two defects in it were found. The automated suite cannot cover it: the
+  suite starts from a schema where the old column no longer exists.
+- **The evidence panel is wired into fixed assets only.** The registry knows eleven kinds of record
+  and the component is generic; bills, invoices, journal entries and reconciliations can all carry
+  evidence through the service and have no control that does it.
+- **Deleting a document is silent about its links.** The button says how many records it will strip
+  it from, and then does it. No undo, and no interstitial for a file used on ten records.
+- **Row-level security as a second isolation layer** (spec §19) is still not in place; tenant
+  isolation rests on `scoped()` at every query and on the tests that assert it. MFA, session and
+  device controls were built in Phase 13.
+- Infrastructure from spec §18 still open: **server-side PDF generation**. Object storage arrived in
+  Phase 20; the background job queue and the outbox pattern in Phase 10.
 
 Per spec §19, a security review is required before any production use involving real financial
 integrations or payments.

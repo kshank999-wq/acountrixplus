@@ -31,6 +31,12 @@ beforeEach(async () => {
       brand_kits,
       assets,
       asset_blobs,
+      -- Named explicitly because nothing cascades to them: content-addressed
+      -- blobs belong to no company by design, so truncating companies leaves
+      -- their reference counts behind and the next run starts from a number
+      -- that is one too high.
+      document_blobs,
+      document_bytes,
       company_profiles,
       lead_submissions,
       lead_intake_keys,

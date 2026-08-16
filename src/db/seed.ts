@@ -25,6 +25,8 @@ import {
   respondToEngagement,
 } from '@/modules/practice/service'
 import { practiceWorkQueue } from '@/modules/practice/switching'
+import { attachDocument, storeDocument } from '@/modules/evidence/service'
+import { writeNote } from '@/modules/evidence/notes'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
@@ -1546,7 +1548,7 @@ async function main() {
   // asset register, not an edge case.
   const checking = await accountByNumber(company.id, SYSTEM_ACCOUNTS.defaultChecking)
 
-  await registerAsset(ctx, {
+  const truck = await registerAsset(ctx, {
     name: 'Ford F-350 crew truck',
     category: 'Vehicles',
     costCents: 5_850_000,
@@ -1567,6 +1569,50 @@ async function main() {
     convention: 'half_year',
     postAcquisitionCreditAccountId: checking?.id,
   })
+
+  // --- Phase 20: the paperwork behind the numbers ---------------------------
+  //
+  // The same PDF on two records, so the documents page shows a file used twice
+  // rather than two copies of one file — which is the claim of the phase, and
+  // the thing you cannot see from a list of one.
+  const purchaseInvoice = await storeDocument(ctx, {
+    filename: 'ford-f350-invoice.pdf',
+    contentType: 'application/pdf',
+    // A minimal valid PDF header — the store keeps bytes, not documents.
+    data: Buffer.from('%PDF-1.4\nFord F-350 crew truck, invoice 88412\n%%EOF'),
+    note: 'Dealer invoice, matches the finance agreement.',
+  })
+
+  await attachDocument(ctx, {
+    subjectType: 'fixed_asset',
+    subjectId: truck.id,
+    documentId: purchaseInvoice.id,
+  })
+
+  const sameBytesAgain = await storeDocument(ctx, {
+    filename: 'ford-invoice-resent-by-dealer.pdf',
+    contentType: 'application/pdf',
+    data: Buffer.from('%PDF-1.4\nFord F-350 crew truck, invoice 88412\n%%EOF'),
+  })
+
+  await writeNote(ctx, {
+    subjectType: 'fixed_asset',
+    subjectId: truck.id,
+    body: 'Five-year life agreed with the accountant; salvage from the dealer buy-back quote.',
+  })
+
+  await writeNote(ctx, {
+    subjectType: 'fixed_asset',
+    subjectId: truck.id,
+    body: 'Is the extended warranty capitalised here or expensed? Invoice does not separate it.',
+    isQuestion: true,
+  })
+
+  console.log(
+    `  Evidence: the dealer invoice is on the truck, and re-uploading it ` +
+      `${sameBytesAgain.deduplicated ? 'returned the same document' : 'MADE A SECOND COPY'} ` +
+      'rather than storing the bytes twice. One question left open on it.',
+  )
 
   await runDepreciation(ctx, { throughDate: '2026-06-30' })
 
@@ -1739,6 +1785,7 @@ async function main() {
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')
+  console.log('  /accounting/documents  every file, what it hangs on, and the open questions')
   console.log('  /forgot               ask for a reset; the link is printed in this terminal')
   console.log('  /invite?token=…       Priya’s invitation, printed above — she picks her own password')
   console.log('')

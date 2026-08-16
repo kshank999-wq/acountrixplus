@@ -52,6 +52,7 @@ import { PermissionError } from '@/modules/permissions'
 import { createOpportunity, createOrganization } from '@/modules/crm/opportunities'
 import { createProposal, sendProposal } from '@/modules/crm/proposals'
 import { acceptProposal } from '@/modules/crm/acceptance'
+import { listDocuments } from '@/modules/evidence/service'
 
 /**
  * Phase 8: the mobile app (spec §3, §18, §19).
@@ -656,8 +657,12 @@ describe('receipts', () => {
       data: jpeg(),
     })
 
-    expect(asset.kind).toBe('document')
-    expect(asset.companyId).toBe(fixture.companyId)
+    expect(asset.filename).toBe('till.jpg')
+    expect(asset.sizeBytes).toBe(jpeg().byteLength)
+
+    // It landed in the company's evidence, reachable the way anything else is.
+    const held = await listDocuments(fixture.ctx)
+    expect(held.map((row) => row.id)).toContain(asset.id)
   })
 
   it('refuses a type that can carry script', async () => {
@@ -708,7 +713,7 @@ describe('receipts', () => {
 
     await expect(
       attachReceipt(ours.ctx, transaction.id, theirAsset.id),
-    ).rejects.toThrow(/not found/i)
+    ).rejects.toThrow(/does not exist/i)
   })
 
   it('keeps the file when an attachment is removed', async () => {

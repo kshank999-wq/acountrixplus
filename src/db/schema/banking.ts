@@ -147,9 +147,14 @@ export const bankTransactions = pgTable(
     reconciliationId: uuid('reconciliation_id').references(() => reconciliations.id, {
       onDelete: 'set null',
     }),
-    /** Receipt/document references (spec §3). */
-    attachments: jsonb('attachments').$type<Attachment[]>().notNull().default([]),
-    /** Untouched provider payload, kept for audit and re-processing. */
+    /**
+     * Receipts used to live here as a `jsonb` array. As of Phase 20 they are
+     * rows in `document_links`, because evidence belongs to more than bank
+     * transactions and because an array cannot answer "which of these has no
+     * paperwork?" — see `src/db/schema/evidence.ts`.
+     *
+     * Untouched provider payload, kept for audit and re-processing.
+     */
     raw: jsonb('raw').$type<Record<string, unknown>>(),
 
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -174,15 +179,6 @@ export const bankTransactions = pgTable(
     accountIdx: index('bank_transactions_account_idx').on(t.financialAccountId, t.postedDate),
   }),
 )
-
-export type Attachment = {
-  id: string
-  filename: string
-  contentType: string
-  sizeBytes: number
-  storageKey: string
-  uploadedAt: string
-}
 
 /**
  * One leg of a split transaction (spec §3). The split amounts must sum to the
