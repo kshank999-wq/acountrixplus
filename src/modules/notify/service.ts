@@ -8,6 +8,7 @@ import {
   type TransactionalKind,
   type TransactionalMessage,
 } from './transactional'
+import { recordOutboundMail } from '@/modules/engagement/outbound'
 
 /**
  * Sending a letter that must arrive (spec §19).
@@ -94,17 +95,37 @@ export async function sendTransactional(
   const provider = getTransactionalProvider()
   const result = await provider.send(message)
 
-  await exec.insert(transactionalMessages).values({
-    companyId: input.companyId ?? null,
-    kind: input.kind,
-    email,
-    subject: input.subject,
-    outcome: result.ok ? 'sent' : 'failed',
-    providerKey: provider.key,
-    providerMessageId: result.ok ? result.providerMessageId : null,
-    error: result.ok ? null : result.error,
-    reference: input.reference ?? null,
-  })
+  const [record] = await exec
+    .insert(transactionalMessages)
+    .values({
+      companyId: input.companyId ?? null,
+      kind: input.kind,
+      email,
+      subject: input.subject,
+      outcome: result.ok ? 'sent' : 'failed',
+      providerKey: provider.key,
+      providerMessageId: result.ok ? result.providerMessageId : null,
+      error: result.ok ? null : result.error,
+      reference: input.reference ?? null,
+    })
+    .returning({ id: transactionalMessages.id })
+
+  // Filed against whoever it went to, when the address belongs to a contact
+  // this company knows (Phase 22). Never throws and never blocks the send:
+  // the letter is what matters, and a missing timeline entry is not worth
+  // failing a password reset for.
+  if (input.companyId) {
+    await recordOutboundMail(
+      {
+        companyId: input.companyId,
+        email,
+        subject: input.subject,
+        transactionalMessageId: record.id,
+        delivered: result.ok,
+      },
+      exec,
+    )
+  }
 
   return result.ok
     ? { ok: true, messageId: result.providerMessageId }

@@ -13,8 +13,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **accounting dimensions with the fixed asset register**, **bringing an
 existing business's books in**, **accountant practice mode**,
 **transactional mail with password reset and invitations**,
-**attachments and accountant notes on a content-addressed object store**, and
-**server-side PDF generation with immutable sent-document snapshots** from the
+**attachments and accountant notes on a content-addressed object store**,
+**server-side PDF generation with immutable sent-document snapshots**, and the
+**communications log with the follow-up list** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -35,8 +36,9 @@ existing business's books in**, **accountant practice mode**,
 [ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md),
 [ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md),
 [ADR 0019](docs/adr/0019-a-reset-is-not-marketing-and-an-invitation-carries-no-password.md), and
-[ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md), and
-[ADR 0021](docs/adr/0021-a-sent-document-never-changes.md).
+[ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md),
+[ADR 0021](docs/adr/0021-a-sent-document-never-changes.md), and
+[ADR 0022](docs/adr/0022-what-was-said-and-what-was-promised.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -831,6 +833,63 @@ proposal ever sent.
   with what follows it, a long paragraph splits by line rather than jumping a page whole, and
   inter-block spacing is dropped at the top of a page so a document never starts an inch too low.
 
+### Communications and follow-ups (Phase 22)
+
+§16 lists the core data model entity by entity, and by Phase 21 every one of them existed except
+two. `Communication` did not exist at all, so §6's requirement that an opportunity store
+"communications, files, and activity history" was met on two counts of three — files arrived in
+Phase 20, activity history in Phase 3, and what anybody actually *said* was nowhere. `Task` existed
+as half a table: written only by marketing engagement, read only by the marketing overview,
+reachable from one screen nobody in sales opens.
+
+- **Every letter the system sends is recorded against the person it went to.** Phase 19 logs sends
+  in `transactional_messages`, which answers "did the mail go?" and knows nothing about the CRM.
+  When an address belongs to a known contact, the send now lands on that contact's timeline beside
+  the hand-logged calls. Recording it can never fail the sending, and catching the error is only
+  half of that: Postgres aborts a whole transaction on any failed statement, so a swallowed
+  exception inside the caller's would leave it holding a dead connection. The record runs in a
+  savepoint, and a test writes a communication after a deliberately-failed one, inside a single
+  transaction, to prove the caller survives.
+- **Campaign sends are deliberately excluded.** `campaign_recipients` already records every
+  marketing send per contact with opens and clicks. Mirroring them in would put a row on every
+  recipient's timeline for every newsletter, and a log where the quarterly mailshot outnumbers the
+  three sentences somebody typed after a difficult call is a log people stop reading.
+- **An activity is not a communication.** `opportunity_activities` records what the software did and
+  nobody writes it; a communication records what a person said to somebody outside the company. They
+  are stored separately so the useful half does not scroll out of sight behind forty automatic stage
+  changes, and shown together — separate storage, one view.
+- **Real foreign keys, not the Phase 20 registry.** A communication is always with a party: an
+  organization, one of its people, optionally the deal being discussed. Three columns the database
+  can constrain, plus a CHECK requiring at least one — the polymorphic subject registry would have
+  made "log a phone call against a bank transaction" expressible.
+- **The client is derived from the person, and from the deal.** Somebody logging a call against the
+  contact they spoke to does not also name that contact's employer, and a follow-up raised on an
+  opportunity belongs to that opportunity's client. The read side matches from the other end:
+  exchanges filed against the client, its contacts *and* its deals all appear on the client's
+  timeline. Without the derivation a promise made on a deal appears on no client's timeline and
+  carries no name on the board — which is how a client history quietly acquires holes.
+- **An internal note is not contact.** `lastContactedAt` excludes `internal`, because "must remember
+  to call these people" is worth writing down and is not evidence of having called them.
+- **A task is never silently lost.** It survives without an owner — `myWork` shows unclaimed work by
+  default, since a task nobody owns is everybody's problem and hiding it until somebody claims it is
+  how it stops being anybody's. It surfaces when it is late. And closing it is a claim, not an
+  update: `WHERE status = 'open' … RETURNING`, the same shape as Phase 15's billed-once clause, so
+  two people closing the same follow-up produce one completion and one honest refusal.
+- **A finished task carries a finish time, enforced.** `CHECK ((status = 'open') = (completed_at IS
+  NULL))`. Cancelling stamps the time too, and keeps its reason — a task that simply vanishes
+  teaches nobody anything. The migration backfills existing rows into shape before adding the
+  constraint.
+- **Closing is undoable from the screen that closes.** The board lists what was closed this week,
+  done and dropped together, each with a Reopen beside it. Without that list one mis-click is
+  permanent, and "a task is never silently lost" would have a hole in it exactly the size of the
+  Done button.
+- **Overdue is measured against a date, not the clock.** `openWork` and `workSummary` take `asOf`,
+  the same rule Phase 21 applied to the PDF's timestamp: a report that reads the clock cannot be run
+  for last Tuesday and cannot be asserted on.
+- **One work list, two screens.** `/crm/work` is the shared board — mine, unclaimed, overdue, done
+  this week — and every client row on `/crm/organizations` expands into its own timeline with the
+  two things somebody does next: log what was said, raise what was promised.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -928,7 +987,8 @@ Coverage matches what spec §21 asks for:
 | `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; and one company's engagements invisible to another |
 | `tests/notify.test.ts` | **A transactional letter carrying no unsubscribe link**, in the type and at runtime; the URL written out in full so a person can read where it goes; a bounce recorded rather than swallowed; the hourly limit per address per kind, and an invitation not blocked by somebody hammering the reset form; tokens stored as hashes with only an eight-character prefix in the clear, **spent exactly once by two simultaneous claims**, a new one superseding the last, an hour for a reset against a week for an invitation, and old ones pruned while live ones survive; **the reset form saying the same thing whether or not the address exists**, and **reaching somebody who unsubscribed from marketing company-wide**; a reset changing the password, ending every session, and auditing into each company the person belongs to; the same link refused twice with the first password left standing; a link dying once the address is no longer theirs; a dead link reported before anybody types, and checking not spending it; **an invitation creating no user and no membership until it is accepted**, the offer shown before anybody types, the invitee's own password taking effect, a short password refused with the link still usable, **an existing account never asked for a password**, **one account created when the same link is clicked twice at once**, somebody already inside told rather than mailed, another company unable to withdraw the invitation by id, and a practice invitee landing with access at every client the firm already serves |
 | `tests/evidence.test.ts` | Bytes addressed by what they are; both store adapters round-tripping, putting twice being a no-op, and deleting what is not there not being an error; **the same bytes uploaded twice returning the one document that already exists**, two companies sharing a blob and each counted, **one company deleting its copy leaving the other's downloading**, and the bytes going only when the last of them does; an orphan collected after a simulated crash between commit and free, and **bytes a document still points at never freed however far the count has drifted**; a type that can carry script, an empty file, and one over 10 MB all refused; one document on a transaction and a fixed asset at once with detaching one leaving the other, **three concurrent attachments of the same file leaving one link**, deleting a document taking it off every record, a page of records counted in one query, and the bare ones named; **a record from another company refused, a document from another company refused, and another company's bytes not served on a known id**; each kind of record guarded by its own permission, and a read-only auditor seeing the evidence and refused the removal; a note recorded and audited, an empty one refused, **a question on the work list until answered with the answer added beside it rather than over it**, one answer between two simultaneous clicks, a remark refused by the CHECK constraint, one company's questions invisible to another, and the list filtered kind by kind; and the mobile path uploading, attaching idempotently, reading back as an ordinary document, and keeping the phone's tighter limit |
-| `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions**; and an invoice rendered from the record with another company's refused |
+| `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions** — against a pinned clock, because the PDF's timestamp has one-second resolution and the test was relying on both sends landing inside the same second; and an invoice rendered from the record with another company's refused |
+| `tests/engagement.test.ts` | An exchange recorded with the client derived from the person spoken to, and a call logged against a contact or a deal appearing on that client's timeline; the day it happened kept rather than the day it was typed; an exchange with nobody and one with no summary refused, another company's client refused, and `crm:manage` needed to write against `crm:view` to read; **when each client was last spoken to, with a note to self not counted as contact**; **a letter the system sends landing on the timeline of the person it went to**, a bounce shown as such, nothing recorded for an address the CRM does not know, **a send never failed because the log could not be written**, and **the caller's transaction still usable after one fails**; a follow-up surviving with no owner and staying on the shared list, **closed once however many people click at the same moment**, a dropped one kept with its reason, reopened when it turns out it was not done, and what is late measured against a date rather than the clock; work refused to somebody who does not work here, a task about another company's client and an empty title refused, and one company's work off another's list; a client's follow-ups with the open ones first, **a follow-up raised on a deal belonging to that deal's client**; **what was closed listed with its reason and reopened from the same place**, work closed before the window neither listed nor counted, and one company's closed work off another's list; and the timeline merging what the system did, what people said and what is owed, **an open follow-up placed at its due date rather than when it was typed**, and nothing of another company shown |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1694,6 +1754,37 @@ key and the client proposal link — keep them for steps 22 and 24.
      Invoice PDF. Rendered from the record on every request, not snapshotted — an invoice that was
      wrong is credited and reissued, and the ledger is the authority for what is owed.
 
+### Communications and follow-ups (Phase 22)
+
+216. **Open Clients & Sales → Follow-ups.** Three seeded promises: one late and high priority, one
+     due later, and one nobody owns — the late one under **Late**, separately from the rest,
+     because "three of these are late" is a different fact from "these are your next three". The
+     line across the top counts open, late, due today, and the ones with nobody's name on.
+217. **Put your name on the unclaimed one** from the dropdown beside it, then take it off again. It
+     goes back to the shared list rather than nowhere: unclaimed is a state, not an omission.
+218. **Press Done on the late one, then open "Closed this week".** It is there with what was said
+     about it. Press **Reopen** and it comes back onto the list with its completion time cleared —
+     a row that is open and carries a completion date is exactly what the CHECK constraint refuses,
+     so the count and the list can never disagree.
+219. **Press Drop on another one** and look in the same place. A dropped follow-up keeps its reason
+     and sits beside the completed one, because both are finished — and it is recoverable by the
+     same button.
+220. **Open Clients & Sales → Clients and expand History and follow-ups on Summit Builders.** The
+     two seeded exchanges, the automatic stage changes, and the outstanding follow-ups, in one list,
+     newest first. Each client row says when it was last spoken to, or *never spoken to*.
+221. **Log a call from that panel** — pick call, "They contacted us", one line of what was said. It
+     appears immediately, and the row's "last spoken to" moves.
+222. **Log an internal note instead.** It appears on the timeline and the "last spoken to" date does
+     *not* move: a note to self is not evidence of having called anybody.
+223. **Raise a follow-up from the same panel** with a date in the past. It appears on the timeline at
+     its due date, and on the Follow-ups board under Overdue.
+224. **Look again at Summit Property Group's timeline.** One entry there was written by nobody: the
+     seed gives Alex Whitfield, the client's project manager, read-only access to watch the job, and
+     the invitation filed itself against him. Phase 19 sent it; Phase 22 put it where the next
+     person to ring him will see it. Priya's invitation, sent in the same breath to a staff address
+     the CRM has never seen, is recorded as mail and appears on no timeline — which is the same rule
+     working, not a different one.
+
 ## Project layout
 
 ```
@@ -1703,6 +1794,7 @@ src/
     bookkeeping/          Transaction Inbox
     accounting/           Reports, journal, reconciliation workspace
     crm/                  Pipeline, dashboard, clients, proposals, designer
+    crm/work/             The shared follow-up board — mine, unclaimed, overdue, done
     marketing/            Overview, campaigns, segments, creative, suppressions
     ai/                   AI module admin, usage ledger, insights, prompt registry
     jobs/                 WIP schedule, job detail, cost codes, subcontractors
@@ -1767,6 +1859,7 @@ src/
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
+    engagement/           The communications log, follow-up tasks, and the merged timeline
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -2236,8 +2329,31 @@ Gaps within the phases already built:
   user-defined dimensions in Phase 16, with their own dimensional P&L; the job and cost-code
   dimensions have been real since Phase 7. But a *statement* scoped to one job is still a query
   change to make — the WIP and job cost reports answer that question by another route.
-- Communications and file attachments on opportunities (spec §6) are not built;
-  `opportunity_activities` is the seam they will hang from.
+- ~~Communications and file attachments on opportunities (spec §6) are not built.~~ Files arrived
+  in Phase 20 and the communications log in Phase 22, so §6's "communications, files, and activity
+  history" is met on all three counts and **§16's core data model is complete** —
+  `Communication` and `Task` were the last two entities in it.
+- **Inbound mail is not captured.** A reply from a client is logged by hand. There is no IMAP
+  connection, no forwarding address and no threading, so the log records that somebody replied
+  rather than the reply. The largest gap in Phase 22, and it needs a provider decision before it
+  needs code.
+- **Nothing chases an overdue follow-up.** It surfaces when somebody opens the page. The Phase 10
+  queue and Phase 8's push channel both exist and neither is wired to this, so a task due Friday
+  nudges nobody on Friday.
+- **Communications carry no attachments.** Phase 20 attaches a document to eleven kinds of record
+  and `communication` is not one of them, so "here is the quote I emailed them" is a sentence
+  rather than a file. One row in the subject registry.
+- **Campaign sends are invisible on the timeline**, deliberately (ADR 0022), so "why have we not
+  heard from them since March?" will not show the four newsletters they were sent. The marketing
+  workspace answers that separately.
+- **Tasks have no recurrence and no dependencies.** A quarterly check-in is raised four times by
+  hand. This is a follow-up list rather than a project-management surface, and the line is
+  deliberate.
+- **The timeline merges in memory**, each source capped and then the merge capped, so pagination is
+  approximate past sixty entries. And an open task sits at its *due* date, which is right for "what
+  is outstanding" and surprising for "what happened when".
+- **No timeline on a contact or a job**, only on a client and a deal. The data supports both; the
+  screens do not exist.
 - Renaming an organization does not propagate to its linked customer or vendor record. Client-
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not

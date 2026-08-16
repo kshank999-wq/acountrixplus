@@ -10,7 +10,9 @@ import {
   index,
   unique,
   pgEnum,
+  check,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { contacts, opportunities, organizations } from './crm'
 import { designDocuments } from './design'
@@ -275,6 +277,8 @@ export const suppressions = pgTable(
  * person, without inventing a project-management surface Phase 5 does not ask
  * for.
  */
+export const taskPriorityEnum = pgEnum('task_priority', ['low', 'normal', 'high'])
+
 export const tasks = pgTable(
   'tasks',
   {
@@ -304,8 +308,32 @@ export const tasks = pgTable(
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
+
+    // --- Phase 22 -----------------------------------------------------------
+    //
+    // Added here rather than in a second table: a follow-up raised by a
+    // campaign and one somebody typed are the same kind of thing, and two
+    // tables is how the first stops appearing on the list anybody reads.
+    priority: taskPriorityEnum('priority').notNull().default('normal'),
+    completedBy: uuid('completed_by').references(() => users.id, { onDelete: 'set null' }),
+    /** How it ended. A task that simply vanishes teaches nobody anything. */
+    outcome: text('outcome'),
   },
   (t) => ({
     companyStatusIdx: index('tasks_company_status_idx').on(t.companyId, t.status, t.dueOn),
+    /** The "what is on my desk" query: mine, open, soonest first. */
+    assigneeIdx: index('tasks_assignee_idx').on(t.companyId, t.assignedTo, t.status, t.dueOn),
+    titleNotEmpty: check('tasks_title_not_empty', sql`length(btrim(${t.title})) > 0`),
+    /**
+     * A finished task records when it finished; an open one cannot claim to.
+     *
+     * Without this a completion that half-failed leaves a row that is open and
+     * has a completion date, and every count of "done this week" disagrees
+     * with every list of open work.
+     */
+    completionShape: check(
+      'tasks_completion_shape',
+      sql`(${t.status} = 'open') = (${t.completedAt} IS NULL)`,
+    ),
   }),
 )

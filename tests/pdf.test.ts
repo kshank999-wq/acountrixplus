@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { brandKits, proposalItems, proposalVersions } from '@/db/schema'
@@ -494,15 +494,31 @@ describe('a sent proposal never changes', () => {
   it('stores one copy when two sends render identical bytes', async () => {
     const { fixture, proposal } = await sendable()
 
-    const first = await sendProposal(fixture.ctx, proposal.id)
-    const second = await sendProposal(fixture.ctx, proposal.id)
+    // The clock is pinned rather than raced. `sendProposal` stamps the file
+    // with `new Date()`, and the PDF's timestamp has one-second resolution, so
+    // the property under test — identical input, identical bytes — held only
+    // when both sends happened to land inside the same second. That is a
+    // coincidence the suite was relying on, and on a loaded machine it is a
+    // coincidence that stops happening.
+    //
+    // Only `Date` is faked: the driver's own timers have to keep running or
+    // the connection pool stalls.
+    vi.useFakeTimers({ toFake: ['Date'], now: new Date('2026-05-04T09:00:00Z') })
+
+    let first: Awaited<ReturnType<typeof sendProposal>>
+    let second: Awaited<ReturnType<typeof sendProposal>>
+    try {
+      first = await sendProposal(fixture.ctx, proposal.id)
+      second = await sendProposal(fixture.ctx, proposal.id)
+    } finally {
+      vi.useRealTimers()
+    }
 
     expect(second.versionNumber).toBe(2)
 
-    // Nothing changed between the two sends, and the only thing that could
-    // have — the timestamp in the file — has one-second resolution. So the
-    // renderer produced the same bytes, and Phase 20's content addressing
-    // stored them once and handed back the same document to both versions.
+    // Nothing changed between the two sends, so the renderer produced the same
+    // bytes, and Phase 20's content addressing stored them once and handed back
+    // the same document to both versions.
     //
     // Two rows in `proposal_versions`, one row in `documents`, one blob. That
     // is the two phases composing rather than merely coexisting.

@@ -12,6 +12,7 @@ import {
   brandKits,
   campaignRecipients,
   chartAccounts,
+  contacts,
   documents,
   financialAccounts,
   journalEntries,
@@ -27,6 +28,8 @@ import {
 } from '@/modules/practice/service'
 import { practiceWorkQueue } from '@/modules/practice/switching'
 import { attachDocument, storeDocument } from '@/modules/evidence/service'
+import { logCommunication } from '@/modules/engagement/communications'
+import { createTask, workSummary } from '@/modules/engagement/tasks'
 import { writeNote } from '@/modules/evidence/notes'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
@@ -463,6 +466,64 @@ async function main() {
     openProposalId = openProposal.id
     openProposalToken = openProposal.publicToken
     console.log(`  Proposal ${openProposal.number} sent and awaiting a decision.`)
+  }
+
+  // --- Phase 22: what was said, and what is owed ----------------------------
+  //
+  // A relationship is a sequence of exchanges and promises, and neither is in
+  // the ledger. The invitation the seed sends further down — to Alex Whitfield,
+  // whose address the CRM knows — lands here too, automatically, beside the
+  // calls somebody logged by hand.
+  if (negotiating) {
+    const [summitContact] = await db
+      .select({ id: contacts.id })
+      .from(contacts)
+      .where(eq(contacts.companyId, company.id))
+      .limit(1)
+
+    await logCommunication(ctx, {
+      opportunityId: negotiating.id,
+      contactId: summitContact?.id ?? null,
+      channel: 'call',
+      direction: 'inbound',
+      summary: 'Rang about the foundation bid — wants the copper valley priced separately.',
+      body: 'Asked whether we could hold the price to the end of the quarter. Said we would come back on Friday.',
+      occurredAt: new Date('2026-08-10T09:20:00Z'),
+    })
+
+    await logCommunication(ctx, {
+      opportunityId: negotiating.id,
+      channel: 'meeting',
+      direction: 'outbound',
+      summary: 'Site walk with their project manager.',
+      occurredAt: new Date('2026-08-12T14:00:00Z'),
+    })
+
+    await createTask(ctx, {
+      title: 'Come back on holding the price to quarter end',
+      detail: 'Promised on the call of 10 August. Needs a decision from Dana first.',
+      opportunityId: negotiating.id,
+      dueOn: '2026-08-14',
+      priority: 'high',
+      assignedTo: user.id,
+    })
+
+    await createTask(ctx, {
+      title: 'Chase the signed bid',
+      opportunityId: negotiating.id,
+      dueOn: '2026-08-28',
+    })
+
+    // Deliberately unowned, to show the state: "somebody should do this" is
+    // real, and a list that hides it until claimed is how it stops being
+    // anybody's.
+    await createTask(ctx, { title: 'Ask them who signs off on change orders' })
+
+    const work = await workSummary(ctx, '2026-08-16')
+    console.log(
+      `  Engagement: 2 exchanges logged, ${work.open} follow-ups open ` +
+        `(${work.overdue} late, ${work.unassigned} unclaimed).`,
+    )
   }
 
   const intakeKey = await createIntakeKey(ctx, {
@@ -1741,6 +1802,22 @@ async function main() {
     role: 'bookkeeper',
   })
 
+  // A second invitation, to somebody the CRM already knows: Alex Whitfield is
+  // the client's project manager on the Summit deal, given read-only access to
+  // watch the job rather than ring for a progress figure. It is here to
+  // demonstrate the Phase 19 → Phase 22 join — this letter lands on Summit
+  // Property Group's timeline on its own, beside the calls somebody typed,
+  // because the address belongs to a contact.
+  //
+  // Priya's above does not, and correctly: `priya@example.test` is a staff
+  // address the CRM has never seen. A letter to an unknown address is recorded
+  // as mail and filed against nobody.
+  await inviteToCompany(ctx, {
+    email: 'alex@summitproperty.test',
+    name: 'Alex Whitfield',
+    role: 'readonly',
+  })
+
   // The link is printed because it cannot be recovered later: the token is
   // hashed at rest, so this is the only moment anybody can read it. No reset is
   // seeded — following one would change the password printed at the end of this
@@ -1816,6 +1893,8 @@ async function main() {
   console.log('  /settings/access      who can open these books, and one click to stop them')
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')
   console.log('  /accounting/documents  every file, what it hangs on, and the open questions')
+  console.log('  /crm/work             follow-ups: late, due, and the ones nobody claimed')
+  console.log('  /crm/organizations    open a client’s history — calls, letters, and what is owed')
   console.log('  /forgot               ask for a reset; the link is printed in this terminal')
   console.log('  /invite?token=…       Priya’s invitation, printed above — she picks her own password')
   console.log('')

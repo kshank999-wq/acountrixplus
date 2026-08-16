@@ -5,7 +5,9 @@ import { formatCents } from '@/lib/money'
 import { listContacts, listOrganizations } from '@/modules/crm/opportunities'
 import { listProjects } from '@/modules/crm/conversion'
 import { CRM_NAV } from '../nav'
+import { lastContactedAt } from '@/modules/engagement/communications'
 import { NewOrganization } from './new-organization'
+import { ClientTimeline } from './client-timeline'
 
 export const dynamic = 'force-dynamic'
 
@@ -47,6 +49,14 @@ export default async function OrganizationsPage() {
     listContacts(actor),
     listProjects(actor),
   ])
+
+  // One query for the whole page. "When did we last speak to these people" is
+  // the question a client list is opened to answer, and asking it per row is
+  // how it ends up not being shown at all.
+  const spokenTo = await lastContactedAt(
+    actor,
+    organizations.map((organization) => organization.id),
+  )
 
   const contactsByOrg = new Map<string, typeof contacts>()
   for (const contact of contacts) {
@@ -106,6 +116,14 @@ export default async function OrganizationsPage() {
                       </span>
                     </div>
                   </div>
+
+                  <ClientTimeline
+                    organizationId={organization.id}
+                    organizationName={organization.name}
+                    lastContacted={
+                      spokenTo.get(organization.id)?.toISOString().slice(0, 10) ?? null
+                    }
+                  />
 
                   {people.length > 0 && (
                     <ul className="mt-2 flex flex-wrap gap-2">
