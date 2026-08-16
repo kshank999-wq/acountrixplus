@@ -60,6 +60,16 @@ export type AuditAction =
   | 'expense.mark_billable'
   | 'retainer.receive'
   | 'retainer.apply'
+  // Accounting dimensions and fixed assets (spec §13, Phase 16)
+  | 'dimension.create'
+  | 'dimension.update'
+  // Reclassifying moves no money, which is exactly why it is audited: nothing
+  // in the ledger records that somebody moved a quarter of the year's costs
+  // from one site to another.
+  | 'dimension.reclassify'
+  | 'fixed_asset.register'
+  | 'fixed_asset.depreciate'
+  | 'fixed_asset.dispose'
   // Inventory (spec §5, Phase 14)
   | 'stock.adjust'
   | 'stock.receive'

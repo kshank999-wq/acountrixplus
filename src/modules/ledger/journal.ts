@@ -11,6 +11,10 @@ import {
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import {
+  assignLineDimensions,
+  type DimensionAssignment,
+} from '@/modules/dimensions/service'
 
 /**
  * The double-entry journal (spec §13).
@@ -54,6 +58,14 @@ export type JournalLineInput = {
    */
   projectId?: string | null
   costCodeId?: string | null
+  /**
+   * User-defined dimensions (Phase 16): `{ [dimensionId]: dimensionValueId }`.
+   *
+   * A map rather than a list of pairs, because one value per dimension per
+   * line is the constraint the whole dimensional model rests on, and a map
+   * cannot express a violation of it. See `modules/dimensions/service.ts`.
+   */
+  dimensions?: DimensionAssignment
 }
 
 export type JournalEntryInput = {
@@ -142,6 +154,7 @@ export function normalizeLines(lines: JournalLineInput[]) {
       memo: line.memo ?? null,
       projectId: line.projectId ?? null,
       costCodeId: line.costCodeId ?? null,
+      dimensions: line.dimensions ?? {},
       sortOrder: index,
     }
   })
@@ -271,19 +284,43 @@ export async function createJournalEntry(
     })
     .returning({ id: journalEntries.id, entryNumber: journalEntries.entryNumber })
 
-  await exec.insert(journalLines).values(
-    lines.map((line) => ({
-      companyId: ctx.companyId,
-      journalEntryId: entry.id,
-      chartAccountId: line.chartAccountId,
-      debitCents: line.debitCents,
-      creditCents: line.creditCents,
-      memo: line.memo,
-      projectId: line.projectId,
-      costCodeId: line.costCodeId,
-      sortOrder: line.sortOrder,
-    })),
-  )
+  const inserted = await exec
+    .insert(journalLines)
+    .values(
+      lines.map((line) => ({
+        companyId: ctx.companyId,
+        journalEntryId: entry.id,
+        chartAccountId: line.chartAccountId,
+        debitCents: line.debitCents,
+        creditCents: line.creditCents,
+        memo: line.memo,
+        projectId: line.projectId,
+        costCodeId: line.costCodeId,
+        sortOrder: line.sortOrder,
+      })),
+    )
+    .returning({ id: journalLines.id, sortOrder: journalLines.sortOrder })
+
+  // Dimensions are written inside the same transaction as the lines they
+  // belong to. A line that committed without them would show up as
+  // Unassigned on a report, which the person who posted it — having assigned
+  // a value — would have no way to explain.
+  //
+  // Matched by `sortOrder` rather than by the order `returning()` happened to
+  // give back: Postgres makes no promise about that, and silently attaching
+  // the Airport site's costs to the Downtown line is the kind of defect that
+  // reconciles perfectly and is still wrong.
+  const bySortOrder = new Map(inserted.map((row) => [row.sortOrder, row.id]))
+  const withDimensions = lines
+    .filter((line) => Object.keys(line.dimensions).length > 0)
+    .map((line) => ({
+      journalLineId: bySortOrder.get(line.sortOrder) as string,
+      assignment: line.dimensions,
+    }))
+
+  if (withDimensions.length > 0) {
+    await assignLineDimensions(ctx, withDimensions, exec)
+  }
 
   return { id: entry.id, entryNumber: entry.entryNumber, totalCents }
 }

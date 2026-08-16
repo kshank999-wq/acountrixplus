@@ -8,6 +8,7 @@ const REPORTS = [
   { key: 'balance_sheet', label: 'Balance sheet', financial: true },
   { key: 'cash_flow', label: 'Cash flow', financial: true },
   { key: 'comparative', label: 'Comparative P&L', financial: true },
+  { key: 'comparative_bs', label: 'Comparative balance sheet', financial: true },
   { key: 'ar_aging', label: 'A/R aging', financial: false },
   { key: 'ap_aging', label: 'A/P aging', financial: false },
 ]
@@ -54,7 +55,11 @@ export function ReportPicker({
   // Nor does the cash flow statement. The indirect method exists to explain the
   // gap between accrual profit and cash; on a cash basis there is no gap, so
   // every adjustment line would be zero.
-  const hasBasis = report === 'profit_loss' || report === 'balance_sheet' || report === 'comparative'
+  const hasBasis =
+    report === 'profit_loss' ||
+    report === 'balance_sheet' ||
+    report === 'comparative' ||
+    report === 'comparative_bs'
 
   return (
     <div className="card p-3">
@@ -122,7 +127,7 @@ export function ReportPicker({
           </div>
         )}
 
-        {report === 'comparative' && (
+        {(report === 'comparative' || report === 'comparative_bs') && (
           <div className="text-xs text-muted">
             <span className="mb-1 block">Compare against</span>
             <div className="flex flex-wrap gap-1">

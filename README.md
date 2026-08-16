@@ -9,7 +9,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
 **Payroll and Tax**, the **background worker and outbox**, the
 **completed accounting core**, the **statements an accountant asks for**, the
-**security controls**, **inventory**, and **time and billing** from the
+**security controls**, **inventory**, **time and billing**, and
+**accounting dimensions with the fixed asset register** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -24,8 +25,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md),
 [ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md),
 [ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md),
-[ADR 0014](docs/adr/0014-one-inventory-five-industries.md), and
-[ADR 0015](docs/adr/0015-an-hour-is-billed-once.md).
+[ADR 0014](docs/adr/0014-one-inventory-five-industries.md),
+[ADR 0015](docs/adr/0015-an-hour-is-billed-once.md), and
+[ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -559,6 +561,52 @@ nothing looks wrong on any report.
 - **Written-off time is kept, with a reason**, and stays in the utilization
   denominator — so a firm cannot improve its numbers by giving work away.
 
+### Dimensions and fixed assets (Phase 16)
+
+The last two things spec §13 asked for: user-defined accounting dimensions —
+§13 says "classes/departments/locations/projects/jobs **or equivalent**", and
+projects were only ever half of that — and a fixed asset register with
+depreciation.
+
+They share a claim: **the parts sum to the whole.** Both are derived views of
+the same ledger, and a view that disagrees with the ledger is a second set of
+books printed on the same paper.
+
+- **A dimension is a row, not a column.** A restaurant with three sites, an
+  agency with two departments, a nonprofit with restricted funds — a location
+  does not start, finish, or get billed, so it is not a project. Adding
+  "Region" is a thing an owner does on a Tuesday, not a migration.
+- **`unique(journal_line_id, dimension_id)` is the whole model.** One value per
+  dimension per line, so a line cannot be counted in two columns and the report
+  cannot sum to more than the account it came from. `totalsAgree` is computed
+  on every run and the screen says so if it is ever false.
+- **Unassigned is a column, not an omission.** Filtering to tagged lines gives
+  a page that is internally consistent, adds up to less than the business
+  earned, and hides by how much. Coverage is measured on *gross* movement,
+  because $50,000 of untagged revenue against $50,000 of untagged cost nets to
+  zero and "100% covered" would be a lie about $100,000.
+- **Reclassifying moves no money**, so it is allowed inside a closed period —
+  and audited anyway, because the ledger has no record of who moved a quarter
+  of the year's costs to another site.
+- **There is no balance sheet by dimension.** Assets can be tagged; equity
+  cannot. Every product that ships one balances it with a plug the business
+  never transacted.
+- **A depreciation schedule sums exactly to the depreciable base.** 756
+  schedules across every method, convention, life and awkward cost are asserted
+  to the cent, because an asset that never quite finishes depreciating survives
+  ten years of closes and then has to be explained.
+- **Registering an asset posts nothing** — the money was already spent and
+  coded when the bill was entered, and posting it again puts the truck on the
+  balance sheet twice. `reconcileFixedAssets` proves cost against Fixed Assets
+  and depreciation against Accumulated Depreciation, which is the only report
+  that finds an asset nobody coded or a purchase nobody registered.
+- **`unique(fixed_asset_id, period_end)` makes running depreciation twice
+  safe** — a person clicks, a job fires an hour later — and arrears are charged
+  to *their own months*, because that is when the truck was wearing out.
+- **Disposal charges the arrears first**, so gain or loss comes from the ledger
+  rather than from the schedule, and lands in Other income or Other expense
+  rather than flattering the trading margin.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -650,6 +698,8 @@ Coverage matches what spec §21 asks for:
 | `tests/security.test.ts` | TOTP against RFC 6238's published vectors, base32 round-tripping, ±1 step of drift and no more, a used code refused inside its own window, and non-numeric codes rejected; secrets round-tripping under encryption with a fresh IV each time and a tampered ciphertext throwing rather than decrypting to something else; enrolment not switching on until a code has worked, the secret never stored in the clear, recovery codes single-use and never stored in the clear and invalidated when regenerated, the password required to switch MFA off, and a working factor never silently replaced; the challenge token rejecting tampering, dying when the password changes, and expiring; the network kept and the host discarded, lockout after repeated failures cleared by a success and not extended by retries, and the window expiring; signing out everywhere else keeping this session, ending a device-less session a device sweep would miss, a password change ending every other session, the company session length honoured, and a forged cookie rejected; CSV quoting fields that would otherwise shift every column, an export an accountant could rebuild the books from, the export recorded in two places, a role without ledger access refused, and one company's export containing nothing of another's; and the policy refusing settings that would lock everybody out |
 | `tests/inventory.test.ts` | FIFO taking oldest first against weighted average pooling, the parts summing to the whole across a thousand awkward quantities under both methods, consuming everything costing exactly the pool, a shortfall reported rather than thrown, receipt-date ties broken deterministically, and a return valued at what left; the subledger equalling the Inventory account after a busy month under both cost methods; the cost posting inside the invoice's transaction, a service line left alone, an empty shelf still recording the sale, and a return restored at its original cost while prices moved; a shortage booked to Shrinkage and not to Cost of Goods Sold, a count with no reason refused, a count that found the right quantity posting nothing, and a surplus valued at the current average; an order posting nothing, a receipt landing in Goods Received Not Invoiced rather than payables, a short shipment surfacing in the match, unbilled receipts itemised, and an order closing once every line is satisfied; and the guards — a service refused as stock, a negative cost refused, the module gate, and one company's stock invisible to another |
 | `tests/timebilling.test.ts` | Rate resolution most-specific-first with zero treated as a rate and null as its absence; money computed from minutes rather than displayed hours, and the three-cent divergence demonstrated; every duration format people type; markup in basis points; utilization measured against time recorded; recording time posting nothing; a description and a sane duration insisted on; the draft/submitted/approved path; billed time refusing to be edited; written-off time kept with a reason; **two concurrent billings producing exactly one invoice**, a second attempt finding nothing, the invoice footing to the preview, unapproved and non-billable time left alone, a cut-off date honoured, and the rate frozen at what was billed; all four groupings footing to the same total; an expense posting nothing and billing at cost plus markup to its own revenue account; a retainer as a liability, drawn down without cash moving, capped at what is left and what is owed, refused across clients, and its cash-basis limitation asserted and named; unbilled work with its age; and the guards |
+| `tests/assets.test.ts` | 756 depreciation schedules across every method, convention, life and awkward cost, each summing exactly to the depreciable base and ending on the salvage value with no zero-amount period; a half-year convention giving exactly half a year in year one and a mid-month one half a month at each end; declining balance front-loading and still landing on salvage, and the crossover removing the final lump; month arithmetic across leap years; registering an asset posting nothing, sequential tags, and salvage above cost refused; arrears charged to their own months rather than the run date, **a month that has not finished not charged**, the same period run twice charging once, two concurrent runs posting one set between them, one entry a month covering every asset, and an exhausted schedule marking the asset; **cost and accumulated depreciation both reconciling to the ledger** across several assets on different methods, and a disagreement reported when an asset was never posted; disposal charging the arrears first so book value comes from the ledger, a gain landing in Other income rather than Sales Revenue, a loss in Other expense, the asset leaving the balance sheet entirely, and disposal through the same account list the screen offers |
+| `tests/dimensions.test.ts` | Code normalization, a parent from another dimension refused, and a retired dimension keeping its history; values attached at posting time, **each line of a two-site entry keeping its own value**, a value from the wrong dimension or another company refused; **every row's columns summing to the ordinary profit and loss**, checked against a report built by a different query; untagged activity as a column rather than an omission, the Unassigned column dropped when nothing is untagged, an unused value left off the page, and each site getting its own bottom line; coverage measured on gross movement so offsetting amounts cannot hide, reported only for dimensions marked expected, and null when nothing happened; reclassifying leaving the trial balance untouched, replacing rather than duplicating, clearing back to Unassigned, and silently ignoring another company's lines; defaults filling an unset dimension, never overriding a choice, the more specific owner winning, and replacing rather than duplicating; and balance-sheet movement by value with no equity row |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1238,6 +1288,37 @@ key and the client proposal link — keep them for steps 22 and 24.
      revenue, because none has been earned. Then bill some work against it and watch the liability
      fall without any cash moving.
 
+### Dimensions and fixed assets (Phase 16)
+
+172. **Open Accounting → Dimensions** — the demo ships a *Location* with two yards, deliberately
+     only ~90% tagged. Read the coverage figure first: it is what tells you how much of the report
+     you are entitled to believe.
+173. **Read a row across** — Contract Revenue under North yard plus South yard plus Unassigned is
+     exactly what the ordinary profit and loss shows for Contract Revenue. That is the claim, and
+     the page computes it on every run rather than trusting itself.
+174. **Look at the bottom line per column** — one yard is profitable and the other is not, which the
+     company-wide figure hides completely. That is the whole reason to have dimensions.
+175. **Tick some untagged lines and assign them** — then check the trial balance. Identical. No
+     money moved; only which column it appears in. That is why reclassifying is allowed inside a
+     closed period, and why it is audited anyway.
+176. **Notice what is absent** — there is no balance sheet by location, and the page says why.
+     Assets can be tagged and equity cannot, so one would have to be balanced with a number the
+     business never transacted.
+177. **Open Accounting → Fixed assets** — the reconciliation is first, above the asset list.
+     Register cost against Fixed Assets, register depreciation against Accumulated Depreciation.
+     Nothing else in the application can tell you these agree.
+178. **Register an asset without posting it** — leave "already in the books" ticked, which is the
+     normal case. Then look at the reconciliation: it now disagrees by exactly that cost, because
+     you have described something the ledger has never heard of. That is the feature working.
+179. **Run depreciation** — the months owed are listed before you post, each dated to itself rather
+     than to today. Click it twice: the second run charges nothing.
+180. **Dispose of something** — the form shows the projected gain or loss before you commit, and any
+     depreciation still owed is charged to its own months first, so the figure comes from the ledger
+     rather than from the schedule. A gain lands in *Other income*, never in Sales Revenue.
+181. **Open Accounting → Reports → Comparative balance sheet** — two dates rather than two ranges,
+     with net income shown inside equity because it is what makes the columns balance, and a line
+     stating whether each one does.
+
 ## Project layout
 
 ```
@@ -1255,6 +1336,10 @@ src/
     accounting/receivables/  Credit notes, write-offs, and customer statements
     accounting/periods/   Recurring entries and the year-end close
     settings/modules/     Industry module switches
+    accounting/dimensions/  Profit and loss by location, and the reclassify work list
+    accounting/assets/    The fixed asset register and its reconciliation
+    inventory/            Stock on hand, receiving, counts
+    time/                 Timesheets, unbilled work, billing, retainers
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
     studio/               Company Studio — profile, brand, catalog, clauses
@@ -1288,6 +1373,10 @@ src/
     worker/               Queue, handler registry, runner, schedules, outbox, system actor
     studio/               Company profile, brand kits, assets, clause library
     ledger/               Journal engine, derived postings, balances, statements
+    inventory/            Lot costing, stock movements, purchasing, valuation
+    timebilling/          Rates, time entries, reimbursable expenses, retainers
+    dimensions/           User-defined dimensions, assignment, dimensional reporting
+    assets/               Depreciation schedules and the fixed asset register
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -1501,13 +1590,30 @@ Tracked against the spec §20 phases:
 
 Gaps within the phases already built:
 
-- **§13's accounting workspace, what is left.** Cash Flow, comparative periods, deposits and
-  undeposited funds, and vendor credits are built. Still open: a **classes / departments /
-  locations dimension** — §13 asks for those "**or equivalent**", and projects plus cost codes are
-  the equivalent that exists, which leaves a restaurant with three locations and no projects
-  unserved — and a **fixed asset register with depreciation schedules**, which §13 explicitly
-  allows as a later professional module. Comparative *balance sheets* have a tested service and no
-  screen; only the P&L has one.
+- **§13's accounting workspace is complete.** Cash Flow, comparative periods (both statements,
+  both with screens), deposits and undeposited funds, vendor credits, user-defined dimensions, and
+  the fixed asset register are all built. What remains inside them is listed below.
+- **Dimension defaults are built and unused by the document paths.** `dimension_defaults` and
+  `resolveDefaults` are tested; the invoice, bill and payroll paths do not call them, so a
+  dimension is set by hand on a manual entry or by reclassifying afterwards. The largest gap in
+  Phase 16.
+- **A dimension cannot be reported hierarchically.** Values nest and `parentId` is validated; no
+  report rolls a child into its parent, so "West / Portland" and "West / Seattle" are two columns
+  rather than one with a subtotal.
+- **No dimension picker on the transaction inbox**, which is the natural moment to tag a cost.
+- **Dimensional reporting is accrual only.** Cash basis restates entries through payment
+  applications, and a restated figure has no single journal line to inherit a dimension from.
+- **A dimension marked `expected` is advisory.** Coverage is measured and reported; a posting
+  without one is not refused, because refusing would stop payroll and inventory relief working.
+  See ADR 0016.
+- **Depreciation is a button, not a schedule.** The idempotency that would make a monthly job safe
+  is already in place — the unique index exists so a job and a person can both fire it — and no
+  schedule is registered on the Phase 10 worker.
+- **One depreciation book per asset.** A company keeping a book life and a different tax life has
+  to keep the second somewhere else, which is most companies past a certain size. No revaluation,
+  impairment, or componentisation either.
+- **A part-month disposal charges no part-month.** Only completed months are charged, so an asset
+  sold on the 15th gets nothing for that month.
 - **Accruals are pooled per account, not matched per item.** Cash basis works out what a
   prepayment or accrual was for by reading the recognition entries on that account. A company
   running two prepaid insurance policies through one account gets the pool, not the policy, and one

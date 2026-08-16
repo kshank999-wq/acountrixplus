@@ -6,14 +6,35 @@
  * user rather than a special case.
  */
 import { randomUUID } from 'node:crypto'
-import { eq } from 'drizzle-orm'
+import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db } from '@/db'
-import { brandKits, campaignRecipients, financialAccounts, serviceItems } from '@/db/schema'
+import {
+  brandKits,
+  campaignRecipients,
+  chartAccounts,
+  financialAccounts,
+  journalEntries,
+  journalLines,
+  serviceItems,
+} from '@/db/schema'
 import { registerCompany } from '@/modules/tenancy/onboarding'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
 import { categorize, listInbox } from '@/modules/bookkeeping/transactions'
 import { accountByNumber } from '@/modules/coa/service'
+import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
+import {
+  createDimension,
+  createDimensionValue,
+  reclassifyLines,
+} from '@/modules/dimensions/service'
+import { dimensionalProfitAndLoss } from '@/modules/dimensions/reporting'
+import {
+  depreciationDue,
+  reconcileFixedAssets,
+  registerAsset,
+  runDepreciation,
+} from '@/modules/assets/service'
 import {
   createBill,
   createCustomer,
@@ -1240,22 +1261,16 @@ async function main() {
 
   // --- Phase 12: the statements an accountant asks for ---------------------
 
-  // Depreciation, so the cash flow statement has the add-back that the whole
-  // indirect method is built around. Without it the operating section is just
-  // net income and the point is invisible.
-  const accumulatedDepreciation = await accountByNumber(company.id, '1510')
-  const depreciationExpense = await accountByNumber(company.id, '9100')
-  if (accumulatedDepreciation && depreciationExpense) {
-    await postManualEntry(ctx, {
-      entryDate: '2026-06-30',
-      memo: 'Depreciation, six months',
-      source: 'adjusting',
-      lines: [
-        { chartAccountId: depreciationExpense.id, debitCents: 480_000 },
-        { chartAccountId: accumulatedDepreciation.id, creditCents: 480_000 },
-      ],
-    })
-  }
+  // Depreciation used to be a hand-written $4,800 entry here, so the cash flow
+  // statement had the add-back the whole indirect method is built around.
+  //
+  // Phase 16 posts it from the fixed asset register instead, further down. The
+  // hand-written one was removed rather than left alongside, because the two
+  // together are exactly the double-count the register exists to catch: the
+  // demo's own reconciliation reported the disagreement the first time it ran,
+  // which is the feature working and a bad thing to ship as the demo's
+  // headline. The cash flow add-back is unchanged — it comes from a real
+  // schedule now instead of a placeholder.
 
   // An accrual and its reversal — the pattern cash basis is supposed to see
   // through, and the one that used to show as an expense in the wrong month.
@@ -1307,17 +1322,6 @@ async function main() {
       `  ${waiting.length} receipt(s) waiting to be deposited — the bank will show one line for all of them.`,
     )
   }
-
-  const flow = await cashFlowStatement(ctx, {
-    startDate: '2026-01-01',
-    endDate: '2026-12-31',
-  })
-  console.log(
-    `  Cash flow 2026: operating ${formatCentsPlain(flow.operating.totalCents)}, ` +
-      `investing ${formatCentsPlain(flow.investing.totalCents)}, ` +
-      `financing ${formatCentsPlain(flow.financing.totalCents)} — ` +
-      `${flow.reconciles ? 'reconciles' : 'DOES NOT RECONCILE'} to the cash accounts.`,
-  )
 
   // --- Phase 14: inventory -------------------------------------------------
   //
@@ -1460,6 +1464,126 @@ async function main() {
     )
   }
 
+  // --- Phase 16: dimensions and the fixed asset register -------------------
+  //
+  // Ridgeline runs two yards. That is not a project — a yard does not start,
+  // finish, or get billed — so it is exactly the case projects and cost codes
+  // do not cover.
+  const location = await createDimension(ctx, {
+    name: 'Location',
+    code: 'LOC',
+    requirement: 'expected',
+    description: 'Which yard the money belongs to.',
+  })
+
+  const northYard = await createDimensionValue(ctx, {
+    dimensionId: location.id,
+    code: 'NORTH',
+    name: 'North yard',
+  })
+  const southYard = await createDimensionValue(ctx, {
+    dimensionId: location.id,
+    code: 'SOUTH',
+    name: 'South yard',
+  })
+
+  // Deliberately partial. A demo where everything is tagged would show a
+  // coverage figure of 100% and teach nothing — the whole point of the
+  // Unassigned column is that real books arrive part-way tagged, and the
+  // number tells you how much of the report you are entitled to believe.
+  const plLines = await db
+    .select({ id: journalLines.id })
+    .from(journalLines)
+    .innerJoin(journalEntries, eq(journalEntries.id, journalLines.journalEntryId))
+    .innerJoin(chartAccounts, eq(chartAccounts.id, journalLines.chartAccountId))
+    .where(
+      and(
+        eq(journalLines.companyId, company.id),
+        eq(journalEntries.status, 'posted'),
+        inArray(chartAccounts.type, ['revenue', 'cogs', 'expense']),
+      ),
+    )
+    .orderBy(asc(journalEntries.entryDate))
+
+  const tagged = plLines.slice(0, Math.floor(plLines.length * 0.72))
+  const half = Math.ceil(tagged.length / 2)
+
+  if (tagged.length > 0) {
+    await reclassifyLines(ctx, {
+      journalLineIds: tagged.slice(0, half).map((line) => line.id),
+      dimensionId: location.id,
+      dimensionValueId: northYard.id,
+    })
+    await reclassifyLines(ctx, {
+      journalLineIds: tagged.slice(half).map((line) => line.id),
+      dimensionId: location.id,
+      dimensionValueId: southYard.id,
+    })
+  }
+
+  const byLocation = await dimensionalProfitAndLoss(ctx, {
+    dimensionId: location.id,
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+  })
+  console.log(
+    `  ${Math.round((byLocation.coverage.basisPointsAssigned ?? 0) / 100)}% of profit-and-loss ` +
+      `activity carries a Location; the rest is one column called Unassigned. ` +
+      `Columns foot to the account totals: ${byLocation.totalsAgree ? 'yes' : 'NO'}.`,
+  )
+
+  // Two assets a contractor actually owns, bought before the books open so the
+  // register has arrears to catch up — which is the normal state of a fixed
+  // asset register, not an edge case.
+  const checking = await accountByNumber(company.id, SYSTEM_ACCOUNTS.defaultChecking)
+
+  await registerAsset(ctx, {
+    name: 'Ford F-350 crew truck',
+    category: 'Vehicles',
+    costCents: 5_850_000,
+    salvageValueCents: 850_000,
+    lifeMonths: 60,
+    acquiredDate: '2026-01-15',
+    method: 'straight_line',
+    postAcquisitionCreditAccountId: checking?.id,
+  })
+
+  await registerAsset(ctx, {
+    name: 'Skid-steer loader',
+    category: 'Plant',
+    costCents: 4_275_000,
+    lifeMonths: 84,
+    acquiredDate: '2026-03-01',
+    method: 'declining_balance_switch',
+    convention: 'half_year',
+    postAcquisitionCreditAccountId: checking?.id,
+  })
+
+  await runDepreciation(ctx, { throughDate: '2026-06-30' })
+
+  const reconciliation = await reconcileFixedAssets(ctx, { asOf: '2026-06-30' })
+  const owed = await depreciationDue(ctx, { throughDate: '2026-12-31' })
+  console.log(
+    `  Fixed assets: ${formatCentsPlain(reconciliation.registerBookValueCents)} book value, ` +
+      `register and ledger ${reconciliation.agrees ? 'agree' : 'DISAGREE'}. ` +
+      `${new Set(owed.map((row) => row.periodEnd)).size} months of depreciation still owed.`,
+  )
+
+  // Reported here rather than where Phase 12 built it, because Phase 16 buys
+  // two vehicles further down and the investing section was printed as $0.00
+  // while the finished books showed six figures of it. A summary that was true
+  // when it ran and false when it is read is worse than no summary.
+  const flow = await cashFlowStatement(ctx, {
+    startDate: '2026-01-01',
+    endDate: '2026-12-31',
+  })
+  console.log(
+    `  Cash flow 2026: operating ${formatCentsPlain(flow.operating.totalCents)}, ` +
+      `investing ${formatCentsPlain(flow.investing.totalCents)}, ` +
+      `financing ${formatCentsPlain(flow.financing.totalCents)} — ` +
+      `${flow.reconciles ? 'reconciles' : 'DOES NOT RECONCILE'} to the cash accounts.`,
+  )
+
   // Cash versus accrual on the demo's own books, so the difference is a
   // number rather than an explanation.
   const range = { startDate: '2026-01-01', endDate: '2026-12-31' }
@@ -1499,6 +1623,8 @@ async function main() {
   console.log('  /settings/security    two-factor, sessions, sign-in history, and the export')
   console.log('  /inventory            stock on hand, receiving, and counts')
   console.log('  /time                 timesheets, unbilled work, and billing it')
+  console.log('  /accounting/dimensions  profit and loss by location, and the Unassigned column')
+  console.log('  /accounting/assets    the register, and whether it agrees with the ledger')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

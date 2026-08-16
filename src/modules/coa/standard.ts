@@ -171,8 +171,13 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
   // --- Other income / expense --------------------------------------------
   { number: '8000', name: 'Interest Income', type: 'other_income' },
   { number: '8100', name: 'Other Income', type: 'other_income' },
+  // Phase 16. Selling a truck for more than its written-down value is not
+  // trading income — putting it in Sales Revenue would flatter the margin of a
+  // business that sells services, in a month it happened to sell a van.
+  { number: '8200', name: 'Gain on Asset Disposal', type: 'other_income' },
   { number: '9000', name: 'Interest Expense', type: 'other_expense' },
   { number: '9100', name: 'Depreciation Expense', type: 'other_expense' },
+  { number: '9200', name: 'Loss on Asset Disposal', type: 'other_expense' },
 ]
 
 /**
@@ -193,6 +198,14 @@ export const SYSTEM_ACCOUNTS = {
   openingBalanceEquity: '3900',
   uncategorizedIncome: '4990',
   uncategorizedExpense: '6900',
+  // Phase 16. The fixed asset register reconciles to these two: the sum of
+  // the register's costs is `fixedAssets`, and the sum of its depreciation is
+  // `accumulatedDepreciation`.
+  fixedAssets: '1500',
+  accumulatedDepreciation: '1510',
+  depreciationExpense: '9100',
+  gainOnDisposal: '8200',
+  lossOnDisposal: '9200',
   askMyAccountant: '6950',
   defaultChecking: '1000',
   defaultCreditCard: '2100',

@@ -15,6 +15,7 @@ import {
 import { cashFlowStatement } from '@/modules/ledger/cash-flow'
 import {
   COMPARISON_LABELS,
+  comparativeBalanceSheet,
   comparativeProfitAndLoss,
   comparisonWindows,
   type ComparisonKind,
@@ -92,6 +93,15 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         )}
         {report === 'comparative' && canSeeStatements && (
           <ComparativeReport actor={actor} start={start} end={end} basis={basis} compare={compare} />
+        )}
+        {report === 'comparative_bs' && canSeeStatements && (
+          <ComparativeBalanceSheetReport
+            actor={actor}
+            start={start}
+            end={end}
+            basis={basis}
+            compare={compare}
+          />
         )}
         {report === 'ar_aging' && <AgingReport actor={actor} end={end} kind="ar" />}
         {report === 'ap_aging' && <AgingReport actor={actor} end={end} kind="ap" />}
@@ -592,6 +602,198 @@ async function ComparativeReport({
           </tr>
         </tbody>
       </table>
+    </Card>
+  )
+}
+
+/**
+ * The comparative balance sheet.
+ *
+ * A balance sheet is a point in time, so the comparison is two *dates* rather
+ * than two ranges — the end of the current window against the end of the one
+ * it is compared with. Taking the start of the prior window instead would put
+ * the opening position beside the closing one and call the difference a
+ * variance.
+ *
+ * `isBalanced` is printed per column. A comparative that balances in one
+ * column and not the other is a broken report, and it is the kind of thing a
+ * reader will not notice unless it is stated.
+ */
+async function ComparativeBalanceSheetReport({
+  actor,
+  start,
+  end,
+  basis,
+  compare,
+}: {
+  actor: Awaited<ReturnType<typeof requireActor>>
+  start: string
+  end: string
+  basis: ReportingBasis
+  compare: ComparisonKind
+}) {
+  const periods = comparisonWindows({ startDate: start, endDate: end }, compare)
+  const report = await comparativeBalanceSheet(actor, {
+    basis,
+    columns: periods.map((period) => ({ label: period.label, asOfDate: period.endDate })),
+  })
+
+  const last = report.totalAssetsCents.length - 1
+  const varianceCents = report.totalAssetsCents[0] - report.totalAssetsCents[last]
+
+  // Equity is rendered separately from assets and liabilities because the
+  // period's profit belongs in it and is not an account. Without that line the
+  // page shows liabilities above a smaller total, and the gap — which is
+  // exactly the net income — has nothing explaining it.
+  const sections = [report.assets, report.liabilities].filter(
+    (section) => section.rows.length > 0,
+  )
+  const equityTotals = report.equity.totalsCents.map(
+    (amount, index) => amount + report.netIncomeCents[index],
+  )
+
+  return (
+    <Card
+      title={`Comparative balance sheet — ${COMPARISON_LABELS[compare]}`}
+      subtitle={`${BASIS_LABELS[basis]} basis · ${report.asOfDates.join(' and ')}`}
+    >
+      <table className="w-full text-sm">
+        <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+          <tr>
+            <th className="px-4 py-2 font-medium">Account</th>
+            {/* The date is the heading, not the window that produced it. A
+                balance sheet column is a moment; printing "1 Jan to 16 Aug"
+                over a closing position invites somebody to read it as
+                activity across those dates, which is the profit and loss. */}
+            {report.asOfDates.map((asOfDate) => (
+              <th key={asOfDate} className="px-4 py-2 text-right font-medium">
+                As at {asOfDate}
+              </th>
+            ))}
+            <th className="px-4 py-2 text-right font-medium">Variance</th>
+          </tr>
+        </thead>
+        <tbody>
+          {sections.map((section) => (
+            <Fragment key={section.title}>
+              <tr className="bg-raised/40">
+                <td
+                  colSpan={report.labels.length + 2}
+                  className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted"
+                >
+                  {section.title}
+                </td>
+              </tr>
+              {section.rows.map((row) => (
+                <tr key={row.chartAccountId} className="border-t border-line">
+                  <td className="px-4 py-1.5">
+                    <span className="tnum text-faint">{row.number}</span> {row.name}
+                  </td>
+                  {row.amountsCents.map((amount, index) => (
+                    <td key={index} className="tnum px-4 py-1.5 text-right">
+                      {formatCents(amount)}
+                    </td>
+                  ))}
+                  <td className="tnum px-4 py-1.5 text-right">{formatCents(row.varianceCents)}</td>
+                </tr>
+              ))}
+              <tr className="border-t border-line text-muted">
+                <td className="px-4 py-1.5 text-xs">Total {section.title.toLowerCase()}</td>
+                {section.totalsCents.map((amount, index) => (
+                  <td key={index} className="tnum px-4 py-1.5 text-right text-xs">
+                    {formatCents(amount)}
+                  </td>
+                ))}
+                <td className="tnum px-4 py-1.5 text-right text-xs">
+                  {formatCents(section.totalsCents[0] - section.totalsCents[last])}
+                </td>
+              </tr>
+            </Fragment>
+          ))}
+
+          <tr className="bg-raised/40">
+            <td
+              colSpan={report.labels.length + 2}
+              className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wide text-muted"
+            >
+              Equity
+            </td>
+          </tr>
+          {report.equity.rows.map((row) => (
+            <tr key={row.chartAccountId} className="border-t border-line">
+              <td className="px-4 py-1.5">
+                <span className="tnum text-faint">{row.number}</span> {row.name}
+              </td>
+              {row.amountsCents.map((amount, index) => (
+                <td key={index} className="tnum px-4 py-1.5 text-right">
+                  {formatCents(amount)}
+                </td>
+              ))}
+              <td className="tnum px-4 py-1.5 text-right">{formatCents(row.varianceCents)}</td>
+            </tr>
+          ))}
+          <tr className="border-t border-line">
+            <td className="px-4 py-1.5">
+              Net income for the period
+              <span className="block text-xs text-faint">
+                Not an account — it is what the profit and loss made, sitting in equity until the
+                year is closed.
+              </span>
+            </td>
+            {report.netIncomeCents.map((amount, index) => (
+              <td key={index} className="tnum px-4 py-1.5 text-right">
+                {formatCents(amount)}
+              </td>
+            ))}
+            <td className="tnum px-4 py-1.5 text-right">
+              {formatCents(report.netIncomeCents[0] - report.netIncomeCents[last])}
+            </td>
+          </tr>
+          <tr className="border-t border-line text-muted">
+            <td className="px-4 py-1.5 text-xs">Total equity</td>
+            {equityTotals.map((amount, index) => (
+              <td key={index} className="tnum px-4 py-1.5 text-right text-xs">
+                {formatCents(amount)}
+              </td>
+            ))}
+            <td className="tnum px-4 py-1.5 text-right text-xs">
+              {formatCents(equityTotals[0] - equityTotals[last])}
+            </td>
+          </tr>
+
+          <tr className="border-t-2 border-line font-semibold">
+            <td className="px-4 py-2">Total assets</td>
+            {report.totalAssetsCents.map((amount, index) => (
+              <td key={index} className="tnum px-4 py-2 text-right">
+                {formatCents(amount)}
+              </td>
+            ))}
+            <td className="tnum px-4 py-2 text-right">{formatCents(varianceCents)}</td>
+          </tr>
+          <tr className="font-semibold">
+            <td className="px-4 py-2">Liabilities and equity</td>
+            {report.totalLiabilitiesAndEquityCents.map((amount, index) => (
+              <td key={index} className="tnum px-4 py-2 text-right">
+                {formatCents(amount)}
+              </td>
+            ))}
+            <td className="tnum px-4 py-2 text-right">
+              {formatCents(
+                report.totalLiabilitiesAndEquityCents[0] -
+                  report.totalLiabilitiesAndEquityCents[last],
+              )}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      <p className="border-t border-line px-4 py-2 text-xs text-faint">
+        {report.isBalanced.every(Boolean)
+          ? 'Both columns balance.'
+          : `One column does not balance: ${report.asOfDates
+              .filter((_, index) => !report.isBalanced[index])
+              .join(', ')}. Something wrote around the journal service.`}
+      </p>
     </Card>
   )
 }
