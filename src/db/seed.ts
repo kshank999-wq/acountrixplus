@@ -17,7 +17,9 @@ import {
   financialAccounts,
   journalEntries,
   journalLines,
+  loginAttempts,
   serviceItems,
+  transactionalMessages,
 } from '@/db/schema'
 import { registerCompany, registerUser } from '@/modules/tenancy/onboarding'
 import {
@@ -127,6 +129,7 @@ import { createTaxCode } from '@/modules/payroll/sales-tax'
 import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
 import { workpaperPack } from '@/modules/payroll/workpapers'
 import { installCompanySchedules, installGlobalSchedules } from '@/modules/worker/defaults'
+import { retentionReport } from '@/modules/retention/sweep'
 import { enqueue } from '@/modules/worker/queue'
 import { runOnce } from '@/modules/worker/runner'
 import { listDraftEntries } from '@/modules/ledger/journal'
@@ -621,6 +624,47 @@ async function main() {
     `  Deposits held ${formatCentsPlain(held.registerCents)} against account 2580 ` +
       `at ${formatCentsPlain(held.ledgerCents)} — ${held.agrees ? 'agrees' : 'DISAGREES'}. ` +
       `${let_.occupied}/${let_.units} units let.`,
+  )
+
+  // --- Phase 24: retention, and the work nobody was doing --------------------
+  //
+  // Something for the sweep to find, and something for the digest to report.
+  // Both are deliberately the shapes that are hardest to notice in production:
+  // a failed sign-in from four years ago that nobody will ever look at, and an
+  // invitation to a mistyped address that simply never arrived.
+  await db.insert(loginAttempts).values([
+    {
+      email: 'someone@example.test',
+      outcome: 'wrong_password',
+      ipPrefix: '203.0.113.0/24',
+      createdAt: new Date('2022-04-02T03:14:00Z'),
+    },
+    {
+      email: 'someone@example.test',
+      outcome: 'unknown_email',
+      ipPrefix: '203.0.113.0/24',
+      createdAt: new Date('2022-04-02T03:15:00Z'),
+    },
+  ])
+
+  await db.insert(transactionalMessages).values({
+    companyId: company.id,
+    kind: 'company_invitation',
+    email: 'jordan@ridgelien.test',
+    subject: 'Dana Owner invited you to Ridgeline Construction',
+    outcome: 'failed',
+    providerKey: 'mock',
+    error: 'No mail server for ridgelien.test — the domain does not exist.',
+  })
+
+  const holding = await retentionReport()
+  const expiring = holding.reduce((sum, row) => sum + row.expired, 0)
+  console.log(
+    `  Retention: ${holding.length} policies, holding ${holding.reduce((sum, row) => sum + row.held, 0)} rows, ` +
+      `${expiring} past their window and waiting for the 3am sweep.`,
+  )
+  console.log(
+    '  One invitation bounced, to a mistyped domain — recorded since Phase 19 and shown to nobody until now.',
   )
 
   const intakeKey = await createIntakeKey(ctx, {

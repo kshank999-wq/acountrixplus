@@ -39,6 +39,8 @@ export const TOPIC_LABELS: Record<NotificationTopic, string> = {
   compliance_expiring: 'Subcontractor insurance expiring',
   reconciliation_ready: 'An account is ready to reconcile',
   remittance_due: 'Payroll or sales tax owed to an agency',
+  follow_up_due: 'A follow-up you promised is late',
+  background_failures: 'Scheduled work failed, or a letter did not arrive',
 }
 
 export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
@@ -50,6 +52,10 @@ export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
   reconciliation_ready: 'When a statement period is complete enough to reconcile.',
   remittance_due:
     'While there is still time to pay it. This is the one that costs penalties if it is missed.',
+  follow_up_due:
+    'Once a day, with a count rather than one message per task. A promise made on a call is chased without anybody opening a page.',
+  background_failures:
+    'A daily digest of scheduled work that gave up and letters that bounced. Silence means there is nothing to see, which is the point.',
 }
 
 /** How many transactions have to be waiting before a nudge is worth sending. */

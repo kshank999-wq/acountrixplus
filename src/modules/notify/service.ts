@@ -289,6 +289,13 @@ export async function failedDeliveries(
   companyId: string,
   limit = 20,
   exec: Executor = db,
+  /**
+   * Only failures since this instant (Phase 24).
+   *
+   * The daily digest needs a window or it reports the same bounce every
+   * morning for ever. Omitted by the screen, which wants all of them.
+   */
+  since?: Date,
 ) {
   return exec
     .select({
@@ -304,6 +311,7 @@ export async function failedDeliveries(
       and(
         eq(transactionalMessages.companyId, companyId),
         eq(transactionalMessages.outcome, 'failed'),
+        since ? gte(transactionalMessages.createdAt, since) : undefined,
       ),
     )
     .orderBy(desc(transactionalMessages.createdAt))

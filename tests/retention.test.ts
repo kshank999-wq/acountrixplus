@@ -1,0 +1,448 @@
+import { describe, expect, it } from 'vitest'
+import { and, eq, sql } from 'drizzle-orm'
+import { db } from '@/db'
+import {
+  actionTokens,
+  backgroundJobs,
+  campaignEvents,
+  documentBlobs,
+  domainEvents,
+  journalLines,
+  leadSubmissions,
+  loginAttempts,
+  proposalViews,
+  sessions,
+  transactionalMessages,
+} from '@/db/schema'
+import { createCompanyFixture } from './helpers'
+import { PermissionError } from '@/modules/permissions'
+import {
+  NEVER_SWEPT,
+  RETENTION_POLICIES,
+  cutoffFor,
+  policyFor,
+  retentionSummary,
+} from '@/modules/retention/policy'
+import { retentionReport, sweepAll, sweepOne } from '@/modules/retention/sweep'
+import { health } from '@/modules/worker/health'
+import { recordLoginAttempt } from '@/modules/auth/login-history'
+import { issueToken } from '@/modules/notify/tokens'
+import { createTask, openWork } from '@/modules/engagement/tasks'
+import { COMPANY_SCHEDULES, GLOBAL_SCHEDULES } from '@/modules/worker/defaults'
+import { registeredKinds } from '@/modules/worker/registry'
+import '@/modules/worker/handlers'
+
+/**
+ * Retention, and the work nobody was doing (spec §19, §18, Phase 24).
+ *
+ * Three claims:
+ *
+ *  1. **Nothing grows without bound, and retention never touches the books.**
+ *     Every table that grows with traffic has a named policy; the policy list
+ *     is an allowlist, and the ledger, the audit log and the evidence store
+ *     are not on it.
+ *  2. **A promise is chased without somebody opening a page.** The overdue
+ *     follow-up chase and the rent run are handlers with schedules, not
+ *     buttons.
+ *  3. **A failure is never silent** — and never noisy either: a digest with a
+ *     count, and nothing at all on a quiet day.
+ */
+
+describe('the retention policy', () => {
+  it('never names a table that holds the books', () => {
+    const swept = new Set(RETENTION_POLICIES.map((policy) => policy.table))
+
+    // The safety property, asserted by name. Adding a policy for
+    // `journal_lines` fails here rather than at the year-end.
+    for (const table of NEVER_SWEPT) {
+      expect(swept.has(table)).toBe(false)
+    }
+  })
+
+  it('says how long it keeps everything, and why', () => {
+    const summary = retentionSummary()
+    expect(summary.length).toBe(RETENTION_POLICIES.length)
+
+    for (const policy of summary) {
+      // A policy nobody can explain is a policy nobody can defend to somebody
+      // asking what is held about them.
+      expect(policy.why.length).toBeGreaterThan(40)
+      expect(policy.label.length).toBeGreaterThan(0)
+      if (policy.days !== null) expect(policy.days).toBeGreaterThan(0)
+    }
+  })
+
+  it('names each policy exactly once, and each table exactly once', () => {
+    const kinds = RETENTION_POLICIES.map((policy) => policy.kind)
+    const tables = RETENTION_POLICIES.map((policy) => policy.table)
+
+    expect(new Set(kinds).size).toBe(kinds.length)
+    // Two policies on one table would mean two answers to "how long do you
+    // keep this", and the shorter one would silently win.
+    expect(new Set(tables).size).toBe(tables.length)
+  })
+
+  it('measures the cutoff from a date it is given, not from the clock', () => {
+    const asOf = new Date('2026-06-15T00:00:00Z')
+    const policy = policyFor('login_attempts')
+
+    const cutoff = cutoffFor(policy, asOf)
+    expect(cutoff?.toISOString().slice(0, 10)).toBe('2026-03-17')
+
+    // The orphan sweep asks about reachability, not age.
+    expect(cutoffFor(policyFor('orphaned_blobs'), asOf)).toBeNull()
+  })
+
+  it('refuses to describe a policy that does not exist', () => {
+    expect(() => policyFor('nonsense' as never)).toThrow(/No retention policy/)
+  })
+})
+
+describe('sweeping', () => {
+  it('deletes sign-in attempts past the window and keeps the recent ones', async () => {
+    await recordLoginAttempt({ email: 'old@example.test', outcome: 'wrong_password' })
+    await recordLoginAttempt({ email: 'recent@example.test', outcome: 'wrong_password' })
+
+    // The old one, backdated past ninety days.
+    await db
+      .update(loginAttempts)
+      .set({ createdAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(loginAttempts.email, 'old@example.test'))
+
+    const before = await retentionReport(new Date('2026-06-15T00:00:00Z'))
+    const attempts = before.find((row) => row.kind === 'login_attempts')!
+    expect(attempts.held).toBe(2)
+    expect(attempts.expired).toBe(1)
+
+    const result = await sweepOne('login_attempts', new Date('2026-06-15T00:00:00Z'))
+    expect(result.removed).toBe(1)
+
+    const left = await db.select({ email: loginAttempts.email }).from(loginAttempts)
+    expect(left.map((row) => row.email)).toEqual(['recent@example.test'])
+  })
+
+  it('runs twice and deletes once', async () => {
+    await recordLoginAttempt({ email: 'old@example.test', outcome: 'wrong_password' })
+    await db
+      .update(loginAttempts)
+      .set({ createdAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(loginAttempts.email, 'old@example.test'))
+
+    const asOf = new Date('2026-06-15T00:00:00Z')
+    expect((await sweepOne('login_attempts', asOf)).removed).toBe(1)
+    // Idempotent by construction — it is a ranged delete, so the second run
+    // finds nothing rather than needing to know the first happened.
+    expect((await sweepOne('login_attempts', asOf)).removed).toBe(0)
+  })
+
+  it('keeps a token until well past its expiry', async () => {
+    const fixture = await createCompanyFixture({ name: 'Token Co' })
+
+    const issued = await issueToken({
+      purpose: 'company_invitation',
+      email: 'invitee@example.test',
+      companyId: fixture.companyId,
+      role: 'bookkeeper',
+      invitedBy: fixture.userId,
+    })
+
+    // Expired yesterday: still held, because the policy measures thirty days
+    // *past expiry*, not thirty days past issue.
+    await db
+      .update(actionTokens)
+      .set({ expiresAt: new Date('2026-06-14T00:00:00Z') })
+      .where(eq(actionTokens.id, issued.id))
+
+    const asOf = new Date('2026-06-15T00:00:00Z')
+    expect((await sweepOne('action_tokens', asOf)).removed).toBe(0)
+
+    await db
+      .update(actionTokens)
+      .set({ expiresAt: new Date('2026-04-01T00:00:00Z') })
+      .where(eq(actionTokens.id, issued.id))
+
+    expect((await sweepOne('action_tokens', asOf)).removed).toBe(1)
+  })
+
+  it('never sweeps an event that has not been relayed', async () => {
+    const fixture = await createCompanyFixture({ name: 'Outbox Co' })
+    const old = new Date('2020-01-01T00:00:00Z')
+
+    const [waiting] = await db
+      .insert(domainEvents)
+      .values({
+        companyId: fixture.companyId,
+        type: 'invoice.paid',
+        payload: {},
+        occurredAt: old,
+      })
+      .returning({ id: domainEvents.id })
+
+    await db.insert(domainEvents).values({
+      companyId: fixture.companyId,
+      type: 'invoice.paid',
+      payload: {},
+      occurredAt: old,
+      relayedAt: old,
+    })
+
+    const removed = await sweepOne('domain_events', new Date('2026-06-15T00:00:00Z'))
+
+    // An outbox that deletes work in progress is not an outbox.
+    expect(removed.removed).toBe(1)
+    const left = await db.select({ id: domainEvents.id }).from(domainEvents)
+    expect(left.map((row) => row.id)).toEqual([waiting.id])
+  })
+
+  it('never sweeps a lead that became an opportunity', async () => {
+    const fixture = await createCompanyFixture({ name: 'Intake Co' })
+    const old = new Date('2020-01-01T00:00:00Z')
+
+    const [converted] = await db
+      .insert(leadSubmissions)
+      .values({
+        companyId: fixture.companyId,
+        accepted: true,
+        receivedAt: old,
+        createdOpportunityId: '00000000-0000-0000-0000-000000000001',
+      })
+      .returning({ id: leadSubmissions.id })
+
+    await db.insert(leadSubmissions).values({
+      companyId: fixture.companyId,
+      accepted: false,
+      receivedAt: old,
+      rejectionReason: 'honeypot',
+    })
+
+    const removed = await sweepOne('lead_submissions', new Date('2026-06-15T00:00:00Z'))
+
+    // The honeypot catch goes; the one somebody is still working stays,
+    // however old the row is.
+    expect(removed.removed).toBe(1)
+    const left = await db.select({ id: leadSubmissions.id }).from(leadSubmissions)
+    expect(left.map((row) => row.id)).toEqual([converted.id])
+  })
+
+  it('leaves the ledger exactly where it was', async () => {
+    const fixture = await createCompanyFixture({ name: 'Books Co' })
+    const { postManualEntry } = await import('@/modules/ledger/journal')
+    const cash = await fixture.account('1000')
+    const revenue = await fixture.account('4000')
+
+    await postManualEntry(fixture.ctx, {
+      entryDate: '2019-01-01',
+      memo: 'Older than every retention window in the policy',
+      lines: [
+        { chartAccountId: cash.id, debitCents: 100_000 },
+        { chartAccountId: revenue.id, creditCents: 100_000 },
+      ],
+    })
+
+    const before = await db
+      .select({ n: sql<string>`count(*)` })
+      .from(journalLines)
+      .where(eq(journalLines.companyId, fixture.companyId))
+
+    // Every policy, run against a date long after that entry. Nothing in this
+    // module can reach it — the allowlist is the mechanism, and this is the
+    // demonstration.
+    await sweepAll(new Date('2030-01-01T00:00:00Z'))
+
+    const after = await db
+      .select({ n: sql<string>`count(*)` })
+      .from(journalLines)
+      .where(eq(journalLines.companyId, fixture.companyId))
+
+    expect(after[0].n).toBe(before[0].n)
+    expect(Number(after[0].n)).toBeGreaterThan(0)
+  })
+
+  it('reports what every policy holds without deleting any of it', async () => {
+    await recordLoginAttempt({ email: 'old@example.test', outcome: 'wrong_password' })
+    await db
+      .update(loginAttempts)
+      .set({ createdAt: new Date('2020-01-01T00:00:00Z') })
+      .where(eq(loginAttempts.email, 'old@example.test'))
+
+    const report = await retentionReport(new Date('2026-06-15T00:00:00Z'))
+    expect(report.length).toBe(RETENTION_POLICIES.length)
+
+    // Counting is a separate query from deleting on purpose: a number nobody
+    // can check before the delete is a number nobody can dispute after it.
+    expect(await db.select({ id: loginAttempts.id }).from(loginAttempts)).toHaveLength(1)
+    expect(report.find((row) => row.kind === 'login_attempts')?.expired).toBe(1)
+  })
+
+  it('sweeps every policy in one pass', async () => {
+    const results = await sweepAll(new Date('2026-06-15T00:00:00Z'))
+    expect(results.map((row) => row.kind).sort()).toEqual(
+      RETENTION_POLICIES.map((policy) => policy.kind).sort(),
+    )
+  })
+})
+
+describe('the schedules that were owed', () => {
+  it('registers a handler for every schedule, and schedules every new handler', () => {
+    const kinds = new Set(registeredKinds().map((handler) => handler.kind))
+
+    // A schedule with no handler fires a job that dead-letters every day; a
+    // handler with no schedule is the gap five phases each wrote a README
+    // bullet about.
+    for (const schedule of [...COMPANY_SCHEDULES, ...GLOBAL_SCHEDULES]) {
+      expect(kinds.has(schedule.kind)).toBe(true)
+    }
+
+    const scheduled = new Set(
+      [...COMPANY_SCHEDULES, ...GLOBAL_SCHEDULES].map((schedule) => schedule.kind),
+    )
+    for (const kind of [
+      'housekeeping.retention',
+      'engagement.chase_overdue',
+      'properties.run_rent',
+      'ops.failure_digest',
+    ]) {
+      expect(scheduled.has(kind)).toBe(true)
+    }
+  })
+
+  it('marks the housekeeping ones global and the rest per company', () => {
+    const handlers = new Map(registeredKinds().map((handler) => [handler.kind, handler]))
+
+    expect(handlers.get('housekeeping.retention')?.global).toBe(true)
+
+    // `global` is optional, so "per company" is the absence of it — asserted
+    // as falsy rather than as `false`, which is what the registry actually
+    // stores for a handler that never said.
+    //
+    // The digest is per company because dead jobs and bounced letters belong
+    // to a tenant, and because there is no deployment operator to page.
+    for (const kind of ['ops.failure_digest', 'engagement.chase_overdue', 'properties.run_rent']) {
+      expect(handlers.get(kind)).toBeDefined()
+      expect(handlers.get(kind)?.global ?? false).toBe(false)
+    }
+  })
+})
+
+describe('the failure digest', () => {
+  it('finds a dead job and a bounced letter in one shape', async () => {
+    const fixture = await createCompanyFixture({ name: 'Digest Co' })
+    const now = new Date()
+
+    await db.insert(backgroundJobs).values({
+      companyId: fixture.companyId,
+      kind: 'bank.sync_all',
+      payload: {},
+      status: 'dead',
+      attempts: 5,
+      maxAttempts: 5,
+      lastError: 'The provider refused the token.',
+      runAt: now,
+      updatedAt: now,
+      finishedAt: now,
+    })
+
+    await db.insert(transactionalMessages).values({
+      companyId: fixture.companyId,
+      kind: 'company_invitation',
+      email: 'mistyped@exmaple.test',
+      subject: 'You have been invited',
+      outcome: 'failed',
+      providerKey: 'mock',
+      error: 'No such domain.',
+    })
+
+    const state = await health(fixture.ctx)
+
+    expect(state.deadJobs).toHaveLength(1)
+    expect(state.bouncedMail).toHaveLength(1)
+    expect(state.total).toBe(2)
+    expect(state.bouncedMail[0].email).toBe('mistyped@exmaple.test')
+  })
+
+  it('says nothing on a quiet day', async () => {
+    const fixture = await createCompanyFixture({ name: 'Quiet Co' })
+    const state = await health(fixture.ctx)
+
+    // The whole point of the digest. One that fires on a quiet day teaches
+    // people to ignore the one that fires on a loud one.
+    expect(state.total).toBe(0)
+  })
+
+  it('does not report the same failure every morning', async () => {
+    const fixture = await createCompanyFixture({ name: 'Window Co' })
+    const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000)
+
+    await db.insert(transactionalMessages).values({
+      companyId: fixture.companyId,
+      kind: 'password_reset',
+      email: 'ancient@example.test',
+      subject: 'Reset your password',
+      outcome: 'failed',
+      providerKey: 'mock',
+      error: 'Mailbox full.',
+      createdAt: old,
+    })
+
+    // A month-old bounce is not today's news.
+    expect((await health(fixture.ctx)).total).toBe(0)
+    expect(
+      (await health(fixture.ctx, { since: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) })).total,
+    ).toBe(1)
+  })
+
+  it('needs the permission that administers the company', async () => {
+    const fixture = await createCompanyFixture({ name: 'Locked Co' })
+    const bookkeeper = { ...fixture.ctx, role: 'bookkeeper' as const }
+
+    await expect(health(bookkeeper)).rejects.toBeInstanceOf(PermissionError)
+  })
+
+  it('keeps one company’s failures off another’s digest', async () => {
+    const ours = await createCompanyFixture({ name: 'Ours Digest Co' })
+    const theirs = await createCompanyFixture({ name: 'Theirs Digest Co' })
+
+    await db.insert(transactionalMessages).values({
+      companyId: theirs.companyId,
+      kind: 'password_reset',
+      email: 'theirs@example.test',
+      subject: 'Reset',
+      outcome: 'failed',
+      providerKey: 'mock',
+      error: 'Bounced.',
+    })
+
+    expect((await health(ours.ctx)).total).toBe(0)
+    expect((await health(theirs.ctx)).total).toBe(1)
+  })
+})
+
+describe('chasing what was promised', () => {
+  it('counts a person’s late follow-ups rather than listing them one by one', async () => {
+    const fixture = await createCompanyFixture({ name: 'Chase Co' })
+
+    await createTask(fixture.ctx, {
+      title: 'Ring them back',
+      dueOn: '2026-03-01',
+      assignedTo: fixture.userId,
+    })
+    await createTask(fixture.ctx, {
+      title: 'Send the revised quote',
+      dueOn: '2026-03-05',
+      assignedTo: fixture.userId,
+    })
+    await createTask(fixture.ctx, { title: 'Nobody has claimed this', dueOn: '2026-03-02' })
+    await createTask(fixture.ctx, {
+      title: 'Not late yet',
+      dueOn: '2026-12-01',
+      assignedTo: fixture.userId,
+    })
+
+    const overdue = await openWork(fixture.ctx, { asOf: '2026-03-10', overdueOnly: true })
+
+    // What the handler groups: two for one person, one with nobody's name on.
+    expect(overdue).toHaveLength(3)
+    expect(overdue.filter((task) => task.assignedTo === fixture.userId)).toHaveLength(2)
+    expect(overdue.filter((task) => task.assignedTo === null)).toHaveLength(1)
+  })
+})

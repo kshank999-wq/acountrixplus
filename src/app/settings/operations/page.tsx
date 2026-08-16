@@ -9,6 +9,8 @@ import { listEvents, pendingEventCount } from '@/modules/worker/outbox'
 import { registeredKinds } from '@/modules/worker/registry'
 import { workerStatuses } from '@/modules/worker/runner'
 import { listDraftEntries } from '@/modules/ledger/journal'
+import { health } from '@/modules/worker/health'
+import { retentionReport } from '@/modules/retention/sweep'
 import '@/modules/worker/handlers'
 import { OperationsBoard } from './board'
 
@@ -45,7 +47,12 @@ export default async function OperationsPage() {
     )
   }
 
-  const [counts, workers, jobs, schedules, events, pendingEvents, oldest, drafts] =
+  // Retention counts read every table this application lets grow, which is a
+  // question only somebody who administers the company may ask — and the
+  // health digest names bounced addresses, which is the same.
+  const canAdminister = can(actor, 'company:manage')
+
+  const [counts, workers, jobs, schedules, events, pendingEvents, oldest, drafts, failures, retention] =
     await Promise.all([
       queueCounts(actor.companyId),
       workerStatuses(),
@@ -55,6 +62,10 @@ export default async function OperationsPage() {
       pendingEventCount(actor.companyId),
       oldestQueuedAt(actor.companyId),
       can(actor, 'accounting:view') ? listDraftEntries(actor, { limit: 20 }) : Promise.resolve([]),
+      canAdminister
+        ? health(actor, { since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) })
+        : Promise.resolve(null),
+      canAdminister ? retentionReport() : Promise.resolve(null),
     ])
 
   return (
@@ -105,6 +116,28 @@ export default async function OperationsPage() {
           relayedAt: event.relayedAt?.toISOString() ?? null,
           lastError: event.lastError,
         }))}
+        failures={
+          failures && {
+            since: failures.since.toISOString(),
+            total: failures.total,
+            deadJobs: failures.deadJobs.map((job) => ({
+              id: job.id,
+              kind: job.kind,
+              lastError: job.lastError,
+              attempts: job.attempts,
+              finishedAt: job.finishedAt?.toISOString() ?? null,
+            })),
+            bouncedMail: failures.bouncedMail.map((mail) => ({
+              id: mail.id,
+              kind: mail.kind,
+              email: mail.email,
+              subject: mail.subject,
+              error: mail.error,
+              createdAt: mail.createdAt.toISOString(),
+            })),
+          }
+        }
+        retention={retention}
         drafts={drafts.map((entry) => ({
           id: entry.id,
           entryNumber: entry.entryNumber,

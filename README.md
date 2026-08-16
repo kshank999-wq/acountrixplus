@@ -15,7 +15,8 @@ existing business's books in**, **accountant practice mode**,
 **transactional mail with password reset and invitations**,
 **attachments and accountant notes on a content-addressed object store**,
 **server-side PDF generation with immutable sent-document snapshots**, the
-**communications log with the follow-up list**, and **property management** from the
+**communications log with the follow-up list**, **property management**, and a
+**retention policy with the scheduled work six phases owed** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -39,7 +40,8 @@ existing business's books in**, **accountant practice mode**,
 [ADR 0020](docs/adr/0020-one-file-stored-once-reachable-only-through-a-record.md),
 [ADR 0021](docs/adr/0021-a-sent-document-never-changes.md), and
 [ADR 0022](docs/adr/0022-what-was-said-and-what-was-promised.md), and
-[ADR 0023](docs/adr/0023-somebody-elses-money.md).
+[ADR 0023](docs/adr/0023-somebody-elses-money.md), and
+[ADR 0024](docs/adr/0024-nothing-grows-for-ever-and-nothing-waits-for-somebody-to-look.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -941,6 +943,51 @@ so an invoice could not be tagged with a Location or a Property — the README h
 largest gap in Phase 16" ever since, because a company slicing its books by Location saw its costs
 and missed its revenue. Invoices and bills now carry `dimensions` through to their journal lines.
 
+### Retention, and the work nobody was doing (Phase 24)
+
+Six phases each finished a feature, noticed the same missing thing, and wrote it in this README
+instead of building it: `login_attempts` never pruned (Phase 13), `action_tokens` pruned on demand
+only (Phase 19), `sweepOrphanedBlobs` unscheduled (Phase 20), nothing chasing an overdue follow-up
+(Phase 22), nothing scheduling the rent run (Phase 23), and nothing telling anybody about a dead job
+(Phase 10). Each was correctly deferred. What none could do alone was decide *how long anything is
+kept* — one decision about the whole application, which taken six times would have had six answers.
+
+- **The policy is data, in one place.** Nine tables, how many days each, whether strangers can write
+  to it, and why — read by the sweeps and shown on the operations page. *"What do you hold about me,
+  and for how long"* is the question a data-protection request actually asks, and it now has an
+  answer that is not "read every module".
+- **The allowlist is the safety property.** Every policy names exactly one table, and that list is
+  the entire set of tables anything in the module may delete from. `NEVER_SWEPT` writes down the
+  other half — the ledger, the audit log, the documents, the notes, dead jobs — and a test asserts
+  the two never intersect, so a policy for `journal_lines` fails the suite rather than the year-end.
+  A second test posts an entry dated 2019, runs every sweep as at 2030, and asserts the lines are
+  still there.
+- **Counting is a separate query from deleting.** The page shows what each policy holds and what it
+  would remove, before it removes it — a number nobody can check beforehand is a number nobody can
+  dispute afterwards.
+- **Three policies are narrower than their table.** `domain_events` sweeps only what was actually
+  relayed, because an outbox that deletes work in progress is not an outbox. `lead_submissions`
+  sweeps only what never became an opportunity, which is what lets the window be six months.
+  `action_tokens` measures from expiry, not issue — a week-long invitation issued 29 days ago has
+  not been expired for 30.
+- **Dead jobs are never swept**, alongside the ledger, for Phase 10's reason: a failure nobody looked
+  at is not evidence to be tidied away.
+- **Scheduling arrived last because it is the easy part.** Four handlers, and not one needed the
+  feature it drives to change — `runRent` was already idempotent, `completeTask` was already a claim,
+  the sweeps were already ranged deletes. A scheduled job that can run twice is safe *only* because
+  the precondition lives in the database, and that was built first.
+- **One message per person, not one per task.** Somebody with eleven late follow-ups gets one
+  notification saying eleven, with a `tag` that replaces yesterday's rather than stacking. Unclaimed
+  overdue work is told separately to whoever could claim it, because "three of yours are late" and
+  "two are late and unclaimed" are different sentences.
+- **The digest is silent on a quiet day.** One message, with a count, and nothing at all when the
+  count is zero — silence has to mean something, or the digest becomes a daily "everything is fine"
+  nobody reads and therefore cannot notice the day it says otherwise. The digest and the page run the
+  same query, because a notification saying two beside a page showing three costs you the page.
+- **Bounced mail is finally shown to somebody.** `failedDeliveries` has existed since Phase 19 with
+  no screen calling it, so an invitation to a mistyped address failed silently and the person waiting
+  simply never heard.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1041,6 +1088,7 @@ Coverage matches what spec §21 asks for:
 | `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions** — against a pinned clock, because the PDF's timestamp has one-second resolution and the test was relying on both sends landing inside the same second; and an invoice rendered from the record with another company's refused |
 | `tests/engagement.test.ts` | An exchange recorded with the client derived from the person spoken to, and a call logged against a contact or a deal appearing on that client's timeline; the day it happened kept rather than the day it was typed; an exchange with nobody and one with no summary refused, another company's client refused, and `crm:manage` needed to write against `crm:view` to read; **when each client was last spoken to, with a note to self not counted as contact**; **a letter the system sends landing on the timeline of the person it went to**, a bounce shown as such, nothing recorded for an address the CRM does not know, **a send never failed because the log could not be written**, and **the caller's transaction still usable after one fails**; a follow-up surviving with no owner and staying on the shared list, **closed once however many people click at the same moment**, a dropped one kept with its reason, reopened when it turns out it was not done, and what is late measured against a date rather than the clock; work refused to somebody who does not work here, a task about another company's client and an empty title refused, and one company's work off another's list; a client's follow-ups with the open ones first, **a follow-up raised on a deal belonging to that deal's client**; **what was closed listed with its reason and reopened from the same place**, work closed before the window neither listed nor counted, and one company's closed work off another's list; and the timeline merging what the system did, what people said and what is owed, **an open follow-up placed at its due date rather than when it was typed**, and nothing of another company shown |
 | `tests/properties.test.ts` | Rent arithmetic against a pure core: a whole month charged exactly what the lease says without ever dividing, a tenancy starting on the 15th charged 17 days rather than 16 and one ending on the 10th charged to the 10th, nothing charged for a period the tenancy does not touch, February in a leap year and out of one, **a proration that rounds away to nothing raising no charge at all**, periods walked inclusively across a year boundary, and a due date that stays inside its own month; a property reportable the moment it exists with one Property dimension however many properties, two live tenancies on one unit refused while back-to-back ones are allowed, a unit occupied while let and available after, a property with somebody living in it refused retirement and kept rather than deleted once empty, and **the module installing the four accounts a pack that never had them cannot supply**; the industry gate, the terminology seam calling a customer a Tenant while the record stays a `customers` row, and one landlord's properties off another's books; **one invoice per tenancy raised against Rental Income**, **a period billed once however many times the run fires**, **one invoice between two runs fired at the same instant**, the first month prorated and the rest whole, an agreed-but-unstarted tenancy billing nothing, the month taken as a parameter rather than read from the clock, and the permissions on running against previewing; **a deposit as a liability with the profit and loss unmoved**, **a refund that is not an expense**, more refused than is held either way round, **unpaid rent settled without recognising the rent twice**, **a settled deposit kept off the undeposited funds list**, income recognised only when a deposit is kept for something unbilled, **what is held reconciled to account 2580**, a shortfall reported, every movement tied to the entry that posted it, and one landlord's deposits off another's reconciliation; a rent roll counting the empty flat, billed and outstanding per unit, and a unit held back for works kept in the denominator; and property-level reporting through the dimensional profit and loss, **seeing a roof repair this module never posted**, footing to the ordinary profit and loss, and **the rent invoice itself carrying the property tag** |
+| `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1868,6 +1916,29 @@ key and the client proposal link — keep them for steps 22 and 24.
      and it lands in the same column — which is why there is no per-property report in the
      properties module at all.
 
+### Retention and the scheduled work (Phase 24)
+
+234. **Open Settings → Background work and scroll to "What is kept, and for how long".** Nine
+     policies, each with its window, its reason, what it is holding, and what it would remove if it
+     ran now. Six of them are marked *written by the public* — those are the ones where an attacker
+     picks the rate.
+235. **Read the panel's subtitle.** Nothing there can reach the ledger, the audit log or a document:
+     the policy list is an allowlist and the suite fails if the books ever appear on it. A test
+     posts an entry dated 2019, runs every sweep as at 2030, and checks the lines are still there.
+236. **Look at Sign-in attempts: 90 days, 2 would be removed.** The seed writes two failed sign-ins
+     from 2022 — the kind of row nobody ever looks at and which nothing had ever deleted.
+237. **Press "Delete what the retention policy no longer keeps"**, then run a worker tick. The job
+     queues, runs, and reports `{"removed": 2, "byPolicy": {"login_attempts": 2}}`. Reload: the
+     count is zero and today's successful sign-in is untouched.
+238. **Press it again.** Nothing is removed. Every sweep is a ranged delete on a cutoff, so running
+     twice deletes once without needing to know the first run happened.
+239. **Scroll up to "1 letter did not arrive".** An invitation to `jordan@ridgelien.test` — a
+     mistyped domain — with the provider's own error. It has been recorded since Phase 19 and shown
+     to nobody until now; the person waiting for it simply never heard.
+240. **Look at the schedules list.** Four new rows: the nightly sweep, the daily follow-up chase, the
+     rent run on the 1st, and the daily failure digest. None of them needed the feature it drives to
+     change — the safety was built first, which is why scheduling could arrive last.
+
 ## Project layout
 
 ```
@@ -1945,6 +2016,7 @@ src/
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
     engagement/           The communications log, follow-up tasks, and the merged timeline
     properties/           Properties and units, tenancies, the rent run, security deposits
+    retention/            What is kept and for how long, and the sweeps that enforce it
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -2209,8 +2281,8 @@ Gaps within the phases already built:
   `payment_applications` links a payment to its invoice.
 - **No WebAuthn or passkeys.** TOTP works with any authenticator app and no hardware, but it is
   phishable in a way a passkey is not.
-- **`login_attempts` is never pruned.** The table grows with every failed sign-in on the internet
-  and an attacker controls that rate. A retention job belongs on the Phase 10 scheduler.
+- ~~**`login_attempts` is never pruned.**~~ Ninety days since Phase 24, on a nightly sweep, with the
+  window and the reason on the operations page.
 - **The export is built in memory.** Fine for a small company, wrong for a large one — it needs the
   object store §18 asks for and this repository does not have.
 - **A practice member reaches every client of the firm.** There is no per-client staff assignment,
@@ -2236,8 +2308,8 @@ Gaps within the phases already built:
   address; somebody registering a company still proves nothing. The mechanism to fix it now exists.
 - **No confirmed change of email.** Reset re-checks the current address, so the machinery is ready,
   but changing your email is still a direct write with no confirmation to either address.
-- **`action_tokens` is pruned on demand, never on a schedule.** `pruneExpiredTokens` exists and the
-  Phase 10 queue is right there; nothing schedules it. Same shape as `login_attempts` above.
+- ~~**`action_tokens` is pruned on demand, never on a schedule.**~~ Thirty days past expiry since
+  Phase 24 — measured from expiry rather than issue, so a week-long invitation is not swept early.
 - **Reset requests are rate-limited per address, not per IP.** It bounds using this application to
   post mail at one stranger; a spread attempt across many addresses is not bounded at all.
 - **An invitation cannot be resent.** Withdraw and re-invite issues a new token and silently kills
@@ -2368,9 +2440,9 @@ Gaps within the phases already built:
   no worker is running then nothing in the queue happens. The operations page says so in as many
   words rather than looking calm — but there is no supervisor, no restart policy, and no alerting
   beyond that page.
-- **Nothing retries a dead job automatically, and nothing tells you about one.** Deliberate for the
-  retry; the missing digest is the obvious next handler now that the notification machinery it
-  needs exists.
+- **Nothing retries a dead job automatically**, which is deliberate — a job retrying forever hides
+  the healthy queue behind it. ~~And nothing tells you about one.~~ Phase 24 sends a daily digest of
+  dead jobs and bounced letters, and says nothing at all on a quiet day.
 - **Jobs are polled, not pushed.** A five-second poll is five seconds of latency. `LISTEN/NOTIFY`
   would remove it and is not worth the complexity while the most urgent queued thing is an hourly
   campaign check.
@@ -2426,9 +2498,9 @@ Gaps within the phases already built:
   connection, no forwarding address and no threading, so the log records that somebody replied
   rather than the reply. The largest gap in Phase 22, and it needs a provider decision before it
   needs code.
-- **Nothing chases an overdue follow-up.** It surfaces when somebody opens the page. The Phase 10
-  queue and Phase 8's push channel both exist and neither is wired to this, so a task due Friday
-  nudges nobody on Friday.
+- ~~**Nothing chases an overdue follow-up.**~~ Daily since Phase 24, one message per person with a
+  count rather than one per task, and unclaimed overdue work told separately to whoever could claim
+  it.
 - **Communications carry no attachments.** Phase 20 attaches a document to eleven kinds of record
   and `communication` is not one of them, so "here is the quote I emailed them" is a sentence
   rather than a file. One row in the subject registry.
@@ -2447,9 +2519,9 @@ Gaps within the phases already built:
 - **Rent is monthly.** Weekly tenancies, quarterly commercial rents and annual ground rents are not
   expressible. The period is a month because the idempotency key is a month, and widening it means
   a period *type* on the lease and a rethink of proration.
-- **Nothing schedules the rent run.** It is a button. The Phase 10 queue is right there and the run
-  is already idempotent — which is the hard half — so this is a handler registration away, and the
-  fourth job now owed after `login_attempts`, `action_tokens` and `sweepOrphanedBlobs`.
+- ~~**Nothing schedules the rent run.**~~ Monthly on the 1st since Phase 24. It skips a company that
+  lets no property rather than dead-lettering a job every month, and billing twice bills once because
+  the unique index decides.
 - **No late fees, and no CAM.** `4310 CAM Reimbursements` and `4320 Late Fee Income` are installed
   and unused. Service-charge apportionment by floor area is what `areaUnits` was recorded for, and
   half of it is worse than none.
@@ -2466,6 +2538,28 @@ Gaps within the phases already built:
 - **A property is not a fixed asset.** Phase 16's register would depreciate the building and this
   module does not link to it, so the same address can exist in both places with nothing reconciling
   them.
+
+- **Retention is not configurable per company.** The days are the application's, not a setting. A
+  jurisdiction requiring seven years of sign-in history has no way to say so, and one requiring
+  thirty days has no way either. The policy being data is what makes that a small change; it is
+  still a change.
+- **Nothing is anonymised, only deleted.** A row past its window goes entirely, so an aggregate
+  computed before a sweep and after it disagree, and nothing records that a sweep is why.
+- **The audit log has no retention, deliberately, and grows for ever.** Spec §19 asks for complete
+  auditability and this takes it literally. A busy company's `audit_events` will eventually be its
+  largest table, and there is no plan beyond "that is the requirement".
+- **A swept row is not recoverable from the application.** The backup is the answer and
+  `db:verify-restore` is the tested half of it, but there is no undo on a sweep.
+- **The failure digest reaches phones, not inboxes.** It goes through Phase 8's push channel, so
+  somebody without a subscription is told nothing — and Phase 19's mail channel is right there,
+  unused for this.
+- **Nothing watches the watcher.** The digest is itself a scheduled job, so if the worker stops the
+  digest stops with it and the only thing that says so is the operations page nobody is looking at.
+  The same gap Phase 10 named, and not closed here — it cannot be, from inside.
+- **The rent run is monthly on the 1st for everybody.** The run takes a month parameter; the
+  schedule does not offer one.
+- **Retention counts scan whole tables.** Nine `count(*)` pairs on every load of the operations
+  page. Fine at this scale, wrong for a tenant with ten million campaign events.
 - Renaming an organization does not propagate to its linked customer or vendor record. Client-
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not
@@ -2477,9 +2571,8 @@ Gaps within the phases already built:
   the same file share a blob, so storage cost is not attributable per company and physical
   separation between tenants is not available with this store. The tenancy guarantee is the
   `documents` row and nothing else.
-- **`sweepOrphanedBlobs` is not scheduled.** It exists and is safe to run at any time; the Phase 10
-  queue is right there and nothing calls it. The third retention job now owed, after
-  `login_attempts` and `action_tokens`.
+- ~~**`sweepOrphanedBlobs` is not scheduled.**~~ Nightly since Phase 24, as one of the nine
+  retention policies — the only one whose question is reachability rather than age.
 - **No virus scanning.** Uploaded files are served back with `nosniff` and a restrictive CSP, which
   stops a text file becoming a script and does nothing about a malicious PDF.
 - **No previews and no search inside documents.** A receipt is a link that opens in a new tab —

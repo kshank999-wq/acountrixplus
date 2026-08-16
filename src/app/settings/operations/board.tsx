@@ -64,6 +64,36 @@ type Draft = {
 
 type Handler = { kind: string; label: string; global: boolean }
 
+type Failures = {
+  since: string
+  total: number
+  deadJobs: Array<{
+    id: string
+    kind: string
+    lastError: string | null
+    attempts: number
+    finishedAt: string | null
+  }>
+  bouncedMail: Array<{
+    id: string
+    kind: string
+    email: string
+    subject: string
+    error: string | null
+    createdAt: string
+  }>
+} | null
+
+type Retention = Array<{
+  kind: string
+  label: string
+  days: number | null
+  publicallyWritten: boolean
+  why: string
+  expired: number
+  held: number
+}> | null
+
 /**
  * The operations board.
  *
@@ -82,6 +112,8 @@ export function OperationsBoard({
   events,
   drafts,
   handlers,
+  failures,
+  retention,
   canManage,
   canPostEntries,
 }: {
@@ -94,6 +126,8 @@ export function OperationsBoard({
   events: DomainEventRow[]
   drafts: Draft[]
   handlers: Handler[]
+  failures: Failures
+  retention: Retention
   canManage: boolean
   canPostEntries: boolean
 }) {
@@ -238,6 +272,27 @@ export function OperationsBoard({
             onRetry={(id) => act(() => retryJobAction(id))}
             onCancel={(id) => act(() => cancelJobAction(id))}
           />
+        </Card>
+      )}
+
+      {failures && failures.bouncedMail.length > 0 && (
+        <Card
+          title={`${failures.bouncedMail.length} ${failures.bouncedMail.length === 1 ? 'letter' : 'letters'} did not arrive`}
+          subtitle="Recorded since Phase 19 and shown to nobody until now. An invitation to a mistyped address fails silently otherwise — the person waiting simply never hears."
+        >
+          <ul className="divide-y divide-line text-sm">
+            {failures.bouncedMail.map((mail) => (
+              <li key={mail.id} className="px-4 py-2">
+                <p>
+                  <span className="font-medium">{mail.email}</span>
+                  <span className="text-xs text-faint"> · {mail.kind.replace(/_/g, ' ')}</span>
+                </p>
+                <p className="text-xs text-muted">{mail.subject}</p>
+                {mail.error && <p className="text-xs text-negative">{mail.error}</p>}
+                <p className="text-xs text-faint">{mail.createdAt.slice(0, 10)}</p>
+              </li>
+            ))}
+          </ul>
         </Card>
       )}
 
@@ -394,6 +449,55 @@ export function OperationsBoard({
               </button>
             ))}
           </div>
+        </Card>
+      )}
+
+      {retention && (
+        <Card
+          title="What is kept, and for how long"
+          subtitle="Every table this application lets grow with traffic. Nothing here can reach the ledger, the audit log, or a document — the policy is an allowlist, and the suite fails if the books ever appear on it."
+        >
+          <table className="w-full text-sm">
+            <thead className="border-b border-line text-left text-xs text-muted">
+              <tr>
+                <th className="px-4 py-2 font-medium">Kept</th>
+                <th className="px-4 py-2 font-medium">For</th>
+                <th className="px-4 py-2 text-right font-medium">Holding</th>
+                <th className="px-4 py-2 text-right font-medium">Would remove</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-line">
+              {retention.map((policy) => (
+                <tr key={policy.kind}>
+                  <td className="px-4 py-2">
+                    <p className="font-medium">{policy.label}</p>
+                    <p className="text-xs text-muted">{policy.why}</p>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2 text-xs">
+                    {policy.days === null ? (
+                      <span className="text-faint">until unreachable</span>
+                    ) : (
+                      `${policy.days} days`
+                    )}
+                    {policy.publicallyWritten && (
+                      <span
+                        className="block text-faint"
+                        title="Rows arrive from unauthenticated strangers, which is what makes the retention a control rather than tidiness."
+                      >
+                        written by the public
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2 text-right tabular-nums">{policy.held}</td>
+                  <td className="px-4 py-2 text-right tabular-nums">
+                    <span className={policy.expired > 0 ? 'text-warning' : 'text-faint'}>
+                      {policy.expired}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </Card>
       )}
     </div>

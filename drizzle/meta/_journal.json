@@ -169,6 +169,13 @@
       "when": 1786912452758,
       "tag": "0023_phase23_properties",
       "breakpoints": true
+    },
+    {
+      "idx": 24,
+      "version": "7",
+      "when": 1786915661344,
+      "tag": "0024_phase24_retention_topics",
+      "breakpoints": true
     }
   ]
 }

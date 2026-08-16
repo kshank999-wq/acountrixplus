@@ -61,6 +61,26 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
     dayOfMonth: 1,
     why: 'After a month closes. Proposes a draft; posting stays a decision.',
   },
+  // --- Phase 24 -------------------------------------------------------------
+  {
+    kind: 'engagement.chase_overdue',
+    cadence: 'daily',
+    hourUtc: 8,
+    why: 'Morning, once, with a count. A promise made on a call is chased without anybody opening a page.',
+  },
+  {
+    kind: 'properties.run_rent',
+    cadence: 'monthly',
+    hourUtc: 6,
+    dayOfMonth: 1,
+    why: 'The 1st, before the working day. Skips companies that let no property; billing twice bills once.',
+  },
+  {
+    kind: 'ops.failure_digest',
+    cadence: 'daily',
+    hourUtc: 7,
+    why: 'Once a day, and silent when there is nothing wrong — which is what makes it worth reading.',
+  },
 ]
 
 /** Housekeeping that spans every tenant. */
@@ -76,6 +96,12 @@ export const GLOBAL_SCHEDULES: ScheduleDefault[] = [
     cadence: 'daily',
     hourUtc: 4,
     why: 'Succeeded and cancelled jobs older than a fortnight. Dead ones are never swept.',
+  },
+  {
+    kind: 'housekeeping.retention',
+    cadence: 'daily',
+    hourUtc: 3,
+    why: 'Everything the retention policy no longer keeps. Nine tables, one ranged delete each.',
   },
 ]
 

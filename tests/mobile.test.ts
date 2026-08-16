@@ -7,6 +7,7 @@ import {
   journalEntries,
   journalLines,
   notificationLog,
+  notificationTopicEnum,
   pushSubscriptions,
   sessions,
 } from '@/db/schema'
@@ -891,9 +892,15 @@ describe('notifications', () => {
     const fixture = await createCompanyFixture()
     const topics = await preferences(fixture.ctx)
 
-    // Six since Phase 10 added `remittance_due` — a reminder about money owed
-    // to an agency is not the same interruption as a review queue.
-    expect(topics).toHaveLength(6)
+    // Counted from the enum rather than hard-coded. The number was 5, then 6
+    // when Phase 10 added `remittance_due`, then 8 when Phase 24 added
+    // `follow_up_due` and `background_failures` — and each time the literal
+    // was the only thing that broke. What the test is actually for is that
+    // *every* topic is offered and every one starts on: a topic the settings
+    // screen forgets is a notification nobody can switch off.
+    expect(topics.map((topic) => topic.topic).sort()).toEqual(
+      [...notificationTopicEnum.enumValues].sort(),
+    )
     expect(topics.every((topic) => topic.enabled)).toBe(true)
   })
 })

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, isNull, lte, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { backgroundJobs } from '@/db/schema'
 import { CLAIM_TIMEOUT_MS, nextAttemptAt } from './backoff'
@@ -273,6 +273,14 @@ export type JobFilter = {
   status?: Array<'queued' | 'running' | 'succeeded' | 'failed' | 'dead' | 'cancelled'>
   kind?: string
   limit?: number
+  /**
+   * Only jobs that finished after this instant (Phase 24).
+   *
+   * A daily digest needs a window, or it reports the same dead job every
+   * morning until somebody deletes it — and a notification that repeats
+   * whatever you do is one people learn to ignore.
+   */
+  since?: Date
 }
 
 /** Jobs for the operations page. Not tenant-scoped by itself — callers scope it. */
@@ -292,6 +300,7 @@ export async function listJobs(filter: JobFilter = {}) {
           : undefined,
         filter.status?.length ? inArray(backgroundJobs.status, filter.status) : undefined,
         filter.kind ? eq(backgroundJobs.kind, filter.kind) : undefined,
+        filter.since ? gte(backgroundJobs.updatedAt, filter.since) : undefined,
       ),
     )
     .orderBy(desc(backgroundJobs.createdAt))

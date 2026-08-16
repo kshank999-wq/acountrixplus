@@ -126,6 +126,15 @@ export const notificationTopicEnum = pgEnum('notification_topic', [
   // review queue, and folding it into one would mean somebody switching off
   // nudges also switches off the one that costs penalties.
   'remittance_due',
+  // Added in Phase 24, for the same reason `remittance_due` was added in Phase
+  // 10: something finally exists to send them, and each is a different kind of
+  // interruption from the others.
+  //
+  // A promise somebody made on a call is not a review queue, and a background
+  // failure is not either — folding any of these together would mean somebody
+  // switching off the noisy one also switching off the one that matters.
+  'follow_up_due',
+  'background_failures',
 ])
 
 /**
