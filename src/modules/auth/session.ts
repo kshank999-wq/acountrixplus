@@ -1,7 +1,15 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
 import { eq, and, gt } from 'drizzle-orm'
 import { db } from '@/db'
-import { sessions, memberships, users, companies, devices } from '@/db/schema'
+import {
+  sessions,
+  memberships,
+  users,
+  companies,
+  devices,
+  practiceEngagements,
+  practices,
+} from '@/db/schema'
 import { securityPolicy } from './login-history'
 
 export const SESSION_COOKIE = 'accountrix_session'
@@ -125,9 +133,14 @@ export async function resolveSession(cookieValue: string | undefined) {
       overrides: memberships.permissionOverrides,
       companyName: companies.name,
       companyIndustry: companies.industry,
+      // Left joins, so somebody who works at the company itself — no
+      // engagement — still resolves. Phase 18.
+      viaPractice: practices.name,
     })
     .from(memberships)
     .innerJoin(companies, eq(companies.id, memberships.companyId))
+    .leftJoin(practiceEngagements, eq(practiceEngagements.id, memberships.practiceEngagementId))
+    .leftJoin(practices, eq(practices.id, practiceEngagements.practiceId))
     .where(
       and(
         eq(memberships.companyId, row.activeCompanyId),
@@ -150,6 +163,7 @@ export async function resolveSession(cookieValue: string | undefined) {
     role: membership.role,
     overrides: membership.overrides,
     deviceId: row.deviceId,
+    viaPractice: membership.viaPractice,
   }
 }
 

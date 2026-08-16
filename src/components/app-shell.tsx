@@ -2,6 +2,9 @@ import Link from 'next/link'
 import { logoutAction } from '@/app/actions/auth'
 import { can, type ActorContext } from '@/modules/tenancy/context'
 import { moduleEnabled } from '@/modules/industry/modules'
+import { reachableCompanies } from '@/modules/practice/switching'
+import { practicesFor } from '@/modules/practice/service'
+import { CompanySwitcher } from './company-switcher'
 
 /**
  * Chrome shared by the workspaces (spec §2).
@@ -50,6 +53,14 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'time_billing')
     : false
 
+  // Practice mode (Phase 18). Both reads are keyed on the user rather than the
+  // company, which is the whole point — they are the only two things on this
+  // page that are about the person instead of the books they are looking at.
+  const [reachable, practices] = await Promise.all([
+    reachableCompanies(actor.userId, actor.companyId),
+    practicesFor(actor.userId),
+  ])
+
   const links = [
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
@@ -81,11 +92,32 @@ export async function AppShell({
             <h1 className="truncate text-base font-semibold tracking-tight">{companyName}</h1>
             <p className="truncate text-xs text-muted">
               {actor.userName} ({actor.role})
+              {actor.viaPractice && (
+                // Shown to the accountant, not to the client. Somebody working
+                // across forty sets of books should never have to wonder which
+                // ones they are in, or on whose authority.
+                <span className="text-faint"> · acting for a client via {actor.viaPractice}</span>
+              )}
             </p>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
             {actions}
+            {practices.length > 0 && (
+              <Link href="/practice" className="btn text-xs">
+                Practice
+              </Link>
+            )}
+            <CompanySwitcher
+              companies={reachable.map((company) => ({
+                id: company.id,
+                name: company.name,
+                role: company.role,
+                viaPracticeName: company.viaPracticeName,
+                isCurrent: company.isCurrent,
+              }))}
+              currentName={companyName}
+            />
             <form action={logoutAction}>
               <button className="btn text-xs">Sign out</button>
             </form>

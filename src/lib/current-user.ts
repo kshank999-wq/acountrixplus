@@ -26,6 +26,8 @@ export async function currentActor(): Promise<ActorContext | null> {
     overrides: session.overrides,
     ipAddress: headerStore.get('x-forwarded-for'),
     userAgent: headerStore.get('user-agent'),
+    // Changes what an audit event says, never what anybody may do. Phase 18.
+    viaPractice: session.viaPractice,
   }
 }
 

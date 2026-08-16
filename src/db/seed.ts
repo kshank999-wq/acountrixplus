@@ -17,7 +17,14 @@ import {
   journalLines,
   serviceItems,
 } from '@/db/schema'
-import { registerCompany } from '@/modules/tenancy/onboarding'
+import { registerCompany, registerUser } from '@/modules/tenancy/onboarding'
+import {
+  addPracticeMember,
+  createPractice,
+  offerEngagement,
+  respondToEngagement,
+} from '@/modules/practice/service'
+import { practiceWorkQueue } from '@/modules/practice/switching'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
 import { categorize, listInbox } from '@/modules/bookkeeping/transactions'
@@ -1569,6 +1576,82 @@ async function main() {
       `${new Set(owed.map((row) => row.periodEnd)).size} months of depreciation still owed.`,
   )
 
+  // --- Phase 18: accountant practice mode ----------------------------------
+  //
+  // The demo's own accountant, at a real firm, with access Ridgeline granted
+  // rather than the firm claimed. Two engagements so the switcher has
+  // somewhere to switch to, and so the isolation is visible rather than
+  // asserted.
+  const practiceOwner = await registerUser({
+    name: 'Robin Hartley',
+    email: 'robin@hartleyco.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const practice = await createPractice({
+    userId: practiceOwner.id,
+    userName: practiceOwner.name,
+    name: 'Hartley & Co',
+    contactEmail: 'hello@hartleyco.test',
+  })
+
+  const junior = await registerUser({
+    name: 'Sam Okafor',
+    email: 'sam@hartleyco.test',
+    password: DEMO_PASSWORD,
+  })
+  await addPracticeMember(
+    { userId: practiceOwner.id, userName: practiceOwner.name },
+    { practiceId: practice.id, userId: junior.id },
+  )
+
+  // Ridgeline invites them; the firm accepts. Neither side could have done
+  // both halves.
+  const { engagementId } = await offerEngagement(ctx, {
+    practiceId: practice.id,
+    grantedRole: 'accountant',
+    note: 'Year-end and monthly review.',
+  })
+  await respondToEngagement(
+    { side: 'practice', userId: practiceOwner.id, userName: practiceOwner.name },
+    { engagementId, accept: true },
+  )
+
+  // A second client, so the switcher has two entries and the practice work
+  // queue has something to compare. Small on purpose — the point is the
+  // isolation, not the second company's books.
+  const secondClient = await registerCompany({
+    companyName: 'Kestrel Joinery',
+    industry: 'professional_services',
+    userName: 'Sam Owner',
+    email: 'owner@kestrel.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const secondCtx: ActorContext = {
+    userId: secondClient.user.id,
+    userName: secondClient.user.name,
+    companyId: secondClient.company.id,
+    role: 'owner',
+  }
+
+  const secondOffer = await offerEngagement(secondCtx, {
+    practiceId: practice.id,
+    grantedRole: 'bookkeeper',
+    note: 'Bookkeeping only.',
+  })
+  await respondToEngagement(
+    { side: 'practice', userId: practiceOwner.id, userName: practiceOwner.name },
+    { engagementId: secondOffer.engagementId, accept: true },
+  )
+
+  const queue = await practiceWorkQueue(practiceOwner.id, practice.id)
+  console.log(
+    `  Hartley & Co act for ${queue.length} clients — ` +
+      `${queue.map((row) => `${row.companyName} (${row.role}, ${row.awaitingReview} waiting)`).join(', ')}. ` +
+      'Each granted separately; neither can be seen while in the other.',
+  )
+
   // Reported here rather than where Phase 12 built it, because Phase 16 buys
   // two vehicles further down and the investing section was printed as $0.00
   // while the finished books showed six figures of it. A summary that was true
@@ -1626,6 +1709,8 @@ async function main() {
   console.log('  /accounting/dimensions  profit and loss by location, and the Unassigned column')
   console.log('  /accounting/assets    the register, and whether it agrees with the ledger')
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
+  console.log('  /settings/access      who can open these books, and one click to stop them')
+  console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

@@ -60,6 +60,13 @@ export type AuditAction =
   | 'expense.mark_billable'
   | 'retainer.receive'
   | 'retainer.apply'
+  // Accountant practice mode (spec §14, Phase 18)
+  | 'engagement.offer'
+  | 'engagement.accept'
+  | 'engagement.end'
+  // Recorded in the company being *entered*, because "who opened our books
+  // and when" is the client's question, not the accountant's.
+  | 'company.switch'
   // Bringing an existing business's books in (spec §20 Phase 8, Phase 17)
   | 'import.commit'
   | 'import.revert'
@@ -203,7 +210,11 @@ export async function recordAudit(
     .values({
       companyId: ctx.companyId,
       userId: ctx.userId,
-      actorName: ctx.userName,
+      // "Dana Chen (Hartley & Co)" when acting through a practice. The client
+      // reading their own audit log should not have to cross-reference a user
+      // list to find out that the person who reopened December works for
+      // their accountants.
+      actorName: ctx.viaPractice ? `${ctx.userName} (${ctx.viaPractice})` : ctx.userName,
       action: input.action,
       entityType: input.entityType,
       entityId: input.entityId ?? null,

@@ -10,8 +10,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Payroll and Tax**, the **background worker and outbox**, the
 **completed accounting core**, the **statements an accountant asks for**, the
 **security controls**, **inventory**, **time and billing**,
-**accounting dimensions with the fixed asset register**, and **bringing an
-existing business's books in** from the
+**accounting dimensions with the fixed asset register**, **bringing an
+existing business's books in**, and **accountant practice mode** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -28,8 +28,9 @@ existing business's books in** from the
 [ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md),
 [ADR 0014](docs/adr/0014-one-inventory-five-industries.md),
 [ADR 0015](docs/adr/0015-an-hour-is-billed-once.md),
-[ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md), and
-[ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md).
+[ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md),
+[ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md), and
+[ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -651,6 +652,47 @@ specification.
   refuses when what it created has since been used, rather than cascading and
   taking the newer work with it. Journal entries are voided, never deleted.
 
+### Accountant practice mode (Phase 18)
+
+§14's last deferred sentence, and the one the whole tenancy design was built to
+survive. Since Phase 1 every service has taken an explicit `ActorContext` and
+there has been no ambient "current company" anywhere — a decision that cost
+something on every function signature for eighteen phases, made for a case that
+did not exist yet. An accountant who legitimately belongs to twenty companies
+at once is that case, and this is the first time the design is tested rather
+than asserted.
+
+- **Access is granted, never claimed.** Whichever side asks, the *other* side
+  has to agree — one comparison, no flag that turns it off. "The firm adds the
+  client and the client is notified" is how a support tool ends up able to read
+  every customer's ledger, and more mundanely how one mistyped email address
+  hands a stranger the books.
+- **Ending it is asymmetric on purpose.** Starting an engagement needs both
+  signatures; ending one needs either. A client must never need their
+  accountant's permission to take their books back — and revocation takes
+  effect on the accountant's *next click*, not when their session expires.
+- **An engagement grants memberships and steps out of the way.** Everything
+  downstream — permissions, audit, session resolution, `scoped()` — needed no
+  changes. Deriving access at read time would give two answers to "can this
+  person see these books", and two answers can disagree.
+- **The client's role choice is a ceiling.** A firm that would like its people
+  to be owners still arrives as whatever the client agreed to.
+- **Leaving the firm ends access everywhere at once** — one revocation, not
+  forty. Somebody who leaves on Friday should not read a client's ledger on
+  Monday because one company got missed.
+- **Switching mints a new context, never a wider one.** A context carrying a
+  *set* of company ids would mean re-reading several hundred call sites to
+  decide whether each meant one or many, and one missed leaks a client's ledger
+  to another client's accountant.
+- **Exactly one query crosses tenants**, and it is built not to be pointed
+  anywhere else: the company set is derived inside the function from the
+  caller's own memberships, practice membership is a gate checked before
+  anything is read, each count names a company already proven reachable, and it
+  returns counts rather than rows.
+- **The audit log names the firm** — "Dana Chen (Hartley & Co)" — and the
+  switch is recorded in the company being *entered*, because "who opened our
+  books, and when" is the client's question.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -745,6 +787,7 @@ Coverage matches what spec §21 asks for:
 | `tests/assets.test.ts` | 756 depreciation schedules across every method, convention, life and awkward cost, each summing exactly to the depreciable base and ending on the salvage value with no zero-amount period; a half-year convention giving exactly half a year in year one and a mid-month one half a month at each end; declining balance front-loading and still landing on salvage, and the crossover removing the final lump; month arithmetic across leap years; registering an asset posting nothing, sequential tags, and salvage above cost refused; arrears charged to their own months rather than the run date, **a month that has not finished not charged**, the same period run twice charging once, two concurrent runs posting one set between them, one entry a month covering every asset, and an exhausted schedule marking the asset; **cost and accumulated depreciation both reconciling to the ledger** across several assets on different methods, and a disagreement reported when an asset was never posted; disposal charging the arrears first so book value comes from the ledger, a gain landing in Other income rather than Sales Revenue, a loss in Other expense, the asset leaving the balance sheet entirely, and disposal through the same account list the screen offers |
 | `tests/dimensions.test.ts` | Code normalization, a parent from another dimension refused, and a retired dimension keeping its history; values attached at posting time, **each line of a two-site entry keeping its own value**, a value from the wrong dimension or another company refused; **every row's columns summing to the ordinary profit and loss**, checked against a report built by a different query; untagged activity as a column rather than an omission, the Unassigned column dropped when nothing is untagged, an unused value left off the page, and each site getting its own bottom line; coverage measured on gross movement so offsetting amounts cannot hide, reported only for dimensions marked expected, and null when nothing happened; reclassifying leaving the trial balance untouched, replacing rather than duplicating, clearing back to Unassigned, and silently ignoring another company's lines; defaults filling an unset dimension, never overriding a choice, the more specific owner winning, and replacing rather than duplicating; and balance-sheet movement by value with no equity row |
 | `tests/importing.test.ts` | Quoted commas, embedded newlines, doubled quotes, CRLF and the byte-order mark Excel writes; the delimiter found by consistency so a tab-separated file of addresses is not shredded by its own commas; blank rows dropped, short rows padded, unclosed quotes and empty files refused; money in every shape an accounting package writes it, and **European notation, a comma that is not a thousands separator, and sub-cent precision all refused rather than guessed**; dates in five formats with the ambiguous ones settled by the row where it can and by a setting where it cannot, 31 February and 29 February in a non-leap year refused; a QuickBooks chart export mapped unasked, one header serving one field, missing required columns named; four hundred identical problems collapsed to one line; account types translated from what other systems call them and an unknown one refused; a duplicate account number refused, and an existing account's type never changed; contacts matched across `Acme, Inc.` and `Acme Inc` without merging `Acme Northwest` into `Acme North West`, a bad email warned about but imported, and an update filling gaps without blanking newer values; **a trial balance that does not balance refusing and posting nothing**, a balance for a non-existent account refused, a row with both a debit and a credit refused, a signed balance column read; **Opening Balance Equity clearing to exactly zero when the detail agrees**, and naming the $3,200 gap when it does not; an open invoice bringing its receivable without recognising revenue again; an unknown customer refused; ambiguous dates warned about across the file; undo removing only what it created, voiding entries rather than deleting them, refusing when an imported customer has since been invoiced, refusing twice, keeping the history, and one company's imports invisible to another |
+| `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; and one company's engagements invisible to another |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1424,6 +1467,29 @@ key and the client proposal link — keep them for steps 22 and 24.
 189. **Look at the balance sheet of the migrated company** — it is exactly the trial balance that
      went in, with the receivable built from two named invoices rather than typed as a total.
 
+### Accountant practice mode (Phase 18)
+
+190. **Sign in as `robin@hartleyco.test`** with the same password. Robin owns no company at all —
+     they arrive straight inside a client's books, with the header saying *acting for a client via
+     Hartley & Co*.
+191. **Open Practice.** Two clients, the transaction backlog of each, and the role Robin holds at
+     each one — `accountant` at Ridgeline, `bookkeeper` at Kestrel, because the two companies made
+     separate decisions. It is deliberately not dressed in any company's chrome: this page is about
+     the person, not the books.
+192. **Open Kestrel Joinery's books, then switch to Ridgeline.** Kestrel shows nothing to review;
+     Ridgeline shows fifty-four. Ridgeline's transactions are not visible from inside Kestrel and
+     never were — that is the isolation claim, and it is the reason every service in this codebase
+     takes an explicit context.
+193. **Sign back in as `owner@ridgeline.test` and open Settings → Who has access.** Three people:
+     the owner who works there, and two from Hartley & Co, marked as such.
+194. **End it.** Both accountants disappear at once, the engagement moves to Past, and the message
+     says access stops on their next click rather than when their session expires. You did not need
+     the firm's agreement — starting an engagement takes two signatures, ending one takes either.
+195. **Invite them back.** Search for "Hartley", pick a role, offer access. Nothing is granted:
+     the offer waits for the firm to accept, and the firm cannot accept on the client's behalf.
+196. **Try it from the other side.** As Robin, request access to a company and watch it sit there.
+     A firm cannot give itself the books.
+
 ## Project layout
 
 ```
@@ -1444,6 +1510,8 @@ src/
     accounting/dimensions/  Profit and loss by location, and the reclassify work list
     accounting/assets/    The fixed asset register and its reconciliation
     settings/import/      The migration wizard and the opening-balance check
+    settings/access/      Who can open these books, and one click to stop them
+    practice/             The firm's own workspace — outside any company's chrome
     inventory/            Stock on hand, receiving, counts
     time/                 Timesheets, unbilled work, billing, retainers
     m/                    The mobile app — Today, review deck, receipts, devices
@@ -1484,6 +1552,7 @@ src/
     dimensions/           User-defined dimensions, assignment, dimensional reporting
     assets/               Depreciation schedules and the fixed asset register
     importing/            Delimited parsing, coercion, column mapping, opening balances
+    practice/             Firms, engagements, company switching, the cross-tenant work queue
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -1753,8 +1822,19 @@ Gaps within the phases already built:
   and an attacker controls that rate. A retention job belongs on the Phase 10 scheduler.
 - **The export is built in memory.** Fine for a small company, wrong for a large one — it needs the
   object store §18 asks for and this repository does not have.
-- **Accountant practice mode is not built**, which spec §14 itself defers ("can later allow one
-  accountant to switch securely among multiple client companies").
+- **A practice member reaches every client of the firm.** There is no per-client staff assignment,
+  so a firm that wants one junior on one client and not the other cannot say so. The largest gap in
+  Phase 18.
+- **Engagements are found by name, not by an invitation link.** A client searches a directory of
+  practices and offers access; there is no emailed token, because there is still no transactional
+  email provider. A firm must already exist in the system before a client can invite them.
+- **The practice directory cannot be opted out of.** Name and contact email are visible to any
+  signed-in user — deliberately not client counts, which would be a competitive-intelligence feed —
+  but a firm cannot hide.
+- **No practice-level security policy.** A client can require a second factor of everybody in their
+  company, which does cover practice members; a firm cannot impose one on its own staff.
+- **The practice work queue counts one thing** — transactions awaiting review. A firm chasing
+  period-end also wants unreconciled accounts, open periods, and unposted drafts.
 - **No tool-calling loop.** Spec §12's tool layer is implemented as the suggestion queue plus
   permission-gated retrieval, not as a model invoking functions directly. Every consequential
   action here is one a person should confirm anyway. See ADR 0006.

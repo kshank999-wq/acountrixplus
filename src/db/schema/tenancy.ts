@@ -115,11 +115,29 @@ export const memberships = pgTable(
      */
     permissionOverrides: text('permission_overrides'),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * The practice engagement that granted this membership (spec §14,
+     * Phase 18). Null for somebody who works at the company itself.
+     *
+     * Named rather than inferred so that ending an engagement removes exactly
+     * the memberships it created. A sweep by "everybody from that firm" would
+     * also remove the bookkeeper who happens to work there *and* was hired
+     * directly by the client — a real arrangement, and one where the two
+     * grants are independent.
+     *
+     * Typed as a bare uuid with no foreign key: `practice_engagements` is
+     * defined in `practice.ts`, which imports this file, and a reference the
+     * other way is a cycle. The service is what keeps it honest, and the
+     * engagement's own cascade would not help anyway — ending an engagement
+     * keeps its row.
+     */
+    practiceEngagementId: uuid('practice_engagement_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     companyUserUnique: unique('memberships_company_user_unique').on(t.companyId, t.userId),
     userIdx: index('memberships_user_idx').on(t.userId),
+    engagementIdx: index('memberships_engagement_idx').on(t.practiceEngagementId),
   }),
 )
 

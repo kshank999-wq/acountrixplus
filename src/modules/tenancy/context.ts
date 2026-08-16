@@ -27,6 +27,17 @@ export type ActorContext = {
   /** Request metadata recorded on audit events. */
   ipAddress?: string | null
   userAgent?: string | null
+  /**
+   * The practice this person is acting through, when they are (spec §14,
+   * Phase 18). Null for somebody who works at the company itself.
+   *
+   * Carried on the context rather than looked up at each audit write, because
+   * every service already has the context and none of them should have to
+   * know that practices exist. It changes what an audit event *says*, never
+   * what anybody may do — the role does that, and the role was capped by the
+   * client when the engagement was accepted.
+   */
+  viaPractice?: string | null
 }
 
 /** Throws PermissionError unless the actor holds `permission`. */

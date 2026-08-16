@@ -127,6 +127,13 @@
       "when": 1786850914634,
       "tag": "0017_phase17_importing",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1786857517557,
+      "tag": "0018_phase18_practice_mode",
+      "breakpoints": true
     }
   ]
 }

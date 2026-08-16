@@ -98,6 +98,37 @@ export async function registerCompany(input: RegisterInput) {
 }
 
 /**
+ * Registers a person who does not found a company (spec §14, Phase 18).
+ *
+ * Until practice mode there was no such person: every user arrived by
+ * registering a business, and a membership followed immediately. An accountant
+ * is the case that breaks it — they sign up to run a *practice*, and they may
+ * never own a company at all. Their access comes from engagements their
+ * clients agree to, and on the day they sign up there are none.
+ *
+ * Which is why `resolveSession` returns null for a session with no active
+ * company: this user can log in and has, correctly, nowhere to go until
+ * somebody grants them somewhere. The practice workspace is that somewhere.
+ */
+export async function registerUser(input: { name: string; email: string; password: string }) {
+  const email = input.email.trim().toLowerCase()
+
+  const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1)
+  if (existing) {
+    throw new Error('An account with that email already exists.')
+  }
+
+  const passwordHash = await hashPassword(input.password)
+
+  const [user] = await db
+    .insert(users)
+    .values({ email, name: input.name.trim(), passwordHash })
+    .returning()
+
+  return user
+}
+
+/**
  * Adds an existing user to a company (spec §14: invite each professional with
  * their own account rather than sharing credentials).
  */
