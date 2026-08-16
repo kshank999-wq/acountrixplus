@@ -207,6 +207,13 @@ export const SYSTEM_ACCOUNTS = {
  * needs one has to say so rather than assume it.
  */
 export const INDUSTRY_ACCOUNTS = {
+  // Professional services (Phase 15). Declared by the pack since Phase 0 and
+  // used for the first time here.
+  unbilledWorkInProgress: '1150',
+  clientRetainers: '2550',
+  consultingRevenue: '4110',
+  retainerRevenue: '4120',
+  reimbursableRevenue: '4130',
   retainageReceivable: '1170',
   retainagePayable: '2570',
   contractRevenue: '4200',

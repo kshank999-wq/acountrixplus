@@ -24,6 +24,7 @@ export async function AppShell({
     | 'crm'
     | 'jobs'
     | 'inventory'
+    | 'time'
     | 'payroll'
     | 'marketing'
     | 'studio'
@@ -45,12 +46,17 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'inventory')
     : false
 
+  const timeEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'time_billing')
+    : false
+
   const links = [
     { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
     { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
     { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
     { key: 'jobs', href: '/jobs', label: 'Jobs', show: jobsEnabled },
     { key: 'inventory', href: '/inventory', label: 'Inventory', show: inventoryEnabled },
+    { key: 'time', href: '/time', label: 'Time', show: timeEnabled },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

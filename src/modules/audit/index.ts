@@ -52,6 +52,14 @@ export type AuditAction =
   | 'payment.record'
   | 'customer.create'
   | 'vendor.create'
+  // Time and expense billing (spec §5, Phase 15)
+  | 'time.log'
+  | 'time.approve'
+  | 'time.write_off'
+  | 'time.bill'
+  | 'expense.mark_billable'
+  | 'retainer.receive'
+  | 'retainer.apply'
   // Inventory (spec §5, Phase 14)
   | 'stock.adjust'
   | 'stock.receive'

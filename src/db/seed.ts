@@ -27,6 +27,14 @@ import { setModuleEnabled } from '@/modules/industry/modules'
 import { adjustStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
 import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
 import {
+  approveTime,
+  logTime,
+  recordBillableExpense,
+  setPersonRate,
+  unbilledWork,
+} from '@/modules/timebilling/service'
+import { listProjects } from '@/modules/crm/conversion'
+import {
   changeStage,
   createContact,
   createOpportunity,
@@ -1396,6 +1404,62 @@ async function main() {
     )
   }
 
+  // --- Phase 15: time and billing ------------------------------------------
+  //
+  // Ridgeline is a contractor, and contractors bill time too — the site
+  // supervisor's hours on a cost-plus job are the same shape as a consultant's.
+  // Switched on here for the same reason inventory was: industry is a starting
+  // point, not a cage.
+  await setModuleEnabled(ctx, 'time_billing', true)
+
+  const timeProjects = await listProjects(ctx)
+  if (timeProjects.length > 0) {
+    const engagement = timeProjects[0]
+
+    await setPersonRate(ctx, { userId: user.id, rateCents: 14_500, costRateCents: 6_200 })
+
+    const days: Array<[string, number, string, boolean]> = [
+      ['2026-06-02', 210, 'Site walk-through and punch list', true],
+      ['2026-06-03', 90, 'Change order pricing with the client', true],
+      ['2026-06-04', 45, 'Internal scheduling', false],
+      ['2026-06-08', 180, 'Coordinating the mechanical sub', true],
+      ['2026-06-09', 120, 'Progress photos and daily report', true],
+    ]
+
+    const logged = []
+    for (const [workedOn, minutes, description, isBillable] of days) {
+      logged.push(
+        await logTime(ctx, {
+          projectId: engagement.id,
+          workedOn,
+          minutes,
+          description,
+          isBillable,
+        }),
+      )
+    }
+
+    // Most approved, one left as a draft so the approval queue is not empty.
+    await approveTime(
+      ctx,
+      logged.slice(0, 4).map((entry) => entry.id),
+    )
+
+    await recordBillableExpense(ctx, {
+      projectId: engagement.id,
+      incurredOn: '2026-06-05',
+      description: 'Permit filing fee',
+      costCents: 32_500,
+      markupBasisPoints: 0,
+    })
+
+    const ready = await unbilledWork(ctx)
+    const readyCents = ready.reduce((sum, row) => sum + row.totalCents, 0)
+    console.log(
+      `  ${formatCentsPlain(readyCents)} of approved work waiting to be billed, oldest ${ready[0]?.oldestDate ?? '—'}.`,
+    )
+  }
+
   // Cash versus accrual on the demo's own books, so the difference is a
   // number rather than an explanation.
   const range = { startDate: '2026-01-01', endDate: '2026-12-31' }
@@ -1434,6 +1498,7 @@ async function main() {
   console.log('  /accounting/deposits  receipts waiting to be banked, and the slip')
   console.log('  /settings/security    two-factor, sessions, sign-in history, and the export')
   console.log('  /inventory            stock on hand, receiving, and counts')
+  console.log('  /time                 timesheets, unbilled work, and billing it')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

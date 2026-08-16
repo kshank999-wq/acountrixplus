@@ -9,7 +9,7 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **Phase 6 (AI Add-on)**, **Phase 7 (Industry Modules)**, the mobile app,
 **Payroll and Tax**, the **background worker and outbox**, the
 **completed accounting core**, the **statements an accountant asks for**, the
-**security controls**, and **inventory** from the
+**security controls**, **inventory**, and **time and billing** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -23,8 +23,9 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 [ADR 0010](docs/adr/0010-at-least-once-and-who-decides.md),
 [ADR 0011](docs/adr/0011-the-same-books-read-two-ways.md),
 [ADR 0012](docs/adr/0012-the-statements-an-accountant-asks-for.md),
-[ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md), and
-[ADR 0014](docs/adr/0014-one-inventory-five-industries.md).
+[ADR 0013](docs/adr/0013-a-stolen-password-is-not-enough.md),
+[ADR 0014](docs/adr/0014-one-inventory-five-industries.md), and
+[ADR 0015](docs/adr/0015-an-hour-is-billed-once.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -520,6 +521,44 @@ always.**
   facts, and a margin quietly containing theft explains nothing. Every count
   needs a reason.
 
+### Time and billing (Phase 15)
+
+Professional services is the largest small-business segment, and `time_billing`
+was declared in Phase 0 and left empty. Unlike inventory it needs no new
+accounting concepts — a timesheet becomes an invoice line, and the invoice
+already exists.
+
+The claim: **an hour is billed once, or not at all.** The second half is the
+expensive one. Double-billing is a client dispute; *losing* an hour is revenue
+that was earned, recorded, and never charged for — and nobody notices, because
+nothing looks wrong on any report.
+
+- **The precondition is in the WHERE.** The update that marks time billed
+  carries `AND status = 'approved' AND invoice_id IS NULL`, inside the invoice's
+  own transaction. Two partners billing the same engagement at once both build
+  an invoice; only one update matches, and the loser's invoice rolls back
+  entire. A test runs them concurrently and asserts one invoice exists.
+- **Recording time posts nothing** — the same decision as a purchase order
+  posting nothing. Unbilled time is not revenue, and booking profit on your own
+  labour before anybody is billed is what flatters a firm into insolvency. The
+  pack's `1150 Unbilled Work in Progress` is there for firms whose policy is to
+  accrue it; the report reads the timesheet instead.
+- **Money comes from minutes, never displayed hours.** Ten minutes at $90 is
+  $15.00; via a rounded 0.167 hours it is $15.03, and forty of those is a
+  client asking why the lines do not add to the total.
+- **Rate resolution says where it looked** — entry, person-on-engagement,
+  engagement, person, list price — and returns the source, so "why $150 and not
+  $175" is answerable in the interface. Zero is a rate; `null` is the absence of
+  one.
+- **Grouping is presentation.** One line per person, per day, per kind of work,
+  or one for the lot — all four foot to the same total, because amounts are
+  summed from the entries rather than recomputed.
+- **A retainer is a liability**, not revenue on arrival — the commonest error in
+  services bookkeeping, and it flatters a quarter by the work still owed.
+  Drawing it down is capped at what is left *and* at what the invoice owes.
+- **Written-off time is kept, with a reason**, and stays in the utilization
+  denominator — so a firm cannot improve its numbers by giving work away.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -610,6 +649,7 @@ Coverage matches what spec §21 asks for:
 | `tests/statements.test.ts` | Account classification, including the two that look wrong and are right — accumulated depreciation in operating, and depreciation not being a timing difference; the cash flow statement reconciling to what the cash accounts moved, and an unpaid invoice as profit that is not yet cash; comparison windows including 29 February; an account surviving in only one column; a comparative balancing in every column; three cheques banked as one line, a processing fee, the same cheque refused twice, a deposit a fee has eaten, and a reversal making the receipts depositable again; a vendor credit reversing the cost on the bill's own account, a customer credit refused against a bill, and the two numbering series kept apart; an accrual not being an expense on a cash basis, an accrual settled straight from the bank still becoming one, a prepayment deducted when paid, a deposit taken in advance as revenue when it arrives, the transformation still balancing, and the caveat naming what it could not resolve; and a closed year reporting its drift rather than blocking the entry |
 | `tests/security.test.ts` | TOTP against RFC 6238's published vectors, base32 round-tripping, ±1 step of drift and no more, a used code refused inside its own window, and non-numeric codes rejected; secrets round-tripping under encryption with a fresh IV each time and a tampered ciphertext throwing rather than decrypting to something else; enrolment not switching on until a code has worked, the secret never stored in the clear, recovery codes single-use and never stored in the clear and invalidated when regenerated, the password required to switch MFA off, and a working factor never silently replaced; the challenge token rejecting tampering, dying when the password changes, and expiring; the network kept and the host discarded, lockout after repeated failures cleared by a success and not extended by retries, and the window expiring; signing out everywhere else keeping this session, ending a device-less session a device sweep would miss, a password change ending every other session, the company session length honoured, and a forged cookie rejected; CSV quoting fields that would otherwise shift every column, an export an accountant could rebuild the books from, the export recorded in two places, a role without ledger access refused, and one company's export containing nothing of another's; and the policy refusing settings that would lock everybody out |
 | `tests/inventory.test.ts` | FIFO taking oldest first against weighted average pooling, the parts summing to the whole across a thousand awkward quantities under both methods, consuming everything costing exactly the pool, a shortfall reported rather than thrown, receipt-date ties broken deterministically, and a return valued at what left; the subledger equalling the Inventory account after a busy month under both cost methods; the cost posting inside the invoice's transaction, a service line left alone, an empty shelf still recording the sale, and a return restored at its original cost while prices moved; a shortage booked to Shrinkage and not to Cost of Goods Sold, a count with no reason refused, a count that found the right quantity posting nothing, and a surplus valued at the current average; an order posting nothing, a receipt landing in Goods Received Not Invoiced rather than payables, a short shipment surfacing in the match, unbilled receipts itemised, and an order closing once every line is satisfied; and the guards — a service refused as stock, a negative cost refused, the module gate, and one company's stock invisible to another |
+| `tests/timebilling.test.ts` | Rate resolution most-specific-first with zero treated as a rate and null as its absence; money computed from minutes rather than displayed hours, and the three-cent divergence demonstrated; every duration format people type; markup in basis points; utilization measured against time recorded; recording time posting nothing; a description and a sane duration insisted on; the draft/submitted/approved path; billed time refusing to be edited; written-off time kept with a reason; **two concurrent billings producing exactly one invoice**, a second attempt finding nothing, the invoice footing to the preview, unapproved and non-billable time left alone, a cut-off date honoured, and the rate frozen at what was billed; all four groupings footing to the same total; an expense posting nothing and billing at cost plus markup to its own revenue account; a retainer as a liability, drawn down without cash moving, capped at what is left and what is owed, refused across clients, and its cash-basis limitation asserted and named; unbilled work with its age; and the guards |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1174,6 +1214,30 @@ key and the client proposal link — keep them for steps 22 and 24.
      again. FIFO follows what you actually paid, in order; weighted average pools it. The subledger
      still equals the ledger either way, which is the point.
 
+### Time and billing (Phase 15)
+
+164. **Switch time and billing on** — the professional-services pack does it itself; on any other,
+     **Settings → Modules**. A **Time** workspace appears.
+165. **Log an hour** — type `1.5`, `1:30`, or `90m`. The form echoes back what it understood, because
+     `1:30` and `1.30` are an easy thing to confuse and an expensive one. Check the trial balance
+     afterwards: nothing posted, because unbilled time is not revenue.
+166. **Approve it, then look at "Ready to bill"** — the value of work done and not yet charged for,
+     with the date of the oldest item. Two hours from last week is nothing; two hours from March
+     means the billing is broken.
+167. **Bill it** — pick how the lines are grouped and raise the invoice. Switch the grouping and
+     raise it again on another engagement: the totals are identical, because amounts come from the
+     entries rather than from the group.
+168. **Try to bill it twice** — refused, because there is no approved unbilled work left. The
+     protection underneath is stronger than the message: the update that marks time billed carries
+     its own precondition, so two people billing at the same instant produce one invoice.
+169. **Edit billed time** — refused. An invoice has gone to a client; correcting it is a credit note
+     and a fresh entry.
+170. **Write an hour off** — it needs a reason and it stays on the timesheet. Deleting it would make
+     the engagement look more profitable than it was.
+171. **Take a retainer** — it lands in *Client Retainers Held*, a liability. Check the P&L: no
+     revenue, because none has been earned. Then bill some work against it and watch the liability
+     fall without any cash moving.
+
 ## Project layout
 
 ```
@@ -1474,10 +1538,21 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Six of ten industry modules do nothing.** `job_costing`, `projects`, and now `inventory` are
-  implemented; `time_billing`, `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
+- **Five of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`, and
+  `time_billing` are implemented; `pos_import`, `properties`, `funds`, `appointments`, `vehicles`,
   and `manufacturing` are declared, switched on by the packs that ask for them, and have no
   workflows. The module settings page lists them under "Not built yet" rather than hiding them.
+- **A retainer is not modelled on a cash basis.** Strictly, cash basis has no unearned revenue —
+  money received in April is April's revenue. What happens instead is that the receipt has no
+  recognition entry to take accounts from, so it stays on the balance sheet and the caveat names
+  the amount. Guessing a revenue account would put income in a bucket nobody chose. A test asserts
+  the limitation, so it stays a named shortcoming.
+- **No timer, and no approval routing.** Time is typed after the fact, and anybody with journal
+  permission can approve anybody's time including their own.
+- **Billable expenses are not created from the transaction inbox.** A cost has to be marked
+  recoverable by hand, when the natural moment is categorizing the transaction it arrived on.
+- **Cost rates are recorded and unread.** Engagement profitability is what the column was added
+  for and no report uses it yet.
 - **Inventory has one location.** No warehouses, no bins, no transfers between them — which
   wholesale and multi-site retail both need. The movement table has the shape to carry them.
 - **No bill of materials.** The manufacturing pack gets stock without the ability to consume

@@ -62,7 +62,8 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
   inventory:
     'Stock quantities and valuation, purchase orders and receiving, cost of goods sold on sale, and counts.',
   projects: 'Jobs as an accounting dimension, so revenue and cost can be reported per job.',
-  time_billing: 'Timesheets that become billable lines on an invoice.',
+  time_billing:
+    'Timesheets with approval, reimbursable expenses, retainers, and invoices built from unbilled work.',
   pos_import: 'Daily sales summaries imported from a point-of-sale system.',
   properties: 'Units, leases, and recurring rent.',
   funds: 'Restricted and unrestricted fund tracking for nonprofits.',
@@ -85,7 +86,12 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
  * hidden, because a module that is silently absent is worse than one that says
  * so.
  */
-export const IMPLEMENTED_MODULES: IndustryModule[] = ['job_costing', 'projects', 'inventory']
+export const IMPLEMENTED_MODULES: IndustryModule[] = [
+  'job_costing',
+  'projects',
+  'inventory',
+  'time_billing',
+]
 
 type CompanyRow = { id: string; industry: Industry }
 
