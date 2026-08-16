@@ -11,7 +11,8 @@ This repository implements **Phase 0 (Foundation)**, **Phase 1 (Bookkeeping MVP)
 **completed accounting core**, the **statements an accountant asks for**, the
 **security controls**, **inventory**, **time and billing**,
 **accounting dimensions with the fixed asset register**, **bringing an
-existing business's books in**, and **accountant practice mode** from the
+existing business's books in**, **accountant practice mode**, and
+**transactional mail with password reset and invitations** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -29,8 +30,9 @@ existing business's books in**, and **accountant practice mode** from the
 [ADR 0014](docs/adr/0014-one-inventory-five-industries.md),
 [ADR 0015](docs/adr/0015-an-hour-is-billed-once.md),
 [ADR 0016](docs/adr/0016-the-parts-sum-to-the-whole.md),
-[ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md), and
-[ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md).
+[ADR 0017](docs/adr/0017-nothing-is-imported-until-all-of-it-can-be.md),
+[ADR 0018](docs/adr/0018-access-is-granted-never-claimed.md), and
+[ADR 0019](docs/adr/0019-a-reset-is-not-marketing-and-an-invitation-carries-no-password.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -693,6 +695,50 @@ than asserted.
   switch is recorded in the company being *entered*, because "who opened our
   books, and when" is the client's question.
 
+### Transactional mail, password reset and invitations (Phase 19)
+
+Two things deferred with a stated reason, and both reasons had expired. Phase
+13 left password reset out because *"a half-built reset flow is a bypass for
+everything above it"*; Phase 18 shipped a screen that asked an owner to type a
+colleague's first password and then tell them what it was — spec §14's "never
+share owner credentials" in a subtler form.
+
+- **A password reset is not marketing, and the type says so.** Phase 5's
+  `OutboundMessage` *requires* an unsubscribe URL; a `TransactionalMessage` has
+  no field to put one in. You cannot attach an unsubscribe link to a password
+  reset — which would offer to stop sending somebody the only mail that can let
+  them in — and nothing marketing-shaped can be pushed down this pipe to dodge
+  an unsubscribe. Somebody who unsubscribed from the newsletter in March still
+  gets back into their own books in August, and a test asserts exactly that.
+- **An invitation proves an address; it never carries a password.** No user and
+  no membership exist until the invitee clicks and chooses one, so a mistyped
+  address hands a stranger *nothing* rather than a working login. Somebody who
+  already has an account is not asked for a password at all — that page was
+  reached from an email, and asking there teaches the habit that gets people
+  phished.
+- **One token mechanism, three jobs**, because reset, company invitation and
+  practice invitation are the same sentence: *whoever can read this address may
+  do this one thing, once, soon.* Hashed at rest, spent by a
+  `WHERE redeemed_at IS NULL` claim inside the transaction that does the work,
+  and shorter-lived for a reset (an hour) than an invitation (a week).
+- **The shape of a token is a database constraint.** A company invitation must
+  name a company, a practice invitation a practice, a reset a user — and the
+  constraint caught two of this phase's own tests.
+- **The reset form is not an oracle.** Identical response whether or not the
+  address exists; even a rate-limit refusal is swallowed, because "you have
+  asked five times already" tells an attacker their guess was real.
+- **A reset is not an MFA bypass.** Enrolment is untouched, and the letter says
+  so plainly rather than leaving somebody to wonder. Completing one ends *every*
+  session, because the usual reason to reset is thinking somebody else has it.
+- **A practice invitee arrives able to work**, through the same helper the
+  added-by-hand route uses — two implementations of "which clients does a new
+  colleague reach" is how the two routes come to disagree, and the disagreement
+  would be somebody quietly retaining access.
+- **The mock provider prints to the terminal in development**, so `/forgot`
+  works with no mail server. Without it a developer who clicks it on their own
+  dev server is genuinely locked out: the token is hashed the moment it is
+  stored, and nothing anywhere can show them the link.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -788,6 +834,7 @@ Coverage matches what spec §21 asks for:
 | `tests/dimensions.test.ts` | Code normalization, a parent from another dimension refused, and a retired dimension keeping its history; values attached at posting time, **each line of a two-site entry keeping its own value**, a value from the wrong dimension or another company refused; **every row's columns summing to the ordinary profit and loss**, checked against a report built by a different query; untagged activity as a column rather than an omission, the Unassigned column dropped when nothing is untagged, an unused value left off the page, and each site getting its own bottom line; coverage measured on gross movement so offsetting amounts cannot hide, reported only for dimensions marked expected, and null when nothing happened; reclassifying leaving the trial balance untouched, replacing rather than duplicating, clearing back to Unassigned, and silently ignoring another company's lines; defaults filling an unset dimension, never overriding a choice, the more specific owner winning, and replacing rather than duplicating; and balance-sheet movement by value with no equity row |
 | `tests/importing.test.ts` | Quoted commas, embedded newlines, doubled quotes, CRLF and the byte-order mark Excel writes; the delimiter found by consistency so a tab-separated file of addresses is not shredded by its own commas; blank rows dropped, short rows padded, unclosed quotes and empty files refused; money in every shape an accounting package writes it, and **European notation, a comma that is not a thousands separator, and sub-cent precision all refused rather than guessed**; dates in five formats with the ambiguous ones settled by the row where it can and by a setting where it cannot, 31 February and 29 February in a non-leap year refused; a QuickBooks chart export mapped unasked, one header serving one field, missing required columns named; four hundred identical problems collapsed to one line; account types translated from what other systems call them and an unknown one refused; a duplicate account number refused, and an existing account's type never changed; contacts matched across `Acme, Inc.` and `Acme Inc` without merging `Acme Northwest` into `Acme North West`, a bad email warned about but imported, and an update filling gaps without blanking newer values; **a trial balance that does not balance refusing and posting nothing**, a balance for a non-existent account refused, a row with both a debit and a credit refused, a signed balance column read; **Opening Balance Equity clearing to exactly zero when the detail agrees**, and naming the $3,200 gap when it does not; an open invoice bringing its receivable without recognising revenue again; an unknown customer refused; ambiguous dates warned about across the file; undo removing only what it created, voiding entries rather than deleting them, refusing when an imported customer has since been invoiced, refusing twice, keeping the history, and one company's imports invisible to another |
 | `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; and one company's engagements invisible to another |
+| `tests/notify.test.ts` | **A transactional letter carrying no unsubscribe link**, in the type and at runtime; the URL written out in full so a person can read where it goes; a bounce recorded rather than swallowed; the hourly limit per address per kind, and an invitation not blocked by somebody hammering the reset form; tokens stored as hashes with only an eight-character prefix in the clear, **spent exactly once by two simultaneous claims**, a new one superseding the last, an hour for a reset against a week for an invitation, and old ones pruned while live ones survive; **the reset form saying the same thing whether or not the address exists**, and **reaching somebody who unsubscribed from marketing company-wide**; a reset changing the password, ending every session, and auditing into each company the person belongs to; the same link refused twice with the first password left standing; a link dying once the address is no longer theirs; a dead link reported before anybody types, and checking not spending it; **an invitation creating no user and no membership until it is accepted**, the offer shown before anybody types, the invitee's own password taking effect, a short password refused with the link still usable, **an existing account never asked for a password**, **one account created when the same link is clicked twice at once**, somebody already inside told rather than mailed, another company unable to withdraw the invitation by id, and a practice invitee landing with access at every client the firm already serves |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -1490,6 +1537,29 @@ key and the client proposal link — keep them for steps 22 and 24.
 196. **Try it from the other side.** As Robin, request access to a company and watch it sit there.
      A firm cannot give itself the books.
 
+### Transactional mail, reset and invitations (Phase 19)
+
+197. **As `owner@ridgeline.test`, open Settings → Who has access.** Priya Raman is waiting to be
+     accepted — an invitation the seed sent and nobody set a password for. The form above it has an
+     email, a name and a role, and no password field at all. That is the phase.
+198. **Open the invitation link the seed printed** (`/invite?token=…`) in a private window. It says
+     which books, in what role, at which address, *before* asking for anything — an invitation that
+     only says "you have been invited" gives nobody a way to notice it is for the wrong company.
+199. **Choose a password and accept.** You land in Ridgeline's inbox signed in as Priya, a
+     bookkeeper. Nobody else has ever known that password, and the audit log now has her name in it
+     rather than the owner's.
+200. **Click the same link again.** *That invitation has already been accepted.* The precondition is
+     in the write — `WHERE redeemed_at IS NULL` — so two simultaneous clicks create one account.
+201. **Go to `/forgot` and ask for a reset for `owner@ridgeline.test`.** The link is printed in the
+     terminal running `npm run dev`, because the mock provider is the whole outbox in development.
+     Then ask for a reset for an address that does not exist: the page says exactly the same thing.
+202. **Open the reset link.** Choose a new password. Every session signed in as Dana ends — leave a
+     second tab open on `/bookkeeping` and watch it land on the sign-in page — and the old password
+     stops working immediately. Reload the reset link: it is spent.
+203. **Withdraw an invitation.** Send one to any address, then withdraw it, then open its link. It
+     is dead, and no other company could have withdrawn it: the query is scoped, so an invitation id
+     is not a lever on somebody else's books.
+
 ## Project layout
 
 ```
@@ -1512,6 +1582,8 @@ src/
     settings/import/      The migration wizard and the opening-balance check
     settings/access/      Who can open these books, and one click to stop them
     practice/             The firm's own workspace — outside any company's chrome
+    forgot/, reset/       Password reset, both pages reachable without a session
+    invite/              Accepting an invitation and choosing a first password
     inventory/            Stock on hand, receiving, counts
     time/                 Timesheets, unbilled work, billing, retainers
     m/                    The mobile app — Today, review deck, receipts, devices
@@ -1553,6 +1625,7 @@ src/
     assets/               Depreciation schedules and the fixed asset register
     importing/            Delimited parsing, coercion, column mapping, opening balances
     practice/             Firms, engagements, company switching, the cross-tenant work queue
+    notify/               Transactional mail, single-use tokens, reset, invitations
     permissions/          Roles, permissions, overrides
     receivables/          Customers, vendors, invoices, bills, payments
     reconciliation/       Statement sessions, clearing, locking
@@ -1813,9 +1886,6 @@ Gaps within the phases already built:
   that has never amortized a prepayment gets it left on the balance sheet with a caveat naming the
   amount. Matching per item needs the accrual linked to its settlement the way
   `payment_applications` links a payment to its invoice.
-- **No password reset by email.** Two-factor, lockout, and a password change are built; "I forgot
-  my password" still needs the email provider wiring and a single-use token. A half-built reset flow
-  is a bypass for everything above it, so it is absent rather than approximate.
 - **No WebAuthn or passkeys.** TOTP works with any authenticator app and no hardware, but it is
   phishable in a way a passkey is not.
 - **`login_attempts` is never pruned.** The table grows with every failed sign-in on the internet
@@ -1826,8 +1896,8 @@ Gaps within the phases already built:
   so a firm that wants one junior on one client and not the other cannot say so. The largest gap in
   Phase 18.
 - **Engagements are found by name, not by an invitation link.** A client searches a directory of
-  practices and offers access; there is no emailed token, because there is still no transactional
-  email provider. A firm must already exist in the system before a client can invite them.
+  practices and offers access. People are now invited by email (Phase 19) but *firms* are not, so a
+  firm must already exist in the system before a client can invite them.
 - **The practice directory cannot be opted out of.** Name and contact email are visible to any
   signed-in user — deliberately not client counts, which would be a competitive-intelligence feed —
   but a firm cannot hide.
@@ -1835,6 +1905,23 @@ Gaps within the phases already built:
   company, which does cover practice members; a firm cannot impose one on its own staff.
 - **The practice work queue counts one thing** — transactions awaiting review. A firm chasing
   period-end also wants unreconciled accounts, open periods, and unposted drafts.
+- **The only mail adapter is the mock.** Every letter goes to a process-local array and, in
+  development, to the terminal. The seam is one interface and one variable, but nothing has been
+  sent over SMTP or through a real provider, so none of the delivery problems — DKIM, bounces,
+  complaint feedback loops, suppression at the provider — have been met.
+- **Bounced transactional mail is recorded, not surfaced.** `failedDeliveries` exists and no screen
+  calls it, so nobody is told when an invitation to a mistyped address never arrives.
+- **No email verification for a self-registered owner.** Invitees and resetters prove they own an
+  address; somebody registering a company still proves nothing. The mechanism to fix it now exists.
+- **No confirmed change of email.** Reset re-checks the current address, so the machinery is ready,
+  but changing your email is still a direct write with no confirmation to either address.
+- **`action_tokens` is pruned on demand, never on a schedule.** `pruneExpiredTokens` exists and the
+  Phase 10 queue is right there; nothing schedules it. Same shape as `login_attempts` above.
+- **Reset requests are rate-limited per address, not per IP.** It bounds using this application to
+  post mail at one stranger; a spread attempt across many addresses is not bounded at all.
+- **An invitation cannot be resent.** Withdraw and re-invite issues a new token and silently kills
+  the old link, and an invitation that expires vanishes from the list rather than showing as
+  expired — so an owner watching for somebody to accept sees the row disappear unexplained.
 - **No tool-calling loop.** Spec §12's tool layer is implemented as the suggestion queue plus
   permission-gated retrieval, not as a model invoking functions directly. Every consequential
   action here is one a person should confirm anyway. See ADR 0006.

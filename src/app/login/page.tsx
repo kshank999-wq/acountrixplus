@@ -34,7 +34,13 @@ export default async function LoginPage({
         <LoginForm next={destination} />
       </div>
 
-      <p className="mt-6 text-center text-sm text-muted">
+      <p className="mt-4 text-center text-sm">
+        <Link href="/forgot" className="text-muted hover:underline">
+          Forgot your password?
+        </Link>
+      </p>
+
+      <p className="mt-2 text-center text-sm text-muted">
         New here?{' '}
         <Link href="/register" className="font-medium text-brand hover:underline">
           Set up a company

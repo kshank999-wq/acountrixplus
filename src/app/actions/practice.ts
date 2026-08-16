@@ -14,7 +14,7 @@ import {
   removePracticeMember,
 } from '@/modules/practice/service'
 import { switchCompany } from '@/modules/practice/switching'
-import { registerUser } from '@/modules/tenancy/onboarding'
+import { inviteToPractice } from '@/modules/notify/invitations'
 
 /** Server actions for accountant practice mode (spec §14, Phase 18). */
 
@@ -164,37 +164,33 @@ export async function endEngagementAction(
   })
 }
 
-export async function addPracticeMemberAction(input: unknown): Promise<ActionResult> {
+/**
+ * Invites somebody to the firm.
+ *
+ * Replaces the Phase 18 version, which took a first password and set it *for*
+ * them — spec §14's "never share credentials" warning in a subtler form. The
+ * invitee now chooses a password nobody else has ever known, and nothing is
+ * granted until they do.
+ */
+export async function inviteStaffAction(input: unknown): Promise<ActionResult> {
   return run(async () => {
     const actor = await requireActor()
     const parsed = z
       .object({
         practiceId: uuid,
-        name: z.string().trim().min(1, 'Who are they?'),
+        name: z.string().trim().optional(),
         email: z.string().trim().email('That is not an email address.'),
-        password: z.string().min(12, 'A first password needs at least twelve characters.'),
-        practiceRole: z.enum(['owner', 'staff']).optional(),
       })
       .parse(input)
 
-    const user = await registerUser({
-      name: parsed.name,
-      email: parsed.email,
-      password: parsed.password,
-    })
-
-    const result = await addPracticeMember(
+    const result = await inviteToPractice(
       { userId: actor.userId, userName: actor.userName },
-      {
-        practiceId: parsed.practiceId,
-        userId: user.id,
-        practiceRole: parsed.practiceRole ?? 'staff',
-      },
+      parsed,
     )
 
-    return `${parsed.name} added, and can reach ${result.grantedAtClients} ${
-      result.grantedAtClients === 1 ? 'client' : 'clients'
-    } straight away.`
+    return result.alreadyMember
+      ? 'They already work here — nothing sent.'
+      : `Invitation sent to ${parsed.email}. They choose their own password; you never see it.`
   })
 }
 

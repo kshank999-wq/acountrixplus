@@ -25,6 +25,8 @@ import {
   respondToEngagement,
 } from '@/modules/practice/service'
 import { practiceWorkQueue } from '@/modules/practice/switching'
+import { inviteToCompany } from '@/modules/notify/invitations'
+import { mockTransactionalProvider } from '@/modules/notify/transactional'
 import { connectInstitution, syncConnection } from '@/modules/banking/sync'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
 import { categorize, listInbox } from '@/modules/bookkeeping/transactions'
@@ -1652,6 +1654,32 @@ async function main() {
       'Each granted separately; neither can be seen while in the other.',
   )
 
+  // --- Phase 19: an invitation that carries no password ---------------------
+  //
+  // Left pending on purpose, so /settings/access has something in its "waiting
+  // to be accepted" list and the link below can be followed end to end. Nobody
+  // has typed a password for Priya, and nobody will.
+  await inviteToCompany(ctx, {
+    email: 'priya@example.test',
+    name: 'Priya Raman',
+    role: 'bookkeeper',
+  })
+
+  // The link is printed because it cannot be recovered later: the token is
+  // hashed at rest, so this is the only moment anybody can read it. No reset is
+  // seeded — following one would change the password printed at the end of this
+  // script. Use /forgot and read the link from the dev server's terminal, which
+  // is what the in-memory provider logs it for.
+  const outbox = mockTransactionalProvider()
+  const invitation =
+    outbox.lastTo('priya@example.test')?.text.match(/https?:\/\/\S+/)?.[0] ?? '(nothing sent)'
+
+  console.log(
+    `  Transactional mail: ${outbox.sent.length} letters in the in-memory outbox, ` +
+      'none carrying an unsubscribe link — a password reset is not marketing.',
+  )
+  console.log(`  Invitation waiting for Priya (no password was set for her):\n    ${invitation}`)
+
   // Reported here rather than where Phase 12 built it, because Phase 16 buys
   // two vehicles further down and the investing section was printed as $0.00
   // while the finished books showed six figures of it. A summary that was true
@@ -1711,6 +1739,8 @@ async function main() {
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')
+  console.log('  /forgot               ask for a reset; the link is printed in this terminal')
+  console.log('  /invite?token=…       Priya’s invitation, printed above — she picks her own password')
   console.log('')
   console.log('Then, in a second terminal:')
   console.log('  npm run worker        the thing that actually drains the queue')

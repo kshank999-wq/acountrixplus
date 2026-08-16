@@ -200,21 +200,14 @@ export async function addPracticeMember(
         },
       })
 
-    const live = await tx
-      .select()
-      .from(practiceEngagements)
-      .where(
-        and(
-          eq(practiceEngagements.practiceId, input.practiceId),
-          eq(practiceEngagements.status, 'active'),
-        ),
-      )
+    const grantedAtClients = await grantAtLiveEngagements(
+      tx,
+      input.practiceId,
+      input.userId,
+      input.defaultRole ?? 'accountant',
+    )
 
-    for (const engagement of live) {
-      await grantMembership(tx, engagement, input.userId, input.defaultRole ?? 'accountant')
-    }
-
-    return { grantedAtClients: live.length }
+    return { grantedAtClients }
   })
 }
 
@@ -506,6 +499,37 @@ export async function respondToEngagement(
 
     return { status: 'active' as const, membershipsGranted: granted }
   })
+}
+
+/**
+ * Grants one person a membership at every client the firm currently serves.
+ *
+ * Exported so the invitation flow can call it: somebody who joins a firm by
+ * accepting an emailed link should reach the same clients as somebody the
+ * owner added by hand, and two implementations of that rule is how the two
+ * paths come to differ.
+ */
+export async function grantAtLiveEngagements(
+  tx: Executor,
+  practiceId: string,
+  userId: string,
+  defaultRole: Role,
+): Promise<number> {
+  const live = await tx
+    .select()
+    .from(practiceEngagements)
+    .where(
+      and(
+        eq(practiceEngagements.practiceId, practiceId),
+        eq(practiceEngagements.status, 'active'),
+      ),
+    )
+
+  let granted = 0
+  for (const engagement of live) {
+    if (await grantMembership(tx, engagement, userId, defaultRole)) granted += 1
+  }
+  return granted
 }
 
 /**

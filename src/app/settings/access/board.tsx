@@ -9,6 +9,7 @@ import {
   type ActionResult,
 } from '@/app/actions/practice'
 import { findPracticesAction } from '@/app/actions/practice-search'
+import { inviteToCompanyAction, withdrawInvitationAction } from '@/app/actions/notify'
 
 type Holder = {
   userId: string
@@ -31,7 +32,26 @@ type Engagement = {
   endedAt: string | null
 }
 
+type Invitation = {
+  id: string
+  email: string
+  invitedName: string | null
+  role: string
+  expiresAt: string
+}
+
 const ROLES = ['readonly', 'bookkeeper', 'accountant', 'manager'] as const
+
+/** What a person can be invited as. Wider than the ceiling offered to a firm. */
+const MEMBER_ROLES = [
+  'readonly',
+  'sales',
+  'marketing',
+  'bookkeeper',
+  'accountant',
+  'manager',
+  'owner',
+] as const
 
 /**
  * The client's side of practice mode.
@@ -42,10 +62,12 @@ const ROLES = ['readonly', 'bookkeeper', 'accountant', 'manager'] as const
 export function AccessBoard({
   holders,
   engagements,
+  invitations,
   canManage,
 }: {
   holders: Holder[]
   engagements: Engagement[]
+  invitations: Invitation[]
   canManage: boolean
 }) {
   const router = useRouter()
@@ -184,6 +206,10 @@ export function AccessBoard({
           </p>
         )}
       </Card>
+
+      {canManage && (
+        <InviteCard invitations={invitations} act={act} pending={pending} />
+      )}
 
       {active.length > 0 && (
         <Card title="Practices with access" subtitle="You can end any of these without asking them.">
@@ -333,6 +359,114 @@ export function AccessBoard({
         </Card>
       )}
     </div>
+  )
+}
+
+/**
+ * Invite a colleague onto these books.
+ *
+ * Replaces the form that asked an owner to type somebody else's first password.
+ * There is no password field here at all — that is the point of the phase, not
+ * an omission, so the note under the button says so rather than leaving people
+ * hunting for the field they remember.
+ */
+function InviteCard({
+  invitations,
+  act,
+  pending,
+}: {
+  invitations: Invitation[]
+  act: (fn: () => Promise<ActionResult>) => void
+  pending: boolean
+}) {
+  const [email, setEmail] = useState('')
+  const [name, setName] = useState('')
+  const [role, setRole] = useState<string>('bookkeeper')
+
+  return (
+    <Card
+      title="Invite somebody to these books"
+      subtitle="They get a link, choose their own password, and appear above once they accept."
+    >
+      <div className="space-y-3 px-4 py-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <label className="text-xs text-muted">
+            <span className="mb-1 block">Email</span>
+            <input
+              value={email}
+              onChange={(event) => setEmail(event.target.value)}
+              placeholder="dana@example.com"
+              className="field py-1.5 text-sm"
+            />
+          </label>
+          <label className="text-xs text-muted">
+            <span className="mb-1 block">Name (optional)</span>
+            <input
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Dana Chen"
+              className="field py-1.5 text-sm"
+            />
+          </label>
+          <label className="text-xs text-muted">
+            <span className="mb-1 block">Role</span>
+            <select
+              value={role}
+              onChange={(event) => setRole(event.target.value)}
+              className="field py-1.5 text-sm"
+            >
+              {MEMBER_ROLES.map((option) => (
+                <option key={option} value={option}>
+                  {option}
+                </option>
+              ))}
+            </select>
+          </label>
+          <button
+            className="btn btn-primary"
+            disabled={pending || !email.includes('@')}
+            onClick={() => {
+              act(() => inviteToCompanyAction({ email, name, role }))
+              setEmail('')
+              setName('')
+            }}
+          >
+            Send an invitation
+          </button>
+        </div>
+
+        <p className="text-xs text-faint">
+          You never see or set their password. Nothing is granted until they accept, so a mistyped
+          address hands a stranger nothing.
+        </p>
+
+        {invitations.length > 0 && (
+          <div className="border-t border-line pt-3">
+            <p className="mb-1 text-xs uppercase tracking-wide text-muted">Waiting to be accepted</p>
+            <ul className="divide-y divide-line">
+              {invitations.map((invitation) => (
+                <li key={invitation.id} className="flex flex-wrap items-center gap-3 py-2 text-sm">
+                  <span className="min-w-0 flex-1">
+                    {invitation.invitedName ? `${invitation.invitedName} · ` : ''}
+                    {invitation.email}
+                    <span className="block text-xs text-faint">
+                      as {invitation.role} · link expires {invitation.expiresAt}
+                    </span>
+                  </span>
+                  <button
+                    className="btn btn-ghost text-xs text-danger"
+                    disabled={pending}
+                    onClick={() => act(() => withdrawInvitationAction(invitation.id))}
+                  >
+                    Withdraw
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </div>
+    </Card>
   )
 }
 

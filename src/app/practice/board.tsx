@@ -3,10 +3,10 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
-  addPracticeMemberAction,
   endEngagementAction,
   enterClientAction,
   removePracticeMemberAction,
+  inviteStaffAction,
   respondToEngagementAction,
   type ActionResult,
 } from '@/app/actions/practice'
@@ -321,38 +321,27 @@ function StaffForm({
 }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
 
   return (
     <div className="mt-3 space-y-3">
-      <div className="grid gap-3 sm:grid-cols-3">
-        <Field label="Name">
+      <div className="grid gap-3 sm:grid-cols-2">
+        <Field label="Name" hint="Optional — they can correct it.">
           <input value={name} onChange={(e) => setName(e.target.value)} className="field" />
         </Field>
         <Field label="Email">
           <input value={email} onChange={(e) => setEmail(e.target.value)} className="field" />
         </Field>
-        <Field label="First password" hint="They change it when they sign in.">
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            className="field"
-          />
-        </Field>
       </div>
       <button
         className="btn btn-primary"
-        disabled={pending || !name.trim() || !email.trim() || password.length < 12}
-        onClick={() =>
-          act(() => addPracticeMemberAction({ practiceId, name, email, password }))
-        }
+        disabled={pending || !email.includes('@')}
+        onClick={() => act(() => inviteStaffAction({ practiceId, name, email }))}
       >
-        Add them
+        Send an invitation
       </button>
       <p className="text-xs text-faint">
-        They get their own account. Sharing one login is how an audit trail stops being able to say
-        who did anything.
+        They get a link and choose their own password — you never see it and never set it. Nothing
+        is granted until they accept.
       </p>
     </div>
   )

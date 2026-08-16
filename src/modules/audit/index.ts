@@ -60,6 +60,11 @@ export type AuditAction =
   | 'expense.mark_billable'
   | 'retainer.receive'
   | 'retainer.apply'
+  // Transactional mail, invitations and password reset (spec §19, Phase 19)
+  | 'password.reset'
+  | 'invitation.send'
+  | 'invitation.accept'
+  | 'invitation.withdraw'
   // Accountant practice mode (spec §14, Phase 18)
   | 'engagement.offer'
   | 'engagement.accept'

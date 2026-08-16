@@ -2,6 +2,7 @@ import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { engagementsForCompany, whoHasAccess } from '@/modules/practice/service'
+import { companyInvitations } from '@/modules/notify/invitations'
 import { SETTINGS_NAV } from '../nav'
 import { AccessBoard } from './board'
 
@@ -29,9 +30,10 @@ export default async function AccessPage() {
     )
   }
 
-  const [holders, engagements] = await Promise.all([
+  const [holders, engagements, invitations] = await Promise.all([
     whoHasAccess(actor),
     engagementsForCompany(actor),
+    companyInvitations(actor),
   ])
 
   return (
@@ -60,6 +62,13 @@ export default async function AccessPage() {
           note: engagement.note,
           requestedAt: engagement.requestedAt.toISOString().slice(0, 10),
           endedAt: engagement.endedAt ? engagement.endedAt.toISOString().slice(0, 10) : null,
+        }))}
+        invitations={invitations.map((invitation) => ({
+          id: invitation.id,
+          email: invitation.email,
+          invitedName: invitation.invitedName,
+          role: invitation.role ?? 'readonly',
+          expiresAt: invitation.expiresAt.toISOString().slice(0, 10),
         }))}
         canManage={can(actor, 'company:manage')}
       />

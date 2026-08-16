@@ -21,6 +21,16 @@ export default {
         positive: 'rgb(var(--positive) / <alpha-value>)',
         negative: 'rgb(var(--negative) / <alpha-value>)',
         warning: 'rgb(var(--warning) / <alpha-value>)',
+        // Aliases. `positive`/`negative` read as *a number went up or down*,
+        // which is right on a variance column and wrong on "that link has
+        // expired", so screens kept reaching for `success`/`danger` — and got
+        // no CSS at all, because Tailwind only emits classes it can see. Nine
+        // screens have been rendering their error messages in body ink since
+        // Phase 12 as a result. Naming them is cheaper and more honest than
+        // renaming every call site to a word that does not fit.
+        success: 'rgb(var(--positive) / <alpha-value>)',
+        danger: 'rgb(var(--negative) / <alpha-value>)',
+        fg: 'rgb(var(--ink) / <alpha-value>)',
       },
       fontFamily: {
         sans: ['ui-sans-serif', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
