@@ -33,6 +33,7 @@ export async function AppShell({
     | 'manufacturing'
     | 'takings'
     | 'appointments'
+    | 'shop'
     | 'payroll'
     | 'marketing'
     | 'studio'
@@ -90,6 +91,13 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'appointments')
     : false
 
+  // Phase 30, the tenth module. Its own workspace rather than a tab under Jobs:
+  // a garage's question is "what is on the ramp and may I bill it", and a job
+  // list answers neither half.
+  const shopEnabled = can(actor, 'jobs:view')
+    ? await moduleEnabled(actor.companyId, 'vehicles')
+    : false
+
   // Practice mode (Phase 18). Both reads are keyed on the user rather than the
   // company, which is the whole point — they are the only two things on this
   // page that are about the person instead of the books they are looking at.
@@ -120,6 +128,7 @@ export async function AppShell({
       label: 'Appointments',
       show: appointmentsEnabled,
     },
+    { key: 'shop', href: '/shop', label: 'The shop', show: shopEnabled },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

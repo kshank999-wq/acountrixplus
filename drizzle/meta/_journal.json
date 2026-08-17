@@ -211,6 +211,13 @@
       "when": 1786982065624,
       "tag": "0029_phase29_appointments",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "7",
+      "when": 1786986246719,
+      "tag": "0030_phase30_vehicles",
+      "breakpoints": true
     }
   ]
 }

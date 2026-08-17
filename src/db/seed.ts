@@ -13,6 +13,7 @@ import {
   campaignRecipients,
   chartAccounts,
   contacts,
+  customers,
   documents,
   financialAccounts,
   journalEntries,
@@ -68,6 +69,14 @@ import {
   giftCardPosition,
   payoutPosition,
 } from '@/modules/appointments/reporting'
+import {
+  addLine,
+  addVehicle,
+  authorise,
+  completeRepairOrder,
+  openRepairOrder,
+} from '@/modules/vehicles/service'
+import { authorisationsAgree, openOrders, shopMix } from '@/modules/vehicles/reporting'
 import { listRentCharges } from '@/modules/properties/billing'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
@@ -2561,6 +2570,190 @@ async function main() {
       `${formatCentsPlain(cardsHeld.ledgerCents)} — ${cardsHeld.agrees ? 'agrees' : 'DISAGREES'}.`,
   )
 
+  // --- Phase 30: the estimate nobody may bill past --------------------------
+  //
+  // A garage, and the tenth of ten industry modules. The automotive pack turns
+  // on job costing, inventory and vehicles together — a repair order needs
+  // parts off a shelf, so this company gets both.
+  const shop = await registerCompany({
+    companyName: 'Ashgrove Motors',
+    industry: 'automotive',
+    userName: 'Marek Dvořák',
+    email: 'marek@ashgrovemotors.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const shopCtx: ActorContext = {
+    userId: shop.user.id,
+    userName: shop.user.name,
+    companyId: shop.company.id,
+    role: 'owner',
+  }
+
+  await db.insert(financialAccounts).values({
+    companyId: shop.company.id,
+    chartAccountId: (await accountByNumber(shop.company.id, '1000'))!.id,
+    name: 'Workshop Current Account',
+    mask: '8821',
+    kind: 'checking',
+    providerAccountId: 'seed-ashgrove-current',
+  })
+
+  const [shopCustomer] = await db
+    .insert(customers)
+    .values([
+      { companyId: shop.company.id, name: 'Priya Raman' },
+      { companyId: shop.company.id, name: 'Tomasz Lewandowski' },
+    ])
+    .returning()
+
+  // A part on the shelf, bought at two prices so the cost of what is fitted
+  // comes from the lots rather than from a price list.
+  const shopParts = await accountByNumber(shop.company.id, '1480')
+  const shopPartsRevenue = await accountByNumber(shop.company.id, '4610')
+  const shopPayable = await accountByNumber(shop.company.id, '2000')
+
+  const [brakePads] = await db
+    .insert(serviceItems)
+    .values({
+      companyId: shop.company.id,
+      code: 'PADS-F',
+      name: 'Brake pads, front',
+      unit: 'set',
+      unitPriceCents: 8_000,
+      unitCostCents: 3_000,
+      isInventoried: true,
+      chartAccountId: shopPartsRevenue!.id,
+      inventoryAccountId: shopParts!.id,
+    })
+    .returning()
+
+  await receiveStock(shopCtx, {
+    itemId: brakePads.id,
+    quantityMilli: 6_000,
+    unitCostCents: 3_000,
+    receivedOn: '2026-04-20',
+    creditAccountId: shopPayable!.id,
+  })
+
+  const golf = await addVehicle(shopCtx, {
+    customerId: shopCustomer.id,
+    registration: 'YK21 ZRT',
+    vin: 'WVWZZZAUZMW123456',
+    make: 'Volkswagen',
+    model: 'Golf',
+    year: 2021,
+    odometerMiles: 48_000,
+  })
+
+  // The job that ran over. Booked in for brakes at £180 agreed at the counter;
+  // the technician finds a seized caliper, and the bill would come to £355.
+  const overrun = await openRepairOrder(shopCtx, {
+    vehicleId: golf.id,
+    openedOn: '2026-05-04',
+    complaint: 'Grinding from the front when braking',
+    odometerIn: 48_260,
+  })
+
+  await authorise(shopCtx, {
+    repairOrderId: overrun.id,
+    amountCents: 18_000,
+    channel: 'in_person',
+    approvedBy: 'Priya Raman',
+    notes: 'Signed the estimate at the counter',
+  })
+
+  await addLine(shopCtx, {
+    repairOrderId: overrun.id,
+    kind: 'labour',
+    description: 'Replace front pads',
+    quantityMilli: 1_500,
+    unitPriceCents: 9_000,
+  })
+  await addLine(shopCtx, {
+    repairOrderId: overrun.id,
+    kind: 'part',
+    description: 'Brake pads, front',
+    itemId: brakePads.id,
+    quantityMilli: 1_000,
+    unitPriceCents: 8_000,
+  })
+  // The extra work nobody has agreed to yet: a seized caliper and the discs
+  // sent out to be skimmed. £355 against £180 authorised.
+  await addLine(shopCtx, {
+    repairOrderId: overrun.id,
+    kind: 'labour',
+    description: 'Free off seized nearside caliper',
+    quantityMilli: 1_000,
+    unitPriceCents: 9_000,
+  })
+  await addLine(shopCtx, {
+    repairOrderId: overrun.id,
+    kind: 'sublet',
+    description: 'Discs skimmed — Bellway Machining',
+    unitPriceCents: 6_000,
+    subletCostCents: 4_000,
+  })
+
+  // The phone call. £175 more, and now it can be billed.
+  await authorise(shopCtx, {
+    // £365 of work against £180 already agreed. The number read down the phone
+    // is the *extra*, which is what the customer is being asked to approve.
+    repairOrderId: overrun.id,
+    amountCents: 18_500,
+    channel: 'phone',
+    approvedBy: 'Priya Raman',
+    notes: 'Rang at 14:20, explained the caliper and the skim',
+  })
+
+  const billed = await completeRepairOrder(shopCtx, {
+    repairOrderId: overrun.id,
+    completedOn: '2026-05-06',
+    odometerOut: 48_272,
+  })
+
+  // A second order left open and over its authority, so the board has
+  // something red on it and the demo has something to ring about.
+  const awaitingCall = await openRepairOrder(shopCtx, {
+    vehicleId: golf.id,
+    openedOn: '2026-05-18',
+    complaint: 'Service and MOT',
+    odometerIn: 49_100,
+  })
+  await authorise(shopCtx, {
+    repairOrderId: awaitingCall.id,
+    amountCents: 12_000,
+    channel: 'phone',
+    approvedBy: 'Priya Raman',
+  })
+  await addLine(shopCtx, {
+    repairOrderId: awaitingCall.id,
+    kind: 'labour',
+    description: 'Service',
+    quantityMilli: 1_000,
+    unitPriceCents: 12_000,
+  })
+  await addLine(shopCtx, {
+    repairOrderId: awaitingCall.id,
+    kind: 'labour',
+    description: 'Rear brakes, found on inspection',
+    quantityMilli: 1_000,
+    unitPriceCents: 8_500,
+  })
+
+  const shopBoard = await openOrders(shopCtx)
+  const shopMade = await shopMix(shopCtx)
+  const approvals = await authorisationsAgree(shopCtx)
+  const stuck = shopBoard.filter((row) => !row.withinAuthority)
+
+  console.log(
+    `  Ashgrove Motors: ${formatCentsPlain(billed.totals.totalCents)} billed on ${overrun.number} ` +
+      `against ${formatCentsPlain(18_000 + 18_500)} authorised in two goes — ` +
+      `${formatCentsPlain(shopMade.labourCents)} labour, ${formatCentsPlain(shopMade.partsCents)} parts, ` +
+      `${formatCentsPlain(shopMade.subletCents)} sublet. ${stuck.length} order waiting on a phone call. ` +
+      `Approvals ${approvals.agrees ? 'agree' : 'DISAGREE'} with what the orders claim.`,
+  )
+
   // --- Phase 19: an invitation that carries no password ---------------------
   //
   // Left pending on purpose, so /settings/access has something in its "waiting
@@ -2670,6 +2863,9 @@ async function main() {
   )
   console.log(
     '  /appointments         sign in as delphine@fenwickrow.test — a diary, the splits, and a gift card',
+  )
+  console.log(
+    '  /shop                 sign in as marek@ashgrovemotors.test — a job that ran over its estimate',
   )
   console.log('  /accounting/documents  every file, what it hangs on, and the open questions')
   console.log('  /crm/work             follow-ups: late, due, and the ones nobody claimed')

@@ -54,6 +54,9 @@ export const journalSourceEnum = pgEnum('journal_source', [
   // cards" are two questions a practice asks constantly, and neither should be a
   // text search through memos.
   'appointment',
+  // Phase 30. A repair order billed. Named for the Phase 9 reason: "show me
+  // every job off the ramp" should be a filter, not a text search.
+  'repair',
 ])
 
 /**

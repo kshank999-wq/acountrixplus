@@ -123,6 +123,12 @@ export type AuditAction =
   // earlier — §19 asks for both to be reconstructable.
   | 'appointment.complete'
   | 'giftcard.redeem'
+  // Vehicles (spec §5, Phase 30). Who authorised what is the whole evidentiary
+  // content of a repair order, and an odometer going backwards is the one event
+  // in this application that may need explaining to somebody official.
+  | 'repair.authorise'
+  | 'repair.complete'
+  | 'vehicle.odometer_rollback'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became

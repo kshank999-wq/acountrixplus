@@ -68,8 +68,8 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
   properties:
     'Properties and units, tenancies, a monthly rent run, and security deposits held as a liability.',
   funds: 'Restricted and unrestricted fund tracking for nonprofits.',
-  appointments: 'Scheduling that feeds the invoice.',
-  vehicles: 'Per-vehicle cost and mileage tracking.',
+  appointments: 'A diary, practitioner splits, and gift cards held as a liability.',
+  vehicles: 'Customer vehicles, repair orders, and the estimate nobody may bill past.',
   manufacturing: 'Bills of materials and work orders.',
 }
 
@@ -82,10 +82,10 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
  * wholesaler's warehouse are the same perpetual inventory with different words
  * on the screen, which is what the terminology map is for.
  *
- * The rest are declared, switched on by the packs that ask for them, and do
- * nothing. Listed under "Not built yet" on the settings page rather than
- * hidden, because a module that is silently absent is worse than one that says
- * so.
+ * As of Phase 30 there is no "rest": all ten are implemented, and the settings
+ * page's "Not built yet" section is empty. It is kept rather than deleted,
+ * because the next module declared will need it — and a module that is
+ * silently absent is worse than one that says so.
  */
 export const IMPLEMENTED_MODULES: IndustryModule[] = [
   'job_costing',
@@ -111,6 +111,9 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   // share of it, and gift cards as the liability they are. Two more industry
   // rows: healthcare and personal care.
   'appointments',
+  // Phase 30, and the tenth of ten. A customer's vehicle, a repair order
+  // against it, and the rule that nobody bills past what was authorised.
+  'vehicles',
 ]
 
 type CompanyRow = { id: string; industry: Industry }
