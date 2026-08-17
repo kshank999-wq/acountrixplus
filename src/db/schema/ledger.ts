@@ -40,6 +40,12 @@ export const journalSourceEnum = pgEnum('journal_source', [
   // text search through memos.
   'payroll',
   'remittance',
+  // Phase 26. A contribution and a release are named for the Phase 9 reason:
+  // "show me every donation" and "show me every release of restriction" are
+  // the two questions a charity's auditor opens with, and neither should be a
+  // text search through memos.
+  'contribution',
+  'release',
 ])
 
 /**

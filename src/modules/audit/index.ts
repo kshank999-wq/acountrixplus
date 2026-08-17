@@ -104,6 +104,16 @@ export type AuditAction =
   | 'deposit.receive'
   | 'deposit.refund'
   | 'deposit.apply'
+  // Fund accounting (spec §5, Phase 26). A release is the moment a charity
+  // says a donor's condition has been met, which is a judgement rather than a
+  // calculation — so who made it, for which fund and for how much is exactly
+  // the privileged decision §19 asks to be able to reconstruct.
+  | 'fund.create'
+  | 'fund.update'
+  | 'fund.close'
+  | 'fund.release'
+  | 'contribution.record'
+  | 'contribution.receive'
   // Inventory (spec §5, Phase 14)
   | 'stock.adjust'
   | 'stock.receive'

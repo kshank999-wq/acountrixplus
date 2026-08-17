@@ -96,6 +96,9 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   // and no per-property report, because a property is a dimension and Phase 16
   // already reports on those.
   'properties',
+  // Phase 26. Funds, contributions, pledges and the release run — and, for the
+  // same reason, no per-fund profit and loss.
+  'funds',
 ]
 
 type CompanyRow = { id: string; industry: Industry }

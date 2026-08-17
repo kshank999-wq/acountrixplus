@@ -16,8 +16,9 @@ existing business's books in**, **accountant practice mode**,
 **attachments and accountant notes on a content-addressed object store**,
 **server-side PDF generation with immutable sent-document snapshots**, the
 **communications log with the follow-up list**, **property management**, a
-**retention policy with the scheduled work six phases owed**, and
-**per-client staff assignment inside a firm** from the
+**retention policy with the scheduled work six phases owed**,
+**per-client staff assignment inside a firm**, and **fund accounting for
+nonprofits** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -43,7 +44,8 @@ existing business's books in**, **accountant practice mode**,
 [ADR 0022](docs/adr/0022-what-was-said-and-what-was-promised.md), and
 [ADR 0023](docs/adr/0023-somebody-elses-money.md), and
 [ADR 0024](docs/adr/0024-nothing-grows-for-ever-and-nothing-waits-for-somebody-to-look.md), and
-[ADR 0025](docs/adr/0025-a-firm-does-not-put-everybody-on-everything.md).
+[ADR 0025](docs/adr/0025-a-firm-does-not-put-everybody-on-everything.md), and
+[ADR 0026](docs/adr/0026-a-restriction-is-the-donors-not-the-charitys.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1037,6 +1039,52 @@ overrides", and this is them.
   deletes their membership in the same transaction, and `resolveSession` has re-read the membership
   on every request since Phase 13. No session invalidation, no token version, no cache to bust.
 
+### Money given for a purpose (Phase 26)
+
+`funds` has been a declared industry module since Phase 0, switched on by the nonprofit pack, doing
+nothing — and so have the nine accounts that pack installs. This is the fifth of §5's fourteen rows
+to get a real module, and the one least like the others: a job, a stock item and a tenancy are
+things a business *does*, while a restriction is a statement about what it is **allowed to do with
+money it already holds**. The constraint belongs to somebody who is not the user.
+
+- **A fund is a dimension value, and there is no per-fund profit and loss.** The same trick as a
+  property, and the absence is the design: a bill coded to the roof appeal by a bookkeeper who has
+  never opened the funds screen is spending against the roof appeal, and earns its release. A
+  module that only counted expenditure booked through its own API would under-release exactly the
+  charities big enough to employ a bookkeeper.
+- **A fund is not a bank account.** Restricted money sits in the same current account as everything
+  else; the restriction is a promise about what the charity may do, not a statement about where the
+  money is. Making a fund an account would force an internal transfer on every supplier payment and
+  would report as solvent a charity that had spent its endowment.
+- **Release the lesser of what was given and what was spent.** One comparison, and the whole phase.
+  Releasing the spend regardless of the balance drives a fund negative, which on a balance sheet
+  reads as a donor owing the charity money. Releasing the balance regardless of the spend reports a
+  condition met that has not been met.
+- **A release changes no total.** The debit and the credit are both income accounts and they sum to
+  zero, so the year's income is identical either side of a run — what changes is which column it
+  sits in. Two accounts rather than one signed number, because a reader has to be able to see that
+  £400 left the restricted column *because* £400 arrived in the unrestricted one.
+- **A promise is revenue on the day it is made.** An unconditional pledge is a receivable: a charity
+  told in December it will get £50,000 in March has the revenue in December. Waiting for the cheque
+  would report the year the appeal succeeded as the worse year. The consequence is the part that is
+  easy to get wrong — **receiving a pledge posts no revenue at all**, and an entry there that
+  touched income would double-count in a way that reconciles perfectly: the bank agrees, the fund
+  agrees, and only the income for the year is wrong by the size of the appeal.
+- **An endowment's principal is never released.** A donor who gave money to be held forever did not
+  give money to be spent, and a charity that released principal as it spent would report a growing
+  unrestricted balance made entirely of money it may not touch.
+- **The restriction cannot be edited.** `updateFund` does not take one, and there is no other way to
+  change it. A fund whose class could be edited would let a charity move money between the two
+  columns of its balance sheet without posting an entry anybody could see.
+- **An overspend is recorded, not hidden and not blocked.** A charity really can spend more on a
+  programme than was given for it. The run releases what the fund can cover and keeps the excess on
+  the row — refusing to post would leave the books wrong in order to protest about a decision
+  already taken, and recomputing the figure later would quietly forgive an overspend a subsequent
+  donation happened to cover.
+- **The check is for money the page cannot see.** Net assets reports contribution revenue carrying
+  *no fund at all* — a genuinely independent comparison, unlike totalling the funds and comparing
+  them to a total derived from the funds, which reconciles perfectly and proves nothing.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1137,6 +1185,7 @@ Coverage matches what spec §21 asks for:
 | `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions** — against a pinned clock, because the PDF's timestamp has one-second resolution and the test was relying on both sends landing inside the same second; and an invoice rendered from the record with another company's refused |
 | `tests/engagement.test.ts` | An exchange recorded with the client derived from the person spoken to, and a call logged against a contact or a deal appearing on that client's timeline; the day it happened kept rather than the day it was typed; an exchange with nobody and one with no summary refused, another company's client refused, and `crm:manage` needed to write against `crm:view` to read; **when each client was last spoken to, with a note to self not counted as contact**; **a letter the system sends landing on the timeline of the person it went to**, a bounce shown as such, nothing recorded for an address the CRM does not know, **a send never failed because the log could not be written**, and **the caller's transaction still usable after one fails**; a follow-up surviving with no owner and staying on the shared list, **closed once however many people click at the same moment**, a dropped one kept with its reason, reopened when it turns out it was not done, and what is late measured against a date rather than the clock; work refused to somebody who does not work here, a task about another company's client and an empty title refused, and one company's work off another's list; a client's follow-ups with the open ones first, **a follow-up raised on a deal belonging to that deal's client**; **what was closed listed with its reason and reopened from the same place**, work closed before the window neither listed nor counted, and one company's closed work off another's list; and the timeline merging what the system did, what people said and what is owed, **an open follow-up placed at its due date rather than when it was typed**, and nothing of another company shown |
 | `tests/properties.test.ts` | Rent arithmetic against a pure core: a whole month charged exactly what the lease says without ever dividing, a tenancy starting on the 15th charged 17 days rather than 16 and one ending on the 10th charged to the 10th, nothing charged for a period the tenancy does not touch, February in a leap year and out of one, **a proration that rounds away to nothing raising no charge at all**, periods walked inclusively across a year boundary, and a due date that stays inside its own month; a property reportable the moment it exists with one Property dimension however many properties, two live tenancies on one unit refused while back-to-back ones are allowed, a unit occupied while let and available after, a property with somebody living in it refused retirement and kept rather than deleted once empty, and **the module installing the four accounts a pack that never had them cannot supply**; the industry gate, the terminology seam calling a customer a Tenant while the record stays a `customers` row, and one landlord's properties off another's books; **one invoice per tenancy raised against Rental Income**, **a period billed once however many times the run fires**, **one invoice between two runs fired at the same instant**, the first month prorated and the rest whole, an agreed-but-unstarted tenancy billing nothing, the month taken as a parameter rather than read from the clock, and the permissions on running against previewing; **a deposit as a liability with the profit and loss unmoved**, **a refund that is not an expense**, more refused than is held either way round, **unpaid rent settled without recognising the rent twice**, **a settled deposit kept off the undeposited funds list**, income recognised only when a deposit is kept for something unbilled, **what is held reconciled to account 2580**, a shortfall reported, every movement tied to the entry that posted it, and one landlord's deposits off another's reconciliation; a rent roll counting the empty flat, billed and outstanding per unit, and a unit held back for works kept in the denominator; and property-level reporting through the dimensional profit and loss, **seeing a roof repair this module never posted**, footing to the ordinary profit and loss, and **the rent invoice itself carrying the property tag** |
+| `tests/funds.test.ts` | The restriction arithmetic against a pure core: **the lesser of what was given and what was spent** released in both directions, nothing released from an empty fund and nothing conjured from an overdrawn one, spending nothing treated as releasing nothing rather than as a shortfall, an endowment placed in the restricted column and refused release, **February refused March's money** while a month may spend what it was given in that same month, and release earned but not posted counted without being spent twice; a fund reportable the moment it exists with one Fund dimension, **the module installing the seven accounts a pack that never had them cannot supply**, the industry gate, the journal permission, **no way at all to edit what the donor said**, and a fund closed while it still holds money rather than the close being refused; **a pledge recognised as income the day it is promised** and sitting in Pledges Receivable rather than the bank, **no income at all posted when the money arrives**, instalments with what is still owed, more refused than was promised, a gift refused a second receipt, and an anonymous gift from a collection tin; **a release that leaves the year's income and net income exactly where they were**, the fund's balance down by precisely what it released, **one release per fund per month however many times the run fires**, **one release between two runs fired at the same instant**, the same donation never released twice across two months, **nor when the months are run out of order**, a fund never driven negative however much is spent, **an endowment's principal never released**, a preview that posts nothing by looking, the month taken as a parameter rather than read from the clock, and the permission on running against previewing; **spending counted from a bill this module never posted**, per-fund reporting through the dimensional profit and loss, and a supplier refund netted off rather than ignored; and net assets split into the two columns, moved from one to the other by the run with the total unchanged, **a donation belonging to no fund at all detected**, overspent funds listed with what they went beyond, an answer as at a date rather than as at now, and one charity's funds off another's books |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -2020,6 +2069,43 @@ key and the client proposal link — keep them for steps 22 and 24.
      exposure and not the firm's roster: "any of their ten people can read this" and "these two can"
      are different answers, and a list of names alone cannot tell them apart.
 
+### Money given for a purpose (Phase 26)
+
+*A different company: sign in as `nadia@riverside.test`. A contractor has no funds, and
+demonstrating this on Ridgeline would show the screen rather than the accounting.*
+
+248. **Open Funds.** Three funds and *$8,440.00 still restricted*. The Hall roof appeal was given
+     $3,840.00 and still has $3,440.00; the Hoyle legacy is marked **endowment — principal never
+     spendable**; General funds is unrestricted.
+249. **Read Net assets.** $620.00 without donor restrictions, $8,440.00 with, $9,060.00 in total —
+     and the total is assets less liabilities, not the balance on the equity accounts, which
+     mid-year still hold last year's close.
+250. **Below it: *Every donation on the books belongs to a named fund*.** That is not the page
+     adding up to itself. It compares every line posted to the contribution accounts against the
+     subset carrying a Fund tag — post a donation straight to 4500 with no fund and the sentence
+     changes to name the amount that is now outside every figure above.
+251. **Open the Release run tab.** Only the Hall roof appeal is listed. The endowment is not
+     offered at all, because a donor who gave money to be held forever did not give money to be
+     spent — and the unrestricted fund has no restriction to release.
+252. **The $400.00 it spent in March is marked *already released*** and the button is disabled. The
+     run is idempotent on `unique(fund_id, period_start)`; two people pressing it in the same
+     second produce one release because the database refuses the second.
+253. **Look at Accounting → Reports.** `4590 Net Assets Released from Restriction` $400.00 debit and
+     `4595 Net Assets Released — Unrestricted` $400.00 credit. Both are income accounts and they
+     sum to zero: **the release changed no total**, only which column the money sits in.
+254. **On the same trial balance, `4510 Grant Revenue` is $2,500.00 — once.** The seeded grant was
+     *promised*, not received, and it was income the day it was promised. `1180 Pledges Receivable`
+     shows $2,500.00 raised against $2,500.00 cleared, netting to nothing.
+255. **Go back to Funds → Donors and promises and press "It arrived" on Marguerite's grant.**
+     *Promise settled in full. No income was posted — it was recognised when the promise was made.*
+     Return to the trial balance: the bank is up and revenue has not moved. Counting it again here
+     would reconcile perfectly — bank agrees, fund agrees — and only the income for the year would
+     be wrong, by the size of the appeal.
+256. **Open Accounting → Dimensions and pick Fund.** ROOF, GENERAL and LEGACY each have a column,
+     including the $400.00 of scaffolding — which was posted as an ordinary journal entry through
+     no part of the funds module. That is why there is no per-fund profit and loss in this
+     workspace: a fund is a dimension, and Phase 16 already answers the question.
+
 ## Project layout
 
 ```
@@ -2092,6 +2178,7 @@ src/
     assets/               Depreciation schedules and the fixed asset register
     importing/            Delimited parsing, coercion, column mapping, opening balances
     practice/             Firms, engagements, staffing a client, company switching, the work queue
+    funds/                Funds and restrictions, contributions and pledges, the release run
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2411,12 +2498,13 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Five of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
-  `time_billing` and `properties` are implemented; `pos_import`, `funds`, `appointments`,
-  `vehicles`, and `manufacturing` are declared, switched on by the packs that ask for them, and
-  have no workflows. The module settings page lists them under "Not built yet" rather than hiding
-  them. Of the five, `funds` is the one with real accounting content behind it — restricted fund
-  balances are a reporting model, not a screen — and the other four are workflow surfaces.
+- **Four of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
+  `time_billing`, `properties` and — since Phase 26 — `funds` are implemented; `pos_import`,
+  `appointments`, `vehicles`, and `manufacturing` are declared, switched on by the packs that ask
+  for them, and have no workflows. The module settings page lists them under "Not built yet" rather
+  than hiding them. All four remaining are workflow surfaces rather than accounting models, which
+  is why `funds` was taken first: restricted fund balances are a reporting model, and the reporting
+  model was the part that could be got wrong quietly.
 - **A retainer is not modelled on a cash basis.** Strictly, cash basis has no unearned revenue —
   money received in April is April's revenue. What happens instead is that the receipt has no
   recognition entry to take accounts from, so it stays on the balance sheet and the caveat names

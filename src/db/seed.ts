@@ -42,6 +42,10 @@ import {
 import { runRent } from '@/modules/properties/billing'
 import { applyDeposit, depositsHeld, receiveDeposit } from '@/modules/properties/deposits'
 import { occupancy } from '@/modules/properties/reporting'
+import { createFund, fundDimensionId } from '@/modules/funds/service'
+import { recordContribution } from '@/modules/funds/contributions'
+import { runReleases } from '@/modules/funds/releases'
+import { netAssets } from '@/modules/funds/reporting'
 import { listRentCharges } from '@/modules/properties/billing'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
@@ -1965,6 +1969,136 @@ async function main() {
       'Ridgeline is the whole firm with Sam narrowed to readonly.',
   )
 
+  // --- Phase 26: money given for a purpose ---------------------------------
+  //
+  // Its own company, because a contractor has no funds and pretending
+  // otherwise would demonstrate the screen rather than the accounting. A small
+  // charity with three funds is the smallest thing that shows all four claims.
+  const charity = await registerCompany({
+    companyName: 'Riverside Community Trust',
+    industry: 'nonprofit',
+    userName: 'Nadia Okonjo',
+    email: 'nadia@riverside.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const charityCtx: ActorContext = {
+    userId: charity.user.id,
+    userName: charity.user.name,
+    companyId: charity.company.id,
+    role: 'owner',
+  }
+
+  const [charityBank] = await db
+    .insert(financialAccounts)
+    .values({
+      companyId: charity.company.id,
+      chartAccountId: (await accountByNumber(charity.company.id, '1000'))!.id,
+      name: 'Charity Current Account',
+      mask: '8812',
+      kind: 'checking',
+      providerAccountId: 'seed-riverside-current',
+    })
+    .returning()
+
+  const roofFund = await createFund(charityCtx, {
+    code: 'ROOF',
+    name: 'Hall roof appeal',
+    restriction: 'restricted',
+    purpose: 'Replacing the community hall roof, as set out in the appeal letter.',
+  })
+
+  const generalFund = await createFund(charityCtx, {
+    code: 'GENERAL',
+    name: 'General funds',
+    restriction: 'unrestricted',
+    purpose: 'Whatever the trustees decide.',
+  })
+
+  // An endowment, so the release run has something it must refuse to touch.
+  const legacyFund = await createFund(charityCtx, {
+    code: 'LEGACY',
+    name: 'Hoyle legacy',
+    restriction: 'perpetual',
+    purpose: 'Held in perpetuity. Only the income may be spent.',
+  })
+
+  const majorDonor = await createCustomer(charityCtx, {
+    name: 'Marguerite Adeyemi',
+    email: 'marguerite@example.test',
+  })
+
+  await recordContribution(charityCtx, {
+    fundId: roofFund.id,
+    donorId: majorDonor.id,
+    receivedOn: '2026-03-02',
+    amountCents: 1_000_00,
+    financialAccountId: charityBank.id,
+    memo: 'Opening gift to the appeal.',
+  })
+
+  await recordContribution(charityCtx, {
+    fundId: roofFund.id,
+    receivedOn: '2026-03-14',
+    amountCents: 340_00,
+    financialAccountId: charityBank.id,
+    memo: 'Collection at the spring fair — no donor named.',
+  })
+
+  await recordContribution(charityCtx, {
+    fundId: generalFund.id,
+    receivedOn: '2026-03-05',
+    amountCents: 620_00,
+    financialAccountId: charityBank.id,
+  })
+
+  await recordContribution(charityCtx, {
+    fundId: legacyFund.id,
+    receivedOn: '2026-01-20',
+    amountCents: 5_000_00,
+    financialAccountId: charityBank.id,
+    memo: 'Left by will. The principal is never spendable.',
+  })
+
+  // A promise, left outstanding on purpose. It is already income — the
+  // statement of activities for March includes it — and the money has not
+  // arrived, which is the whole of Phase 26's second claim on one row.
+  await recordContribution(charityCtx, {
+    fundId: roofFund.id,
+    donorId: majorDonor.id,
+    kind: 'pledge',
+    source: 'grant',
+    receivedOn: '2026-03-20',
+    amountCents: 2_500_00,
+    reference: 'Heritage grant, letter of 20 March',
+  })
+
+  // Spending posted as an ordinary journal entry, through no part of the funds
+  // module — the same proof Phase 23 ran with a roof repair against a property.
+  // The release run below finds it anyway, because a fund is a dimension.
+  const programExpense = await accountByNumber(charity.company.id, '6020')
+  await postManualEntry(charityCtx, {
+    entryDate: '2026-03-24',
+    memo: 'Scaffolding for the roof works',
+    lines: [
+      {
+        chartAccountId: programExpense!.id,
+        debitCents: 400_00,
+        dimensions: { [(await fundDimensionId(charityCtx))!]: roofFund.dimensionValueId },
+      },
+      { chartAccountId: charityBank.chartAccountId, creditCents: 400_00 },
+    ],
+  })
+
+  const marchRelease = await runReleases(charityCtx, { month: '2026-03-01' })
+
+  const charityPosition = await netAssets(charityCtx, { asOf: '2026-12-31' })
+  console.log(
+    `  Riverside Community Trust: ${formatCentsPlain(charityPosition.withRestrictionCents)} restricted, ` +
+      `${formatCentsPlain(charityPosition.withoutRestrictionCents)} unrestricted. ` +
+      `March released ${formatCentsPlain(marchRelease.releasedCents)} — the same money, a different column.`,
+  )
+
   // --- Phase 19: an invitation that carries no password ---------------------
   //
   // Left pending on purpose, so /settings/access has something in its "waiting
@@ -2066,6 +2200,9 @@ async function main() {
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')
+  console.log(
+    '  /funds                sign in as nadia@riverside.test — what money was given for, and when it stops being restricted',
+  )
   console.log('  /accounting/documents  every file, what it hangs on, and the open questions')
   console.log('  /crm/work             follow-ups: late, due, and the ones nobody claimed')
   console.log('  /crm/organizations    open a client’s history — calls, letters, and what is owed')

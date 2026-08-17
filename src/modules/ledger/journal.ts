@@ -42,6 +42,10 @@ export type JournalSource =
   // posting" should not have to search text.
   | 'payroll'
   | 'remittance'
+  // Phase 26. Fund accounting: money given for a purpose, and the moment that
+  // purpose is satisfied.
+  | 'contribution'
+  | 'release'
 
 export type JournalLineInput = {
   chartAccountId: string

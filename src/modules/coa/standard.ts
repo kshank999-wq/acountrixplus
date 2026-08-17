@@ -245,4 +245,23 @@ export const INDUSTRY_ACCOUNTS = {
   rentalIncome: '4300',
   camReimbursements: '4310',
   lateFeeIncome: '4320',
+
+  // Nonprofit (Phase 26). The pack has installed the net-asset and
+  // contribution accounts since Phase 0; the two release accounts are new,
+  // because nothing before this phase had a reason to move money between the
+  // two columns.
+  //
+  // The pair is the point. A release changes no total — it is the same money,
+  // reported in a different column — so it has to be a debit and a credit that
+  // sum to zero on the statement of activities. One account with a signed
+  // amount would net to zero too, and would also be invisible: the reader
+  // could not see that £4,000 left the restricted column *because* £4,000
+  // arrived in the unrestricted one.
+  pledgesReceivable: '1180',
+  netAssetsWithoutRestriction: '3300',
+  netAssetsWithRestriction: '3400',
+  contributionRevenue: '4500',
+  grantRevenue: '4510',
+  releasedFromRestriction: '4590',
+  releasedToUnrestricted: '4595',
 } as const

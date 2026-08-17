@@ -29,6 +29,7 @@ export async function AppShell({
     | 'inventory'
     | 'time'
     | 'properties'
+    | 'funds'
     | 'payroll'
     | 'marketing'
     | 'studio'
@@ -61,6 +62,12 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'properties')
     : false
 
+  // Phase 26. A charity's funds are the first thing its trustees ask about and
+  // the last thing anybody would think to look for under Accounting.
+  const fundsEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'funds')
+    : false
+
   // Practice mode (Phase 18). Both reads are keyed on the user rather than the
   // company, which is the whole point — they are the only two things on this
   // page that are about the person instead of the books they are looking at.
@@ -77,6 +84,7 @@ export async function AppShell({
     { key: 'inventory', href: '/inventory', label: 'Inventory', show: inventoryEnabled },
     { key: 'time', href: '/time', label: 'Time', show: timeEnabled },
     { key: 'properties', href: '/properties', label: 'Properties', show: propertiesEnabled },
+    { key: 'funds', href: '/funds', label: 'Funds', show: fundsEnabled },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

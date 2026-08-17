@@ -189,8 +189,14 @@ export const INDUSTRY_PACKS: Record<Industry, IndustryPack> = {
     accounts: [
       { number: '3300', name: 'Net Assets Without Donor Restrictions', type: 'equity' },
       { number: '3400', name: 'Net Assets With Donor Restrictions', type: 'equity' },
+      { number: '1180', name: 'Pledges Receivable', type: 'asset' },
       { number: '4500', name: 'Contributions and Donations', type: 'revenue' },
       { number: '4510', name: 'Grant Revenue', type: 'revenue' },
+      // The pair that moves money between the two columns of the statement of
+      // activities. They sum to zero on every release, which is the whole
+      // reason there are two of them — see INDUSTRY_ACCOUNTS.
+      { number: '4590', name: 'Net Assets Released from Restriction', type: 'revenue' },
+      { number: '4595', name: 'Net Assets Released — Unrestricted', type: 'revenue' },
       { number: '4520', name: 'Fundraising Event Revenue', type: 'revenue' },
       { number: '4530', name: 'Membership Dues', type: 'revenue' },
       { number: '6010', name: 'Fundraising Expenses', type: 'expense' },
