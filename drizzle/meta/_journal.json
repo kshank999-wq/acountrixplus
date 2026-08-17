@@ -190,6 +190,13 @@
       "when": 1786944239184,
       "tag": "0026_phase26_funds",
       "breakpoints": true
+    },
+    {
+      "idx": 27,
+      "version": "7",
+      "when": 1786953424588,
+      "tag": "0027_phase27_manufacturing",
+      "breakpoints": true
     }
   ]
 }

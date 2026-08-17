@@ -46,6 +46,14 @@ import { createFund, fundDimensionId } from '@/modules/funds/service'
 import { recordContribution } from '@/modules/funds/contributions'
 import { runReleases } from '@/modules/funds/releases'
 import { netAssets } from '@/modules/funds/reporting'
+import {
+  absorbCost,
+  completeWorkOrder,
+  createBom,
+  createWorkOrder,
+  issueMaterial,
+} from '@/modules/manufacturing/service'
+import { wipPosition } from '@/modules/manufacturing/reporting'
 import { listRentCharges } from '@/modules/properties/billing'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
@@ -76,7 +84,7 @@ import {
 } from '@/modules/receivables/service'
 import { cashFlowStatement } from '@/modules/ledger/cash-flow'
 import { setModuleEnabled } from '@/modules/industry/modules'
-import { adjustStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
+import { adjustStock, receiveStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
 import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
 import {
   approveTime,
@@ -2097,6 +2105,187 @@ async function main() {
     `  Riverside Community Trust: ${formatCentsPlain(charityPosition.withRestrictionCents)} restricted, ` +
       `${formatCentsPlain(charityPosition.withoutRestrictionCents)} unrestricted. ` +
       `March released ${formatCentsPlain(marchRelease.releasedCents)} — the same money, a different column.`,
+  )
+
+  // --- Phase 27: cost moving through a factory ------------------------------
+  //
+  // Its own company again, because Ridgeline builds on site and Riverside is a
+  // charity — neither has a work in process account and pretending otherwise
+  // would demonstrate the screen rather than the accounting.
+  const workshop = await registerCompany({
+    companyName: 'Kestrel Fabrication',
+    industry: 'manufacturing',
+    userName: 'Tomasz Lewandowski',
+    email: 'tomasz@kestrelfab.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const workshopCtx: ActorContext = {
+    userId: workshop.user.id,
+    userName: workshop.user.name,
+    companyId: workshop.company.id,
+    role: 'owner',
+  }
+
+  const [workshopBank] = await db
+    .insert(financialAccounts)
+    .values({
+      companyId: workshop.company.id,
+      chartAccountId: (await accountByNumber(workshop.company.id, '1000'))!.id,
+      name: 'Workshop Current Account',
+      mask: '3390',
+      kind: 'checking',
+      providerAccountId: 'seed-kestrel-current',
+    })
+    .returning()
+
+  const productRevenue = await accountByNumber(workshop.company.id, '4060')
+  const rawMaterialsAccount = await accountByNumber(workshop.company.id, '1440')
+  const finishedGoodsAccount = await accountByNumber(workshop.company.id, '1460')
+
+  // Two raw materials and one finished good. The raw materials name 1440 and
+  // the finished good names 1460 — the per-item seam Phase 14 left open, used
+  // here for the first time.
+  const [steel, hinge, cabinet] = await db
+    .insert(serviceItems)
+    .values([
+      {
+        companyId: workshop.company.id,
+        code: 'SHEET',
+        name: 'Steel sheet, 2mm',
+        unit: 'sheet',
+        unitPriceCents: 0,
+        unitCostCents: 4_200,
+        isInventoried: true,
+        chartAccountId: productRevenue!.id,
+        inventoryAccountId: rawMaterialsAccount!.id,
+      },
+      {
+        companyId: workshop.company.id,
+        code: 'HINGE',
+        name: 'Piano hinge',
+        unit: 'each',
+        unitPriceCents: 0,
+        unitCostCents: 850,
+        isInventoried: true,
+        chartAccountId: productRevenue!.id,
+        inventoryAccountId: rawMaterialsAccount!.id,
+      },
+      {
+        companyId: workshop.company.id,
+        code: 'CAB',
+        name: 'Tool cabinet',
+        unit: 'each',
+        unitPriceCents: 42_000,
+        unitCostCents: 0,
+        isInventoried: true,
+        chartAccountId: productRevenue!.id,
+        inventoryAccountId: finishedGoodsAccount!.id,
+      },
+    ])
+    .returning()
+
+  const workshopPayable = await accountByNumber(workshop.company.id, '2000')
+
+  // Bought at two different prices, so the run's cost comes from the lots
+  // rather than from the item's planning figure.
+  await receiveStock(workshopCtx, {
+    itemId: steel.id,
+    quantityMilli: 40_000,
+    unitCostCents: 4_000,
+    receivedOn: '2026-02-10',
+    creditAccountId: workshopPayable!.id,
+  })
+  await receiveStock(workshopCtx, {
+    itemId: steel.id,
+    quantityMilli: 20_000,
+    unitCostCents: 4_600,
+    receivedOn: '2026-03-02',
+    creditAccountId: workshopPayable!.id,
+  })
+  await receiveStock(workshopCtx, {
+    itemId: hinge.id,
+    quantityMilli: 60_000,
+    unitCostCents: 850,
+    receivedOn: '2026-02-10',
+    creditAccountId: workshopPayable!.id,
+  })
+
+  const cabinetBom = await createBom(workshopCtx, {
+    outputItemId: cabinet.id,
+    name: 'Tool cabinet, batch of 10',
+    batchMilli: 10_000,
+    notes: 'Written per batch of ten, so a half-sheet per cabinet needs no rounding.',
+    components: [
+      // Half a sheet each, with 5% expected wastage on the cut.
+      { componentItemId: steel.id, quantityMilli: 5_000, scrapBp: 500 },
+      { componentItemId: hinge.id, quantityMilli: 10_000 },
+    ],
+  })
+
+  // A finished run, so the demo opens on a real unit cost.
+  const finishedRun = await createWorkOrder(workshopCtx, {
+    outputItemId: cabinet.id,
+    bomId: cabinetBom.id,
+    plannedMilli: 10_000,
+    startedOn: '2026-03-09',
+  })
+
+  await issueMaterial(workshopCtx, {
+    workOrderId: finishedRun.id,
+    itemId: steel.id,
+    // The recipe asked for 5.25 sheets; the floor took 6. That gap is what the
+    // variance report exists to show.
+    quantityMilli: 6_000,
+    occurredOn: '2026-03-09',
+  })
+  await issueMaterial(workshopCtx, {
+    workOrderId: finishedRun.id,
+    itemId: hinge.id,
+    quantityMilli: 10_000,
+    occurredOn: '2026-03-09',
+  })
+  await absorbCost(workshopCtx, {
+    workOrderId: finishedRun.id,
+    kind: 'labour',
+    costCents: 96_000,
+    occurredOn: '2026-03-11',
+  })
+  await absorbCost(workshopCtx, {
+    workOrderId: finishedRun.id,
+    kind: 'overhead',
+    costCents: 24_000,
+    occurredOn: '2026-03-11',
+  })
+
+  // Nine good and one scrapped: the ten cabinets' cost lands on nine.
+  const completed = await completeWorkOrder(workshopCtx, {
+    workOrderId: finishedRun.id,
+    producedMilli: 9_000,
+    scrappedMilli: 1_000,
+    completedOn: '2026-03-13',
+  })
+
+  // A second run left open, so the WIP reconciliation has something in it.
+  const openRun = await createWorkOrder(workshopCtx, {
+    outputItemId: cabinet.id,
+    bomId: cabinetBom.id,
+    plannedMilli: 6_000,
+    startedOn: '2026-03-16',
+  })
+  await issueMaterial(workshopCtx, {
+    workOrderId: openRun.id,
+    itemId: steel.id,
+    quantityMilli: 3_000,
+    occurredOn: '2026-03-16',
+  })
+
+  const floor = await wipPosition(workshopCtx, { asOf: '2026-12-31' })
+  console.log(
+    `  Kestrel Fabrication: ${completed.producedMilli / 1000} cabinets at ` +
+      `${formatCentsPlain(completed.unitCostCents)} each — one scrapped, so ten cabinets' cost ` +
+      `landed on nine. Work in process ${formatCentsPlain(floor.registerCents)} against account ` +
+      `1450 at ${formatCentsPlain(floor.ledgerCents)} — ${floor.agrees ? 'agrees' : 'DISAGREES'}.`,
   )
 
   // --- Phase 19: an invitation that carries no password ---------------------

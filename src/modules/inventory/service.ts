@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   inventoryLots,
@@ -294,19 +294,32 @@ export type ConsumeStockResult = {
 }
 
 /**
- * Takes stock out for a sale, and posts the cost.
+ * Takes stock out, and posts what it cost to wherever it went.
+ *
+ * The shared path for a sale and — since Phase 27 — for material issued to a
+ * work order. They differ only in which account is debited, what the movement
+ * is called, and what the entry is filed under, which is why those are
+ * parameters rather than two near-copies of a function that decides a cost.
+ * `receiveStock` has taken its `creditAccountId` the same way since Phase 14;
+ * this is the other half of that seam.
  *
  * Returns the consumption so the caller can record it against the document —
  * a return has to put the stock back at the cost it left at, and that is only
  * knowable if the decision was written down.
  */
-export async function consumeStockForSale(
+export async function consumeStock(
   ctx: ActorContext,
   input: {
     itemId: string
     quantityMilli: number
-    soldOn: string
+    movedOn: string
+    /** Where the cost lands. COGS for a sale, WIP for a work order. */
+    debitAccountId?: string
+    kind?: 'sale' | 'work_order_issue'
+    source: 'invoice' | 'manual'
     sourceType: string
+    /** Suffix on the entry's `sourceType`, so the posting can be found. */
+    entrySourceType?: string
     sourceId: string
     memo?: string
   },
@@ -339,13 +352,17 @@ export async function consumeStockForSale(
   const journal = await createJournalEntry(
     ctx,
     {
-      entryDate: input.soldOn,
+      entryDate: input.movedOn,
       memo: input.memo ?? `Cost of goods sold — ${item.name}`,
-      source: 'invoice',
-      sourceType: `${input.sourceType}_cogs`,
+      source: input.source,
+      sourceType: input.entrySourceType ?? `${input.sourceType}_cogs`,
       sourceId: input.sourceId,
       lines: [
-        { chartAccountId: accounts.cogsId, debitCents: result.totalCostCents, memo: item.name },
+        {
+          chartAccountId: input.debitAccountId ?? accounts.cogsId,
+          debitCents: result.totalCostCents,
+          memo: item.name,
+        },
         {
           chartAccountId: accounts.inventoryId,
           creditCents: result.totalCostCents,
@@ -359,8 +376,8 @@ export async function consumeStockForSale(
   await exec.insert(stockMovements).values({
     companyId: ctx.companyId,
     itemId: input.itemId,
-    kind: 'sale',
-    movedOn: input.soldOn,
+    kind: input.kind ?? 'sale',
+    movedOn: input.movedOn,
     quantityMilli: -(input.quantityMilli - result.shortfallMilli),
     costCents: -result.totalCostCents,
     lotBreakdown: JSON.stringify(result.consumed),
@@ -376,6 +393,41 @@ export async function consumeStockForSale(
     consumed: result.consumed,
     shortfallMilli: result.shortfallMilli,
   }
+}
+
+/**
+ * Takes stock out for a sale, and posts the cost to COGS.
+ *
+ * Kept as its own name because every caller since Phase 14 uses it and the
+ * defaults it fills in — COGS, `sale`, an `invoice`-sourced entry — are the
+ * decisions that make a sale a sale.
+ */
+export async function consumeStockForSale(
+  ctx: ActorContext,
+  input: {
+    itemId: string
+    quantityMilli: number
+    soldOn: string
+    sourceType: string
+    sourceId: string
+    memo?: string
+  },
+  exec: Executor,
+): Promise<ConsumeStockResult> {
+  return consumeStock(
+    ctx,
+    {
+      itemId: input.itemId,
+      quantityMilli: input.quantityMilli,
+      movedOn: input.soldOn,
+      kind: 'sale',
+      source: 'invoice',
+      sourceType: input.sourceType,
+      sourceId: input.sourceId,
+      memo: input.memo,
+    },
+    exec,
+  )
 }
 
 /**
@@ -679,6 +731,35 @@ export async function reconcileInventory(
   const inventoryAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.inventory)
   if (!inventoryAccount) throw new Error('The Inventory account is missing from the chart.')
 
+  /**
+   * Every account stock is actually carried on, not just 1400.
+   *
+   * An item may name its own inventory account, and Phase 27's manufacturer
+   * does exactly that — raw materials on 1440, finished goods on 1460, and
+   * nothing at all on 1400. Comparing all the lots against 1400 alone reported
+   * a difference the size of the whole subledger, on books that were perfectly
+   * correct, which is worse than not checking: a reconciliation that cries wolf
+   * is one people learn to ignore.
+   *
+   * The default is always included, because an item that names no account
+   * lands there.
+   */
+  const named = await db
+    .selectDistinct({ id: serviceItems.inventoryAccountId })
+    .from(serviceItems)
+    .where(
+      and(
+        eq(serviceItems.companyId, ctx.companyId),
+        eq(serviceItems.isInventoried, true),
+        isNotNull(serviceItems.inventoryAccountId),
+      ),
+    )
+
+  const accountIds = [
+    inventoryAccount.id,
+    ...named.map((row) => row.id as string).filter((id) => id !== inventoryAccount.id),
+  ]
+
   const [ledger] = await db
     .select({
       value: sql<string>`coalesce(sum(${journalLines.debitCents} - ${journalLines.creditCents}), 0)`,
@@ -688,7 +769,7 @@ export async function reconcileInventory(
     .where(
       and(
         eq(journalLines.companyId, ctx.companyId),
-        eq(journalLines.chartAccountId, inventoryAccount.id),
+        inArray(journalLines.chartAccountId, accountIds),
         eq(journalEntries.status, 'posted'),
         opts.asOfDate ? sql`${journalEntries.entryDate} <= ${opts.asOfDate}` : undefined,
       ),

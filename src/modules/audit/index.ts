@@ -114,6 +114,14 @@ export type AuditAction =
   | 'fund.release'
   | 'contribution.record'
   | 'contribution.receive'
+  // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
+  // that every subsequent sale of that item is measured against, and
+  // cancelling one writes off stock that was consumed and never became
+  // anything — both are judgements §19 asks to be able to reconstruct.
+  | 'bom.create'
+  | 'work_order.create'
+  | 'work_order.complete'
+  | 'work_order.cancel'
   // Inventory (spec §5, Phase 14)
   | 'stock.adjust'
   | 'stock.receive'

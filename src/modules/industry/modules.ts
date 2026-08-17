@@ -99,6 +99,10 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   // Phase 26. Funds, contributions, pledges and the release run — and, for the
   // same reason, no per-fund profit and loss.
   'funds',
+  // Phase 27. Bills of materials and work orders, moving cost from raw
+  // materials through work in process into finished goods — on Phase 14's
+  // costing engine rather than a second one.
+  'manufacturing',
 ]
 
 type CompanyRow = { id: string; industry: Industry }

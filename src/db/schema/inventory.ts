@@ -58,6 +58,15 @@ export const stockMovementKindEnum = pgEnum('stock_movement_kind', [
   'adjustment',
   /** Goods sent back to a supplier. */
   'purchase_return',
+  /**
+   * Raw material issued to a work order (Phase 27).
+   *
+   * Its own kind rather than an `adjustment`, because the stock did not go
+   * missing and it was not sold — it is still an asset, one shelf along, and a
+   * report that called it shrinkage would be describing a loss that did not
+   * happen.
+   */
+  'work_order_issue',
 ])
 
 /**

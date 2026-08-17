@@ -17,8 +17,9 @@ existing business's books in**, **accountant practice mode**,
 **server-side PDF generation with immutable sent-document snapshots**, the
 **communications log with the follow-up list**, **property management**, a
 **retention policy with the scheduled work six phases owed**,
-**per-client staff assignment inside a firm**, and **fund accounting for
-nonprofits** from the
+**per-client staff assignment inside a firm**, **fund accounting for
+nonprofits**, and **manufacturing with bills of materials and work orders** from
+the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -45,7 +46,8 @@ nonprofits** from the
 [ADR 0023](docs/adr/0023-somebody-elses-money.md), and
 [ADR 0024](docs/adr/0024-nothing-grows-for-ever-and-nothing-waits-for-somebody-to-look.md), and
 [ADR 0025](docs/adr/0025-a-firm-does-not-put-everybody-on-everything.md), and
-[ADR 0026](docs/adr/0026-a-restriction-is-the-donors-not-the-charitys.md).
+[ADR 0026](docs/adr/0026-a-restriction-is-the-donors-not-the-charitys.md), and
+[ADR 0027](docs/adr/0027-cost-moves-with-the-material.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1085,6 +1087,60 @@ money it already holds**. The constraint belongs to somebody who is not the user
   *no fund at all* — a genuinely independent comparison, unlike totalling the funds and comparing
   them to a total derived from the funds, which reconciles perfectly and proves nothing.
 
+### Cost moving through a factory (Phase 27)
+
+`manufacturing` has been a declared module since Phase 0, switched on by the manufacturing pack,
+doing nothing — and so have the seven accounts that pack installs. Phase 14 built one perpetual
+inventory for five industry packs and left a seam in it with a comment: *"A business that keeps raw
+materials and finished goods on separate balance sheet lines sets them on the items."* Thirteen
+phases later, this is that business.
+
+- **There is no second costing engine, and no second inventory.** A raw material and a finished good
+  are ordinary inventoried items. Issuing material is Phase 14's `consumeStock` debiting WIP instead
+  of COGS; finishing a run is `receiveStock` crediting WIP instead of a supplier. A run's cost is
+  whatever the lots it consumed were worth, by FIFO or weighted average, exactly as a sale's is. The
+  alternative — a standard cost on the BOM with variances against actual — is a second source of
+  truth about what a thing cost, and a factory is not the place to start having those.
+- **The seam was widened, not duplicated.** `consumeStockForSale` became a thin caller of a general
+  `consumeStock` that names its debit account, mirroring `receiveStock`. Phase 14's 31 tests pass
+  unchanged, which is the point: the refactor is asserted behaviour-preserving by tests written
+  before it existed.
+- **A bill of materials is written per batch, not per unit.** A component used a third of a time per
+  unit accumulates a third of a thousandth of error on every unit of a run; scaling once from batch
+  to run does not. Expected wastage sits on the component in basis points, because it is a property
+  of the material rather than of the day.
+- **A BOM says how much, never how much it cost.** The variance is on quantity. A run that cost more
+  did so because it used more material or because material had gone up, and one number covering both
+  tells a production manager nothing they can act on.
+- **Scrap raises the unit cost.** A run that consumed the material for 100 and yielded 95 cost the
+  same money and made less, so the 95 carry all of it. Yield is measured against the plan and scrap
+  against total output — a run stopped early has a terrible yield and perfect scrap, and one figure
+  could not tell those apart.
+- **Completing a run clears WIP to exactly zero**, enforced by the service, by a check constraint,
+  and by a test that reads account 1450 afterwards. Where the cost does not divide — £100 over three
+  units — the remainder is posted *and the lot corrected*, in one transaction. Fixing only the
+  ledger would leave the finished-goods lot carrying the extended figure, so the subledger and the
+  accounts would disagree by pennies for ever.
+- **Absorbing labour credits the expense.** That reads oddly and is right: the cost was incurred when
+  the wages were paid, and this is the moment it stops being the period's and becomes part of what is
+  on a shelf. What is left in 5070 at a period end is labour that was never absorbed — idle time.
+- **A cancelled run is written off to overhead, not back to the store.** The material was cut and
+  mixed; crediting raw materials would put back stock nobody can pick.
+
+**Two defects this phase found, both in code with passing tests.** A left join multiplied the
+finished-goods shelf by the number of runs that had ever made the item. And a raw `OR` inside
+drizzle's `and()` — unparenthesised, against SQL's AND-binds-tighter rule — collapsed an account
+filter into `(everything else) OR line IS NULL`, so a three-line report returned the entire chart of
+accounts. The test asserting the three figures passed, because the three were right and eighty more
+came with them; **it was caught in a browser.** Both now have tests that pin the shape and not just
+the numbers.
+
+**And one improvement to Phase 14 it forced.** `reconcileInventory` compared all lots against
+account 1400 alone. Correct while every item used the default — and this factory is the first
+company where none does. It reported a difference the size of the whole subledger on books that were
+perfectly correct, which is worse than not checking. It now sums every account an inventoried item
+actually names.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1186,6 +1242,7 @@ Coverage matches what spec §21 asks for:
 | `tests/engagement.test.ts` | An exchange recorded with the client derived from the person spoken to, and a call logged against a contact or a deal appearing on that client's timeline; the day it happened kept rather than the day it was typed; an exchange with nobody and one with no summary refused, another company's client refused, and `crm:manage` needed to write against `crm:view` to read; **when each client was last spoken to, with a note to self not counted as contact**; **a letter the system sends landing on the timeline of the person it went to**, a bounce shown as such, nothing recorded for an address the CRM does not know, **a send never failed because the log could not be written**, and **the caller's transaction still usable after one fails**; a follow-up surviving with no owner and staying on the shared list, **closed once however many people click at the same moment**, a dropped one kept with its reason, reopened when it turns out it was not done, and what is late measured against a date rather than the clock; work refused to somebody who does not work here, a task about another company's client and an empty title refused, and one company's work off another's list; a client's follow-ups with the open ones first, **a follow-up raised on a deal belonging to that deal's client**; **what was closed listed with its reason and reopened from the same place**, work closed before the window neither listed nor counted, and one company's closed work off another's list; and the timeline merging what the system did, what people said and what is owed, **an open follow-up placed at its due date rather than when it was typed**, and nothing of another company shown |
 | `tests/properties.test.ts` | Rent arithmetic against a pure core: a whole month charged exactly what the lease says without ever dividing, a tenancy starting on the 15th charged 17 days rather than 16 and one ending on the 10th charged to the 10th, nothing charged for a period the tenancy does not touch, February in a leap year and out of one, **a proration that rounds away to nothing raising no charge at all**, periods walked inclusively across a year boundary, and a due date that stays inside its own month; a property reportable the moment it exists with one Property dimension however many properties, two live tenancies on one unit refused while back-to-back ones are allowed, a unit occupied while let and available after, a property with somebody living in it refused retirement and kept rather than deleted once empty, and **the module installing the four accounts a pack that never had them cannot supply**; the industry gate, the terminology seam calling a customer a Tenant while the record stays a `customers` row, and one landlord's properties off another's books; **one invoice per tenancy raised against Rental Income**, **a period billed once however many times the run fires**, **one invoice between two runs fired at the same instant**, the first month prorated and the rest whole, an agreed-but-unstarted tenancy billing nothing, the month taken as a parameter rather than read from the clock, and the permissions on running against previewing; **a deposit as a liability with the profit and loss unmoved**, **a refund that is not an expense**, more refused than is held either way round, **unpaid rent settled without recognising the rent twice**, **a settled deposit kept off the undeposited funds list**, income recognised only when a deposit is kept for something unbilled, **what is held reconciled to account 2580**, a shortfall reported, every movement tied to the entry that posted it, and one landlord's deposits off another's reconciliation; a rent roll counting the empty flat, billed and outstanding per unit, and a unit held back for works kept in the denominator; and property-level reporting through the dimensional profit and loss, **seeing a roof repair this module never posted**, footing to the ordinary profit and loss, and **the rent invoice itself carrying the property tag** |
 | `tests/funds.test.ts` | The restriction arithmetic against a pure core: **the lesser of what was given and what was spent** released in both directions, nothing released from an empty fund and nothing conjured from an overdrawn one, spending nothing treated as releasing nothing rather than as a shortfall, an endowment placed in the restricted column and refused release, **February refused March's money** while a month may spend what it was given in that same month, and release earned but not posted counted without being spent twice; a fund reportable the moment it exists with one Fund dimension, **the module installing the seven accounts a pack that never had them cannot supply**, the industry gate, the journal permission, **no way at all to edit what the donor said**, and a fund closed while it still holds money rather than the close being refused; **a pledge recognised as income the day it is promised** and sitting in Pledges Receivable rather than the bank, **no income at all posted when the money arrives**, instalments with what is still owed, more refused than was promised, a gift refused a second receipt, and an anonymous gift from a collection tin; **a release that leaves the year's income and net income exactly where they were**, the fund's balance down by precisely what it released, **one release per fund per month however many times the run fires**, **one release between two runs fired at the same instant**, the same donation never released twice across two months, **nor when the months are run out of order**, a fund never driven negative however much is spent, **an endowment's principal never released**, a preview that posts nothing by looking, the month taken as a parameter rather than read from the clock, and the permission on running against previewing; **spending counted from a bill this module never posted**, per-fund reporting through the dimensional profit and loss, and a supplier refund netted off rather than ignored; and net assets split into the two columns, moved from one to the other by the run with the total unchanged, **a donation belonging to no fund at all detected**, overspent funds listed with what they went beyond, an answer as at a date rather than as at now, and one charity's funds off another's books |
+| `tests/manufacturing.test.ts` | The batch arithmetic against a pure core: a recipe scaled in one step rather than per unit then multiplied, expected wastage added on top of the drawing, a bill of materials that makes nothing refused, the whole cost divided over the good units, **scrap raising the unit cost while leaving the total alone**, the rounding handed back rather than dropped and always adding back to the total, a run that made nothing saying so instead of dividing by zero, **yield measured against the plan and scrap against total output** so a run stopped early is not confused with a run going wrong, and a component nobody expected reported beside one used heavily; material out of raw materials and into WIP, **costed from the lots and not from the item's planning figure or a BOM**, recorded as its own movement kind rather than as shrinkage, labour absorbed by crediting the expense so what is left is idle time, **work in process cleared to exactly zero on completion** with not one penny left behind when the cost does not divide, the finished goods a lot like any other, a scrapped run's cost landing on its survivors, **a cancelled run written off to overhead rather than back to the store**, a run that absorbed nothing refused completion, a finished run refused more material, and an empty store issuing nothing and saying so; a stored recipe exploded to a run size, one that makes something out of itself refused, one with no components refused, **the module installing the five accounts a pack that never had them cannot supply**, the industry gate, the journal permission, and one factory's runs off another's floor; and **the WIP register agreeing with account 1450** while a run is open and after it closes, stock split across the three stages, **three stages reported and not the whole chart of accounts**, a stage kept at zero rather than dropped when nothing has moved, **the inventory subledger still equal to the ledger with a factory in the middle**, a shelf not multiplied by the number of runs that made it, a run compared against what its recipe expected, no variance where there was no recipe, and what a run absorbed listed in the order it happened |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -2106,6 +2163,36 @@ demonstrating this on Ridgeline would show the screen rather than the accounting
      no part of the funds module. That is why there is no per-fund profit and loss in this
      workspace: a fund is a dimension, and Phase 16 already answers the question.
 
+### Cost moving through a factory (Phase 27)
+
+*A third company: sign in as `tomasz@kestrelfab.test`. Ridgeline builds on site and Riverside is a
+charity — neither has a work in process account.*
+
+257. **Open Manufacturing.** *1 run on the floor · $126.00 in work in process.* Two runs are listed:
+     WO-1001 finished, WO-1002 still open and holding cost.
+258. **Open WO-1001.** $337.00 material, $960.00 labour, $240.00 overhead — **$170.78 each**. Ten
+     cabinets' worth of cost landed on nine, because one was scrapped. A "cost per unit from the
+     bill of materials" would have said $153.70 and been wrong in the direction that matters.
+259. **Note what the material cost.** The steel was bought at $40.00 and $46.00 a sheet; the run was
+     costed at the pooled $42.00, from the lots. The item's own `unitCostCents` of $42.00 and the
+     recipe's quantities had no say in it — a BOM says *how much*, never *how much it cost*.
+260. **Open the Bills of materials tab.** *Makes 10 × Tool cabinet* — written per batch, so half a
+     sheet each needs no rounding. The steel line carries **5.00% wastage**, which is a property of
+     the material rather than of the day.
+261. **Open Where the value sits.** Open runs $126.00, account 1450 $126.00, **Agrees: Yes**. Those
+     are two different things — a subledger this module maintains as it issues material, and what
+     the journal lines add up to — so agreement means something.
+262. **Read the three stages: 1440 $2,567.00, 1450 $126.00, 1460 $1,537.00.** Three balance-sheet
+     lines rather than one. A factory with most of its stock in unmachined bar is a different
+     business from one holding finished units, and a single Inventory line cannot say which.
+263. **Look at the shelf below: 9 cabinets, $1,537.00, $170.78 each.** Nine, not twenty-seven — the
+     first defect this phase caught was a join that multiplied the shelf by the number of runs that
+     had ever made the item.
+264. **Open Accounting → Reports.** `1450 Work in Process` and `1460 Finished Goods` both appear, and
+     `5070 Direct Labor` carries a credit of $960.00. The wages were an expense when they were paid;
+     absorbing them is the moment that cost became part of something on a shelf. What is left in
+     5070 at a period end is labour that was never absorbed — idle time.
+
 ## Project layout
 
 ```
@@ -2179,6 +2266,7 @@ src/
     importing/            Delimited parsing, coercion, column mapping, opening balances
     practice/             Firms, engagements, staffing a client, company switching, the work queue
     funds/                Funds and restrictions, contributions and pledges, the release run
+    manufacturing/        Bills of materials, work orders, and cost moving through WIP
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2498,13 +2586,13 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Four of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
-  `time_billing`, `properties` and — since Phase 26 — `funds` are implemented; `pos_import`,
-  `appointments`, `vehicles`, and `manufacturing` are declared, switched on by the packs that ask
-  for them, and have no workflows. The module settings page lists them under "Not built yet" rather
-  than hiding them. All four remaining are workflow surfaces rather than accounting models, which
-  is why `funds` was taken first: restricted fund balances are a reporting model, and the reporting
-  model was the part that could be got wrong quietly.
+- **Three of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
+  `time_billing`, `properties`, `funds` and — since Phase 27 — `manufacturing` are implemented;
+  `pos_import`, `appointments` and `vehicles` are declared, switched on by the packs that ask for
+  them, and have no workflows. The module settings page lists them under "Not built yet" rather
+  than hiding them. All three remaining are workflow surfaces rather than accounting models: the
+  two with real accounting content behind them, `funds` and `manufacturing`, were taken first,
+  because a reporting model is the part that can be got wrong quietly.
 - **A retainer is not modelled on a cash basis.** Strictly, cash basis has no unearned revenue —
   money received in April is April's revenue. What happens instead is that the receipt has no
   recognition entry to take accounts from, so it stays on the balance sheet and the caveat names

@@ -30,6 +30,7 @@ export async function AppShell({
     | 'time'
     | 'properties'
     | 'funds'
+    | 'manufacturing'
     | 'payroll'
     | 'marketing'
     | 'studio'
@@ -68,6 +69,13 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'funds')
     : false
 
+  // Phase 27. Its own workspace rather than a tab under Inventory: a factory's
+  // question is "what is on the floor and what has it cost", and a stock list
+  // answers neither.
+  const manufacturingEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'manufacturing')
+    : false
+
   // Practice mode (Phase 18). Both reads are keyed on the user rather than the
   // company, which is the whole point — they are the only two things on this
   // page that are about the person instead of the books they are looking at.
@@ -85,6 +93,12 @@ export async function AppShell({
     { key: 'time', href: '/time', label: 'Time', show: timeEnabled },
     { key: 'properties', href: '/properties', label: 'Properties', show: propertiesEnabled },
     { key: 'funds', href: '/funds', label: 'Funds', show: fundsEnabled },
+    {
+      key: 'manufacturing',
+      href: '/manufacturing',
+      label: 'Manufacturing',
+      show: manufacturingEnabled,
+    },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

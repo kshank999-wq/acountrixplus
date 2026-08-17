@@ -264,4 +264,20 @@ export const INDUSTRY_ACCOUNTS = {
   grantRevenue: '4510',
   releasedFromRestriction: '4590',
   releasedToUnrestricted: '4595',
+
+  // Manufacturing (Phase 27). Installed by the pack since Phase 0 and used for
+  // the first time here.
+  //
+  // Three inventory accounts rather than one, because a manufacturer's balance
+  // sheet has to say how much of its stock is steel, how much is half-built,
+  // and how much is ready to sell — three very different answers to "how
+  // quickly could you turn that into money". Phase 14 already lets an item name
+  // its own inventory account, which is the seam that makes this work without a
+  // second inventory model.
+  rawMaterials: '1440',
+  workInProcess: '1450',
+  finishedGoods: '1460',
+  directMaterials: '5060',
+  directLabor: '5070',
+  manufacturingOverhead: '5080',
 } as const
