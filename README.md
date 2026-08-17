@@ -1332,6 +1332,15 @@ it for its **reads** as well as its writes, or it cannot see rows the caller cre
 transaction. Always wrong, never mattered — until the walk-in fallback created a customer and
 invoiced it in one go.
 
+## Deploying
+
+For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
+that catch people out are both database connection details: the application must use
+Supabase's *transaction* pooler on port 6543 (the direct host is IPv6-only and Vercel
+cannot reach it), and migrations must use the *session* pooler on 5432 (DDL needs one
+backend for the whole transaction). The code detects both and `npm run db:migrate`
+refuses the wrong one rather than half-applying a migration.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
