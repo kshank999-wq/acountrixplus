@@ -208,7 +208,10 @@ export const INDUSTRY_PACKS: Record<Industry, IndustryPack> = {
   ecommerce: {
     key: 'ecommerce',
     label: 'E-commerce',
-    modules: ['inventory'],
+    // Phase 28. A marketplace settlement and a till Z-report are the same
+    // shape, and this pack's clearing, fee and refund accounts are exactly the
+    // ones a daily summary posts to.
+    modules: ['inventory', 'pos_import'],
     accounts: [
       { number: '1470', name: 'Inventory in Transit', type: 'asset', subtype: 'inventory' },
       { number: '1210', name: 'Payment Processor Clearing', type: 'asset', subtype: 'undeposited_funds' },

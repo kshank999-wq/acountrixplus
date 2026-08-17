@@ -103,6 +103,9 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   // materials through work in process into finished goods — on Phase 14's
   // costing engine rather than a second one.
   'manufacturing',
+  // Phase 28. Daily sales summaries for a till, a marketplace or a processor —
+  // one module for two industry rows, because they are the same shape.
+  'pos_import',
 ]
 
 type CompanyRow = { id: string; industry: Industry }

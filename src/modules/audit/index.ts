@@ -114,6 +114,10 @@ export type AuditAction =
   | 'fund.release'
   | 'contribution.record'
   | 'contribution.receive'
+  // Daily takings (spec §5, Phase 28). Importing a day decides a business's
+  // revenue for that day from somebody else's summary, and records a till
+  // discrepancy — both are exactly what §19 asks to be able to reconstruct.
+  | 'takings.import'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became

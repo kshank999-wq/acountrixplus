@@ -197,6 +197,13 @@
       "when": 1786953424588,
       "tag": "0027_phase27_manufacturing",
       "breakpoints": true
+    },
+    {
+      "idx": 28,
+      "version": "7",
+      "when": 1786975628404,
+      "tag": "0028_phase28_takings",
+      "breakpoints": true
     }
   ]
 }

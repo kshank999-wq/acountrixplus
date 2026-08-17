@@ -18,8 +18,8 @@ existing business's books in**, **accountant practice mode**,
 **communications log with the follow-up list**, **property management**, a
 **retention policy with the scheduled work six phases owed**,
 **per-client staff assignment inside a firm**, **fund accounting for
-nonprofits**, and **manufacturing with bills of materials and work orders** from
-the
+nonprofits**, **manufacturing with bills of materials and work orders**, and
+**daily takings from a till or a marketplace** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -47,7 +47,8 @@ the
 [ADR 0024](docs/adr/0024-nothing-grows-for-ever-and-nothing-waits-for-somebody-to-look.md), and
 [ADR 0025](docs/adr/0025-a-firm-does-not-put-everybody-on-everything.md), and
 [ADR 0026](docs/adr/0026-a-restriction-is-the-donors-not-the-charitys.md), and
-[ADR 0027](docs/adr/0027-cost-moves-with-the-material.md).
+[ADR 0027](docs/adr/0027-cost-moves-with-the-material.md), and
+[ADR 0028](docs/adr/0028-a-day-is-a-fact-somebody-else-recorded.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1141,6 +1142,47 @@ company where none does. It reported a difference the size of the whole subledge
 perfectly correct, which is worse than not checking. It now sums every account an inventoried item
 actually names.
 
+### A day of trading, arriving from somebody else's system (Phase 28)
+
+`pos_import` has been a declared module since Phase 0, switched on by the restaurant and e-commerce
+packs, doing nothing. It is the first module to serve **two** of §5's fourteen rows, and that is the
+whole argument for it: a restaurant's Z-report and a marketplace's settlement file look nothing
+alike — one has tips and a cash drawer, the other has commission and returns — but they are the same
+fact, *a day of trading happened inside somebody else's system and has to become double-entry here.*
+
+- **A day is one journal entry, not four hundred.** A café serving four hundred covers produces four
+  hundred sales and one useful accounting fact. Importing the four hundred gives a ledger nobody can
+  read and promises the detail is trustworthy, which — a POS export not being a system of record —
+  it is not. The categories and tenders are stored as evidence of what the source said; they are not
+  postings.
+- **Gross, not net.** The clearing account is debited at the *net* deposit and the fee is debited
+  separately, so the credit side still carries the full gross. Booking the deposit understates the
+  sales and hides the cost of selling in one move, and it is nearly impossible to detect afterwards
+  because the books still balance. Fees are recorded per tender, so card at 1.6% and a delivery
+  platform at 15% can be told apart.
+- **Tips are somebody else's money.** Credited to 2310 and touching no revenue account, so they
+  appear on no profit and loss — asserted by running the P&L and checking the total is the sales
+  figure and not the sales figure plus the tips. ADR 0023's rule, in a different industry.
+- **The till is counted, and the difference is named.** Cash is banked at what was *counted*, and the
+  gap goes to 6870 Cash Over and Short. A summary that quietly adjusts cash to match the register
+  balances perfectly and hides theft. "Nobody counted" is stored as null and is not the same as
+  counting and finding it exact.
+- **A day imported twice is imported once.** `unique(company_id, business_date, source)`, claimed
+  before anything is posted. A second call returns `created: false` with the row that is there
+  instead of raising — a nightly importer retrying is not an error, and an exception there produces
+  a dead job and eventually somebody who turns the alerting off.
+- **When the source contradicts itself, the difference is named rather than refused.** The first
+  implementation rejected a day whose tenders did not equal its sales, reasoning that a plug is a lie
+  that balances. That was wrong, and the test written to describe the wanted behaviour is what
+  surfaced it: an entry has to balance, so the choice is never *plug or don't* but **which account
+  absorbs it** — and refusing is the worst option, because what happens next is somebody keys the day
+  in by hand and the discrepancy is never seen again. It goes to 1220 POS Import Suspense, on the
+  row and on the screen. That left the balance assertion doing something real: it is now a check on
+  our own arithmetic rather than on anybody's data.
+- **The tips reconciliation compares two different things.** What the days say was collected, against
+  what 2310 holds after payroll has drawn on it. Money leaves that account by a door this module does
+  not control — the seed and the test both pay staff with an ordinary journal entry, deliberately.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1243,6 +1285,7 @@ Coverage matches what spec §21 asks for:
 | `tests/properties.test.ts` | Rent arithmetic against a pure core: a whole month charged exactly what the lease says without ever dividing, a tenancy starting on the 15th charged 17 days rather than 16 and one ending on the 10th charged to the 10th, nothing charged for a period the tenancy does not touch, February in a leap year and out of one, **a proration that rounds away to nothing raising no charge at all**, periods walked inclusively across a year boundary, and a due date that stays inside its own month; a property reportable the moment it exists with one Property dimension however many properties, two live tenancies on one unit refused while back-to-back ones are allowed, a unit occupied while let and available after, a property with somebody living in it refused retirement and kept rather than deleted once empty, and **the module installing the four accounts a pack that never had them cannot supply**; the industry gate, the terminology seam calling a customer a Tenant while the record stays a `customers` row, and one landlord's properties off another's books; **one invoice per tenancy raised against Rental Income**, **a period billed once however many times the run fires**, **one invoice between two runs fired at the same instant**, the first month prorated and the rest whole, an agreed-but-unstarted tenancy billing nothing, the month taken as a parameter rather than read from the clock, and the permissions on running against previewing; **a deposit as a liability with the profit and loss unmoved**, **a refund that is not an expense**, more refused than is held either way round, **unpaid rent settled without recognising the rent twice**, **a settled deposit kept off the undeposited funds list**, income recognised only when a deposit is kept for something unbilled, **what is held reconciled to account 2580**, a shortfall reported, every movement tied to the entry that posted it, and one landlord's deposits off another's reconciliation; a rent roll counting the empty flat, billed and outstanding per unit, and a unit held back for works kept in the denominator; and property-level reporting through the dimensional profit and loss, **seeing a roof repair this module never posted**, footing to the ordinary profit and loss, and **the rent invoice itself carrying the property tag** |
 | `tests/funds.test.ts` | The restriction arithmetic against a pure core: **the lesser of what was given and what was spent** released in both directions, nothing released from an empty fund and nothing conjured from an overdrawn one, spending nothing treated as releasing nothing rather than as a shortfall, an endowment placed in the restricted column and refused release, **February refused March's money** while a month may spend what it was given in that same month, and release earned but not posted counted without being spent twice; a fund reportable the moment it exists with one Fund dimension, **the module installing the seven accounts a pack that never had them cannot supply**, the industry gate, the journal permission, **no way at all to edit what the donor said**, and a fund closed while it still holds money rather than the close being refused; **a pledge recognised as income the day it is promised** and sitting in Pledges Receivable rather than the bank, **no income at all posted when the money arrives**, instalments with what is still owed, more refused than was promised, a gift refused a second receipt, and an anonymous gift from a collection tin; **a release that leaves the year's income and net income exactly where they were**, the fund's balance down by precisely what it released, **one release per fund per month however many times the run fires**, **one release between two runs fired at the same instant**, the same donation never released twice across two months, **nor when the months are run out of order**, a fund never driven negative however much is spent, **an endowment's principal never released**, a preview that posts nothing by looking, the month taken as a parameter rather than read from the clock, and the permission on running against previewing; **spending counted from a bill this module never posted**, per-fund reporting through the dimensional profit and loss, and a supplier refund netted off rather than ignored; and net assets split into the two columns, moved from one to the other by the run with the total unchanged, **a donation belonging to no fund at all detected**, overspent funds listed with what they went beyond, an answer as at a date rather than as at now, and one charity's funds off another's books |
 | `tests/manufacturing.test.ts` | The batch arithmetic against a pure core: a recipe scaled in one step rather than per unit then multiplied, expected wastage added on top of the drawing, a bill of materials that makes nothing refused, the whole cost divided over the good units, **scrap raising the unit cost while leaving the total alone**, the rounding handed back rather than dropped and always adding back to the total, a run that made nothing saying so instead of dividing by zero, **yield measured against the plan and scrap against total output** so a run stopped early is not confused with a run going wrong, and a component nobody expected reported beside one used heavily; material out of raw materials and into WIP, **costed from the lots and not from the item's planning figure or a BOM**, recorded as its own movement kind rather than as shrinkage, labour absorbed by crediting the expense so what is left is idle time, **work in process cleared to exactly zero on completion** with not one penny left behind when the cost does not divide, the finished goods a lot like any other, a scrapped run's cost landing on its survivors, **a cancelled run written off to overhead rather than back to the store**, a run that absorbed nothing refused completion, a finished run refused more material, and an empty store issuing nothing and saying so; a stored recipe exploded to a run size, one that makes something out of itself refused, one with no components refused, **the module installing the five accounts a pack that never had them cannot supply**, the industry gate, the journal permission, and one factory's runs off another's floor; and **the WIP register agreeing with account 1450** while a run is open and after it closes, stock split across the three stages, **three stages reported and not the whole chart of accounts**, a stage kept at zero rather than dropped when nothing has moved, **the inventory subledger still equal to the ledger with a factory in the middle**, a shelf not multiplied by the number of runs that made it, a run compared against what its recipe expected, no variance where there was no recipe, and what a run absorbed listed in the order it happened |
+| `tests/pos.test.ts` | A day turned into lines by a pure core: a plain day balancing, **the gross booked and the fee debited separately so the deposit is never the revenue**, a short till named in Cash Over and Short rather than plugged into cash, a till that is over credited the same way, **"nobody counted" told apart from "counted, and exact"**, tips and tax kept off revenue entirely, discounts and refunds reported rather than netted into sales, **a source that contradicts itself surfaced and given its own account rather than absorbed**, and a day of several categories and tenders still balancing; a whole day posted as **one journal entry** with three lines, the same day and source refused a second time with **revenue not doubled**, **two importers racing for the same day and exactly one creating it**, a till and a marketplace both allowed to report the same date, **the module installing the accounts it posts to even off a pack that never had them**, a category pointed at an account that does not exist refused, an empty day refused, the module gate, the journal permission, what was sold and how it was paid for recorded, and one café's days off another's books; and afterwards **the profit and loss showing the gross with the fee as a cost**, **tips nowhere on it at all**, what is still owed to staff against what payroll has paid out **through a door this module does not control**, the counted cash banked with the shortfall where somebody will see it, and a disagreeing source posted anyway with the difference sitting in 1220 and **neither cash nor revenue touched by it** |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -2193,6 +2236,38 @@ charity — neither has a work in process account.*
      absorbing them is the moment that cost became part of something on a shelf. What is left in
      5070 at a period end is labour that was never absorbed — idle time.
 
+265. **Sign out and sign in as `ines@marlowestreet.test`, then open Takings.** *3 days imported ·
+     $2,400.00 net sales · 1 till did not agree.* Three days of a café's trading, each one journal
+     entry rather than four hundred.
+266. **Read the Tips card.** Collected $214.00, still owed $64.00, paid out $150.00. Those two sides
+     are maintained by different code: the left is what the tills reported, the right is the balance
+     on 2310 after payroll drew on it. The seed pays the staff with an ordinary journal entry, on
+     purpose — a reconciliation whose two halves come from the same place proves nothing.
+267. **Look at the 2026-03-11 row: source `marketplace`, $282.00 net sales, $42.30 of fees.** The
+     delivery platform deposited $239.70. The books say the café sold $282.00 and paid $42.30 to
+     sell it, which are two facts; the deposit is neither of them.
+268. **Click the row for 2026-03-10.** *Sold* on the left, *Taken* on the right, and the totals under
+     each. Food $542.00, drinks $438.00, less $22.00 refunded — and a card tender of $831.00 with
+     *less $13.20 fee* named on the tender that charged it, not lumped into a day-level figure.
+269. **Look at the Till column on that row: *$8.50 short*.** Somebody counted the drawer and it was
+     light. The cash debit is what was *counted*, and the $8.50 is in `6870 Cash Over and Short`
+     with a name on it. A summary that quietly adjusts cash to match the register balances
+     perfectly and hides theft.
+270. **The 2026-03-11 row says *not counted*, which is not the same as *exact*.** Nobody counted a
+     marketplace settlement — there is no drawer. That is stored as null and produces no over/short
+     line at all, rather than being recorded as a perfect count nobody performed.
+271. **Open Accounting → Reports → Profit & loss for 2026.** Revenue $2,400.00, with `6860
+     Marketplace and Platform Fees` $71.90 and `6870 Cash Over and Short` $8.50 as costs. The
+     revenue is the gross of every fee.
+272. **Now look for the $214.00 of tips on that report.** It is not there, and it is not supposed to
+     be. Tips are somebody else's money from the moment they are taken — the same rule ADR 0023
+     applied to a tenant's deposit, in a different industry. Switch to the trial balance and they
+     are on `2310 Tips Payable`, at $64.00, because $150.00 has gone out.
+273. **Press "Import a day" and re-enter 2026-03-09 from the register.** *2026-03-09 was already in.
+     Nothing was posted a second time.* Not an error — a nightly importer retrying is not a fault,
+     and an exception there produces a dead job and eventually somebody who turns the alerting off.
+     The claim row goes in before the entry, so a retry cannot double a café's revenue.
+
 ## Project layout
 
 ```
@@ -2224,6 +2299,9 @@ src/
     inventory/            Stock on hand, receiving, counts
     time/                 Timesheets, unbilled work, billing, retainers
     properties/           Rent roll and occupancy, the rent run, deposits held
+    funds/                Funds, donors and promises, the release run, net assets
+    manufacturing/        Runs on the floor, bills of materials, where the value sits
+    takings/              Days imported, what each was made of, and the tips position
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
     studio/               Company Studio — profile, brand, catalog, clauses
@@ -2267,6 +2345,7 @@ src/
     practice/             Firms, engagements, staffing a client, company switching, the work queue
     funds/                Funds and restrictions, contributions and pledges, the release run
     manufacturing/        Bills of materials, work orders, and cost moving through WIP
+    pos/                  A day's takings as one entry: gross, fees, tips, and the till count
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2586,13 +2665,25 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Three of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
-  `time_billing`, `properties`, `funds` and — since Phase 27 — `manufacturing` are implemented;
-  `pos_import`, `appointments` and `vehicles` are declared, switched on by the packs that ask for
+- **Two of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
+  `time_billing`, `properties`, `funds`, `manufacturing` and — since Phase 28 — `pos_import` are
+  implemented; `appointments` and `vehicles` are declared, switched on by the packs that ask for
   them, and have no workflows. The module settings page lists them under "Not built yet" rather
-  than hiding them. All three remaining are workflow surfaces rather than accounting models: the
-  two with real accounting content behind them, `funds` and `manufacturing`, were taken first,
-  because a reporting model is the part that can be got wrong quietly.
+  than hiding them. Both remaining are scheduling surfaces rather than accounting models: the ones
+  with real accounting content behind them were taken first, because a reporting model is the part
+  that can be got wrong quietly.
+- **No POS integration, and no settlement file upload.** A day arrives through `importDay`, from a
+  form or a caller. There is no adapter for Square, Toast, Shopify or Amazon, and no CSV upload —
+  even though Phase 17 has a parser that could be pointed at one. The module is the accounting half
+  of the problem; the feed half is a provider abstraction that does not exist yet.
+- **A day cannot be un-imported.** The claim row makes re-import impossible by design, which is the
+  point, but nothing reverses one. Getting Tuesday wrong means a manual journal entry against it.
+- **A day's sales tax is one figure.** It credits 2200 in total with no jurisdiction breakdown, so
+  Phase 9's per-jurisdiction return cannot see inside a day's takings.
+- **Tips are one balance, not a balance per person.** Who is owed what out of 2310 is not modelled,
+  and paying it out is payroll's job.
+- **`1220 POS Import Suspense` accumulates silently.** It is on the day row, on the takings board and
+  on the balance sheet, but nothing chases it — no alert, and no entry in Phase 24's health surface.
 - **A retainer is not modelled on a cash basis.** Strictly, cash basis has no unearned revenue —
   money received in April is April's revenue. What happens instead is that the receipt has no
   recognition entry to take accounts from, so it stays on the balance sheet and the caveat names
@@ -2606,8 +2697,10 @@ Gaps within the phases already built:
   for and no report uses it yet.
 - **Inventory has one location.** No warehouses, no bins, no transfers between them — which
   wholesale and multi-site retail both need. The movement table has the shape to carry them.
-- **No bill of materials.** The manufacturing pack gets stock without the ability to consume
-  components into a finished good, which is the half of manufacturing that makes it manufacturing.
+- **No recipes, so a day's takings relieve no stock.** Phase 27 gave the manufacturing pack a bill
+  of materials, but nothing joins a menu item to its ingredients — so a restaurant importing a day
+  through Phase 28 books food sales without touching food inventory, and its cost of sales comes
+  from purchases rather than from consumption.
 - **Landed cost is not apportioned.** Freight and duty go to their own expense accounts rather
   than into the cost of the stock they arrived with, so margin on imported goods is flattered.
 - **Clearing Goods Received Not Invoiced has no screen.** `attachBillToReceipts` does it correctly

@@ -54,6 +54,7 @@ import {
   issueMaterial,
 } from '@/modules/manufacturing/service'
 import { wipPosition } from '@/modules/manufacturing/reporting'
+import { importDay, listDays, tipsPosition } from '@/modules/pos/service'
 import { listRentCharges } from '@/modules/properties/billing'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
@@ -2288,6 +2289,124 @@ async function main() {
       `1450 at ${formatCentsPlain(floor.ledgerCents)} — ${floor.agrees ? 'agrees' : 'DISAGREES'}.`,
   )
 
+  // --- Phase 28: a day's trading, arriving from somebody else's system ------
+  //
+  // A café rather than a marketplace seller, because a till is the harder of
+  // the two: a marketplace settlement cannot be miscounted and a drawer can.
+  // The same module serves both, which is the point — see ADR 0028.
+  const cafe = await registerCompany({
+    companyName: 'Marlowe Street Coffee',
+    industry: 'restaurant',
+    userName: 'Ines Ferreira',
+    email: 'ines@marlowestreet.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const cafeCtx: ActorContext = {
+    userId: cafe.user.id,
+    userName: cafe.user.name,
+    companyId: cafe.company.id,
+    role: 'owner',
+  }
+
+  await db.insert(financialAccounts).values({
+    companyId: cafe.company.id,
+    chartAccountId: (await accountByNumber(cafe.company.id, '1000'))!.id,
+    name: 'Café Current Account',
+    mask: '7712',
+    kind: 'checking',
+    providerAccountId: 'seed-marlowe-current',
+  })
+
+  // Monday. An ordinary day, counted exactly: food and drink across cash and
+  // card, tips collected for the staff, and a card fee that does not touch
+  // revenue.
+  await importDay(cafeCtx, {
+    businessDate: '2026-03-09',
+    source: 'register',
+    label: 'Monday, Z-report 1184',
+    categories: [
+      { name: 'Food', accountNumber: '4030', amountCents: 68_400 },
+      { name: 'Drinks', accountNumber: '4040', amountCents: 51_600 },
+    ],
+    tenders: [
+      { kind: 'cash', name: 'Cash', amountCents: 34_000 },
+      { kind: 'card', name: 'Card', amountCents: 101_800, feeCents: 1_640 },
+    ],
+    taxCents: 8_400,
+    tipsCents: 11_400,
+    discountsCents: 4_000,
+    countedCashCents: 44_000,
+    floatCents: 10_000,
+  })
+
+  // Tuesday. The drawer is £8.50 light. Nothing about the day changes except
+  // that the books now say so, in an account with a name, rather than the cash
+  // figure being quietly written down to match.
+  await importDay(cafeCtx, {
+    businessDate: '2026-03-10',
+    source: 'register',
+    label: 'Tuesday, Z-report 1185',
+    categories: [
+      { name: 'Food', accountNumber: '4030', amountCents: 54_200 },
+      { name: 'Drinks', accountNumber: '4040', amountCents: 43_800 },
+    ],
+    tenders: [
+      { kind: 'cash', name: 'Cash', amountCents: 29_500 },
+      { kind: 'card', name: 'Card', amountCents: 83_100, feeCents: 1_320 },
+    ],
+    taxCents: 6_800,
+    tipsCents: 10_000,
+    refundsCents: 2_200,
+    countedCashCents: 38_650,
+    floatCents: 10_000,
+  })
+
+  // Wednesday, from the delivery platform instead of the till. Same module,
+  // same shape: a summary of somebody else's day, with their commission on it.
+  // The commission is an expense of £42.30 and the sales are the full £282 —
+  // not a deposit of £239.70 recorded as revenue, which is the mistake this
+  // module exists to make impossible.
+  await importDay(cafeCtx, {
+    businessDate: '2026-03-11',
+    source: 'marketplace',
+    label: 'Delivery platform settlement',
+    categories: [{ name: 'Delivery food', accountNumber: '4030', amountCents: 28_200 }],
+    tenders: [{ kind: 'other', name: 'Platform payout', amountCents: 30_180, feeCents: 4_230 }],
+    taxCents: 1_980,
+  })
+
+  // Somebody was paid their tips. Deliberately posted as an ordinary journal
+  // entry and not by anything in this module: paying staff is payroll's job,
+  // and the tips position has to be able to see money leave by a door it does
+  // not control. That is what makes it a reconciliation rather than a restated
+  // copy of its own figure.
+  await postManualEntry(cafeCtx, {
+    entryDate: '2026-03-12',
+    memo: 'Tips paid out to floor staff for w/c 9 March',
+    lines: [
+      {
+        chartAccountId: (await accountByNumber(cafe.company.id, '2310'))!.id,
+        debitCents: 15_000,
+      },
+      { chartAccountId: (await accountByNumber(cafe.company.id, '1000'))!.id, creditCents: 15_000 },
+    ],
+  })
+
+  const tips = await tipsPosition(cafeCtx)
+  const cafeDays = await listDays(cafeCtx)
+  const short = cafeDays.find((day) => (day.overShortCents ?? 0) < 0)
+
+  console.log(
+    `  Marlowe Street Coffee: ${cafeDays.length} days imported, one entry each. ` +
+      `Tips collected ${formatCentsPlain(tips.collectedCents)}, paid out ` +
+      `${formatCentsPlain(tips.paidOutCents)}, still owed ${formatCentsPlain(tips.ledgerCents)}. ` +
+      (short
+        ? `The till was ${formatCentsPlain(-short.overShortCents!)} short on ${short.businessDate} ` +
+          'and the books say so.'
+        : 'Every till counted exactly.'),
+  )
+
   // --- Phase 19: an invitation that carries no password ---------------------
   //
   // Left pending on purpose, so /settings/access has something in its "waiting
@@ -2391,6 +2510,9 @@ async function main() {
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')
   console.log(
     '  /funds                sign in as nadia@riverside.test — what money was given for, and when it stops being restricted',
+  )
+  console.log(
+    '  /takings              sign in as ines@marlowestreet.test — three days of a café, one entry each',
   )
   console.log('  /accounting/documents  every file, what it hangs on, and the open questions')
   console.log('  /crm/work             follow-ups: late, due, and the ones nobody claimed')

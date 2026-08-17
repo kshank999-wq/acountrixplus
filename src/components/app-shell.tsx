@@ -31,6 +31,7 @@ export async function AppShell({
     | 'properties'
     | 'funds'
     | 'manufacturing'
+    | 'takings'
     | 'payroll'
     | 'marketing'
     | 'studio'
@@ -76,6 +77,12 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'manufacturing')
     : false
 
+  // Phase 28. A restaurant's day and a marketplace's settlement are the same
+  // shape, so one workspace serves both.
+  const takingsEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'pos_import')
+    : false
+
   // Practice mode (Phase 18). Both reads are keyed on the user rather than the
   // company, which is the whole point — they are the only two things on this
   // page that are about the person instead of the books they are looking at.
@@ -99,6 +106,7 @@ export async function AppShell({
       label: 'Manufacturing',
       show: manufacturingEnabled,
     },
+    { key: 'takings', href: '/takings', label: 'Takings', show: takingsEnabled },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

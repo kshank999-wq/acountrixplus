@@ -46,6 +46,9 @@ export const journalSourceEnum = pgEnum('journal_source', [
   // text search through memos.
   'contribution',
   'release',
+  // Phase 28. A day's takings, so "show me every daily summary" is a filter
+  // rather than a text search through memos.
+  'takings',
 ])
 
 /**
