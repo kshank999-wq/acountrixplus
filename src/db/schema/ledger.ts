@@ -49,6 +49,11 @@ export const journalSourceEnum = pgEnum('journal_source', [
   // Phase 28. A day's takings, so "show me every daily summary" is a filter
   // rather than a text search through memos.
   'takings',
+  // Phase 29. An appointment delivered, a gift card sold, a card redeemed. Named
+  // because "what did we earn from the chair" and "what do we still owe on
+  // cards" are two questions a practice asks constantly, and neither should be a
+  // text search through memos.
+  'appointment',
 ])
 
 /**

@@ -55,6 +55,19 @@ import {
 } from '@/modules/manufacturing/service'
 import { wipPosition } from '@/modules/manufacturing/reporting'
 import { importDay, listDays, tipsPosition } from '@/modules/pos/service'
+import {
+  addPractitioner,
+  book,
+  closeWithoutDelivery,
+  completeAppointment,
+  redeemGiftCard,
+  sellGiftCard,
+} from '@/modules/appointments/service'
+import {
+  diarySummary,
+  giftCardPosition,
+  payoutPosition,
+} from '@/modules/appointments/reporting'
 import { listRentCharges } from '@/modules/properties/billing'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
@@ -2407,6 +2420,147 @@ async function main() {
         : 'Every till counted exactly.'),
   )
 
+  // --- Phase 29: a diary, a split, and money taken for a promise ------------
+  //
+  // A salon rather than a clinic, because the personal-care pack is the one
+  // that names the contractor split and the gift card — the two things that
+  // make this accounting rather than a calendar.
+  const salon = await registerCompany({
+    companyName: 'Fenwick Row Studio',
+    industry: 'personal_care',
+    userName: 'Delphine Achebe',
+    email: 'delphine@fenwickrow.test',
+    password: DEMO_PASSWORD,
+  })
+
+  const salonCtx: ActorContext = {
+    userId: salon.user.id,
+    userName: salon.user.name,
+    companyId: salon.company.id,
+    role: 'owner',
+  }
+
+  await db.insert(financialAccounts).values({
+    companyId: salon.company.id,
+    chartAccountId: (await accountByNumber(salon.company.id, '1000'))!.id,
+    name: 'Studio Current Account',
+    mask: '5540',
+    kind: 'checking',
+    providerAccountId: 'seed-fenwick-current',
+  })
+
+  // Two practitioners on different terms. Neither has a login, and that is the
+  // usual case: a chair renter appears in the diary and earns a share without
+  // ever being a user of this application.
+  const sam = await addPractitioner(salonCtx, {
+    name: 'Sam Okafor',
+    commissionBp: 4_500,
+    productCommissionBp: 1_000,
+  })
+  const rae = await addPractitioner(salonCtx, {
+    name: 'Rae Lindqvist',
+    commissionBp: 5_500,
+    productCommissionBp: 1_000,
+  })
+
+  const at = (day: number, hour: number) => new Date(Date.UTC(2026, 3, day, hour, 0))
+
+  // A card sold in March, weeks before anybody uses it. £100 taken, £0 earned.
+  await sellGiftCard(salonCtx, {
+    code: 'GC-1001',
+    amountCents: 10_000,
+    issuedOn: '2026-03-14',
+  })
+
+  // Wednesday. Four in the book with Sam, back to back — legal, because the
+  // constraint uses a half-open range and 11:00 does not overlap 10:00–11:00.
+  const delivered: string[] = []
+  for (const [practitionerId, hour, price, retail] of [
+    [sam.id, 10, 6_500, 0],
+    [sam.id, 11, 4_000, 2_400],
+    [rae.id, 10, 8_000, 0],
+    [rae.id, 11, 5_500, 0],
+  ] as const) {
+    const appointment = await book(salonCtx, {
+      practitionerId,
+      startsAt: at(1, hour),
+      endsAt: at(1, hour + 1),
+      priceCents: price,
+      productCents: retail,
+    })
+    delivered.push(appointment.id)
+  }
+
+  for (const id of delivered) {
+    await completeAppointment(salonCtx, { appointmentId: id, completedOn: '2026-04-01' })
+  }
+
+  // The £100 card, produced at the desk against Sam's first client. £65 of it
+  // is spent; £35 is still owed as a haircut somebody has already paid for.
+  await redeemGiftCard(salonCtx, {
+    code: 'GC-1001',
+    appointmentId: delivered[0],
+    redeemedOn: '2026-04-01',
+  })
+
+  // One who did not come, and one who called off. Deliberately different rows:
+  // the cancelled hour is sellable again, the no-show hour was lost.
+  const missed = await book(salonCtx, {
+    practitionerId: sam.id,
+    startsAt: at(2, 10),
+    endsAt: at(2, 11),
+    priceCents: 6_500,
+  })
+  const calledOff = await book(salonCtx, {
+    practitionerId: rae.id,
+    startsAt: at(2, 10),
+    endsAt: at(2, 11),
+    priceCents: 8_000,
+  })
+  await closeWithoutDelivery(salonCtx, { appointmentId: missed.id, status: 'no_show' })
+  await closeWithoutDelivery(salonCtx, { appointmentId: calledOff.id, status: 'cancelled' })
+
+  // Three still in the diary, so the forward book is a number on the screen
+  // that is visibly not revenue.
+  for (const [practitionerId, hour] of [
+    [sam.id, 14],
+    [rae.id, 14],
+    [sam.id, 15],
+  ] as const) {
+    await book(salonCtx, {
+      practitionerId,
+      startsAt: at(3, hour),
+      endsAt: at(3, hour + 1),
+      priceCents: 7_000,
+    })
+  }
+
+  // Sam is paid for the week. Again an ordinary journal entry and no part of
+  // this module — 2320 has to be drawn on by something the appointments code
+  // does not control, or the payout figure is checking itself.
+  await postManualEntry(salonCtx, {
+    entryDate: '2026-04-05',
+    memo: 'Paid Sam Okafor for w/c 30 March',
+    lines: [
+      { chartAccountId: (await accountByNumber(salon.company.id, '2320'))!.id, debitCents: 5_000 },
+      { chartAccountId: (await accountByNumber(salon.company.id, '1000'))!.id, creditCents: 5_000 },
+    ],
+  })
+
+  const owedToStaff = await payoutPosition(salonCtx)
+  const cardsHeld = await giftCardPosition(salonCtx)
+  const book29 = await diarySummary(salonCtx)
+
+  console.log(
+    `  Fenwick Row Studio: ${book29.completed} visits delivered for ` +
+      `${formatCentsPlain(book29.deliveredCents)}, ${book29.booked} still in the diary worth ` +
+      `${formatCentsPlain(book29.bookedCents)} — which is not revenue. Practitioners earned ` +
+      `${formatCentsPlain(owedToStaff.earnedCents)}, of which ` +
+      `${formatCentsPlain(owedToStaff.ledgerCents)} is still owed. Gift cards ` +
+      `${formatCentsPlain(cardsHeld.outstandingCents)} against account 2590 at ` +
+      `${formatCentsPlain(cardsHeld.ledgerCents)} — ${cardsHeld.agrees ? 'agrees' : 'DISAGREES'}.`,
+  )
+
   // --- Phase 19: an invitation that carries no password ---------------------
   //
   // Left pending on purpose, so /settings/access has something in its "waiting
@@ -2513,6 +2667,9 @@ async function main() {
   )
   console.log(
     '  /takings              sign in as ines@marlowestreet.test — three days of a café, one entry each',
+  )
+  console.log(
+    '  /appointments         sign in as delphine@fenwickrow.test — a diary, the splits, and a gift card',
   )
   console.log('  /accounting/documents  every file, what it hangs on, and the open questions')
   console.log('  /crm/work             follow-ups: late, due, and the ones nobody claimed')

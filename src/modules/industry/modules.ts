@@ -106,6 +106,11 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   // Phase 28. Daily sales summaries for a till, a marketplace or a processor —
   // one module for two industry rows, because they are the same shape.
   'pos_import',
+  // Phase 29. A diary a double-booking cannot get into, revenue recognised when
+  // the service is delivered rather than when it is booked, the practitioner's
+  // share of it, and gift cards as the liability they are. Two more industry
+  // rows: healthcare and personal care.
+  'appointments',
 ]
 
 type CompanyRow = { id: string; industry: Industry }

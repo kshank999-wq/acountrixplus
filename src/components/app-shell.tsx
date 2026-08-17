@@ -32,6 +32,7 @@ export async function AppShell({
     | 'funds'
     | 'manufacturing'
     | 'takings'
+    | 'appointments'
     | 'payroll'
     | 'marketing'
     | 'studio'
@@ -83,6 +84,12 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'pos_import')
     : false
 
+  // Phase 29. A clinic and a salon keep the same diary, so one workspace serves
+  // both — and it is gated on the module rather than on either industry.
+  const appointmentsEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'appointments')
+    : false
+
   // Practice mode (Phase 18). Both reads are keyed on the user rather than the
   // company, which is the whole point — they are the only two things on this
   // page that are about the person instead of the books they are looking at.
@@ -107,6 +114,12 @@ export async function AppShell({
       show: manufacturingEnabled,
     },
     { key: 'takings', href: '/takings', label: 'Takings', show: takingsEnabled },
+    {
+      key: 'appointments',
+      href: '/appointments',
+      label: 'Appointments',
+      show: appointmentsEnabled,
+    },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.

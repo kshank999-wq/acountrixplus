@@ -48,6 +48,7 @@ export type JournalSource =
   | 'release'
   // Phase 28. A whole trading day, summarised into one entry.
   | 'takings'
+  | 'appointment'
 
 export type JournalLineInput = {
   chartAccountId: string

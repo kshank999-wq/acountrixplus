@@ -118,6 +118,11 @@ export type AuditAction =
   // revenue for that day from somebody else's summary, and records a till
   // discrepancy — both are exactly what §19 asks to be able to reconstruct.
   | 'takings.import'
+  // Appointments (spec §5, Phase 29). Completing a visit decides what somebody
+  // is paid, and redeeming a card spends money a client handed over months
+  // earlier — §19 asks for both to be reconstructable.
+  | 'appointment.complete'
+  | 'giftcard.redeem'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became

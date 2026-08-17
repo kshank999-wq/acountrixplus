@@ -18,8 +18,9 @@ existing business's books in**, **accountant practice mode**,
 **communications log with the follow-up list**, **property management**, a
 **retention policy with the scheduled work six phases owed**,
 **per-client staff assignment inside a firm**, **fund accounting for
-nonprofits**, **manufacturing with bills of materials and work orders**, and
-**daily takings from a till or a marketplace** from the
+nonprofits**, **manufacturing with bills of materials and work orders**, **daily takings
+from a till or a marketplace**, and **an appointment diary with practitioner
+splits and gift cards** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -48,7 +49,8 @@ nonprofits**, **manufacturing with bills of materials and work orders**, and
 [ADR 0025](docs/adr/0025-a-firm-does-not-put-everybody-on-everything.md), and
 [ADR 0026](docs/adr/0026-a-restriction-is-the-donors-not-the-charitys.md), and
 [ADR 0027](docs/adr/0027-cost-moves-with-the-material.md), and
-[ADR 0028](docs/adr/0028-a-day-is-a-fact-somebody-else-recorded.md).
+[ADR 0028](docs/adr/0028-a-day-is-a-fact-somebody-else-recorded.md), and
+[ADR 0029](docs/adr/0029-a-booking-is-a-promise-and-part-of-the-money-was-never-yours.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1183,6 +1185,55 @@ fact, *a day of trading happened inside somebody else's system and has to become
   what 2310 holds after payroll has drawn on it. Money leaves that account by a door this module does
   not control — the seed and the test both pay staff with an ordinary journal entry, deliberately.
 
+### A diary that owes people money (Phase 29)
+
+`appointments` has been a declared module since Phase 0, switched on by the healthcare and
+personal-care packs, doing nothing. Like Phase 28 it serves two of §5's rows, because a dentist and
+a hair salon do the same thing: keep a diary, deliver a service out of it, and owe a share of what
+it earned to the person who did the work. Three things here are not scheduling, and they are why
+this is a module rather than a calendar widget.
+
+- **The database refuses a double-booking, because a check cannot.** Bookings at 10:00 and 10:30
+  collide on no *column* — they collide on an **interval**, and only Postgres knows that at the
+  moment of insert. An `EXCLUDE USING gist` constraint over `(practitioner_id, tstzrange(starts_at,
+  ends_at))` does it, hand-written into the migration because drizzle-kit cannot generate one. A
+  read-then-write check is correct right up until the receptionist and the online form act in the
+  same second. Two details carry weight: the constraint's `WHERE` clause frees a cancelled slot, or
+  calling off Tuesday blocks that hour for ever; and `tstzrange` is half-open, so a back-to-back
+  diary is legal.
+- **A booking posts nothing at all.** Revenue happens when the service is delivered. If booking
+  posted, every cancellation would need a reversal and a practice's revenue would be whatever its
+  diary happened to hold. The forward book is reported and named separately from what was earned, so
+  nobody adds the two together.
+- **The share is a cost, never netted off the revenue.** The salon earned the whole £65 and owes
+  £29.25 of it to the person who did the work. Netting to £35.75 of revenue would understate both the
+  turnover and the cost of producing it, and hide the payout from anybody reading the profit and
+  loss — which is exactly the figure an owner is looking for when they ask why a busy month made no
+  money. It credits 2320 whether the person is a contractor or an employee: the liability is the same
+  fact, and which door the money leaves by is payroll's business.
+- **Rates are copied onto the booking, and the split always sums to the price.** A rise in April must
+  not restate what March's work was worth. Service and retail carry separate rates, because a stylist
+  on 45% of the cut is commonly on 10% of the shampoo. The practitioner's share is computed and the
+  business takes *the remainder*, so the two halves add to the whole by construction; the business
+  absorbs the half-penny, and `roundingCents` says so.
+- **A gift card is money owed, not money earned — and spending it earns nothing extra.** Selling one
+  credits 2590 and touches no revenue. Redeeming one settles the receivable. The personal-care pack
+  installs `4720 Gift Card Redemptions` and **this module never posts to it**: the revenue was
+  already recognised at delivery, so crediting 4720 as well would state £130 of income for one £65
+  haircut. Having an account in the pack is not a reason to post to it.
+- **A practitioner is not a user.** Most never sign in — a chair renter and a visiting
+  physiotherapist earn a share and have no login. Modelling them as users would mean dormant
+  accounts somebody could sign into.
+- **A no-show is not a cancellation.** A cancellation is a slot given back in time to sell again; a
+  no-show is one that was lost. Neither posts, and a no-show *fee* is deliberately not booked here —
+  it is a fee, with a different revenue account and different tax treatment, not the service revenue
+  for a service nobody received.
+- **Two reconciliations, and they are not the same kind.** Payouts against 2320 are *expected* to
+  diverge once anybody has been paid — the gap is the answer to "what went out this month". Gift
+  cards against 2590 **should** match exactly, because nothing legitimately moves that account
+  except selling and spending a card. A test journals straight at 2590 by hand and asserts the
+  report catches it.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1286,6 +1337,7 @@ Coverage matches what spec §21 asks for:
 | `tests/funds.test.ts` | The restriction arithmetic against a pure core: **the lesser of what was given and what was spent** released in both directions, nothing released from an empty fund and nothing conjured from an overdrawn one, spending nothing treated as releasing nothing rather than as a shortfall, an endowment placed in the restricted column and refused release, **February refused March's money** while a month may spend what it was given in that same month, and release earned but not posted counted without being spent twice; a fund reportable the moment it exists with one Fund dimension, **the module installing the seven accounts a pack that never had them cannot supply**, the industry gate, the journal permission, **no way at all to edit what the donor said**, and a fund closed while it still holds money rather than the close being refused; **a pledge recognised as income the day it is promised** and sitting in Pledges Receivable rather than the bank, **no income at all posted when the money arrives**, instalments with what is still owed, more refused than was promised, a gift refused a second receipt, and an anonymous gift from a collection tin; **a release that leaves the year's income and net income exactly where they were**, the fund's balance down by precisely what it released, **one release per fund per month however many times the run fires**, **one release between two runs fired at the same instant**, the same donation never released twice across two months, **nor when the months are run out of order**, a fund never driven negative however much is spent, **an endowment's principal never released**, a preview that posts nothing by looking, the month taken as a parameter rather than read from the clock, and the permission on running against previewing; **spending counted from a bill this module never posted**, per-fund reporting through the dimensional profit and loss, and a supplier refund netted off rather than ignored; and net assets split into the two columns, moved from one to the other by the run with the total unchanged, **a donation belonging to no fund at all detected**, overspent funds listed with what they went beyond, an answer as at a date rather than as at now, and one charity's funds off another's books |
 | `tests/manufacturing.test.ts` | The batch arithmetic against a pure core: a recipe scaled in one step rather than per unit then multiplied, expected wastage added on top of the drawing, a bill of materials that makes nothing refused, the whole cost divided over the good units, **scrap raising the unit cost while leaving the total alone**, the rounding handed back rather than dropped and always adding back to the total, a run that made nothing saying so instead of dividing by zero, **yield measured against the plan and scrap against total output** so a run stopped early is not confused with a run going wrong, and a component nobody expected reported beside one used heavily; material out of raw materials and into WIP, **costed from the lots and not from the item's planning figure or a BOM**, recorded as its own movement kind rather than as shrinkage, labour absorbed by crediting the expense so what is left is idle time, **work in process cleared to exactly zero on completion** with not one penny left behind when the cost does not divide, the finished goods a lot like any other, a scrapped run's cost landing on its survivors, **a cancelled run written off to overhead rather than back to the store**, a run that absorbed nothing refused completion, a finished run refused more material, and an empty store issuing nothing and saying so; a stored recipe exploded to a run size, one that makes something out of itself refused, one with no components refused, **the module installing the five accounts a pack that never had them cannot supply**, the industry gate, the journal permission, and one factory's runs off another's floor; and **the WIP register agreeing with account 1450** while a run is open and after it closes, stock split across the three stages, **three stages reported and not the whole chart of accounts**, a stage kept at zero rather than dropped when nothing has moved, **the inventory subledger still equal to the ledger with a factory in the middle**, a shelf not multiplied by the number of runs that made it, a run compared against what its recipe expected, no variance where there was no recipe, and what a run absorbed listed in the order it happened |
 | `tests/pos.test.ts` | A day turned into lines by a pure core: a plain day balancing, **the gross booked and the fee debited separately so the deposit is never the revenue**, a short till named in Cash Over and Short rather than plugged into cash, a till that is over credited the same way, **"nobody counted" told apart from "counted, and exact"**, tips and tax kept off revenue entirely, discounts and refunds reported rather than netted into sales, **a source that contradicts itself surfaced and given its own account rather than absorbed**, and a day of several categories and tenders still balancing; a whole day posted as **one journal entry** with three lines, the same day and source refused a second time with **revenue not doubled**, **two importers racing for the same day and exactly one creating it**, a till and a marketplace both allowed to report the same date, **the module installing the accounts it posts to even off a pack that never had them**, a category pointed at an account that does not exist refused, an empty day refused, the module gate, the journal permission, what was sold and how it was paid for recorded, and one café's days off another's books; and afterwards **the profit and loss showing the gross with the fee as a cost**, **tips nowhere on it at all**, what is still owed to staff against what payroll has paid out **through a door this module does not control**, the counted cash banked with the shortfall where somebody will see it, and a disagreeing source posted anyway with the difference sitting in 1220 and **neither cash nor revenue touched by it** |
+| `tests/appointments.test.ts` | The split against a pure core: two halves that **always add to the price** across a sweep of awkward prices and rates, the fraction of a penny named and attributed, a discounted service split on **what was charged rather than what was listed**, a nonsense rate clamped as the typo it is, service and retail split at their own rates, and a card that can pay **neither more than it holds nor more than the bill**; a practitioner refused a second place at the same time, **back-to-back slots allowed because the range is half-open**, two practitioners allowed the same hour, **a cancelled slot freed to sell again**, two receptionists racing for one slot and exactly one winning, an appointment that ends before it starts refused, the module gate, the journal permission, and one salon's diary out of another's; **a booking posting nothing at all** while the forward book is still counted, the whole fee booked as revenue with the share as a cost and **never netted**, retail through its own account at its own rate, completing twice posting once, **the rate that was agreed surviving a later rise**, a free visit completed without inventing an entry, **a no-show told from a cancellation** with neither posting, a no-show refused completion and a delivered visit refused un-delivery; and a sold card **on the balance sheet with revenue still at zero**, a redemption earning nothing a second time so one £65 haircut is £65 of income, **no change given in cash**, a card refused a second spend on the same visit, a card refused against a visit that has not happened, a duplicate card code refused, the cards **agreeing with account 2590** and a hand-written entry against it caught, what each practitioner is owed before and after payday, **the diary kept out of revenue**, and one delivered visit as one balanced five-line entry |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -2268,6 +2320,44 @@ charity — neither has a work in process account.*
      and an exception there produces a dead job and eventually somebody who turns the alerting off.
      The claim row goes in before the entry, so a retry cannot double a café's revenue.
 
+274. **Sign out and sign in as `delphine@fenwickrow.test`, then open Appointments.** *4 delivered ·
+     $264.00 earned · 3 still in the diary worth $210.00, which is not revenue.* Those are two
+     numbers on purpose. A forward book is useful and dangerous, and adding it to the earned figure
+     is how a diary starts pretending to be a sales ledger.
+275. **Press "Book somebody in", pick Sam Okafor, and book 2026-04-20 at 10:00 for 60 minutes.**
+     *In the diary. Nothing has been posted — a booking is a promise, not a sale.*
+276. **Do it again at 10:30.** *Sam Okafor already has an appointment overlapping that time. Two
+     people cannot be in the same chair at once.* That refusal is Postgres, not application code:
+     an `EXCLUDE USING gist` constraint over the practitioner and the time range. A check that read
+     the diary first and then inserted would be correct until the receptionist and the online
+     booking form acted in the same second.
+277. **Now book 11:00.** It goes in. `tstzrange` is half-open, so 11:00 does not overlap
+     10:00–11:00 — a closed range would have refused a normal back-to-back day.
+278. **Look at the diary rows for 2026-04-02: one no-show and one cancellation.** Two statuses on
+     purpose. The cancelled hour was given back in time to sell again; the no-show hour was lost.
+     Neither posted anything, and the no-show *fee* is deliberately not booked as service revenue
+     for a service nobody received.
+279. **Open "Who is owed".** Earned $123.90, still owed $73.90, paid out $50.00. Rae is on 55% and
+     Sam on 45% of the service with 10% of the retail, and both rates were copied onto each booking
+     — a rise next month cannot restate what this month's work was worth.
+280. **The two sides of that card are maintained by different code.** The left is what delivered
+     visits say was earned; the right is account 2320 after payroll drew on it. The seed pays Sam
+     with an ordinary journal entry no part of this module, which is what makes the comparison
+     worth anything.
+281. **Open "Gift cards".** $35.00 on the cards, $35.00 on account 2590, *Agrees: Yes*. A $100 card
+     was sold in March and $65 of it spent on Sam's first client in April. Unlike the payout figures
+     these two **should** match exactly — nothing legitimately moves 2590 except selling and
+     spending a card, and both do it in the same transaction as the balance.
+282. **Open Accounting → Reports → Profit & loss for 2026.** Revenue $264.00, cost of sales
+     $123.90, gross profit $140.10. The salon earned the whole $264 and owes $123.90 of it. Netting
+     the split off the revenue would show $140.10 of income and no cost at all — and hide the
+     payout from the one person most likely to be asking why a busy month made no money.
+283. **Now look for the $100 gift card on that report.** It is not there, and $65 of it has been
+     spent. The revenue was recognised when the haircut happened; crediting `4720 Gift Card
+     Redemptions` as well would state $130 of income for one $65 haircut. The personal-care pack
+     installs that account and this module never posts to it — having an account is not a reason to
+     use it.
+
 ## Project layout
 
 ```
@@ -2302,6 +2392,7 @@ src/
     funds/                Funds, donors and promises, the release run, net assets
     manufacturing/        Runs on the floor, bills of materials, where the value sits
     takings/              Days imported, what each was made of, and the tips position
+    appointments/         The diary, who is owed what, and gift cards outstanding
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
     studio/               Company Studio — profile, brand, catalog, clauses
@@ -2346,6 +2437,7 @@ src/
     funds/                Funds and restrictions, contributions and pledges, the release run
     manufacturing/        Bills of materials, work orders, and cost moving through WIP
     pos/                  A day's takings as one entry: gross, fees, tips, and the till count
+    appointments/         The diary, the practitioner split, and gift cards as a liability
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2665,13 +2757,12 @@ Gaps within the phases already built:
 - **AI cost is an estimate.** Prices are a table in the adapter; historic ledger rows keep the
   figure computed at the time. It is a usage meter, not billing.
 
-- **Two of ten industry modules do nothing.** `job_costing`, `projects`, `inventory`,
-  `time_billing`, `properties`, `funds`, `manufacturing` and — since Phase 28 — `pos_import` are
-  implemented; `appointments` and `vehicles` are declared, switched on by the packs that ask for
-  them, and have no workflows. The module settings page lists them under "Not built yet" rather
-  than hiding them. Both remaining are scheduling surfaces rather than accounting models: the ones
-  with real accounting content behind them were taken first, because a reporting model is the part
-  that can be got wrong quietly.
+- **One of ten industry modules does nothing.** `job_costing`, `projects`, `inventory`,
+  `time_billing`, `properties`, `funds`, `manufacturing`, `pos_import` and — since Phase 29 —
+  `appointments` are implemented. Only `vehicles` is declared, switched on by the automotive pack,
+  and has no workflows; the module settings page lists it under "Not built yet" rather than hiding
+  it. It was left until last on purpose: a vehicle is a dimension plus a mileage log, and Phase 16
+  already reports per dimension, so it carries the least accounting of the ten.
 - **No POS integration, and no settlement file upload.** A day arrives through `importDay`, from a
   form or a caller. There is no adapter for Square, Toast, Shopify or Amazon, and no CSV upload —
   even though Phase 17 has a parser that could be pointed at one. The module is the accounting half
@@ -2684,6 +2775,20 @@ Gaps within the phases already built:
   and paying it out is payroll's job.
 - **`1220 POS Import Suspense` accumulates silently.** It is on the day row, on the takings board and
   on the balance sheet, but nothing chases it — no alert, and no entry in Phase 24's health surface.
+- **Nothing settles a cash-paid visit.** Delivering an appointment debits Accounts Receivable, and
+  clearing it is Phase 12's payment machinery or a gift card. A salon whose clients all pay at the
+  desk accumulates receivables unless somebody records the payments.
+- **A practice running both appointments and daily takings would double-count.** Phase 29 recognises
+  revenue per visit and Phase 28 per day. Nothing prevents both being run against the same trading,
+  and nothing warns about it.
+- **No recurring appointments, reminders, or waiting list.** A standing Tuesday slot is typed out
+  week by week, and nothing tells a client their appointment is tomorrow — even though Phase 19 has
+  the mail channel and Phase 10 has the scheduler.
+- **Only a practitioner can be double-booked.** A treatment room, a chair or a piece of equipment
+  can be booked twice over; the exclusion constraint is keyed on the practitioner alone.
+- **No gift card expiry or breakage.** Recognising revenue on cards nobody will ever use needs a
+  judgement about how many never come back, and a wrong one books revenue that has to be given back.
+  Cards sit on 2590 indefinitely, and nothing reports how old they are.
 - **A retainer is not modelled on a cash basis.** Strictly, cash basis has no unearned revenue —
   money received in April is April's revenue. What happens instead is that the receipt has no
   recognition entry to take accounts from, so it stays on the balance sheet and the caveat names
