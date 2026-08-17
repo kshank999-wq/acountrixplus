@@ -1,9 +1,10 @@
 import { Fragment } from 'react'
 import { requireActor, currentSession } from '@/lib/current-user'
-import { can } from '@/modules/tenancy/context'
+import { can, type ActorContext } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
 import { trialBalance } from '@/modules/ledger/balances'
+import { controlAccounts } from '@/modules/ledger/receivables-check'
 import { apAging, arAging, balanceSheet, profitAndLoss } from '@/modules/ledger/reports'
 import {
   BASIS_DESCRIPTIONS,
@@ -105,6 +106,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
         )}
         {report === 'ar_aging' && <AgingReport actor={actor} end={end} kind="ar" />}
         {report === 'ap_aging' && <AgingReport actor={actor} end={end} kind="ap" />}
+        {report === 'control_accounts' && <ControlAccounts actor={actor} end={end} />}
       </div>
     </AppShell>
   )
@@ -857,5 +859,74 @@ async function AgingReport({
         </table>
       )}
     </Card>
+  )
+}
+
+
+/**
+ * Do the control accounts agree with the documents behind them? (Phase 31)
+ *
+ * Not a financial statement — a check. Accounts Receivable is the ledger's
+ * one-line summary of a subledger made of customers, and the two are
+ * maintained by different code. When they drift, the balance sheet says money
+ * is owed and the aging report cannot say by whom, and nobody chases it.
+ */
+async function ControlAccounts({ actor, end }: { actor: ActorContext; end: string }) {
+  const report = await controlAccounts(actor, { asOf: end })
+
+  return (
+    <div className="space-y-4">
+      <p className="text-sm text-muted">
+        As at {end}. Each control account against the documents behind it. These{' '}
+        <strong>should</strong> agree exactly: a difference means somebody posted straight at the
+        account without a document, or a document moved without a posting.
+      </p>
+
+      {[report.receivables, report.payables].map((check) => (
+        <div className="card px-4 py-3" key={check.accountNumber}>
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold">
+              {check.accountNumber} {check.accountName}
+            </h3>
+            <span className={check.agrees ? 'text-success' : 'text-danger'}>
+              {check.agrees ? 'Agrees' : `Out by ${formatCents(check.differenceCents)}`}
+            </span>
+          </div>
+
+          <dl className="mt-3 grid gap-3 sm:grid-cols-3">
+            <div>
+              <dt className="text-xs text-faint">The ledger says</dt>
+              <dd className="text-lg tabular-nums">{formatCents(check.ledgerCents)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-faint">The documents say</dt>
+              <dd className="text-lg tabular-nums">{formatCents(check.subledgerCents)}</dd>
+            </div>
+            <div>
+              <dt className="text-xs text-faint">Open documents</dt>
+              <dd className="text-lg tabular-nums">{check.documents}</dd>
+            </div>
+          </dl>
+
+          {check.parties.length > 0 && (
+            <ul className="mt-3 space-y-1 text-sm">
+              {check.parties.slice(0, 10).map((party: { id: string; name: string; balanceCents: number }) => (
+                <li className="flex justify-between gap-4" key={party.id}>
+                  <span>{party.name}</span>
+                  <span className="tabular-nums">{formatCents(party.balanceCents)}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+
+          {!check.agrees && (
+            <p className="mt-2 text-xs text-danger">
+              The balance sheet names a figure this report cannot attribute to anybody. Look for a
+              manual journal entry against {check.accountNumber}.
+            </p>
+          )}
+        </div>
+      ))}
+    </div>
   )
 }

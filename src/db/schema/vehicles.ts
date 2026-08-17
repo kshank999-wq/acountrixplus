@@ -17,6 +17,7 @@ import { companies, users } from './tenancy'
 import { customers } from './receivables'
 import { serviceItems } from './studio'
 import { journalEntries } from './ledger'
+import { invoices } from './receivables'
 
 /**
  * Customer vehicles and repair orders (spec §5 "Automotive / Repair — jobs,
@@ -186,6 +187,15 @@ export const repairOrders = pgTable(
 
     openedOn: date('opened_on').notNull(),
     completedOn: date('completed_on'),
+    /**
+     * The invoice raised when the order was billed (Phase 31).
+     *
+     * Phase 30 posted straight to 1100, which put the money on the balance
+     * sheet and on no aging report — so a garage could see what it was owed
+     * and not who owed it. See `ledger/receivables-check.ts`.
+     */
+    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    /** The stock relieved for the parts fitted. The revenue is the invoice's. */
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),

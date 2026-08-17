@@ -11,6 +11,9 @@ const REPORTS = [
   { key: 'comparative_bs', label: 'Comparative balance sheet', financial: true },
   { key: 'ar_aging', label: 'A/R aging', financial: false },
   { key: 'ap_aging', label: 'A/P aging', financial: false },
+  // Phase 31. Not a financial statement — a check that the two ways of
+  // answering "what are we owed" have not drifted apart.
+  { key: 'control_accounts', label: 'Control accounts', financial: false },
 ]
 
 const COMPARISONS = [

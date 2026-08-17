@@ -3,8 +3,10 @@ import { db, type Executor } from '@/db'
 import {
   appointments,
   chartAccounts,
+  customers,
   giftCardRedemptions,
   giftCards,
+  invoices,
   practitioners,
   serviceItems,
 } from '@/db/schema'
@@ -12,6 +14,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
 import { createJournalEntry } from '@/modules/ledger/journal'
+import { createInvoice } from '@/modules/receivables/service'
 import { redeemFor, splitFor } from './split'
 
 /**
@@ -308,6 +311,9 @@ export type CompleteResult = {
   practitionerCents: number
   businessCents: number
   totalCents: number
+  /** The invoice the client owes. Empty on a free visit, which bills nothing. */
+  invoiceId: string
+  /** The practitioner's share. Empty when there was none to post. */
   journalEntryId: string
   /** False when this appointment was already completed and nothing was posted. */
   posted: boolean
@@ -361,6 +367,7 @@ export async function completeAppointment(
         businessCents:
           existing.priceCents + existing.productCents - (existing.practitionerCents ?? 0),
         totalCents: existing.priceCents + existing.productCents,
+        invoiceId: existing.invoiceId ?? '',
         journalEntryId: existing.journalEntryId ?? '',
         posted: false,
       }
@@ -401,6 +408,7 @@ export async function completeAppointment(
         practitionerCents: 0,
         businessCents: 0,
         totalCents: 0,
+        invoiceId: '',
         journalEntryId: '',
         posted: true,
       }
@@ -424,62 +432,85 @@ export async function completeAppointment(
       .where(scoped(ctx, practitioners, eq(practitioners.id, existing.practitionerId)))
       .limit(1)
 
-    const lines: Array<{
-      chartAccountId: string
-      debitCents?: number
-      creditCents?: number
-      memo: string
-    }> = []
+    // --- What the client owes: a real invoice -----------------------------
+    //
+    // Phase 29 posted `Dr 1100 / Cr revenue` by hand here, and it balanced, and
+    // it was wrong. An appointment billed that way appears on the balance sheet
+    // and on **no aging report, no statement and no PDF**, and cannot be paid,
+    // because every one of those reads invoices rather than the ledger. A salon
+    // owner could see £199 of receivables and have no way to find out whose it
+    // was. Phase 31 hands the job to the machinery that already does it
+    // properly; `controlAccounts` is the detector that would have caught it.
+    // A walk-in is a real customer, just not a named one, and refusing to bill
+    // one would be wrong about the trade — half a salon's book is people who
+    // rang that morning. They go on a single house account, which is what a
+    // shop does on paper too, and a payment at the counter clears it. Naming
+    // them later is an ordinary edit to the invoice.
+    const billToId = existing.customerId ?? (await walkInCustomer(ctx, tx))
 
-    if (split.totalCents > 0) {
-      lines.push({
-        chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.receivable) as string,
-        debitCents: split.totalCents,
-        memo: 'Owed for the visit',
-      })
-    }
+    const invoiceLines = []
 
     if (existing.priceCents > 0) {
-      lines.push({
+      invoiceLines.push({
         chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.serviceRevenue) as string,
-        creditCents: existing.priceCents,
-        memo: 'Service delivered',
+        description: `${practitioner?.name ?? 'Practitioner'} — service`,
+        unitPriceCents: existing.priceCents,
       })
     }
 
     if (productCents > 0) {
-      lines.push({
+      invoiceLines.push({
         chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.productRevenue) as string,
-        creditCents: productCents,
-        memo: 'Retail sold at the visit',
+        description: 'Retail sold at the visit',
+        unitPriceCents: productCents,
       })
     }
 
-    if (split.practitionerCents > 0) {
-      lines.push({
-        chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.practitionerCost) as string,
-        debitCents: split.practitionerCents,
-        memo: `${practitioner?.name ?? 'Practitioner'}'s share`,
-      })
-      lines.push({
-        chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.practitionerPayable) as string,
-        creditCents: split.practitionerCents,
-        memo: `Owed to ${practitioner?.name ?? 'practitioner'}`,
-      })
-    }
-
-    const entry = await createJournalEntry(
+    const invoice = await createInvoice(
       ctx,
       {
-        entryDate: input.completedOn,
+        customerId: billToId,
+        issueDate: input.completedOn,
         memo: `Appointment — ${practitioner?.name ?? 'practitioner'}`,
-        source: 'appointment',
-        sourceType: 'appointment',
-        sourceId: existing.id,
-        lines,
+        lines: invoiceLines,
       },
       tx,
     )
+
+    // --- What the practitioner is owed ------------------------------------
+    //
+    // Still its own entry, and deliberately not a line on the invoice: the
+    // client is not being billed for the stylist's share, and putting it on
+    // their bill would be both wrong and rude. It is a cost of delivering what
+    // the invoice sold.
+    let entryId = ''
+
+    if (split.practitionerCents > 0) {
+      const entry = await createJournalEntry(
+        ctx,
+        {
+          entryDate: input.completedOn,
+          memo: `${practitioner?.name ?? 'Practitioner'}'s share of ${invoice.number}`,
+          source: 'appointment',
+          sourceType: 'appointment',
+          sourceId: existing.id,
+          lines: [
+            {
+              chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.practitionerCost) as string,
+              debitCents: split.practitionerCents,
+              memo: `${practitioner?.name ?? 'Practitioner'}'s share`,
+            },
+            {
+              chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.practitionerPayable) as string,
+              creditCents: split.practitionerCents,
+              memo: `Owed to ${practitioner?.name ?? 'practitioner'}`,
+            },
+          ],
+        },
+        tx,
+      )
+      entryId = entry.id
+    }
 
     await tx
       .update(appointments)
@@ -488,7 +519,8 @@ export async function completeAppointment(
         completedOn: input.completedOn,
         productCents,
         practitionerCents: split.practitionerCents,
-        journalEntryId: entry.id,
+        invoiceId: invoice.id,
+        journalEntryId: entryId || null,
       })
       .where(scoped(ctx, appointments, eq(appointments.id, existing.id)))
 
@@ -513,7 +545,8 @@ export async function completeAppointment(
       practitionerCents: split.practitionerCents,
       businessCents: split.businessCents,
       totalCents: split.totalCents,
-      journalEntryId: entry.id,
+      invoiceId: invoice.id,
+      journalEntryId: entryId,
       posted: true,
     }
   })
@@ -553,6 +586,35 @@ export async function closeWithoutDelivery(
     .update(appointments)
     .set({ status: input.status })
     .where(scoped(ctx, appointments, eq(appointments.id, input.appointmentId)))
+}
+
+/**
+ * The house account every unnamed visit is billed to.
+ *
+ * One row per company, found or created. Deliberately a real `customers` row
+ * rather than a null on the invoice: an invoice with no customer cannot age,
+ * cannot appear on a statement and cannot be chased, which is the whole class
+ * of bug Phase 31 exists to close.
+ */
+async function walkInCustomer(ctx: ActorContext, exec: Executor): Promise<string> {
+  const [existing] = await exec
+    .select({ id: customers.id })
+    .from(customers)
+    .where(scoped(ctx, customers, eq(customers.name, 'Walk-in')))
+    .limit(1)
+
+  if (existing) return existing.id
+
+  const [created] = await exec
+    .insert(customers)
+    .values({
+      companyId: ctx.companyId,
+      name: 'Walk-in',
+      notes: 'Visits taken without a named client. Settled at the counter.',
+    })
+    .returning({ id: customers.id })
+
+  return created.id
 }
 
 // --- Gift cards ------------------------------------------------------------
@@ -716,13 +778,51 @@ export async function redeemGiftCard(
 
     if (!appointment) throw new AppointmentError('No such appointment.')
 
-    if (appointment.status !== 'completed') {
+    if (appointment.status !== 'completed' || !appointment.invoiceId) {
       throw new AppointmentError(
         'A card settles a visit that happened. Complete the appointment first.',
       )
     }
 
-    const dueCents = appointment.priceCents + appointment.productCents
+    // What is still owed comes from the **invoice**, not from the appointment's
+    // own prices. Phase 31 made the visit raise a real invoice, so a client who
+    // has already part-paid at the counter must not be able to spend a card
+    // against a balance that is no longer outstanding.
+    const [bill] = await tx
+      .select({ id: invoices.id, balanceCents: invoices.balanceCents })
+      .from(invoices)
+      .where(scoped(ctx, invoices, eq(invoices.id, appointment.invoiceId as string)))
+      .limit(1)
+
+    if (!bill) {
+      throw new AppointmentError('That visit has no invoice to settle.')
+    }
+
+    // Idempotency before arithmetic.
+    //
+    // A retried click must get "that was already settled" rather than an error,
+    // and after Phase 31 the balance check would beat the claim row to it — the
+    // first redemption clears the invoice, so the second sees nothing owing and
+    // throws where it used to return quietly. Same lesson as Phase 28's import:
+    // the honest answer to doing it twice is "it is already done".
+    const [alreadyDone] = await tx
+      .select({ appliedCents: giftCardRedemptions.appliedCents })
+      .from(giftCardRedemptions)
+      .where(
+        scoped(ctx, giftCardRedemptions, eq(giftCardRedemptions.appointmentId, appointment.id)),
+      )
+      .limit(1)
+
+    if (alreadyDone) {
+      return {
+        appliedCents: 0,
+        remainingBalanceCents: card.balanceCents,
+        stillDueCents: bill.balanceCents,
+        applied: false,
+      }
+    }
+
+    const dueCents = bill.balanceCents
     const plan = redeemFor(card.balanceCents, dueCents)
 
     if (plan.appliedCents === 0) {
@@ -784,6 +884,19 @@ export async function redeemGiftCard(
       },
       tx,
     )
+
+    // The subledger has to move with the ledger, or `controlAccounts` will say
+    // so — which is the whole point of having it. A card that cleared the
+    // balance closes the invoice; a partial one leaves it open for the rest.
+    const remainingCents = bill.balanceCents - plan.appliedCents
+
+    await tx
+      .update(invoices)
+      .set({
+        balanceCents: remainingCents,
+        status: remainingCents === 0 ? 'paid' : 'partial',
+      })
+      .where(scoped(ctx, invoices, eq(invoices.id, bill.id)))
 
     await tx
       .update(giftCards)

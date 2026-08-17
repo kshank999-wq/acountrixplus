@@ -11,7 +11,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
-import { createJournalEntry } from '@/modules/ledger/journal'
+import { createInvoice } from '@/modules/receivables/service'
 import { consumeStock } from '@/modules/inventory/service'
 import { authorityFor, odometerStep, type Authority } from './authority'
 
@@ -740,50 +740,54 @@ export async function completeRepairOrder(
       }
     }
 
-    const revenueLines: Array<{
+    // --- What the customer owes: a real invoice ---------------------------
+    //
+    // Phase 30 posted `Dr 1100 / Cr revenue` by hand, which balanced and was
+    // wrong: the money landed on the balance sheet and on no aging report, no
+    // statement and no PDF, and could not be paid. See
+    // `ledger/receivables-check.ts` for the detector that catches it.
+    if (!order.customerId) {
+      throw new RepairError(
+        'This order has no customer on it, so there is nobody to bill. ' +
+          'Put the keeper against the vehicle and reopen the order.',
+      )
+    }
+
+    const invoiceLines: Array<{
       chartAccountId: string
-      debitCents?: number
-      creditCents?: number
-      memo: string
-    }> = [
-      {
-        chartAccountId: accounts.get(REPAIR_ACCOUNTS.receivable) as string,
-        debitCents: totals.totalCents,
-        memo: `${order.number}: owed for the repair`,
-      },
-    ]
+      description: string
+      quantityMilli?: number
+      unitPriceCents: number
+    }> = []
 
-    if (totals.labourCents > 0) {
-      revenueLines.push({
-        chartAccountId: accounts.get(REPAIR_ACCOUNTS.labourRevenue) as string,
-        creditCents: totals.labourCents,
-        memo: 'Labour',
-      })
-    }
-    if (totals.partsCents > 0) {
-      revenueLines.push({
-        chartAccountId: accounts.get(REPAIR_ACCOUNTS.partsRevenue) as string,
-        creditCents: totals.partsCents,
-        memo: 'Parts',
-      })
-    }
-    if (totals.subletCents > 0) {
-      revenueLines.push({
-        chartAccountId: accounts.get(REPAIR_ACCOUNTS.subletRevenue) as string,
-        creditCents: totals.subletCents,
-        memo: 'Sublet, billed on',
+    for (const line of lines) {
+      const account =
+        line.kind === 'labour'
+          ? REPAIR_ACCOUNTS.labourRevenue
+          : line.kind === 'part'
+            ? REPAIR_ACCOUNTS.partsRevenue
+            : REPAIR_ACCOUNTS.subletRevenue
+
+      invoiceLines.push({
+        chartAccountId: accounts.get(account) as string,
+        description: line.description,
+        quantityMilli: line.quantityMilli,
+        unitPriceCents: line.unitPriceCents,
+        // Deliberately no `itemId`, even on a part. `createInvoice` relieves
+        // stock for a line that names one, and the loop above has already done
+        // it — debiting `5160 Parts Cost` rather than the default cost of
+        // sales, which is the distinction the automotive pack exists for.
+        // Passing it here would consume the same part twice.
       })
     }
 
-    const entry = await createJournalEntry(
+    const invoice = await createInvoice(
       ctx,
       {
-        entryDate: input.completedOn,
+        customerId: order.customerId,
+        issueDate: input.completedOn,
         memo: `Repair order ${order.number}`,
-        source: 'repair',
-        sourceType: 'repair_order',
-        sourceId: order.id,
-        lines: revenueLines,
+        lines: invoiceLines,
       },
       tx,
     )
@@ -794,7 +798,7 @@ export async function completeRepairOrder(
         status: 'completed',
         completedOn: input.completedOn,
         odometerOut: input.odometerOut ?? order.odometerOut,
-        journalEntryId: entry.id,
+        invoiceId: invoice.id,
       })
       .where(scoped(ctx, repairOrders, eq(repairOrders.id, order.id)))
 
@@ -814,7 +818,7 @@ export async function completeRepairOrder(
       id: order.id,
       totals,
       partsCostCents,
-      journalEntryId: entry.id,
+      journalEntryId: invoice.id,
       posted: true,
       shortfalls,
     }

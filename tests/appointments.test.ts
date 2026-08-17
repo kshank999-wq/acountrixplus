@@ -920,7 +920,7 @@ describe('what the books say afterwards (Phase 29)', () => {
     expect(pl.revenue.totalCents).toBe(6_500)
   })
 
-  it('posts a delivered visit as one balanced entry', async () => {
+  it('posts what the client owes and what the practitioner is owed, apart', async () => {
     const fixture = await salon()
     const sam = await addPractitioner(fixture.ctx, {
       name: 'Sam Okafor',
@@ -935,33 +935,45 @@ describe('what the books say afterwards (Phase 29)', () => {
       priceCents: 6_500,
       productCents: 2_000,
     })
-    await completeAppointment(fixture.ctx, {
+    const result = await completeAppointment(fixture.ctx, {
       appointmentId: appointment.id,
       completedOn: '2026-04-01',
     })
 
-    const entries = await db
+    // Two entries, and they are two different facts. Phase 29 put them in one,
+    // which balanced and hid the client's bill from every report that reads
+    // invoices rather than the ledger.
+    expect(result.invoiceId).toBeTruthy()
+    expect(result.journalEntryId).toBeTruthy()
+
+    const [invoiceEntry] = await db
       .select({ id: journalEntries.id })
       .from(journalEntries)
       .where(
         and(
           eq(journalEntries.companyId, fixture.companyId),
-          eq(journalEntries.source, 'appointment'),
+          eq(journalEntries.sourceId, result.invoiceId),
         ),
       )
-    expect(entries).toHaveLength(1)
 
-    const lines = await db
+    const invoiceLines = await db
       .select({ debit: journalLines.debitCents, credit: journalLines.creditCents })
       .from(journalLines)
-      .where(eq(journalLines.journalEntryId, entries[0].id))
+      .where(eq(journalLines.journalEntryId, invoiceEntry.id))
 
-    // Receivable, service, retail, the share as a cost, the share as a debt.
-    expect(lines).toHaveLength(5)
+    // Receivable, service, retail.
+    expect(invoiceLines).toHaveLength(3)
+    expect(invoiceLines.reduce((sum, l) => sum + l.debit, 0)).toBe(8_500)
+    expect(invoiceLines.reduce((sum, l) => sum + l.credit, 0)).toBe(8_500)
 
-    const debits = lines.reduce((sum, line) => sum + line.debit, 0)
-    const credits = lines.reduce((sum, line) => sum + line.credit, 0)
-    expect(debits).toBe(credits)
-    expect(debits).toBe(8_500 + 3_125)
+    const shareLines = await db
+      .select({ debit: journalLines.debitCents, credit: journalLines.creditCents })
+      .from(journalLines)
+      .where(eq(journalLines.journalEntryId, result.journalEntryId))
+
+    // The share: a cost and a debt, and nowhere on the client's bill.
+    expect(shareLines).toHaveLength(2)
+    expect(shareLines.reduce((sum, l) => sum + l.debit, 0)).toBe(3_125)
+    expect(shareLines.reduce((sum, l) => sum + l.credit, 0)).toBe(3_125)
   })
 })

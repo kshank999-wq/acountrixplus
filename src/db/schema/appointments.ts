@@ -18,6 +18,7 @@ import { customers } from './receivables'
 import { serviceItems } from './studio'
 import { chartAccounts } from './accounting'
 import { journalEntries } from './ledger'
+import { invoices } from './receivables'
 
 /**
  * Appointments, practitioners and gift cards (spec §5).
@@ -194,7 +195,21 @@ export const appointments = pgTable(
     practitionerCents: bigint('practitioner_cents', { mode: 'number' }),
 
     notes: text('notes'),
-    /** The revenue entry, once delivered. Null while it is only a promise. */
+    /**
+     * The invoice raised when the visit was delivered (Phase 31).
+     *
+     * What the client owes is an invoice like any other, so it ages, appears on
+     * a statement, gets a PDF and can be paid. Phase 29 posted straight to 1100
+     * and skipped all four.
+     */
+    invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'set null' }),
+    /**
+     * The practitioner's share, once delivered. Null on a free visit.
+     *
+     * No longer the revenue posting — that belongs to the invoice now — but the
+     * cost of delivering it, which is not the client's business and is not on
+     * their bill.
+     */
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),

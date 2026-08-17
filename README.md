@@ -52,7 +52,8 @@ from the
 [ADR 0027](docs/adr/0027-cost-moves-with-the-material.md), and
 [ADR 0028](docs/adr/0028-a-day-is-a-fact-somebody-else-recorded.md), and
 [ADR 0029](docs/adr/0029-a-booking-is-a-promise-and-part-of-the-money-was-never-yours.md), and
-[ADR 0030](docs/adr/0030-nobody-bills-past-what-was-authorised.md).
+[ADR 0030](docs/adr/0030-nobody-bills-past-what-was-authorised.md), and
+[ADR 0031](docs/adr/0031-what-is-owed-is-owed-by-somebody.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1285,6 +1286,52 @@ nearly mis-diagnosed: the first instinct was to assume the broken form everywher
 running that form in psql — which proves the hypothesis, not the code. **Dumping `.toSQL()` for each
 real query is what settled it**, and is the only thing that would have.
 
+### What is owed is owed by somebody (Phase 31)
+
+Three consecutive ADRs listed the same follow-up — *nothing settles a receivable at the counter* —
+and it read like a missing feature. It was a defect, and the follow-up list was the wrong place for
+it. Phases 29 and 30 each posted `Dr 1100 / Cr revenue` by hand for what a customer owed. Balanced,
+tested, and wrong: **Accounts Receivable is a control account**, the ledger's one-line summary of a
+subledger made of customers, and both modules posted to the summary without touching the subledger.
+
+Measured on the seeded demo before the fix:
+
+| Company | Balance sheet | Aging report |
+| --- | ---: | ---: |
+| Ashgrove Motors | $365.00 | $0.00 |
+| Fenwick Row Studio | $199.00 | $0.00 |
+| Ridgeline Construction | $39,891.94 | $39,891.94 |
+
+Ridgeline agrees because Phase 7 raises real invoices. The other two are each internally consistent
+and never mention each other — so a garage owner could read $365 of receivables off the balance
+sheet and have **no way to find out who owed it**: no aging, no statement, no dunning, no PDF, and
+no way to record the payment when the customer paid at the counter.
+
+- **Service documents raise real invoices.** `completeAppointment` and `completeRepairOrder` call
+  Phase 2's `createInvoice` inside their own transaction. Everything that reads invoices works
+  immediately, because none of it had to change — the fix is mostly a deletion. This is ADR 0007's
+  rule pointed inward: the modules were told not to fork the ledger, and forked the *receivable*
+  instead, which is the same mistake one level down.
+- **The practitioner's share stays off the client's bill.** It is a cost of delivering what the
+  invoice sold, not something the client is being charged for.
+- **A walk-in is somebody.** Half a salon's book is people who rang that morning, so an unnamed
+  visit bills to a single house account rather than to nobody — which is what a shop does on paper,
+  and a counter payment clears it. A repair order still refuses: a garage knows whose car it is.
+- **A gift card settles the invoice**, not just the ledger. That surfaced an ordering bug: after
+  the fix the first redemption clears the invoice, so a retried click hit "nothing owing" and threw
+  where it used to return quietly. The idempotency claim is now checked first — the honest answer to
+  doing something twice is "it is already done".
+- **`controlAccounts` is the detector**, and it lives with the ledger rather than in any industry
+  module, because the property belongs to double-entry bookkeeping. Unlike the tips and payout
+  positions, these two **should** agree exactly — nothing legitimately moves a control account
+  except a document — so a difference is always a fault, and the report names the parties.
+
+**And one more bug it found.** `createInvoice` accepts an executor so it can run inside a caller's
+transaction, and read the customer through `db` regardless. A function handed an executor has to use
+it for its **reads** as well as its writes, or it cannot see rows the caller created in the same
+transaction. Always wrong, never mattered — until the walk-in fallback created a customer and
+invoiced it in one go.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1390,6 +1437,7 @@ Coverage matches what spec §21 asks for:
 | `tests/pos.test.ts` | A day turned into lines by a pure core: a plain day balancing, **the gross booked and the fee debited separately so the deposit is never the revenue**, a short till named in Cash Over and Short rather than plugged into cash, a till that is over credited the same way, **"nobody counted" told apart from "counted, and exact"**, tips and tax kept off revenue entirely, discounts and refunds reported rather than netted into sales, **a source that contradicts itself surfaced and given its own account rather than absorbed**, and a day of several categories and tenders still balancing; a whole day posted as **one journal entry** with three lines, the same day and source refused a second time with **revenue not doubled**, **two importers racing for the same day and exactly one creating it**, a till and a marketplace both allowed to report the same date, **the module installing the accounts it posts to even off a pack that never had them**, a category pointed at an account that does not exist refused, an empty day refused, the module gate, the journal permission, what was sold and how it was paid for recorded, and one café's days off another's books; and afterwards **the profit and loss showing the gross with the fee as a cost**, **tips nowhere on it at all**, what is still owed to staff against what payroll has paid out **through a door this module does not control**, the counted cash banked with the shortfall where somebody will see it, and a disagreeing source posted anyway with the difference sitting in 1220 and **neither cash nor revenue touched by it** |
 | `tests/appointments.test.ts` | The split against a pure core: two halves that **always add to the price** across a sweep of awkward prices and rates, the fraction of a penny named and attributed, a discounted service split on **what was charged rather than what was listed**, a nonsense rate clamped as the typo it is, service and retail split at their own rates, and a card that can pay **neither more than it holds nor more than the bill**; a practitioner refused a second place at the same time, **back-to-back slots allowed because the range is half-open**, two practitioners allowed the same hour, **a cancelled slot freed to sell again**, two receptionists racing for one slot and exactly one winning, an appointment that ends before it starts refused, the module gate, the journal permission, and one salon's diary out of another's; **a booking posting nothing at all** while the forward book is still counted, the whole fee booked as revenue with the share as a cost and **never netted**, retail through its own account at its own rate, completing twice posting once, **the rate that was agreed surviving a later rise**, a free visit completed without inventing an entry, **a no-show told from a cancellation** with neither posting, a no-show refused completion and a delivered visit refused un-delivery; and a sold card **on the balance sheet with revenue still at zero**, a redemption earning nothing a second time so one £65 haircut is £65 of income, **no change given in cash**, a card refused a second spend on the same visit, a card refused against a visit that has not happened, a duplicate card code refused, the cards **agreeing with account 2590** and a hand-written entry against it caught, what each practitioner is owed before and after payday, **the diary kept out of revenue**, and one delivered visit as one balanced five-line entry |
 | `tests/vehicles.test.ts` | The ceiling against a pure core: **a tolerance applied to what was authorised and not to the quote**, so it does not grow with the overspend; the headroom and the overage as separate sentences; **the additional amount asked for rather than the new total**, so the allowance cannot compound; a ceiling rounded down; a nonsense tolerance clamped; and nothing authorised meaning nothing may be billed. An odometer accepted on its first reading whatever it says, the distance reported, **a car that has not moved told from one that has**, a reading below the last refused, the write refused without somebody asking for it, and a replaced instrument cluster recorded with an audit event when they do. **The history kept when the car changes hands**, a duplicate VIN refused, and one garage's cars off another's ramp. **An estimate nobody agreed to refused billing** with nothing posted, work priced past the authority but only the bill refused, **billing allowed once the customer says yes to the rest**, a tolerance that is not an open cheque, **every approval kept as its own row with who and how**, an approval withdrawn by a further row rather than by editing history, a withdrawal refused below zero, an over-authority order flagged on the board **without alarming about an estimate that has no authority yet**, an empty order refused, a cancelled order refused both more work and a bill, one bill however many times the button is pressed, the module gate and the journal permission. And **the bill split three ways with the shelf relieved for the parts** at what they actually cost, **the sublet's cost left to the supplier's bill** while its margin stays reportable, the shop's mix counting only what was billed, one balanced entry per order, **a part the shelf could not supply billed with the shortfall named**, a part line with no part refused, the odometer out recorded, and **a car leaving with fewer miles than it arrived refusing the whole completion** |
+| `tests/control-accounts.test.ts` | **What the balance sheet says is owed, against the documents behind it** — the check that would have caught Phases 29 and 30 on their first day. An empty company agreeing; a delivered visit agreeing **and naming who owes it**, with the aging report able to see it too; a billed repair order agreeing against its keeper; **a walk-in billed to one house account** however many of them there are, rather than to nobody; **a hand-written journal entry against 1100 caught** with the difference named, because that is the one thing that genuinely breaks the agreement; payables checked the same way **without blaming receivables for one fault**; one company's control accounts out of another's; and **a gift card settling the invoice and not just the ledger**, so the two sides still agree at £15 after a £50 card is spent on a £65 visit |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -2864,9 +2912,6 @@ Gaps within the phases already built:
   and paying it out is payroll's job.
 - **`1220 POS Import Suspense` accumulates silently.** It is on the day row, on the takings board and
   on the balance sheet, but nothing chases it — no alert, and no entry in Phase 24's health surface.
-- **Nothing settles a cash-paid visit.** Delivering an appointment debits Accounts Receivable, and
-  clearing it is Phase 12's payment machinery or a gift card. A salon whose clients all pay at the
-  desk accumulates receivables unless somebody records the payments.
 - **A practice running both appointments and daily takings would double-count.** Phase 29 recognises
   revenue per visit and Phase 28 per day. Nothing prevents both being run against the same trading,
   and nothing warns about it.
@@ -2878,9 +2923,14 @@ Gaps within the phases already built:
 - **No gift card expiry or breakage.** Recognising revenue on cards nobody will ever use needs a
   judgement about how many never come back, and a wrong one books revenue that has to be given back.
   Cards sit on 2590 indefinitely, and nothing reports how old they are.
-- **A repair order's receivable is not settled at the counter either.** Billing debits Accounts
-  Receivable and Phase 12's payment machinery clears it — the same gap Phase 29 leaves, and most
-  acute in a garage, where customers pay before they drive away.
+- **Nothing takes money at the counter in one gesture.** Phase 31 made service documents raise real
+  invoices, so Phase 2's `recordPayment` can settle them — that was the point — but a one-press
+  "paid, cash" on the appointment and repair-order screens is not built. The gap is closed at the
+  ledger, not yet at the till.
+- **`controlAccounts` is a report somebody opens, not a nightly check.** Phase 24's health surface
+  would be the place, and Phase 31 does not put it there.
+- **Opening balances imported through Phase 17 post to AR directly**, so they will show as a
+  control-account difference until they are represented as invoices.
 - **No parts markup rule and no clocked labour.** Every line is priced by hand: there is no matrix
   turning cost into price, which is how most shops actually price parts, and a labour line is hours
   typed in rather than clocked. Phase 15 has timesheets and nothing joins them to a repair order.

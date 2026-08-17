@@ -232,7 +232,17 @@ export async function createInvoice(
     throw new Error('An invoice needs at least one line.')
   }
 
-  const [customer] = await db
+  // Read through the caller's executor, not through `db`.
+  //
+  // A function that accepts an executor has to use it for its *reads* as well
+  // as its writes, or it cannot see rows the caller created in the same
+  // transaction — which is exactly what happens when a walk-in visit creates
+  // its house account and raises the invoice in one go. It read cleanly before
+  // Phase 31 only because every caller happened to pass a customer that was
+  // already committed.
+  const reader = exec ?? db
+
+  const [customer] = await reader
     .select()
     .from(customers)
     .where(scoped(ctx, customers, eq(customers.id, input.customerId)))

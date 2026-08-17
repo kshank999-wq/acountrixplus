@@ -51,8 +51,22 @@ async function garage(name = 'Ashgrove Motors'): Promise<Fixture> {
   return fixture
 }
 
+/**
+ * A car with a keeper on it.
+ *
+ * The keeper is not decoration. Phase 31 made billing raise a real invoice, and
+ * an invoice is owed by somebody — so a garage that does not know whose car it
+ * is cannot bill for it, which is also true at the counter.
+ */
 async function aCar(fixture: Fixture, registration = 'YK21 ZRT') {
+  const { customers } = await import('@/db/schema')
+  const [keeper] = await db
+    .insert(customers)
+    .values({ companyId: fixture.companyId, name: `Keeper of ${registration}` })
+    .returning()
+
   return addVehicle(fixture.ctx, {
+    customerId: keeper.id,
     registration,
     vin: `VIN${registration.replace(/\s/g, '')}`,
     make: 'Volkswagen',
@@ -815,10 +829,22 @@ describe('parts, labour and sublet are three different things (Phase 30)', () =>
       completedOn: '2026-05-02',
     })
 
+    // `journalEntryId` is the invoice now: what the customer owes is an
+    // invoice like any other, so it ages and can be paid (Phase 31).
+    const [invoiceEntry] = await db
+      .select({ id: journalEntries.id })
+      .from(journalEntries)
+      .where(
+        and(
+          eq(journalEntries.companyId, fixture.companyId),
+          eq(journalEntries.sourceId, result.journalEntryId),
+        ),
+      )
+
     const lines = await db
       .select({ debit: journalLines.debitCents, credit: journalLines.creditCents })
       .from(journalLines)
-      .where(eq(journalLines.journalEntryId, result.journalEntryId))
+      .where(eq(journalLines.journalEntryId, invoiceEntry.id))
 
     // Receivable, labour, parts.
     expect(lines).toHaveLength(3)
