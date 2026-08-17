@@ -15,8 +15,9 @@ existing business's books in**, **accountant practice mode**,
 **transactional mail with password reset and invitations**,
 **attachments and accountant notes on a content-addressed object store**,
 **server-side PDF generation with immutable sent-document snapshots**, the
-**communications log with the follow-up list**, **property management**, and a
-**retention policy with the scheduled work six phases owed** from the
+**communications log with the follow-up list**, **property management**, a
+**retention policy with the scheduled work six phases owed**, and
+**per-client staff assignment inside a firm** from the
 [development specification](docs/SPEC.md). Architecture decisions are recorded in
 [ADR 0001](docs/adr/0001-modular-monolith-and-tenancy.md),
 [ADR 0002](docs/adr/0002-double-entry-ledger.md),
@@ -41,7 +42,8 @@ existing business's books in**, **accountant practice mode**,
 [ADR 0021](docs/adr/0021-a-sent-document-never-changes.md), and
 [ADR 0022](docs/adr/0022-what-was-said-and-what-was-promised.md), and
 [ADR 0023](docs/adr/0023-somebody-elses-money.md), and
-[ADR 0024](docs/adr/0024-nothing-grows-for-ever-and-nothing-waits-for-somebody-to-look.md).
+[ADR 0024](docs/adr/0024-nothing-grows-for-ever-and-nothing-waits-for-somebody-to-look.md), and
+[ADR 0025](docs/adr/0025-a-firm-does-not-put-everybody-on-everything.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -988,6 +990,53 @@ kept* — one decision about the whole application, which taken six times would 
   no screen calling it, so an invitation to a mistyped address failed silently and the person waiting
   simply never heard.
 
+### Who at the firm is on which client (Phase 25)
+
+Phase 18 built practice mode and named its own largest hole in this README: *a practice member
+reaches every client of the firm*. That was the right trade then — Phase 18's claim was about the
+boundary between two organisations, and who inside the firm does the work is a different question.
+It is also the question every real firm has. One client is a director's brother-in-law, another is
+in a dispute with a member of staff, another has an independence policy; a ten-person firm with
+forty clients does not put ten people on forty sets of books. Spec §14 asks for "granular
+overrides", and this is them.
+
+- **A staffing mode per client, not per firm.** `whole_firm` or `assigned_only`, on the engagement.
+  A firm-wide switch would have been one column less and the wrong shape: the firm that needs this
+  needs it for *one* client, and forcing the strict mode on all forty means assigning forty clients
+  by hand on the day of the switch, or never switching. The default is `whole_firm`, so every
+  engagement built before this phase means what it always meant.
+- **One place decides who should be on the books.** Four things change the answer — accepting an
+  engagement, somebody joining the firm, an assignment made or withdrawn, the mode changed — and all
+  four go through `entitledStaff` and then reconcile. Four call sites answering "who can open these
+  books" separately is four chances to answer it differently, and the one that counts is whichever
+  ran last, which is a race rather than a rule. `grantAtLiveEngagements` was rewritten to reconcile,
+  which is what makes joining a firm stop meaning "reach every client" without the invitation flow
+  knowing anything changed.
+- **Roles narrow, and only narrow.** An assignment may carry a role that narrows what somebody holds
+  at that client; the engagement's cap is applied last and applied always. An `owner` assigned to an
+  `accountant` engagement arrives as an accountant, because that is what the client agreed to.
+- **The preview comes before the button.** "This tightens access" and "this locks four people out of
+  a client mid-close" are the same click, and the difference is a number. It is rendered beside the
+  button rather than in the result — a permissions change nobody could see coming is one somebody
+  reverses in a panic.
+- **Switching refuses to leave a live client with nobody.** A firm that locks itself out of books it
+  accepted responsibility for has not tightened its security, it has created an incident whose only
+  exit is a client re-inviting the firm they already engaged. The refusal carries the fix: assign
+  somebody first. A *pending* engagement may be staffed to nobody, because deciding who will be on a
+  client before the client says yes is the order a firm actually works in.
+- **An assignment under `whole_firm` grants nothing, and is kept anyway.** That is what lets a firm
+  assemble the list over a week and tighten afterwards, which is the only sequence that does not
+  produce an outage.
+- **The client is told the shape, not the roster.** `/settings/access` distinguishes "everybody at
+  the firm" from "assigned to you specifically". It does not show the firm's assignment list: the
+  client chose a firm and capped its role, and a client with a veto over which junior is on their
+  file has hired the junior rather than the firm. What they are entitled to know is that "any of
+  Hartley & Co's ten people can read this" and "these two can" are different answers — and a list of
+  names alone cannot tell them apart.
+- **Revocation lands on the next click, and nothing new was needed for it.** Taking somebody off
+  deletes their membership in the same transaction, and `resolveSession` has re-read the membership
+  on every request since Phase 13. No session invalidation, no token version, no cache to bust.
+
 ## Requirements
 
 - Node.js 20 or newer (developed on 22)
@@ -1082,7 +1131,7 @@ Coverage matches what spec §21 asks for:
 | `tests/assets.test.ts` | 756 depreciation schedules across every method, convention, life and awkward cost, each summing exactly to the depreciable base and ending on the salvage value with no zero-amount period; a half-year convention giving exactly half a year in year one and a mid-month one half a month at each end; declining balance front-loading and still landing on salvage, and the crossover removing the final lump; month arithmetic across leap years; registering an asset posting nothing, sequential tags, and salvage above cost refused; arrears charged to their own months rather than the run date, **a month that has not finished not charged**, the same period run twice charging once, two concurrent runs posting one set between them, one entry a month covering every asset, and an exhausted schedule marking the asset; **cost and accumulated depreciation both reconciling to the ledger** across several assets on different methods, and a disagreement reported when an asset was never posted; disposal charging the arrears first so book value comes from the ledger, a gain landing in Other income rather than Sales Revenue, a loss in Other expense, the asset leaving the balance sheet entirely, and disposal through the same account list the screen offers |
 | `tests/dimensions.test.ts` | Code normalization, a parent from another dimension refused, and a retired dimension keeping its history; values attached at posting time, **each line of a two-site entry keeping its own value**, a value from the wrong dimension or another company refused; **every row's columns summing to the ordinary profit and loss**, checked against a report built by a different query; untagged activity as a column rather than an omission, the Unassigned column dropped when nothing is untagged, an unused value left off the page, and each site getting its own bottom line; coverage measured on gross movement so offsetting amounts cannot hide, reported only for dimensions marked expected, and null when nothing happened; reclassifying leaving the trial balance untouched, replacing rather than duplicating, clearing back to Unassigned, and silently ignoring another company's lines; defaults filling an unset dimension, never overriding a choice, the more specific owner winning, and replacing rather than duplicating; and balance-sheet movement by value with no equity row |
 | `tests/importing.test.ts` | Quoted commas, embedded newlines, doubled quotes, CRLF and the byte-order mark Excel writes; the delimiter found by consistency so a tab-separated file of addresses is not shredded by its own commas; blank rows dropped, short rows padded, unclosed quotes and empty files refused; money in every shape an accounting package writes it, and **European notation, a comma that is not a thousands separator, and sub-cent precision all refused rather than guessed**; dates in five formats with the ambiguous ones settled by the row where it can and by a setting where it cannot, 31 February and 29 February in a non-leap year refused; a QuickBooks chart export mapped unasked, one header serving one field, missing required columns named; four hundred identical problems collapsed to one line; account types translated from what other systems call them and an unknown one refused; a duplicate account number refused, and an existing account's type never changed; contacts matched across `Acme, Inc.` and `Acme Inc` without merging `Acme Northwest` into `Acme North West`, a bad email warned about but imported, and an update filling gaps without blanking newer values; **a trial balance that does not balance refusing and posting nothing**, a balance for a non-existent account refused, a row with both a debit and a credit refused, a signed balance column read; **Opening Balance Equity clearing to exactly zero when the detail agrees**, and naming the $3,200 gap when it does not; an open invoice bringing its receivable without recognising revenue again; an unknown customer refused; ambiguous dates warned about across the file; undo removing only what it created, voiding entries rather than deleting them, refusing when an imported customer has since been invoiced, refusing twice, keeping the history, and one company's imports invisible to another |
-| `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; and one company's engagements invisible to another |
+| `tests/practice.test.ts` | A practice created without needing any company membership, only owners adding staff, and a firm found by name; **the practice refused when it tries to accept its own request and the client refused when it tries to accept its own offer**, nothing granted while one is pending, a second live engagement refused and a re-engagement after ending allowed; a membership for every practice member on acceptance, and the client's role choice capping the firm's either way round; **a practice member seeing one client's trial balance at a time across two engagements**, the switcher marking the current company, a switch into an ungranted company refused, and the session naming one company after switching rather than two; the switch recorded in the company being entered and attributed as "Dana Chen (Hartley & Co)"; the client ending it alone with the session resolving to null on the next request, the practice ending it alone, only the memberships that engagement created removed while a directly-hired bookkeeper survives, ending twice refused, and another company's engagement refused; leaving the firm ending access at every client at once and a new hire reaching every client immediately; **the cross-tenant work queue returning nothing for a practice the caller does not work at**, showing only that practice's clients, dropping a client the moment the engagement ends, and returning counts rather than rows; one company's engagements invisible to another; and **an engagement staffed `assigned_only` granting only the assigned** — a new hire reaching the whole-firm client and not that one, an assignment granting on the spot and unassigning revoking on the next request, an assignment's role narrowing while the client's cap still wins, an assignment under `whole_firm` granting nothing but surviving the switch that makes it matter, the preview counting what a switch would take before it takes it, switching a live client to nobody refused, staffing by somebody who is not a practice owner refused, assigning somebody who does not work at the firm refused, and an assignment for somebody who has left the firm entitling nobody |
 | `tests/notify.test.ts` | **A transactional letter carrying no unsubscribe link**, in the type and at runtime; the URL written out in full so a person can read where it goes; a bounce recorded rather than swallowed; the hourly limit per address per kind, and an invitation not blocked by somebody hammering the reset form; tokens stored as hashes with only an eight-character prefix in the clear, **spent exactly once by two simultaneous claims**, a new one superseding the last, an hour for a reset against a week for an invitation, and old ones pruned while live ones survive; **the reset form saying the same thing whether or not the address exists**, and **reaching somebody who unsubscribed from marketing company-wide**; a reset changing the password, ending every session, and auditing into each company the person belongs to; the same link refused twice with the first password left standing; a link dying once the address is no longer theirs; a dead link reported before anybody types, and checking not spending it; **an invitation creating no user and no membership until it is accepted**, the offer shown before anybody types, the invitee's own password taking effect, a short password refused with the link still usable, **an existing account never asked for a password**, **one account created when the same link is clicked twice at once**, somebody already inside told rather than mailed, another company unable to withdraw the invitation by id, and a practice invitee landing with access at every client the firm already serves |
 | `tests/evidence.test.ts` | Bytes addressed by what they are; both store adapters round-tripping, putting twice being a no-op, and deleting what is not there not being an error; **the same bytes uploaded twice returning the one document that already exists**, two companies sharing a blob and each counted, **one company deleting its copy leaving the other's downloading**, and the bytes going only when the last of them does; an orphan collected after a simulated crash between commit and free, and **bytes a document still points at never freed however far the count has drifted**; a type that can carry script, an empty file, and one over 10 MB all refused; one document on a transaction and a fixed asset at once with detaching one leaving the other, **three concurrent attachments of the same file leaving one link**, deleting a document taking it off every record, a page of records counted in one query, and the bare ones named; **a record from another company refused, a document from another company refused, and another company's bytes not served on a known id**; each kind of record guarded by its own permission, and a read-only auditor seeing the evidence and refused the removal; a note recorded and audited, an empty one refused, **a question on the work list until answered with the answer added beside it rather than over it**, one answer between two simultaneous clicks, a remark refused by the CHECK constraint, one company's questions invisible to another, and the list filtered kind by kind; and the mobile path uploading, attaching idempotently, reading back as an ordinary document, and keeping the phone's tighter limit |
 | `tests/pdf.test.ts` | A structurally valid file with every cross-reference offset landing on its object; **the same input rendering byte-identically**, and the bytes changing when the date, the title, a brand token the document actually uses, or the base size changes; parentheses and backslashes escaped so a content stream cannot be corrupted; **real em dashes, curly quotes and ellipses rather than ASCII folding**, control characters dropped, and a glyphless character visibly `?`; the standard-font metrics including the typographic extras and Courier's monospacing; wrapping that fits every line and leaves an over-long URL alone rather than chopping it, keeping blank lines as the paragraph breaks somebody typed; truncation with an ellipsis; colour parsing with a fallback rather than a throw; page numbers only when asked and counted correctly, matched as a drawn string rather than a substring; a page break starting one page and two in a row not leaving a blank sheet; **all fifteen block types rendered**, with the figures coming from the caller and an unselected optional item shown and priced at nothing; merge fields resolved with nothing left behind for an unknown one; **the PDF filed against the version inside the send transaction**, **the bytes unchanged after the brand kit, the wording and the prices all move**, while a live preview does move; each version kept separately with the public link serving the newest; a proposal with no document sent anyway and reporting no PDF; another company's snapshot unreachable; **two identical sends stored once and shared by both versions** — against a pinned clock, because the PDF's timestamp has one-second resolution and the test was relying on both sends landing inside the same second; and an invoice rendered from the record with another company's refused |
@@ -1939,6 +1988,38 @@ key and the client proposal link — keep them for steps 22 and 24.
      rent run on the 1st, and the daily failure digest. None of them needed the feature it drives to
      change — the safety was built first, which is why scheduling could arrive last.
 
+### Who at the firm is on which client (Phase 25)
+
+241. **Sign out and sign in as `robin@hartleyco.test`, then open Practice.** Below the client list,
+     *Who is on which client*: Kestrel Joinery is marked **assigned people only** and Ridgeline
+     Construction **the whole firm**. Both engagements were accepted the same way; the difference is
+     the phase.
+242. **Press "Who is on it" under Kestrel.** *Only the people named below can open Kestrel Joinery's
+     books.* Robin holds `bookkeeper` — their firm default is `accountant`, narrowed by what Kestrel
+     agreed to. Sam Okafor works at the firm and shows **no access**, which before this phase was not
+     expressible at all.
+243. **Read the number beside "Open to the whole firm": *1 more person would gain access.*** The
+     count is computed before the button rather than reported after it — a permissions change nobody
+     could see coming is one somebody reverses in a panic.
+244. **Press "Put on" beside Sam, then "Take off" again.** *On the client, and able to open their
+     books now*, then *Taken off. Their access stops on their next click, not when a session
+     expires.* The membership row goes in the same transaction, and `resolveSession` has re-read the
+     membership on every request since Phase 13 — nothing new was needed for revocation to land.
+245. **Open Ridgeline's panel instead.** Everybody at the firm is listed with access, and Sam's
+     dropdown reads *as readonly*: an assignment on a whole-firm client grants nothing new, and
+     narrows anyway. That is how a firm assembles a list *before* it tightens, which is the only
+     order that does not cause an outage.
+246. **Take Sam off Ridgeline — the only assignment it has — and then press "Restrict to the
+     assigned".** Refused, with the fix in the message: assign somebody first. A firm that locks
+     itself out of books it has accepted responsibility for has not tightened its security, it has
+     created an incident whose only exit is the client re-inviting the firm they already engaged.
+     (Taking Sam off changed nothing else: under *the whole firm* he still reaches Ridgeline, now at
+     the firm's `accountant` default rather than the narrower `readonly`.)
+247. **Sign back in as `owner@ridgeline.test` and open Settings → Who can open these books.** Sam is
+     listed *via Hartley & Co*, **everybody at the firm**. The client is told the shape of the
+     exposure and not the firm's roster: "any of their ten people can read this" and "these two can"
+     are different answers, and a list of names alone cannot tell them apart.
+
 ## Project layout
 
 ```
@@ -2010,7 +2091,7 @@ src/
     dimensions/           User-defined dimensions, assignment, dimensional reporting
     assets/               Depreciation schedules and the fixed asset register
     importing/            Delimited parsing, coercion, column mapping, opening balances
-    practice/             Firms, engagements, company switching, the cross-tenant work queue
+    practice/             Firms, engagements, staffing a client, company switching, the work queue
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2285,9 +2366,11 @@ Gaps within the phases already built:
   window and the reason on the operations page.
 - **The export is built in memory.** Fine for a small company, wrong for a large one — it needs the
   object store §18 asks for and this repository does not have.
-- **A practice member reaches every client of the firm.** There is no per-client staff assignment,
-  so a firm that wants one junior on one client and not the other cannot say so. The largest gap in
-  Phase 18.
+- ~~**A practice member reaches every client of the firm.**~~ Since Phase 25 an engagement is staffed
+  `whole_firm` or `assigned_only`, per client, and joining the firm no longer reaches a client the
+  firm has not put you on. What is still true is that **only a practice owner can staff a client** —
+  a firm with a managing partner per office cannot delegate it, because `practice_role` has two
+  values.
 - **Engagements are found by name, not by an invitation link.** A client searches a directory of
   practices and offers access. People are now invited by email (Phase 19) but *firms* are not, so a
   firm must already exist in the system before a client can invite them.

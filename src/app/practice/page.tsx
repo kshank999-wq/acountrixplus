@@ -65,6 +65,7 @@ export default async function PracticePage({
           status: engagement.status,
           initiatedBy: engagement.initiatedBy,
           grantedRole: engagement.grantedRole,
+          staffing: engagement.staffing,
           note: engagement.note,
           requestedAt: engagement.requestedAt.toISOString().slice(0, 10),
         }))}

@@ -176,6 +176,13 @@
       "when": 1786915661344,
       "tag": "0024_phase24_retention_topics",
       "breakpoints": true
+    },
+    {
+      "idx": 25,
+      "version": "7",
+      "when": 1786937416068,
+      "tag": "0025_phase25_engagement_assignments",
+      "breakpoints": true
     }
   ]
 }

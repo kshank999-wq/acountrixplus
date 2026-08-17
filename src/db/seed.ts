@@ -29,6 +29,7 @@ import {
   respondToEngagement,
 } from '@/modules/practice/service'
 import { practiceWorkQueue } from '@/modules/practice/switching'
+import { assignToEngagement, setEngagementStaffing } from '@/modules/practice/service'
 import { attachDocument, storeDocument } from '@/modules/evidence/service'
 import { logCommunication } from '@/modules/engagement/communications'
 import { createTask, workSummary } from '@/modules/engagement/tasks'
@@ -1930,6 +1931,38 @@ async function main() {
     `  Hartley & Co act for ${queue.length} clients — ` +
       `${queue.map((row) => `${row.companyName} (${row.role}, ${row.awaitingReview} waiting)`).join(', ')}. ` +
       'Each granted separately; neither can be seen while in the other.',
+  )
+
+  // --- Phase 25: who at the firm is on which client ------------------------
+  //
+  // The two engagements are deliberately staffed differently, because the
+  // difference is the phase: Ridgeline is the whole firm's, and Kestrel is
+  // Robin's alone. Sam works at Hartley & Co and cannot open Kestrel's books —
+  // which before this phase was not expressible at all.
+  await assignToEngagement(practiceOwner.id, {
+    engagementId: secondOffer.engagementId,
+    userId: practiceOwner.id,
+    note: 'Sole contact for this client.',
+  })
+
+  const restricted = await setEngagementStaffing(practiceOwner.id, {
+    engagementId: secondOffer.engagementId,
+    staffing: 'assigned_only',
+  })
+
+  // And a narrower role on the client that stayed open to everybody: Sam is an
+  // accountant at the firm and read-only at Ridgeline, because an assignment
+  // may narrow what somebody holds even when it grants nothing new.
+  await assignToEngagement(practiceOwner.id, {
+    engagementId,
+    userId: junior.id,
+    role: 'readonly',
+    note: 'Reviewing only, not posting.',
+  })
+
+  console.log(
+    `  Staffing: Kestrel is Robin's alone (${restricted.revoked} removed), ` +
+      'Ridgeline is the whole firm with Sam narrowed to readonly.',
   )
 
   // --- Phase 19: an invitation that carries no password ---------------------

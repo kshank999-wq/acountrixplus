@@ -6,14 +6,22 @@ import { z } from 'zod'
 import { requireActor, currentSession } from '@/lib/current-user'
 import {
   addPracticeMember,
+  assignToEngagement,
   createPractice,
   endEngagement,
   offerEngagement,
   requestEngagement,
   respondToEngagement,
   removePracticeMember,
+  setEngagementStaffing,
+  staffingChangePreview,
+  staffingFor,
+  unassignFromEngagement,
 } from '@/modules/practice/service'
 import { switchCompany } from '@/modules/practice/switching'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { companies } from '@/db/schema'
 import { inviteToPractice } from '@/modules/notify/invitations'
 
 /** Server actions for accountant practice mode (spec §14, Phase 18). */
@@ -228,4 +236,133 @@ export async function enterClientAction(companyId: unknown): Promise<void> {
   )
 
   redirect('/bookkeeping')
+}
+
+// --- Who at the firm is on which client (Phase 25) ---------------------------
+
+const ROLE = z.enum([
+  'owner',
+  'manager',
+  'accountant',
+  'bookkeeper',
+  'sales',
+  'marketing',
+  'readonly',
+])
+
+export async function assignToEngagementAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({
+        engagementId: uuid,
+        userId: uuid,
+        role: ROLE.optional().nullable(),
+        note: z.string().trim().optional(),
+      })
+      .parse(input)
+
+    const result = await assignToEngagement(actor.userId, {
+      engagementId: parsed.engagementId,
+      userId: parsed.userId,
+      role: parsed.role ?? null,
+      note: parsed.note ?? null,
+    })
+
+    return result.granted > 0
+      ? 'On the client, and able to open their books now.'
+      : 'Recorded. They already had access, because this client is staffed by the whole firm.'
+  })
+}
+
+export async function unassignFromEngagementAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z.object({ engagementId: uuid, userId: uuid }).parse(input)
+
+    const result = await unassignFromEngagement(actor.userId, parsed)
+
+    return result.revoked > 0
+      ? 'Taken off. Their access stops on their next click, not when a session expires.'
+      : 'Taken off the list. They keep access while this client is staffed by the whole firm.'
+  })
+}
+
+export async function setEngagementStaffingAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({ engagementId: uuid, staffing: z.enum(['whole_firm', 'assigned_only']) })
+      .parse(input)
+
+    const result = await setEngagementStaffing(actor.userId, parsed)
+
+    if (parsed.staffing === 'assigned_only') {
+      return result.revoked > 0
+        ? `Only the assigned now. ${result.revoked} ${result.revoked === 1 ? 'person' : 'people'} lost access.`
+        : 'Only the assigned now. Nobody lost access — everybody who had it is assigned.'
+    }
+
+    return result.granted > 0
+      ? `The whole firm again. ${result.granted} ${result.granted === 1 ? 'person' : 'people'} gained access.`
+      : 'The whole firm again.'
+  })
+}
+
+export type StaffingView = {
+  staffing: 'whole_firm' | 'assigned_only'
+  companyName: string
+  grantedRole: string
+  staff: Array<{
+    userId: string
+    name: string
+    email: string
+    practiceRole: string
+    defaultRole: string
+    isAssigned: boolean
+    assignedRole: string | null
+    effectiveRole: string | null
+    note: string | null
+  }>
+  /** What switching to the other mode would do, so nothing is a surprise. */
+  wouldRevoke: number
+  wouldGrant: number
+}
+
+/**
+ * Who is on one client, loaded when somebody opens that client.
+ *
+ * On demand rather than with the list, the same reasoning as Phase 22's client
+ * timeline: a firm with forty clients would otherwise run forty staffing
+ * queries to render forty collapsed rows.
+ */
+export async function staffingForAction(engagementId: unknown): Promise<StaffingView | null> {
+  const actor = await requireActor()
+
+  try {
+    const id = uuid.parse(engagementId)
+    const { engagement, staff } = await staffingFor(id, actor.userId)
+
+    const other = engagement.staffing === 'whole_firm' ? 'assigned_only' : 'whole_firm'
+    const preview = await staffingChangePreview(id, actor.userId, other)
+
+    const [company] = await db
+      .select({ name: companies.name })
+      .from(companies)
+      .where(eq(companies.id, engagement.companyId))
+      .limit(1)
+
+    return {
+      staffing: engagement.staffing,
+      companyName: company?.name ?? 'This client',
+      grantedRole: engagement.grantedRole,
+      staff,
+      wouldRevoke: preview.wouldRevoke,
+      wouldGrant: preview.wouldGrant,
+    }
+  } catch {
+    // A practice member who is not an owner, or an engagement of another firm.
+    // The panel simply does not open rather than explaining what exists.
+    return null
+  }
 }

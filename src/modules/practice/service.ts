@@ -1,7 +1,8 @@
-import { and, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   companies,
+  engagementAssignments,
   memberships,
   practiceEngagements,
   practiceMembers,
@@ -301,6 +302,8 @@ export type Engagement = {
   status: 'pending' | 'active' | 'declined' | 'ended'
   initiatedBy: 'practice' | 'client'
   grantedRole: Role
+  /** Whole firm, or only the assigned (Phase 25). */
+  staffing: 'whole_firm' | 'assigned_only'
   note: string | null
   requestedAt: Date
   respondedAt: Date | null
@@ -480,22 +483,10 @@ export async function respondToEngagement(
       .set({ status: 'active', respondedAt: new Date(), respondedBy: responderId })
       .where(eq(practiceEngagements.id, engagement.id))
 
-    const staff = await tx
-      .select({ userId: practiceMembers.userId, defaultRole: practiceMembers.defaultRole })
-      .from(practiceMembers)
-      .where(
-        and(
-          eq(practiceMembers.practiceId, engagement.practiceId),
-          eq(practiceMembers.isActive, true),
-        ),
-      )
-
-    let granted = 0
-    for (const member of staff) {
-      if (await grantMembership(tx, engagement, member.userId, member.defaultRole as Role)) {
-        granted += 1
-      }
-    }
+    // One decision point (Phase 25). An engagement accepted while already
+    // staffed `assigned_only` grants only the assigned, which is what lets a
+    // firm decide who is on a client's books before the client says yes.
+    const { granted } = await reconcileEngagementMemberships(tx, engagement)
 
     return { status: 'active' as const, membershipsGranted: granted }
   })
@@ -508,12 +499,17 @@ export async function respondToEngagement(
  * accepting an emailed link should reach the same clients as somebody the
  * owner added by hand, and two implementations of that rule is how the two
  * paths come to differ.
+ *
+ * Since Phase 25 this reconciles rather than grants, which is what makes
+ * joining a firm stop meaning "reach every client": an engagement staffed
+ * `assigned_only` will not entitle the newcomer, so `reconcile` grants them
+ * nothing there and the count comes back lower.
  */
 export async function grantAtLiveEngagements(
   tx: Executor,
   practiceId: string,
   userId: string,
-  defaultRole: Role,
+  _defaultRole: Role,
 ): Promise<number> {
   const live = await tx
     .select()
@@ -527,9 +523,123 @@ export async function grantAtLiveEngagements(
 
   let granted = 0
   for (const engagement of live) {
-    if (await grantMembership(tx, engagement, userId, defaultRole)) granted += 1
+    const result = await reconcileEngagementMemberships(tx, engagement)
+    if (result.entitled.includes(userId)) granted += 1
   }
   return granted
+}
+
+export type EngagementRow = typeof practiceEngagements.$inferSelect
+
+/**
+ * Who the firm's arrangement says should be on this client's books.
+ *
+ * The one place that decides, and every path goes through it — accepting an
+ * engagement, somebody joining the firm, an assignment made or withdrawn, the
+ * staffing mode changed. Four call sites deciding this separately is four
+ * chances for "who can see these books" to be answered differently, and the
+ * one that matters is whichever ran last.
+ *
+ * Roles resolve in one direction only: an assignment may narrow a member's
+ * default, and the engagement's cap narrows whatever comes out. Nothing here
+ * can widen anything, which is why the client's decision is safe to store once
+ * and never re-check.
+ */
+export async function entitledStaff(
+  tx: Executor,
+  engagement: Pick<EngagementRow, 'id' | 'practiceId' | 'grantedRole' | 'staffing'>,
+): Promise<Array<{ userId: string; role: Role }>> {
+  const [members, assignments] = await Promise.all([
+    tx
+      .select({ userId: practiceMembers.userId, defaultRole: practiceMembers.defaultRole })
+      .from(practiceMembers)
+      .where(
+        and(
+          eq(practiceMembers.practiceId, engagement.practiceId),
+          eq(practiceMembers.isActive, true),
+        ),
+      ),
+    tx
+      .select({ userId: engagementAssignments.userId, role: engagementAssignments.role })
+      .from(engagementAssignments)
+      .where(eq(engagementAssignments.engagementId, engagement.id)),
+  ])
+
+  const assigned = new Map(assignments.map((row) => [row.userId, row.role]))
+
+  // An assignment for somebody who has left the firm entitles nobody. The row
+  // is left alone rather than deleted — removing a member already removes
+  // their memberships, and a stale assignment row that grants nothing is
+  // better than one deleted by a path that was not asked to.
+  const eligible =
+    engagement.staffing === 'assigned_only'
+      ? members.filter((member) => assigned.has(member.userId))
+      : members
+
+  return eligible.map((member) => {
+    const override = assigned.get(member.userId) ?? null
+    const wanted = (override ?? member.defaultRole) as Role
+    return { userId: member.userId, role: narrowerOf(wanted, engagement.grantedRole as Role) }
+  })
+}
+
+/**
+ * Makes the memberships match the arrangement.
+ *
+ * Grants what should exist, and removes what this engagement created for
+ * somebody who is no longer entitled. Only ever touches rows carrying this
+ * engagement's id — a person the client hired directly keeps their own
+ * membership, which is the same rule `grantMembership` and `endEngagement`
+ * already follow and the reason both check.
+ *
+ * Revocation takes effect on the **next request**, because `resolveSession`
+ * re-reads the membership every time (Phase 13). Nobody keeps access until a
+ * session expires.
+ */
+export async function reconcileEngagementMemberships(
+  tx: Executor,
+  engagement: Pick<EngagementRow, 'id' | 'companyId' | 'practiceId' | 'grantedRole' | 'staffing'>,
+): Promise<{ entitled: string[]; granted: number; revoked: number }> {
+  const entitled = await entitledStaff(tx, engagement)
+  const keep = new Set(entitled.map((row) => row.userId))
+
+  // Read before writing, so `granted` can mean *newly* granted. Counting the
+  // writes instead would report "2 people granted" on a reconcile that gave
+  // one person access and rewrote an unchanged row for somebody who already
+  // had it — and the number a permissions screen shows has to be the number of
+  // people whose access actually changed.
+  const existing = await tx
+    .select({ id: memberships.id, userId: memberships.userId, role: memberships.role })
+    .from(memberships)
+    .where(eq(memberships.practiceEngagementId, engagement.id))
+
+  const held = new Map(existing.map((row) => [row.userId, row.role as Role]))
+
+  let granted = 0
+  for (const row of entitled) {
+    const before = held.get(row.userId)
+    const wrote = await grantMembership(tx, engagement, row.userId, row.role)
+    if (wrote && before !== row.role) granted += 1
+  }
+
+  const stale = existing.filter((row) => !keep.has(row.userId))
+
+  let revoked = 0
+  if (stale.length > 0) {
+    const removed = await tx
+      .delete(memberships)
+      .where(
+        inArray(
+          memberships.id,
+          stale.map((row) => row.id),
+        ),
+      )
+      .returning({ id: memberships.id })
+
+    revoked = removed.length
+  }
+
+  return { entitled: [...keep], granted, revoked }
 }
 
 /**
@@ -709,6 +819,7 @@ async function listEngagements(where: ReturnType<typeof eq>): Promise<Engagement
       status: practiceEngagements.status,
       initiatedBy: practiceEngagements.initiatedBy,
       grantedRole: practiceEngagements.grantedRole,
+      staffing: practiceEngagements.staffing,
       note: practiceEngagements.note,
       requestedAt: practiceEngagements.requestedAt,
       respondedAt: practiceEngagements.respondedAt,
@@ -733,6 +844,14 @@ export type AccessHolder = {
   /** Null when they work at the company itself. */
   viaPracticeName: string | null
   viaEngagementId: string | null
+  /**
+   * How the firm staffs this engagement (Phase 25).
+   *
+   * Shown to the client because it is the difference between "everybody at
+   * Hartley & Co can read your ledger" and "these two people can" — and the
+   * client cannot tell those apart from a list of names alone.
+   */
+  viaStaffing: 'whole_firm' | 'assigned_only' | null
   isActive: boolean
 }
 
@@ -755,6 +874,7 @@ export async function whoHasAccess(ctx: ActorContext): Promise<AccessHolder[]> {
       isActive: memberships.isActive,
       engagementId: memberships.practiceEngagementId,
       practiceName: practices.name,
+      staffing: practiceEngagements.staffing,
     })
     .from(memberships)
     .innerJoin(users, eq(users.id, memberships.userId))
@@ -770,6 +890,7 @@ export async function whoHasAccess(ctx: ActorContext): Promise<AccessHolder[]> {
     role: row.role as Role,
     viaPracticeName: row.practiceName,
     viaEngagementId: row.engagementId,
+    viaStaffing: row.staffing,
     isActive: row.isActive,
   }))
 }
@@ -834,4 +955,270 @@ export async function directMemberCount(companyId: string): Promise<number> {
     .where(and(eq(memberships.companyId, companyId), isNull(memberships.practiceEngagementId)))
 
   return Number(row?.count ?? 0)
+}
+
+// --- Who is on which client's books (Phase 25) -------------------------------
+
+/**
+ * Loads an engagement a practice owner is entitled to change.
+ *
+ * Only a practice owner, and only their own firm's engagement. The client does
+ * not choose which of the firm's people work on their books — they chose the
+ * firm and capped its role, and picking staff is the firm's job. What the
+ * client keeps is the cap, and the ability to end the whole thing.
+ */
+async function engagementForOwner(
+  tx: Executor,
+  engagementId: string,
+  userId: string,
+): Promise<EngagementRow> {
+  const [engagement] = await tx
+    .select()
+    .from(practiceEngagements)
+    .where(eq(practiceEngagements.id, engagementId))
+    .limit(1)
+
+  if (!engagement) throw new PracticeError('That engagement does not exist.')
+  await requirePracticeOwner(engagement.practiceId, userId, tx)
+  return engagement
+}
+
+export type StaffingRow = {
+  userId: string
+  name: string
+  email: string
+  practiceRole: string
+  defaultRole: Role
+  /** True when this person is named on this engagement. */
+  isAssigned: boolean
+  /** The assignment's narrower role, when one was set. */
+  assignedRole: Role | null
+  /** What they would actually hold at the client, after every narrowing. */
+  effectiveRole: Role | null
+  note: string | null
+}
+
+/**
+ * Everybody at the firm, and where each of them stands on this client.
+ *
+ * The whole firm rather than the assigned, because the screen this feeds is
+ * for *changing* the answer — a list of the people already on it cannot show
+ * you who else there is.
+ */
+export async function staffingFor(
+  engagementId: string,
+  userId: string,
+): Promise<{ engagement: EngagementRow; staff: StaffingRow[] }> {
+  const engagement = await engagementForOwner(db, engagementId, userId)
+
+  const [members, assignments] = await Promise.all([
+    db
+      .select({
+        userId: practiceMembers.userId,
+        name: users.name,
+        email: users.email,
+        practiceRole: practiceMembers.practiceRole,
+        defaultRole: practiceMembers.defaultRole,
+      })
+      .from(practiceMembers)
+      .innerJoin(users, eq(users.id, practiceMembers.userId))
+      .where(
+        and(
+          eq(practiceMembers.practiceId, engagement.practiceId),
+          eq(practiceMembers.isActive, true),
+        ),
+      )
+      .orderBy(asc(users.name)),
+    db
+      .select({
+        userId: engagementAssignments.userId,
+        role: engagementAssignments.role,
+        note: engagementAssignments.note,
+      })
+      .from(engagementAssignments)
+      .where(eq(engagementAssignments.engagementId, engagementId)),
+  ])
+
+  const assigned = new Map(assignments.map((row) => [row.userId, row]))
+
+  return {
+    engagement,
+    staff: members.map((member) => {
+      const assignment = assigned.get(member.userId)
+      const entitled = engagement.staffing === 'whole_firm' || assignment !== undefined
+      const wanted = (assignment?.role ?? member.defaultRole) as Role
+
+      return {
+        userId: member.userId,
+        name: member.name,
+        email: member.email,
+        practiceRole: member.practiceRole,
+        defaultRole: member.defaultRole as Role,
+        isAssigned: assignment !== undefined,
+        assignedRole: (assignment?.role ?? null) as Role | null,
+        effectiveRole: entitled ? narrowerOf(wanted, engagement.grantedRole as Role) : null,
+        note: assignment?.note ?? null,
+      }
+    }),
+  }
+}
+
+/**
+ * Puts somebody on a client, or changes the role they hold there.
+ *
+ * Takes effect immediately under `assigned_only`. Under `whole_firm` it grants
+ * nothing new — they already had access — but it still records the assignment,
+ * which is how a firm builds the list *before* it tightens the mode rather
+ * than during the outage that would otherwise follow.
+ */
+export async function assignToEngagement(
+  actorUserId: string,
+  input: { engagementId: string; userId: string; role?: Role | null; note?: string | null },
+): Promise<{ granted: number; revoked: number }> {
+  return db.transaction(async (tx) => {
+    const engagement = await engagementForOwner(tx, input.engagementId, actorUserId)
+
+    const [member] = await tx
+      .select({ id: practiceMembers.id })
+      .from(practiceMembers)
+      .where(
+        and(
+          eq(practiceMembers.practiceId, engagement.practiceId),
+          eq(practiceMembers.userId, input.userId),
+          eq(practiceMembers.isActive, true),
+        ),
+      )
+      .limit(1)
+
+    if (!member) throw new PracticeError('That person does not work at this firm.')
+
+    await tx
+      .insert(engagementAssignments)
+      .values({
+        engagementId: input.engagementId,
+        userId: input.userId,
+        role: (input.role ?? null) as never,
+        note: input.note?.trim() || null,
+        assignedBy: actorUserId,
+      })
+      .onConflictDoUpdate({
+        target: [engagementAssignments.engagementId, engagementAssignments.userId],
+        set: {
+          role: (input.role ?? null) as never,
+          note: input.note?.trim() || null,
+          assignedBy: actorUserId,
+          assignedAt: new Date(),
+        },
+      })
+
+    // An engagement that has not been accepted has no memberships to make
+    // match; the assignment is recorded and takes effect when it is.
+    if (engagement.status !== 'active') return { granted: 0, revoked: 0 }
+
+    const result = await reconcileEngagementMemberships(tx, engagement)
+    return { granted: result.granted, revoked: result.revoked }
+  })
+}
+
+/**
+ * Takes somebody off a client.
+ *
+ * Under `assigned_only` their membership goes in the same transaction, and
+ * `resolveSession` re-reads on the next request — so somebody removed while
+ * looking at the books loses them on their next click rather than when a
+ * session happens to expire.
+ */
+export async function unassignFromEngagement(
+  actorUserId: string,
+  input: { engagementId: string; userId: string },
+): Promise<{ revoked: number }> {
+  return db.transaction(async (tx) => {
+    const engagement = await engagementForOwner(tx, input.engagementId, actorUserId)
+
+    const removed = await tx
+      .delete(engagementAssignments)
+      .where(
+        and(
+          eq(engagementAssignments.engagementId, input.engagementId),
+          eq(engagementAssignments.userId, input.userId),
+        ),
+      )
+      .returning({ id: engagementAssignments.id })
+
+    if (removed.length === 0) throw new PracticeError('They are not assigned to that client.')
+    if (engagement.status !== 'active') return { revoked: 0 }
+
+    const result = await reconcileEngagementMemberships(tx, engagement)
+    return { revoked: result.revoked }
+  })
+}
+
+/**
+ * What changing the staffing mode would do, without doing it.
+ *
+ * Shown before the button, because the difference between "this tightens
+ * access" and "this locks four people out of a client mid-close" is a number,
+ * and a permissions change nobody could see coming is one somebody reverses in
+ * a panic.
+ */
+export async function staffingChangePreview(
+  engagementId: string,
+  userId: string,
+  staffing: 'whole_firm' | 'assigned_only',
+): Promise<{ wouldGrant: number; wouldRevoke: number; assigned: number }> {
+  const engagement = await engagementForOwner(db, engagementId, userId)
+
+  const entitled = await entitledStaff(db, { ...engagement, staffing })
+  const keep = new Set(entitled.map((row) => row.userId))
+
+  const existing = await db
+    .select({ userId: memberships.userId })
+    .from(memberships)
+    .where(eq(memberships.practiceEngagementId, engagementId))
+
+  const held = new Set(existing.map((row) => row.userId))
+
+  return {
+    wouldGrant: entitled.filter((row) => !held.has(row.userId)).length,
+    wouldRevoke: existing.filter((row) => !keep.has(row.userId)).length,
+    assigned: keep.size,
+  }
+}
+
+/**
+ * Switches an engagement between whole-firm and assigned-only.
+ *
+ * Refuses to leave a live client with nobody. A firm that has accepted
+ * responsibility for a set of books and then locks itself out of them has not
+ * tightened its security — it has created an incident, and the way out is a
+ * client who now has to go and re-invite the firm they already engaged.
+ */
+export async function setEngagementStaffing(
+  actorUserId: string,
+  input: { engagementId: string; staffing: 'whole_firm' | 'assigned_only' },
+): Promise<{ granted: number; revoked: number; staffing: string }> {
+  return db.transaction(async (tx) => {
+    const engagement = await engagementForOwner(tx, input.engagementId, actorUserId)
+
+    const next = { ...engagement, staffing: input.staffing }
+    const entitled = await entitledStaff(tx, next)
+
+    if (engagement.status === 'active' && entitled.length === 0) {
+      throw new PracticeError(
+        'Assign somebody to this client first — switching now would leave nobody at the firm able to open their books.',
+      )
+    }
+
+    await tx
+      .update(practiceEngagements)
+      .set({ staffing: input.staffing })
+      .where(eq(practiceEngagements.id, input.engagementId))
+
+    if (engagement.status !== 'active') {
+      return { granted: 0, revoked: 0, staffing: input.staffing }
+    }
+
+    const result = await reconcileEngagementMemberships(tx, next)
+    return { granted: result.granted, revoked: result.revoked, staffing: input.staffing }
+  })
 }

@@ -17,6 +17,7 @@ type Holder = {
   email: string
   role: string
   viaPracticeName: string | null
+  viaStaffing: 'whole_firm' | 'assigned_only' | null
   isSelf: boolean
 }
 
@@ -190,7 +191,17 @@ export function AccessBoard({
                 <td className="px-4 py-1.5 text-muted">{holder.role}</td>
                 <td className="px-4 py-1.5">
                   {holder.viaPracticeName ? (
-                    <span className="text-warning">via {holder.viaPracticeName}</span>
+                    <>
+                      <span className="text-warning">via {holder.viaPracticeName}</span>
+                      {/* "Everybody at Hartley & Co can read your ledger" and
+                          "these two people can" are different facts, and a
+                          list of names cannot tell them apart. */}
+                      <span className="block text-xs text-faint">
+                        {holder.viaStaffing === 'assigned_only'
+                          ? 'assigned to you specifically'
+                          : 'everybody at the firm'}
+                      </span>
+                    </>
                   ) : (
                     <span className="text-muted">works here</span>
                   )}

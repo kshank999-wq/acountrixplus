@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import { Staffing } from './staffing'
 import {
   endEngagementAction,
   enterClientAction,
@@ -31,6 +32,7 @@ type Engagement = {
   status: 'pending' | 'active' | 'declined' | 'ended'
   initiatedBy: 'practice' | 'client'
   grantedRole: string
+  staffing: 'whole_firm' | 'assigned_only'
   note: string | null
   requestedAt: string
 }
@@ -90,6 +92,8 @@ export function PracticeBoard({
   const awaitingUs = engagements.filter(
     (engagement) => engagement.status === 'pending' && engagement.initiatedBy === 'client',
   )
+  const live = engagements.filter((engagement) => engagement.status === 'active')
+
   const awaitingThem = engagements.filter(
     (engagement) => engagement.status === 'pending' && engagement.initiatedBy === 'practice',
   )
@@ -222,6 +226,23 @@ export function PracticeBoard({
         )}
       </Card>
 
+      {live.length > 0 && isOwner && (
+        <Card
+          title="Who is on which client"
+          subtitle="A firm does not put everybody on everything. Each client is staffed by the whole firm or by named people, and the client's cap still applies either way."
+        >
+          <ul className="divide-y divide-line">
+            {live.map((engagement) => (
+              <li key={engagement.id} className="px-4 py-3">
+                <p className="text-sm font-medium">{engagement.companyName}</p>
+                <p className="text-xs text-faint">capped at {engagement.grantedRole}</p>
+                <Staffing engagementId={engagement.id} staffing={engagement.staffing} />
+              </li>
+            ))}
+          </ul>
+        </Card>
+      )}
+
       {awaitingThem.length > 0 && (
         <Card title="Waiting on them" subtitle="You have asked; they have not answered.">
           <ul className="divide-y divide-line">
@@ -244,7 +265,10 @@ export function PracticeBoard({
         </Card>
       )}
 
-      <Card title="Who works here" subtitle="Everybody here reaches every client, capped at what each client agreed to.">
+      <Card
+        title="Who works here"
+        subtitle="Somebody here reaches every client staffed by the whole firm, and only the clients they are put on for the rest — capped either way at what each client agreed to."
+      >
         <table className="w-full text-sm">
           <tbody>
             {members

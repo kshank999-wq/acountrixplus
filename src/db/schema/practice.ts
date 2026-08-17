@@ -40,6 +40,25 @@ export const engagementStatusEnum = pgEnum('engagement_status', [
 /** Which side asked. The other side is the one that must accept. */
 export const engagementInitiatorEnum = pgEnum('engagement_initiator', ['practice', 'client'])
 
+/**
+ * How an engagement is staffed (spec §14 "granular overrides", §19
+ * least-privilege).
+ *
+ * Phase 18 granted every member of a firm a membership at every client the
+ * firm served, and said so in the README: *a firm that wants one junior on one
+ * client and not the other cannot say so.* That is the whole of this enum.
+ */
+export const engagementStaffingEnum = pgEnum('engagement_staffing', [
+  /**
+   * Everybody at the firm reaches this client. What Phase 18 built, and the
+   * default — a mode change that quietly revoked access on the migration would
+   * be the worst possible way to ship a permissions feature.
+   */
+  'whole_firm',
+  /** Only the people named in `engagement_assignments`. */
+  'assigned_only',
+])
+
 /** An accounting firm. */
 export const practices = pgTable(
   'practices',
@@ -125,6 +144,13 @@ export const practiceEngagements = pgTable(
      */
     grantedRole: roleEnum('granted_role').notNull().default('accountant'),
 
+    /**
+     * Whether everybody at the firm reaches this client, or only the people
+     * assigned to it (Phase 25). Defaults to `whole_firm`, which is what
+     * every engagement written before Phase 25 already meant.
+     */
+    staffing: engagementStaffingEnum('staffing').notNull().default('whole_firm'),
+
     /** Why the firm wants access, or why the client is asking. Free text. */
     note: text('note'),
 
@@ -158,5 +184,49 @@ export const practiceEngagements = pgTable(
       'practice_engagements_ended',
       sql`(${t.status} = 'ended') = (${t.endedAt} IS NOT NULL)`,
     ),
+  }),
+)
+
+
+/**
+ * One person at the firm, on one client's books.
+ *
+ * Rows exist under either staffing mode: assigning somebody while the
+ * engagement is `whole_firm` is how a firm records *who is actually doing the
+ * work* before it tightens access, and it means switching to `assigned_only`
+ * is a decision about a list somebody has already curated rather than a blank
+ * page and a revocation.
+ *
+ * ## Why the role here can only narrow
+ *
+ * `role` is an optional override, and it is resolved with the same
+ * `narrowerOf` the engagement's cap already goes through. A firm can put a
+ * junior on a client as `readonly` even though their default is `accountant`;
+ * it cannot put them on as `owner` when the client agreed to `accountant`.
+ * Both directions matter, and only one of them is about the client.
+ */
+export const engagementAssignments = pgTable(
+  'engagement_assignments',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    engagementId: uuid('engagement_id')
+      .notNull()
+      .references(() => practiceEngagements.id, { onDelete: 'cascade' }),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+
+    /** Narrower than the member's default, when the firm wants it narrower. */
+    role: roleEnum('role'),
+
+    note: text('note'),
+    assignedAt: timestamp('assigned_at', { withTimezone: true }).notNull().defaultNow(),
+    assignedBy: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
+  },
+  (t) => ({
+    // One row per person per engagement. Two would mean two answers to "what
+    // role does Dana have here", and the second would silently win.
+    once: unique('engagement_assignments_unique').on(t.engagementId, t.userId),
+    userIdx: index('engagement_assignments_user_idx').on(t.userId),
   }),
 )

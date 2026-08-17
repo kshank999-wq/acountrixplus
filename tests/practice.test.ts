@@ -5,6 +5,7 @@ import { auditEvents, customers, memberships, practiceEngagements } from '@/db/s
 import { createCompanyFixture, type Fixture } from './helpers'
 import {
   addPracticeMember,
+  assignToEngagement,
   createPractice,
   endEngagement,
   engagementsForCompany,
@@ -19,6 +20,10 @@ import {
   requestEngagement,
   respondToEngagement,
   SelfAcceptanceError,
+  setEngagementStaffing,
+  staffingChangePreview,
+  staffingFor,
+  unassignFromEngagement,
   whoHasAccess,
 } from '@/modules/practice/service'
 import {
@@ -670,5 +675,390 @@ describe('what the client can see', () => {
       PracticeError,
     )
     await expect(listPracticeMembers(shop.practiceId, outsider.id)).rejects.toThrow(PracticeError)
+  })
+})
+
+describe('who at the firm is on which client (Phase 25)', () => {
+  it('lets everybody in until the firm says otherwise', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'bookkeeper',
+    })
+
+    // Phase 18's behaviour, and the default for every engagement written
+    // before Phase 25 existed. A permissions feature that revoked access on
+    // its own migration would be the worst possible way to ship one.
+    const [engagement] = await db
+      .select()
+      .from(practiceEngagements)
+      .where(eq(practiceEngagements.id, shop.engagementId))
+    expect(engagement.staffing).toBe('whole_firm')
+
+    const holders = await whoHasAccess(client.ctx)
+    expect(holders.map((row) => row.userId)).toContain(junior.id)
+  })
+
+  it('lets in only the assigned once the firm says so', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'bookkeeper',
+    })
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: shop.ownerId,
+    })
+
+    const result = await setEngagementStaffing(shop.ownerId, {
+      engagementId: shop.engagementId,
+      staffing: 'assigned_only',
+    })
+
+    // The junior loses the client they were never actually working on.
+    expect(result.revoked).toBe(1)
+
+    const holders = await whoHasAccess(client.ctx)
+    expect(holders.map((row) => row.userId)).not.toContain(junior.id)
+    expect(holders.map((row) => row.userId)).toContain(shop.ownerId)
+  })
+
+  it('stops a new hire reaching a client nobody put them on', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: shop.ownerId,
+    })
+    await setEngagementStaffing(shop.ownerId, {
+      engagementId: shop.engagementId,
+      staffing: 'assigned_only',
+    })
+
+    // Phase 18: "a new hire reaches every client immediately". That is the
+    // convenience this phase exists to make optional.
+    const junior = await accountant('Late Hire')
+    const { grantedAtClients } = await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'accountant',
+    })
+
+    expect(grantedAtClients).toBe(0)
+    expect((await whoHasAccess(client.ctx)).map((row) => row.userId)).not.toContain(junior.id)
+  })
+
+  it('grants on assignment and revokes on the next request when unassigned', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'accountant',
+    })
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: shop.ownerId,
+    })
+    await setEngagementStaffing(shop.ownerId, {
+      engagementId: shop.engagementId,
+      staffing: 'assigned_only',
+    })
+
+    const added = await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: junior.id,
+    })
+    expect(added.granted).toBe(1)
+
+    // Signed in and looking at the books.
+    const { session } = await createSession(junior.id, client.companyId)
+    expect(await resolveSession(signSessionId(session.id))).not.toBeNull()
+
+    const removed = await unassignFromEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: junior.id,
+    })
+    expect(removed.revoked).toBe(1)
+
+    // `resolveSession` re-reads the membership every request (Phase 13), so
+    // access stops on the next click rather than when a session expires.
+    expect(await resolveSession(signSessionId(session.id))).toBeNull()
+  })
+
+  it('narrows a role for one client without touching the others', async () => {
+    const one = await createCompanyFixture({ name: 'First Client' })
+    const two = await createCompanyFixture({ name: 'Second Client' })
+    const shop = await engaged(one)
+    await engaged(two, shop)
+
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'accountant',
+    })
+
+    const engagements = await engagementsForPractice(shop.practiceId, shop.ownerId)
+    const first = engagements.find((row) => row.companyId === one.companyId)!
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: first.id,
+      userId: junior.id,
+      role: 'readonly',
+    })
+
+    const atOne = (await whoHasAccess(one.ctx)).find((row) => row.userId === junior.id)
+    const atTwo = (await whoHasAccess(two.ctx)).find((row) => row.userId === junior.id)
+
+    // The point of a per-client override: the same person, two roles.
+    expect(atOne?.role).toBe('readonly')
+    expect(atTwo?.role).toBe('accountant')
+  })
+
+  it('cannot use an assignment to exceed what the client agreed to', async () => {
+    const client = await createCompanyFixture({ name: 'Careful Co' })
+    const shop = await firm()
+
+    // The client caps the firm at bookkeeper.
+    const { engagementId } = await offerEngagement(client.ctx, {
+      practiceId: shop.practiceId,
+      grantedRole: 'bookkeeper',
+    })
+    await respondToEngagement(
+      { side: 'practice', userId: shop.ownerId, userName: shop.ownerName },
+      { engagementId, accept: true },
+    )
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId,
+      userId: shop.ownerId,
+      role: 'owner',
+    })
+
+    // An assignment narrows. It has never been able to widen, and the cap is
+    // the client's decision rather than the firm's.
+    const holder = (await whoHasAccess(client.ctx)).find((row) => row.userId === shop.ownerId)
+    expect(holder?.role).toBe('bookkeeper')
+  })
+
+  it('refuses to leave a live client with nobody at the firm', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+
+    // Nobody is assigned yet, so switching would revoke everybody — including
+    // the owner doing the switching.
+    await expect(
+      setEngagementStaffing(shop.ownerId, {
+        engagementId: shop.engagementId,
+        staffing: 'assigned_only',
+      }),
+    ).rejects.toThrow(/Assign somebody/i)
+
+    expect((await whoHasAccess(client.ctx)).map((row) => row.userId)).toContain(shop.ownerId)
+  })
+
+  it('says what a switch would do before it does it', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'bookkeeper',
+    })
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: shop.ownerId,
+    })
+
+    const preview = await staffingChangePreview(
+      shop.engagementId,
+      shop.ownerId,
+      'assigned_only',
+    )
+
+    // A permissions change nobody could see coming is one somebody reverses
+    // in a panic.
+    expect(preview).toMatchObject({ wouldGrant: 0, wouldRevoke: 1, assigned: 1 })
+
+    // And it really was a preview.
+    expect((await whoHasAccess(client.ctx)).map((row) => row.userId)).toContain(junior.id)
+  })
+
+  it('records an assignment before the client has accepted, and applies it after', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await firm()
+
+    const { engagementId } = await requestEngagement(
+      { userId: shop.ownerId, userName: shop.ownerName },
+      { practiceId: shop.practiceId, companyId: client.companyId },
+    )
+
+    await assignToEngagement(shop.ownerId, { engagementId, userId: shop.ownerId })
+    const switched = await setEngagementStaffing(shop.ownerId, {
+      engagementId,
+      staffing: 'assigned_only',
+    })
+
+    // Nothing to grant or revoke yet — there are no memberships until the
+    // client says yes.
+    expect(switched).toMatchObject({ granted: 0, revoked: 0 })
+
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'bookkeeper',
+    })
+
+    await respondToEngagement(
+      { side: 'client', ctx: client.ctx },
+      { engagementId, accept: true },
+    )
+
+    // Accepting grants the assigned and only the assigned, which is how a firm
+    // decides who is on a client's books before the client agrees.
+    const holders = (await whoHasAccess(client.ctx)).map((row) => row.userId)
+    expect(holders).toContain(shop.ownerId)
+    expect(holders).not.toContain(junior.id)
+  })
+
+  it('shows the client whether the whole firm is on their books', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+
+    const before = (await whoHasAccess(client.ctx)).find((row) => row.viaPracticeName !== null)
+    expect(before?.viaStaffing).toBe('whole_firm')
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: shop.ownerId,
+    })
+    await setEngagementStaffing(shop.ownerId, {
+      engagementId: shop.engagementId,
+      staffing: 'assigned_only',
+    })
+
+    // "Everybody at Hartley & Co can read your ledger" and "these two people
+    // can" are different facts, and a list of names cannot tell them apart.
+    const after = (await whoHasAccess(client.ctx)).find((row) => row.viaPracticeName !== null)
+    expect(after?.viaStaffing).toBe('assigned_only')
+  })
+
+  it('lets only a practice owner change who is on a client', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'accountant',
+    })
+
+    await expect(
+      assignToEngagement(junior.id, {
+        engagementId: shop.engagementId,
+        userId: junior.id,
+      }),
+    ).rejects.toThrow(/practice owner/i)
+
+    // And nobody from another firm at all.
+    const rival = await firm('Rival & Co')
+    await expect(
+      assignToEngagement(rival.ownerId, {
+        engagementId: shop.engagementId,
+        userId: rival.ownerId,
+      }),
+    ).rejects.toThrow(/do not work at that practice/i)
+  })
+
+  it('refuses to assign somebody who does not work at the firm', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const stranger = await accountant('Not Employed Here')
+
+    await expect(
+      assignToEngagement(shop.ownerId, {
+        engagementId: shop.engagementId,
+        userId: stranger.id,
+      }),
+    ).rejects.toThrow(/does not work at this firm/i)
+  })
+
+  it('leaves a directly hired bookkeeper alone when the firm tightens', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+
+    // Somebody the client hired themselves, who also happens to work at the
+    // firm. Their own grant is not the engagement's to take away.
+    const both = await accountant('Wears Two Hats')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: both.id,
+      defaultRole: 'accountant',
+    })
+    await db
+      .update(memberships)
+      .set({ practiceEngagementId: null })
+      .where(and(eq(memberships.companyId, client.companyId), eq(memberships.userId, both.id)))
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: shop.ownerId,
+    })
+    await setEngagementStaffing(shop.ownerId, {
+      engagementId: shop.engagementId,
+      staffing: 'assigned_only',
+    })
+
+    expect((await whoHasAccess(client.ctx)).map((row) => row.userId)).toContain(both.id)
+  })
+
+  it('lists the whole firm against one client, assigned or not', async () => {
+    const client = await createCompanyFixture({ name: 'Ridgeline' })
+    const shop = await engaged(client)
+    const junior = await accountant('Junior Ito')
+    await addPracticeMember({ userId: shop.ownerId, userName: shop.ownerName }, {
+      practiceId: shop.practiceId,
+      userId: junior.id,
+      defaultRole: 'bookkeeper',
+    })
+
+    await assignToEngagement(shop.ownerId, {
+      engagementId: shop.engagementId,
+      userId: junior.id,
+      role: 'readonly',
+      note: 'Bank reconciliation only',
+    })
+
+    const { staff } = await staffingFor(shop.engagementId, shop.ownerId)
+
+    // The screen this feeds is for changing the answer, so it has to show the
+    // people who are not on it yet.
+    expect(staff).toHaveLength(2)
+
+    const row = staff.find((entry) => entry.userId === junior.id)!
+    expect(row).toMatchObject({
+      isAssigned: true,
+      assignedRole: 'readonly',
+      effectiveRole: 'readonly',
+      note: 'Bank reconciliation only',
+    })
+
+    const owner = staff.find((entry) => entry.userId === shop.ownerId)!
+    expect(owner.isAssigned).toBe(false)
+    // Still entitled, because the engagement is whole-firm.
+    expect(owner.effectiveRole).toBe('accountant')
   })
 })

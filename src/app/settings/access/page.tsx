@@ -50,6 +50,7 @@ export default async function AccessPage() {
           email: holder.email,
           role: holder.role,
           viaPracticeName: holder.viaPracticeName,
+          viaStaffing: holder.viaStaffing,
           isSelf: holder.userId === actor.userId,
         }))}
         engagements={engagements.map((engagement) => ({
