@@ -55,7 +55,8 @@ from the
 [ADR 0030](docs/adr/0030-nobody-bills-past-what-was-authorised.md), and
 [ADR 0031](docs/adr/0031-what-is-owed-is-owed-by-somebody.md), and
 [ADR 0032](docs/adr/0032-change-is-not-a-transaction.md), and
-[ADR 0033](docs/adr/0033-a-check-nobody-runs-is-not-a-check.md).
+[ADR 0033](docs/adr/0033-a-check-nobody-runs-is-not-a-check.md), and
+[ADR 0034](docs/adr/0034-the-drawer-is-counted-and-the-difference-is-named.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1420,6 +1421,48 @@ exists and writing only what is missing. That is the same failure this phase exi
 work written, tested, and silently never performed — found inside the machinery that performs the
 checks.
 
+### The drawer is counted, and the difference is named (Phase 34)
+
+Phase 32 wrote its own limitation down: *"There is no cash drawer, shift or Z-reading… a drawer
+counted against the ledger will show $50 in and $30 out where the ledger says $20 — correct, and a
+thing to know before reconciling one."* This is the reconciling.
+
+- **A shift, not a day.** Phase 28's `pos_import` handles a day somebody else's till reported. Here
+  the software *is* the till, and the unit is a shift — two people working a morning and an
+  afternoon on one drawer are two counts and two accountabilities, and a day would average them.
+- **The arithmetic works because Phase 32 posts only what was kept.** A drawer should hold
+  `float + Σ cash applied − Σ paid out`, and change appears nowhere in it. A system that had
+  recorded $50 in and $30 out would have to net them back off to count a till.
+- **A float is not revenue** — `Dr 1060 Cash Drawers / Cr 1050 Petty Cash`. Nothing is earned, and a
+  system that booked a float as takings would report a shop as having sold $100 before it opened
+  the door. The float stays on the *expected* side, so a till opened with $80 instead of $100 reads
+  as $20 short on the day rather than balancing quietly.
+- **The database refuses the second shift** — a partial unique index `WHERE status = 'open'`, for
+  Phase 29's reason: where two people can act at the same moment, nothing else actually arbitrates.
+  The refusal names who has it, because "try again" is not information.
+- **Only cash goes in a drawer**, and only when it is unambiguous. One shift open, it is used
+  without asking; none or more than one, cash falls back to Undeposited Funds rather than being
+  guessed — a note in the wrong till is a short drawer for one person and a long one for another.
+- **Counting is a declaration.** The count field starts **empty**, not pre-filled with what was
+  expected: this is the one place where showing the answer first would be wrong, because a
+  pre-filled count is not a count. The difference posts to `6870 Cash Over and Short` rather than
+  being absorbed — a shop that is $2 short every Friday has a fact about Fridays, and it only
+  exists because the $2 was booked.
+- **A closed shift is signed.** Re-counting is refused; correcting a genuine mis-count is a journal
+  entry with a memo saying so.
+
+**And the bug browser verification caught, which would have been embarrassing.** The nightly check
+this phase adds to Phase 33's register summed only the *open* shifts against 1060 — so a till closed
+with its float still in it read as $100 adrift, every night, for every shop that keeps a float
+overnight. Which is every shop. One phase after writing down that an alarm firing on ordinary
+trading is one somebody switches off, this phase nearly shipped exactly that. The unit is now the
+**drawer**, not the shift: a drawer holds money whether or not anybody is standing at it.
+
+Verified end to end: a till open with $100 float less $15 to the window cleaner reads *should hold
+$85*; a $100 note for an $80 bill takes it to $165 with the $20 change in no entry; a typed count of
+$162.50 says *"$2.50 short. This will be posted to 6870 Cash Over and Short, not absorbed"*; and
+closing it banks $62.50, leaves $100 in for tomorrow, and leaves the tills agreeing with 1060.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -1500,6 +1543,7 @@ Coverage matches what spec §21 asks for:
 | `tests/permissions.test.ts` | Role defaults, granular overrides, and enforcement inside services |
 | `tests/dedup.test.ts` | Repeated syncs, the database-level unique constraint, and two tenants importing identical provider ids |
 | `tests/rules.test.ts` | Condition evaluation, priority, merchant normalization, vendor memory, auto vs suggest |
+| `tests/drawer.test.ts` | **The drawer is counted.** Against a pure core: what a till should hold as float plus what was kept less what was paid out; a short one and an over one named by the same arithmetic; **the float kept on the expected side so a wrong float shows up on the day**; banking what was counted rather than what was expected; never retaining more float than is actually there; a drawer that paid out more than ever went in refused; and a figure the ledger cannot hold refused rather than quietly zeroed. Then against the database: **a float that moves petty cash into 1060 and earns nothing**, the account installed on first use, a till opened empty, **a second shift on one drawer refused by the database with the holder named**, two drawers open side by side, the module gate and the permission. **Cash at the counter landing in the open till rather than Undeposited Funds** with the change in no entry, **a card never entering a drawer**, a mixed tender split between the till and the batch, a fallback to Undeposited Funds with nothing open, **a refusal to guess between two open tills**, and the till that was named being used. A payout recorded with its reason and taken out of the drawer, and one with no reason refused. Then the count: **nothing posted to over-and-short when it balances**, **a short drawer posted rather than absorbed** and an over one as a negative cost, the drawer emptied when no float is retained, **a second count on a closed shift refused**, the drawer freed for the next shift, and what was counted kept unadjusted. And the eleventh check: agreeing with nothing open, after a float and a sale and a payout, **when a float is left in overnight** — the case that would have cried wolf nightly — and with a shut till and an open one counted together |
 | `tests/integrity.test.ts` | Money arithmetic, chart-of-accounts consistency, split balancing, transfers, audit trail and undo |
 | `tests/ledger.test.ts` | Balanced-entry validation, normal balances, derived postings, void and reversal, period locking, statements |
 | `tests/reconciliation.test.ts` | Difference arithmetic, balance chaining, completion gating, locking and controlled reopen |
@@ -2636,6 +2680,29 @@ charity — neither has a work in process account.*
      notification was sent — check the job's result in "Recent jobs": `faults: 1, newlyBroken: 0`.
      A drift is persistent by nature, and a digest that reported it every night would stop being
      read by about the time a second one appeared.
+309. **Sign in as `delphine@fenwickrow.test` and open Tills.** The front counter is open: *Float
+     $100.00 · Taken in cash $0.00 · Paid out $15.00 · **Should hold $85.00***, with the window
+     cleaner named underneath. A float is not takings — it came out of petty cash, and the balance
+     sheet total did not move when the till opened.
+310. **Note the count box is empty**, and says so: *"Type what is in the drawer. Nothing is filled
+     in for you — a count that was suggested is not a count."* This is the one place in the
+     application where showing the answer first would be wrong.
+311. **Go to Appointments and take $100.00 in cash against an $80.00 visit.** *"$80.00 taken. $20.00
+     change."* Come back to Tills: the till now says **$165.00** — $100 float, plus the $80 that was
+     kept, less the $15 paid out. The $20 of change is in no entry, which is exactly what makes
+     this sum come out.
+312. **Type 162.50 into the count box.** Before anything is submitted: *"$2.50 short. This will be
+     posted to 6870 Cash Over and Short, not absorbed."* Somebody gave the wrong change, and the
+     person counting can see it while the drawer is still in front of them.
+313. **Press "Count it and close".** *"Front counter counted at $162.50, against $165.00 expected.
+     $2.50 short. $62.50 to bank. $100.00 left in for the next shift."*
+314. **Scroll to "Do the tills agree with the books?" — Yes, at $100.00 each side.** The shift is
+     closed and the float is still in the drawer, and the check counts the *drawer* rather than the
+     shift for exactly that reason. Counting only open shifts would have reported every shop that
+     keeps a float overnight as $100 adrift, every night.
+315. **Try to count it again.** There is nothing to count — the shift is closed and gone from the
+     top of the page. A Z-reading whose number can be revised afterwards proves nothing about the
+     moment it was taken, and the moment is the whole control.
 
 ## Project layout
 
@@ -2721,6 +2788,7 @@ src/
     vehicles/             Customer vehicles, repair orders, and the authorisation ceiling
     counter/              Settling a bill at the desk: what the tenders cover, and the change
     integrity/            Every reconciliation as named data, and the nightly run of all of them
+    drawer/               Tills, shifts, and the count that closes one
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -3068,11 +3136,14 @@ Gaps within the phases already built:
 - **No gift card expiry or breakage.** Recognising revenue on cards nobody will ever use needs a
   judgement about how many never come back, and a wrong one books revenue that has to be given back.
   Cards sit on 2590 indefinitely, and nothing reports how old they are.
-- **There is no cash drawer, shift or Z-reading.** Phase 32 settles a named invoice at the counter;
-  a till that is floated, counted, closed and signed off by a named person is Phase 28's
-  `pos_import` shape and a different piece of work. The change figure is shown and deliberately
-  never posted, so a drawer counted against the ledger will show $50 in and $30 out where the ledger
-  says $20 — correct, and a thing to know before reconciling one.
+- **There is no cash-in-transit account.** Counted takings go straight to Undeposited Funds, so a
+  shop where the money sits in a safe for two days before banking has one account doing two jobs.
+- **A shift has no printable Z-reading.** The record exists and the screen shows it; a piece of
+  paper somebody initials does not, and that is still how many businesses close a till.
+- **Nothing enforces that a drawer is ever counted.** A shift can stay open for a week, and the only
+  thing that notices is the nightly check quietly agreeing with a very large expected figure.
+- **Over and short is recorded and unanalysed.** The number that turns this into an answer rather
+  than a record — over-and-short by person and by weekday — is not reported anywhere.
 - **Split tender is in the core but not on the screen.** `takePayment` and `tenderFor` handle
   several tenders on one bill and the tests cover it; the on-screen control takes one at a time.
   Pressing it twice does the same thing, which is why it did not earn a second form.

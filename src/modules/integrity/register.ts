@@ -9,6 +9,7 @@ import { reconcileInventory } from '@/modules/inventory/service'
 import { controlAccounts } from '@/modules/ledger/receivables-check'
 import { wipPosition } from '@/modules/manufacturing/reporting'
 import { tipsPosition } from '@/modules/pos/service'
+import { drawerPosition } from '@/modules/drawer/service'
 import { depositsHeld } from '@/modules/properties/deposits'
 import { authorisationsAgree } from '@/modules/vehicles/reporting'
 
@@ -220,6 +221,32 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
         result.paidOutCents === 0
           ? undefined
           : `${formatCents(result.paidOutCents)} paid out so far`,
+      }
+    },
+  },
+  {
+    key: 'cash_drawer.open_tills',
+    label: 'What the tills should hold, against the balance sheet',
+    compares: 'Σ per drawer (open shift, or the float its last shift left in) against 1060',
+    module: 'cash_drawer',
+    severity: 'fault',
+    meaning:
+      'Nothing moves 1060 except opening a shift, taking cash into one, paying out of one, or ' +
+      'closing one — and all four maintain both sides in the same transaction. A difference ' +
+      'means cash was journalled into a till by hand, or a shift closed without its entry.',
+    run: async (ctx, asOf) => {
+      const result = await drawerPosition(ctx, { asOf })
+      return {
+        agrees: result.agrees,
+        leftCents: result.registerCents,
+        rightCents: result.ledgerCents,
+        detail: (() => {
+          const open = result.tills.filter((row) => row.openShiftId)
+          if (result.tills.length === 0) return 'No tills.'
+          return open.length === 0
+            ? `${result.tills.length} till${result.tills.length === 1 ? '' : 's'}, none open`
+            : `${open.length} open: ${open.map((row) => row.drawerName).join(', ')}`
+        })(),
       }
     },
   },

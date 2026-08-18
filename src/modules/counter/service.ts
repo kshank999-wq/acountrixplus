@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { customers, invoices } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { recordPayment } from '@/modules/receivables/service'
+import { soleOpenShift } from '@/modules/drawer/service'
 import { tenderFor, TenderError, type Settlement, type Tender } from './tender'
 
 /**
@@ -28,6 +29,19 @@ export type TakePaymentInput = {
    * actually walks to the bank.
    */
   financialAccountId?: string
+  /**
+   * The drawer shift cash goes into (Phase 34).
+   *
+   * Omitted, and with exactly one shift open, that shift is used — a counter
+   * with one till should not make somebody name it on every sale. With none
+   * open or more than one, cash falls back to Undeposited Funds rather than
+   * being guessed into a drawer: a note in the wrong till is a short drawer
+   * for one person and a long one for another, which is two problems where
+   * there was none.
+   *
+   * **Only cash.** A card never enters a drawer, whatever is passed here.
+   */
+  drawerShiftId?: string
   memo?: string
 }
 
@@ -93,6 +107,12 @@ export async function takePayment(
   // is the truthful outcome — the card really was charged.
   const paymentIds: string[] = []
 
+  // Resolved once, before the loop: a bill settled by two cash tenders must
+  // not put them in two different drawers because a shift closed in between.
+  const drawerShiftId = input.financialAccountId
+    ? undefined
+    : (input.drawerShiftId ?? (await soleOpenShift(ctx))?.id)
+
   for (const applied of settlement.applied) {
     const payment = await recordPayment(ctx, {
       kind: 'receipt',
@@ -100,6 +120,10 @@ export async function takePayment(
       paymentDate: input.receivedOn,
       amountCents: applied.amountCents,
       financialAccountId: input.financialAccountId,
+      // Only notes go in a till. A card settles into a batch somewhere else,
+      // and putting it in a drawer would make every count wrong by the day's
+      // card takings.
+      drawerShiftId: applied.kind === 'cash' ? drawerShiftId : undefined,
       reference: applied.reference ?? undefined,
       memo:
         input.memo ??

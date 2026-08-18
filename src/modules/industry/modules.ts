@@ -53,6 +53,7 @@ export const MODULE_LABELS: Record<IndustryModule, string> = {
   appointments: 'Appointments',
   vehicles: 'Vehicles and equipment',
   manufacturing: 'Manufacturing',
+  cash_drawer: 'Cash drawers',
 }
 
 /** One-line descriptions for the settings page. */
@@ -71,6 +72,8 @@ export const MODULE_DESCRIPTIONS: Record<IndustryModule, string> = {
   appointments: 'A diary, practitioner splits, and gift cards held as a liability.',
   vehicles: 'Customer vehicles, repair orders, and the estimate nobody may bill past.',
   manufacturing: 'Bills of materials and work orders.',
+  cash_drawer:
+    'Tills opened with a float and closed by somebody counting them, with over and short posted rather than absorbed.',
 }
 
 /**
@@ -114,6 +117,10 @@ export const IMPLEMENTED_MODULES: IndustryModule[] = [
   // Phase 30, and the tenth of ten. A customer's vehicle, a repair order
   // against it, and the rule that nobody bills past what was authorised.
   'vehicles',
+  // Phase 34. The eleventh, and the first added since the "Not built yet"
+  // section was kept empty against exactly this. A drawer opened with a float,
+  // counted at the end of a shift, with the difference posted.
+  'cash_drawer',
 ]
 
 type CompanyRow = { id: string; industry: Industry }

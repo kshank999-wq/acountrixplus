@@ -165,6 +165,13 @@ import { createTaxCode } from '@/modules/payroll/sales-tax'
 import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
 import { workpaperPack } from '@/modules/payroll/workpapers'
 import { installCompanySchedules, installGlobalSchedules } from '@/modules/worker/defaults'
+import {
+  addDrawer,
+  drawerPosition,
+  openShift,
+  openShiftFor,
+  payOut,
+} from '@/modules/drawer/service'
 import { retentionReport } from '@/modules/retention/sweep'
 import { enqueue } from '@/modules/worker/queue'
 import { runOnce } from '@/modules/worker/runner'
@@ -2556,9 +2563,45 @@ async function main() {
     ],
   })
 
+  // --- Phase 34: a till, opened, with a shift running on it ----------------
+  //
+  // Left open on purpose, so the demo lands on the thing worth seeing: a
+  // drawer somebody is accountable for right now, with a figure to count
+  // against. Closing it is the step in the checklist.
+  await setModuleEnabled(salonCtx, 'cash_drawer', true)
+
+  // Petty cash is funded from the bank before the till draws on it. Without
+  // this the float comes out of an account with nothing in it, and the demo
+  // shows a negative asset — honest double-entry describing a thing no shop
+  // actually does.
+  await postManualEntry(salonCtx, {
+    entryDate: '2026-04-01',
+    memo: 'Cash from the bank for the till float',
+    lines: [
+      { chartAccountId: (await accountByNumber(salon.company.id, '1050'))!.id, debitCents: 20_000 },
+      { chartAccountId: (await accountByNumber(salon.company.id, '1000'))!.id, creditCents: 20_000 },
+    ],
+  })
+
+  const frontCounter = await addDrawer(salonCtx, {
+    name: 'Front counter',
+    defaultFloatCents: 10_000,
+  })
+  await openShift(salonCtx, { drawerId: frontCounter.id })
+
+  // A window cleaner, paid out of the till. This is why real drawers come up
+  // short, and why the reason is kept rather than just the amount.
+  await payOut(salonCtx, {
+    shiftId: (await openShiftFor(salonCtx, frontCounter.id))!.id,
+    reason: 'Window cleaner',
+    amountCents: 1_500,
+    chartAccountId: (await accountByNumber(salon.company.id, '6000'))!.id,
+  })
+
   const owedToStaff = await payoutPosition(salonCtx)
   const cardsHeld = await giftCardPosition(salonCtx)
   const book29 = await diarySummary(salonCtx)
+  const tills = await drawerPosition(salonCtx)
 
   console.log(
     `  Fenwick Row Studio: ${book29.completed} visits delivered for ` +
@@ -2567,7 +2610,10 @@ async function main() {
       `${formatCentsPlain(owedToStaff.earnedCents)}, of which ` +
       `${formatCentsPlain(owedToStaff.ledgerCents)} is still owed. Gift cards ` +
       `${formatCentsPlain(cardsHeld.outstandingCents)} against account 2590 at ` +
-      `${formatCentsPlain(cardsHeld.ledgerCents)} — ${cardsHeld.agrees ? 'agrees' : 'DISAGREES'}.`,
+      `${formatCentsPlain(cardsHeld.ledgerCents)} — ${cardsHeld.agrees ? 'agrees' : 'DISAGREES'}. ` +
+      `The front counter is open holding ${formatCentsPlain(tills.registerCents)} against ` +
+      `account 1060 at ${formatCentsPlain(tills.ledgerCents)} — ` +
+      `${tills.agrees ? 'agrees' : 'DISAGREES'}.`,
   )
 
   // --- Phase 30: the estimate nobody may bill past --------------------------
@@ -2860,6 +2906,9 @@ async function main() {
   )
   console.log(
     '  /takings              sign in as ines@marlowestreet.test — three days of a café, one entry each',
+  )
+  console.log(
+    '  /drawers              sign in as delphine@fenwickrow.test — a till open right now, waiting to be counted',
   )
   console.log(
     '  /appointments         sign in as delphine@fenwickrow.test — a diary, the splits, and a gift card',

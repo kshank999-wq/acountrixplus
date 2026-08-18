@@ -32,6 +32,7 @@ export async function AppShell({
     | 'funds'
     | 'manufacturing'
     | 'takings'
+    | 'drawers'
     | 'appointments'
     | 'shop'
     | 'payroll'
@@ -98,6 +99,12 @@ export async function AppShell({
     ? await moduleEnabled(actor.companyId, 'vehicles')
     : false
 
+  // Phase 34, the eleventh module. A till this software takes money into, as
+  // against Takings, which is a day somebody else's till reported.
+  const drawersEnabled = can(actor, 'accounting:view')
+    ? await moduleEnabled(actor.companyId, 'cash_drawer')
+    : false
+
   // Practice mode (Phase 18). Both reads are keyed on the user rather than the
   // company, which is the whole point — they are the only two things on this
   // page that are about the person instead of the books they are looking at.
@@ -122,6 +129,7 @@ export async function AppShell({
       show: manufacturingEnabled,
     },
     { key: 'takings', href: '/takings', label: 'Takings', show: takingsEnabled },
+    { key: 'drawers', href: '/drawers', label: 'Tills', show: drawersEnabled },
     {
       key: 'appointments',
       href: '/appointments',

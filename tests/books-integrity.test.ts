@@ -122,9 +122,14 @@ describe('the register names every check there is (Phase 33)', () => {
       (check) => check.key,
     )
 
+    // Listed by name on purpose: this is the tripwire that makes adding a check
+    // — or reclassifying one — a deliberate act rather than something that
+    // slips in. `cash_drawer.open_tills` joined in Phase 34 and failed here
+    // first, which is the test doing its job.
     expect(faults.sort()).toEqual([
       'appointments.gift_cards',
       'assets.register',
+      'cash_drawer.open_tills',
       'inventory.lots',
       'ledger.payables',
       'ledger.receivables',

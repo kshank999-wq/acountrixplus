@@ -18,6 +18,7 @@ import { companies } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { journalEntries } from './ledger'
 import { organizations, projects } from './crm'
+import { drawerShifts } from './drawer'
 import { costCodes } from './jobs'
 
 /**
@@ -304,6 +305,22 @@ export const payments = pgTable(
     reference: text('reference'),
     memo: text('memo'),
 
+    /**
+     * The shift whose drawer this cash went into (Phase 34).
+     *
+     * Null for everything that is not a note handed across a counter — a card,
+     * a bank transfer, a cheque in the post. Set, it means the money is in a
+     * physical drawer somebody is accountable for, and it is what makes the
+     * shift's takings a sum over payments rather than a running total that can
+     * drift from them.
+     *
+     * Cleared rather than blocking if a shift is ever deleted: the payment is
+     * a real receipt whatever happened to the till it went through.
+     */
+    drawerShiftId: uuid('drawer_shift_id').references(() => drawerShifts.id, {
+      onDelete: 'set null',
+    }),
+
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),
@@ -311,6 +328,8 @@ export const payments = pgTable(
   },
   (t) => ({
     companyDateIdx: index('payments_company_date_idx').on(t.companyId, t.paymentDate),
+    // The index a shift's takings are summed on.
+    drawerShiftIdx: index('payments_drawer_shift_idx').on(t.drawerShiftId),
     // Named explicitly: the generated name would exceed Postgres's 63-byte limit.
     financialAccountFk: foreignKey({
       name: 'payments_financial_account_fk',

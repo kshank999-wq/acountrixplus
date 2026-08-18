@@ -19,6 +19,10 @@ export const INDUSTRY_MODULES = [
   'appointments',
   'vehicles',
   'manufacturing',
+  // Phase 34. A till this software takes money into, opened with a float and
+  // closed by somebody counting it. Distinct from `pos_import`, which is a day
+  // somebody else's till reported.
+  'cash_drawer',
 ] as const
 
 export type IndustryModule = (typeof INDUSTRY_MODULES)[number]

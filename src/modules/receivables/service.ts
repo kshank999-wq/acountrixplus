@@ -640,6 +640,17 @@ export async function recordPayment(
     amountCents: number
     /** Omit on a receipt to hold it in Undeposited Funds. */
     financialAccountId?: string
+    /**
+     * The open shift whose drawer this cash went into (Phase 34).
+     *
+     * Set, the receipt debits `1060 Cash Drawers` rather than Undeposited
+     * Funds: a note handed across a counter is in a till somebody is
+     * accountable for, and it does not become money on its way to a bank until
+     * that person counts it and hands it over. Ignored alongside an explicit
+     * `financialAccountId`, which is somebody saying they already know where
+     * the money went.
+     */
+    drawerShiftId?: string
     applications: PaymentApplicationInput[]
     reference?: string
     memo?: string
@@ -675,6 +686,14 @@ export async function recordPayment(
 
     if (!account) throw new Error('Financial account not found')
     debitAccountId = account.chartAccountId
+  } else if (input.drawerShiftId) {
+    // Resolved by account number rather than by importing the drawer module,
+    // which would make receivables depend on a module that depends on it.
+    const drawerCash = await accountByNumber(ctx.companyId, '1060')
+    if (!drawerCash) {
+      throw new Error('The Cash Drawers account is missing from the chart.')
+    }
+    debitAccountId = drawerCash.id
   } else {
     const undeposited = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.undepositedFunds)
     if (!undeposited) {
@@ -714,6 +733,7 @@ export async function recordPayment(
         paymentDate: input.paymentDate,
         amountCents: input.amountCents,
         financialAccountId: input.financialAccountId ?? null,
+        drawerShiftId: input.financialAccountId ? null : (input.drawerShiftId ?? null),
         reference: input.reference ?? null,
         memo: input.memo ?? null,
       })

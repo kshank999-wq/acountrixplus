@@ -129,6 +129,12 @@ export type AuditAction =
   | 'repair.authorise'
   | 'repair.complete'
   | 'vehicle.odometer_rollback'
+  // Cash drawers (spec §5, §13, Phase 34). Who opened a till, who counted it,
+  // and what they said was in it — the count is a person's declaration about a
+  // moment, and §19's whole demand is that such a moment stays reconstructable.
+  | 'drawer.create'
+  | 'drawer.shift_open'
+  | 'drawer.shift_close'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became

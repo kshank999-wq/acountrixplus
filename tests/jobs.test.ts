@@ -11,6 +11,7 @@ import {
   setModuleEnabled,
   terminologyFor,
 } from '@/modules/industry/modules'
+import { INDUSTRY_MODULES } from '@/modules/coa/industry'
 import { createCostCode, installDefaultCostCodes, listCostCodes } from '@/modules/jobs/cost-codes'
 import {
   approveChangeOrder,
@@ -144,7 +145,11 @@ describe('the industry module registry', () => {
     const states = await moduleStates(fixture.companyId)
     const enabled = await enabledModules(fixture.companyId)
 
-    expect(states).toHaveLength(10)
+    // Eleven since Phase 34 added cash drawers. Asserted against the registry
+    // rather than a literal, so declaring a module without listing it here is
+    // not something this test can quietly miss.
+    expect(states).toHaveLength(INDUSTRY_MODULES.length)
+    expect(states.map((state) => state.key).sort()).toEqual([...INDUSTRY_MODULES].sort())
     expect(enabled.has('job_costing')).toBe(true)
     expect(enabled.has('inventory')).toBe(false)
   })
