@@ -15,6 +15,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { requireModule } from '@/modules/industry/modules'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { createInvoice } from '@/modules/receivables/service'
+import { relieveFunctional } from '@/modules/fx/documents'
 import { redeemFor, splitFor } from './split'
 
 /**
@@ -789,7 +790,12 @@ export async function redeemGiftCard(
     // has already part-paid at the counter must not be able to spend a card
     // against a balance that is no longer outstanding.
     const [bill] = await tx
-      .select({ id: invoices.id, balanceCents: invoices.balanceCents })
+      .select({
+        id: invoices.id,
+        balanceCents: invoices.balanceCents,
+        exchangeRateMillionths: invoices.exchangeRateMillionths,
+        functionalBalanceCents: invoices.functionalBalanceCents,
+      })
       .from(invoices)
       .where(scoped(ctx, invoices, eq(invoices.id, appointment.invoiceId as string)))
       .limit(1)
@@ -894,6 +900,12 @@ export async function redeemGiftCard(
       .update(invoices)
       .set({
         balanceCents: remainingCents,
+        // And the home-currency balance with it (Phase 35). Leaving this out is
+        // exactly the defect the receivables check reported the night Phase 35
+        // landed: the invoice was settled, the amount the control account is
+        // measured against was not.
+        functionalBalanceCents: relieveFunctional(bill, plan.appliedCents)
+          .functionalBalanceCents,
         status: remainingCents === 0 ? 'paid' : 'partial',
       })
       .where(scoped(ctx, invoices, eq(invoices.id, bill.id)))

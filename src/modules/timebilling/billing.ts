@@ -19,6 +19,8 @@ import { createInvoice, type DocumentLineInput } from '@/modules/receivables/ser
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { amountForMinutes, minutesToQuantityMilli } from './rates'
 import { rateForEntry } from './service'
+import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
+import { functionalCurrency } from '@/modules/fx/service'
 
 /**
  * Turning recorded work into an invoice (spec §5).
@@ -577,6 +579,15 @@ async function applyRetainerWithin(
     throw new Error('A retainer can only be drawn against the same client’s invoice.')
   }
 
+  // A retainer is cash already received in the company's own currency; drawing
+  // it against a euro invoice is a settlement at a rate somebody has to choose
+  // (Phase 35).
+  refuseForeign(
+    invoice,
+    await functionalCurrency(ctx.companyId, tx),
+    'Drawing a retainer against an invoice',
+  )
+
   // Never more than is left, and never more than is owed. Both caps matter:
   // over-drawing invents money the client never paid, and over-applying leaves
   // an invoice with a negative balance that no report knows how to show.
@@ -627,6 +638,7 @@ async function applyRetainerWithin(
     .update(invoices)
     .set({
       balanceCents: newBalance,
+      functionalBalanceCents: relieveFunctional(invoice, amountCents).functionalBalanceCents,
       status: newBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })

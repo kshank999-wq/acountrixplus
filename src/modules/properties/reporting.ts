@@ -127,7 +127,9 @@ export async function rentRoll(
         .select({
           leaseId: rentCharges.leaseId,
           billedCents: sql<string>`coalesce(sum(${rentCharges.amountCents}), 0)`,
-          outstandingCents: sql<string>`coalesce(sum(${invoices.balanceCents}), 0)`,
+          // Home currency: a total across leases cannot be in a document's
+          // currency, because the documents need not share one (Phase 35).
+          outstandingCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
         })
         .from(rentCharges)
         .leftJoin(invoices, eq(invoices.id, rentCharges.invoiceId))

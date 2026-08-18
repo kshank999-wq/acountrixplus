@@ -5,6 +5,7 @@ export const ACCOUNTING_NAV = [
   { href: '/accounting/receivables', label: 'Credits & statements' },
   { href: '/accounting/deposits', label: 'Deposits' },
   { href: '/accounting/dimensions', label: 'Dimensions' },
+  { href: '/accounting/currencies', label: 'Currencies' },
   { href: '/accounting/assets', label: 'Fixed assets' },
   { href: '/accounting/periods', label: 'Recurring & close' },
   { href: '/accounting/reconcile', label: 'Reconcile' },

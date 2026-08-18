@@ -15,6 +15,8 @@ import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
+import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
+import { functionalCurrency } from '@/modules/fx/service'
 
 /**
  * Vendor credits (spec §13: "vendors, bills, **credits**, payments, aging").
@@ -97,6 +99,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
       throw new Error('That bill belongs to a different vendor.')
     }
     if (row.status === 'void') throw new Error('That bill is voided.')
+    refuseForeign(row, await functionalCurrency(ctx.companyId), 'Crediting a bill')
     bill = row
   }
 
@@ -350,6 +353,7 @@ async function applyVendorCreditWithin(
     .update(bills)
     .set({
       balanceCents: billBalance,
+      functionalBalanceCents: relieveFunctional(bill, input.amountCents).functionalBalanceCents,
       status: billBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })

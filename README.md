@@ -56,7 +56,8 @@ from the
 [ADR 0031](docs/adr/0031-what-is-owed-is-owed-by-somebody.md), and
 [ADR 0032](docs/adr/0032-change-is-not-a-transaction.md), and
 [ADR 0033](docs/adr/0033-a-check-nobody-runs-is-not-a-check.md), and
-[ADR 0034](docs/adr/0034-the-drawer-is-counted-and-the-difference-is-named.md).
+[ADR 0034](docs/adr/0034-the-drawer-is-counted-and-the-difference-is-named.md), and
+[ADR 0035](docs/adr/0035-a-document-is-owed-in-its-own-currency.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1463,6 +1464,51 @@ $85*; a $100 note for an $80 bill takes it to $165 with the $20 change in no ent
 $162.50 says *"$2.50 short. This will be posted to 6870 Cash Over and Short, not absorbed"*; and
 closing it banks $62.50, leaves $100 in for tomorrow, and leaves the tills agreeing with 1060.
 
+### A document is owed in its own currency (Phase 35)
+
+A consultancy in Ohio invoices a client in Bremen for €4,000. Every number in this codebase up to
+now has been a US cent, and that one is not. Storing $4,334 and forgetting the euros can never
+answer *what do they still owe me* in the currency the answer has to be given in.
+
+- **Two amounts on the document, one in the ledger.** `invoices` and `bills` carry `currency`, the
+  rate, and the home-currency total and balance beside their own. Journal lines are always in the
+  company's currency. Neither number is derived from the other at read time.
+- **Rates are millionths**, for ADR 0002's reason: a rate is a multiplier on money, and floating
+  point has no business near money. 1.083500 is `1_083_500`, and six places is what feeds carry.
+- **A rate is a fact with a date and a source.** "The rate we used" is the one number in a foreign
+  transaction nobody outside the business can check, so it is stored with where it came from. The
+  lookup walks *backwards only* — a rate published after a transaction is not what it happened at.
+- **A missing rate refuses**, naming the pair and the day. Quietly using parity turns a €4,000
+  invoice into a $4,000 one, and nothing downstream ever looks wrong enough for anybody to notice.
+- **The stored home total *is* what was posted.** The lines are converted and their sum is both the
+  journal entry and the column — converting the total separately would differ by a cent and
+  manufacture, at the moment of posting, exactly the drift Phase 31 exists to catch.
+- **Paying at a different rate realises a real gain or loss**, in `7100 Foreign Exchange Gain or
+  Loss` — one account, not two, and in *other income*, because currency movement is not something
+  the business did. It sold what it sold; the rate moved underneath.
+- **What is still owed is exposure, reported and never posted.** A small business whose result is
+  driven by a number it does not control, has not received, and will restate next month is one
+  whose accountant spends December explaining that the profit is not real. `/accounting/currencies`
+  shows both halves — what is realised and in the profit and loss, and what is merely exposed.
+- **Four operations refuse rather than approximate.** Crediting a foreign invoice or bill, applying
+  a credit note to one, and drawing a retainer against one all stop and say what to do instead: the
+  home amount for a multi-line credit is the sum of the converted lines rather than the conversion
+  of the sum, and which one is right is a decision somebody should make. A **write-off is allowed**,
+  because one amount and two lines convert exactly.
+
+**And the bug this phase's own check caught.** The first draft put "reduce the home balance too"
+inside the payment path. A gift card, a credit note, a write-off, a vendor credit and a retainer
+draw all reduce a balance somewhere else — five paths moved the face balance and left the home one
+untouched, and Phase 31's control check reported $65.00 owed where $15.00 was. The rule now lives in
+one pure function every path calls, and each of the five is a test. That is ADR 0033's whole
+argument arriving on schedule.
+
+Verified end to end: two euro invoices raised at 1.0835; the €4,000 one paid at 1.1000 leaves
+**$66.00 realised in 7100**; the €2,500 one still open reads *€2,500.00 owed, $2,708.75 carried,
+$2,750.00 worth today* — **$41.25 exposed and posted nowhere**; a rate typed as `1,0900` is refused
+with *"uses a comma. Write it with a full stop, like 1.0835"*; and a read-only user sees the check
+and the rates with no exposure section at all rather than a heading with nothing under it.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -1544,6 +1590,7 @@ Coverage matches what spec §21 asks for:
 | `tests/dedup.test.ts` | Repeated syncs, the database-level unique constraint, and two tenants importing identical provider ids |
 | `tests/rules.test.ts` | Condition evaluation, priority, merchant normalization, vendor memory, auto vs suggest |
 | `tests/drawer.test.ts` | **The drawer is counted.** Against a pure core: what a till should hold as float plus what was kept less what was paid out; a short one and an over one named by the same arithmetic; **the float kept on the expected side so a wrong float shows up on the day**; banking what was counted rather than what was expected; never retaining more float than is actually there; a drawer that paid out more than ever went in refused; and a figure the ledger cannot hold refused rather than quietly zeroed. Then against the database: **a float that moves petty cash into 1060 and earns nothing**, the account installed on first use, a till opened empty, **a second shift on one drawer refused by the database with the holder named**, two drawers open side by side, the module gate and the permission. **Cash at the counter landing in the open till rather than Undeposited Funds** with the change in no entry, **a card never entering a drawer**, a mixed tender split between the till and the batch, a fallback to Undeposited Funds with nothing open, **a refusal to guess between two open tills**, and the till that was named being used. A payout recorded with its reason and taken out of the drawer, and one with no reason refused. Then the count: **nothing posted to over-and-short when it balances**, **a short drawer posted rather than absorbed** and an over one as a negative cost, the drawer emptied when no float is retained, **a second count on a closed shift refused**, the drawer freed for the next shift, and what was counted kept unadjusted. And the eleventh check: agreeing with nothing open, after a float and a sale and a payout, **when a float is left in overnight** — the case that would have cried wolf nightly — and with a shut till and an open one counted together |
+| `tests/fx.test.ts` | **A document is owed in its own currency.** Against a pure core: multiplying by a rate and rounding half away from zero; **parity leaving an amount byte-identical**, so no historical figure moves; a rate of zero or less refused; a figure the arithmetic cannot hold exactly refused rather than silently losing precision; a currency code checked for shape rather than against a list; and a rate typed with a **comma refused** rather than read as ten thousand. Then rates as facts: one per pair per day with a correction replacing rather than sitting alongside, **the lookup walking backwards only**, and a **missing rate refusing rather than guessing parity**. Then the documents: a euro invoice carrying both amounts, the ledger carrying only one, **the stored home total being exactly what posted**; a payment at a different rate **realising the gain into 7100** and a loss the other way; a payable's sign flipped; and a payment spanning two currencies refused. Then the exposure: restated at a closing rate, netted across receivables and payables, reported and **posted nowhere**, and refusing when the closing rate is missing. Then the relief rule: a part payment at the document's own rate, **the last payment taking the whole remainder so no cent is stranded**, and every path that reduces a balance moving both numbers — a **write-off on a foreign invoice allowed because it converts exactly**, a **credit note refused because it does not**, and a domestic invoice in the same company still creditable. And the twelfth check: agreeing when freshly raised, agreeing after a part payment within the cent it allows, and ungated because currency is not an industry |
 | `tests/integrity.test.ts` | Money arithmetic, chart-of-accounts consistency, split balancing, transfers, audit trail and undo |
 | `tests/ledger.test.ts` | Balanced-entry validation, normal balances, derived postings, void and reversal, period locking, statements |
 | `tests/reconciliation.test.ts` | Difference arithmetic, balance chaining, completion gating, locking and controlled reopen |
@@ -2703,6 +2750,33 @@ charity — neither has a work in process account.*
 315. **Try to count it again.** There is nothing to count — the shift is closed and gone from the
      top of the page. A Z-reading whose number can be revised afterwards proves nothing about the
      moment it was taken, and the moment is the whole control.
+316. **Sign back in as `owner@ridgeline.test` and open Accounting → Currencies.** *"These books are
+     kept in USD."* Two rates on file from the ECB — 1.083500 on 1 April, 1.100000 on 30 June — and
+     both halves of what currency has done, side by side.
+317. **Read "What currency has already done": $66.00 realised, in account 7100.** A €4,000 invoice
+     was raised at 1.0835 and paid at 1.1000. That $66.00 is settled, in the profit and loss, and
+     nobody has to decide anything about it.
+318. **Read "What the open balances are worth" underneath.** INV-1013 for Bremen Hafenbau: *€2,500.00
+     still owed, $2,708.75 carried, $2,750.00 worth today* — **$41.25**, and it is posted **nowhere**.
+     The rate can be back at 1.07 before they pay. This is a report, not an entry.
+319. **Change "At the rate on" to a date before 1 April.** The exposure refuses rather than
+     guessing: *"No EUR/USD rate on file for that date or before it."* Reporting at the original
+     rate would show zero exposure, which is the one answer guaranteed to be wrong.
+320. **Type `1,0900` into the rate box and press Record.** *"'1,0900' uses a comma. Write it with a
+     full stop, like 1.0835."* Read as an English number that is ten thousand eight hundred and
+     thirty-five, which would convert a €4,000 invoice into a $43,340,000 one.
+321. **Type `1.0925` and press Record.** *"EUR on today is 1.092500. Documents already posted keep
+     the rate they were posted at."* The exposure moves to **$22.50**; INV-1013 still says *raised
+     at 1.083500* and still carries $2,708.75. Nothing converted a converted number.
+322. **Scroll to "Do the documents carry what their own rates produce?" — Yes, $2,708.75 both
+     sides.** The twelfth check, and the same comparison the nightly register runs.
+323. **Open Accounting → Credits & statements and look at the customer picker.** Bremen Hafenbau
+     reads **$2,708.75**, not $2,500.00 — a list that totals several customers cannot be in a
+     document's currency, because the documents need not share one. Browser verification caught
+     this one: it read `$2,500.00` until the aggregate was moved onto the home-currency column.
+324. **Sign in as `sam@hartleyco.test` and open the same page.** No rate form and **no exposure
+     section at all** — not a heading with nothing under it. The check and the rates are there,
+     because a reconciliation is not a financial report.
 
 ## Project layout
 
@@ -2789,6 +2863,7 @@ src/
     counter/              Settling a bill at the desk: what the tenders cover, and the change
     integrity/            Every reconciliation as named data, and the nightly run of all of them
     drawer/               Tills, shifts, and the count that closes one
+    fx/                   Rates as facts, conversion, and what is exposed but unrealised
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -3150,6 +3225,27 @@ Gaps within the phases already built:
 - **Nothing enforces that a new reconciliation joins the register.** A twelfth module could add a
   check and forget, and Phase 33 would not notice — the same class of omission it exists to fix, one
   level up. The register's own doc comment is the record; a lint rule would be better.
+
+- **A foreign invoice cannot be credited**, only paid or written off. A credit note's home amount is
+  the sum of its converted lines rather than the conversion of its total, and the two differ by a
+  cent often enough to matter — so crediting an invoice or a bill in a foreign currency, applying a
+  credit note to one, and drawing a retainer against one all refuse and say why. A **write-off is
+  allowed**, because one amount and two lines convert exactly.
+- **Nothing revalues automatically.** Unrealised movement is reported and never posted (ADR 0035),
+  so a business whose accountant wants it in the ledger posts the journal entry the exposure report
+  describes, every period, by hand.
+- **There is no multi-currency bank account.** Money arriving in euros is recorded as the
+  home-currency amount that reached the account, so a business actually *holding* a euro balance has
+  nowhere to hold it and no period-end translation of it.
+- **Nothing fills the rate table.** `exchange_rates` was shaped for a feed running through the Phase
+  10 worker, and no feed exists — rates are typed, and a day nobody typed is a refusal to post.
+- **The functional currency cannot be changed.** It is a company field with no control, which is
+  correct: changing the currency a set of books is kept in is a migration, not a setting.
+- **The invoice PDF and the customer statement do not name the currency.** They print the document's
+  own figures, which are euros on a euro invoice and labelled as though they were not.
+- **`createBill` with `taxCents > 0` posts an unbalanced entry** — debits are the subtotal, credits
+  the total. Pre-existing and unreachable, since no caller passes it, and left alone deliberately:
+  choosing recoverable against non-recoverable input tax is an accounting decision, not a fix.
 - **Nothing is repaired automatically, and deliberately.** The nightly check says the books
   disagree; it does not decide which side is right. A tool that journalled a plug to make a control
   account agree would destroy the evidence of what actually went wrong.

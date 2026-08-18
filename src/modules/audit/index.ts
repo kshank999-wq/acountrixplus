@@ -135,6 +135,10 @@ export type AuditAction =
   | 'drawer.create'
   | 'drawer.shift_open'
   | 'drawer.shift_close'
+  // Foreign exchange (spec §19, Phase 35). The rate a foreign entry posted at
+  // is the one number in the transaction nobody outside the business can
+  // check, which makes who set it and when exactly what §19 asks to keep.
+  | 'fx.rate_set'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became

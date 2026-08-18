@@ -106,6 +106,8 @@ import {
   recordPayment,
 } from '@/modules/receivables/service'
 import { cashFlowStatement } from '@/modules/ledger/cash-flow'
+import { balanceForAccount } from '@/modules/ledger/balances'
+import { putRate } from '@/modules/fx/service'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { adjustStock, receiveStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
 import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
@@ -1500,6 +1502,80 @@ async function main() {
       reason: 'Contractor entered administration; no prospect of recovery',
     })
     console.log('  Write-off on an uncollectable one: revenue stays, the loss is Bad Debt.')
+  }
+
+  // --- Phase 35: two euro invoices, one settled and one still open ----------
+  //
+  // Both raised at 1.0835 and the rate then moves to 1.1000. One is paid, so
+  // the gain is realised and in account 7100; the other is not, so the movement
+  // is exposure — reported on /accounting/currencies and posted nowhere.
+  //
+  // That contrast is the whole phase, and it needs both halves to be visible
+  // at once or it reads as a rounding curiosity.
+  if (contractRevenue) {
+    await putRate(ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-04-01',
+      rateMillionths: 1_083_500,
+      source: 'ECB',
+    })
+    await putRate(ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-06-30',
+      rateMillionths: 1_100_000,
+      source: 'ECB',
+    })
+
+    const bremen = await createCustomer(ctx, {
+      name: 'Bremen Hafenbau GmbH',
+      email: 'buchhaltung@bremen-hafenbau.test',
+    })
+
+    const settled = await createInvoice(ctx, {
+      customerId: bremen.id,
+      issueDate: '2026-04-01',
+      dueDate: '2026-05-31',
+      currency: 'EUR',
+      lines: [
+        {
+          chartAccountId: contractRevenue.id,
+          description: 'Quay wall condition survey',
+          unitPriceCents: 400_000,
+        },
+      ],
+    })
+
+    await recordPayment(ctx, {
+      kind: 'receipt',
+      customerId: bremen.id,
+      paymentDate: '2026-06-30',
+      amountCents: 400_000,
+      reference: 'SEPA transfer',
+      applications: [{ invoiceId: settled.id, amountCents: 400_000 }],
+    })
+
+    await createInvoice(ctx, {
+      customerId: bremen.id,
+      issueDate: '2026-04-01',
+      dueDate: '2026-09-30',
+      currency: 'EUR',
+      lines: [
+        {
+          chartAccountId: contractRevenue.id,
+          description: 'Second phase — dredging supervision',
+          unitPriceCents: 250_000,
+        },
+      ],
+    })
+
+    const gainAccount = await accountByNumber(company.id, '7100')
+    const realisedCents = gainAccount ? await balanceForAccount(ctx, gainAccount.id) : 0
+
+    console.log(
+      `  Two euro invoices raised at 1.0835. The €4,000 one was paid at 1.1000, so ` +
+        `${formatCentsPlain(realisedCents)} is a realised gain in account 7100. The €2,500 one ` +
+        'is still open — worth more today, and posted nowhere.',
+    )
   }
 
   // A statement a customer would actually be sent.
@@ -2898,6 +2974,9 @@ async function main() {
   console.log('  /time                 timesheets, unbilled work, and billing it')
   console.log('  /accounting/dimensions  profit and loss by location, and the Unassigned column')
   console.log('  /accounting/assets    the register, and whether it agrees with the ledger')
+  console.log(
+    '  /accounting/currencies  two euro invoices — one paid at a different rate, one still open',
+  )
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')

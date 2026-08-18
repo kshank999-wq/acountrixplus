@@ -420,7 +420,11 @@ export async function customersWithBalances(ctx: ActorContext) {
       id: customers.id,
       name: customers.name,
       email: customers.email,
-      balanceCents: sql<string>`coalesce(sum(${invoices.balanceCents}), 0)`,
+      // The *home-currency* balance, not the document one. A customer with a
+      // $1,000 invoice and a €2,500 one has no meaningful sum of face amounts,
+      // and adding them anyway produces 3,500 of nothing with a dollar sign in
+      // front of it (Phase 35).
+      balanceCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
       openCount: sql<string>`count(${invoices.id})`,
     })
     .from(customers)
@@ -434,5 +438,5 @@ export async function customersWithBalances(ctx: ActorContext) {
     )
     .where(scoped(ctx, customers))
     .groupBy(customers.id, customers.name, customers.email)
-    .orderBy(desc(sql`coalesce(sum(${invoices.balanceCents}), 0)`))
+    .orderBy(desc(sql`coalesce(sum(${invoices.functionalBalanceCents}), 0)`))
 }

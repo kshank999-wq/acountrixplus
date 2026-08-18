@@ -293,14 +293,16 @@ export async function businessInsights(ctx: ActorContext) {
 
   const [receivable] = await db
     .select({
-      total: sql<string>`coalesce(sum(${invoices.balanceCents}), 0)`,
-      overdue: sql<string>`coalesce(sum(${invoices.balanceCents}) FILTER (WHERE ${invoices.dueDate} < CURRENT_DATE), 0)`,
+      // Home currency, so a euro invoice does not get added to a dollar one
+      // (Phase 35).
+      total: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
+      overdue: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}) FILTER (WHERE ${invoices.dueDate} < CURRENT_DATE), 0)`,
     })
     .from(invoices)
     .where(scoped(ctx, invoices, sql`${invoices.status} <> 'void'`))
 
   const [payable] = await db
-    .select({ total: sql<string>`coalesce(sum(${bills.balanceCents}), 0)` })
+    .select({ total: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)` })
     .from(bills)
     .where(scoped(ctx, bills, sql`${bills.status} <> 'void'`))
 

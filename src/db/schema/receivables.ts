@@ -150,6 +150,35 @@ export const invoices = pgTable(
     /** Remaining unpaid amount. Reaches zero when fully paid. */
     balanceCents: bigint('balance_cents', { mode: 'number' }).notNull().default(0),
 
+    /**
+     * What this document is denominated in (Phase 35).
+     *
+     * Defaults to the company's own currency, which is what every document
+     * raised before this phase is — so `totalCents` keeps its meaning and no
+     * existing row changes. When it differs, `totalCents` is what the other
+     * party owes *in their money*, and `functionalTotalCents` is what the
+     * ledger carries.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /**
+     * Millionths, foreign → functional. `1_000_000` for a domestic document.
+     *
+     * Fixed at the moment the document was raised and never recomputed.
+     * Restating it from a later rate would silently rewrite the revenue this
+     * document booked, every time a currency moved.
+     */
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' })
+      .notNull()
+      .default(1_000_000),
+    /** `totalCents` converted at the rate above. What the ledger posted. */
+    functionalTotalCents: bigint('functional_total_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+    /** `balanceCents` at the document's own rate. What the control account holds. */
+    functionalBalanceCents: bigint('functional_balance_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+
     memo: text('memo'),
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
@@ -224,6 +253,35 @@ export const bills = pgTable(
     /** Withheld from a subcontractor under a retainage clause (spec §5). */
     retainageCents: bigint('retainage_cents', { mode: 'number' }).notNull().default(0),
     balanceCents: bigint('balance_cents', { mode: 'number' }).notNull().default(0),
+
+    /**
+     * What this document is denominated in (Phase 35).
+     *
+     * Defaults to the company's own currency, which is what every document
+     * raised before this phase is — so `totalCents` keeps its meaning and no
+     * existing row changes. When it differs, `totalCents` is what the other
+     * party owes *in their money*, and `functionalTotalCents` is what the
+     * ledger carries.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /**
+     * Millionths, foreign → functional. `1_000_000` for a domestic document.
+     *
+     * Fixed at the moment the document was raised and never recomputed.
+     * Restating it from a later rate would silently rewrite the revenue this
+     * document booked, every time a currency moved.
+     */
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' })
+      .notNull()
+      .default(1_000_000),
+    /** `totalCents` converted at the rate above. What the ledger posted. */
+    functionalTotalCents: bigint('functional_total_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+    /** `balanceCents` at the document's own rate. What the control account holds. */
+    functionalBalanceCents: bigint('functional_balance_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
 
     memo: text('memo'),
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {

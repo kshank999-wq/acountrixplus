@@ -50,6 +50,14 @@ export type ControlAccountCheck = {
    * first question after "they disagree" is always "by how much, and against
    * whom".
    */
+  /**
+   * Who owes it, in the books' own currency (Phase 35).
+   *
+   * `functional_balance_cents` rather than `balance_cents`: the ledger side of
+   * this comparison is always functional, and summing a euro invoice's face
+   * value against a dollar control account would report every foreign customer
+   * as a discrepancy the moment they were invoiced.
+   */
   parties: Array<{ id: string; name: string; balanceCents: number }>
 }
 
@@ -105,7 +113,7 @@ async function receivablesCheck(
     .select({
       id: customers.id,
       name: customers.name,
-      balanceCents: sql<string>`coalesce(sum(${invoices.balanceCents}), 0)`,
+      balanceCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
       documents: sql<string>`count(${invoices.id})`,
     })
     .from(invoices)
@@ -121,7 +129,7 @@ async function receivablesCheck(
       ),
     )
     .groupBy(customers.id, customers.name)
-    .orderBy(sql`coalesce(sum(${invoices.balanceCents}), 0) desc`)
+    .orderBy(sql`coalesce(sum(${invoices.functionalBalanceCents}), 0) desc`)
 
   const parties = rows.map((row) => ({
     id: row.id,
@@ -154,7 +162,7 @@ async function payablesCheck(ctx: ActorContext, asOf?: string): Promise<ControlA
     .select({
       id: vendors.id,
       name: vendors.name,
-      balanceCents: sql<string>`coalesce(sum(${bills.balanceCents}), 0)`,
+      balanceCents: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)`,
       documents: sql<string>`count(${bills.id})`,
     })
     .from(bills)
@@ -167,7 +175,7 @@ async function payablesCheck(ctx: ActorContext, asOf?: string): Promise<ControlA
       ),
     )
     .groupBy(vendors.id, vendors.name)
-    .orderBy(sql`coalesce(sum(${bills.balanceCents}), 0) desc`)
+    .orderBy(sql`coalesce(sum(${bills.functionalBalanceCents}), 0) desc`)
 
   const parties = rows.map((row) => ({
     id: row.id,

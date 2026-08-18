@@ -16,6 +16,8 @@ import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
+import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
+import { functionalCurrency } from '@/modules/fx/service'
 
 /**
  * Credit notes and write-offs (spec §13).
@@ -101,6 +103,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
       throw new Error('That invoice belongs to a different customer.')
     }
     if (row.status === 'void') throw new Error('That invoice is voided.')
+    refuseForeign(row, await functionalCurrency(ctx.companyId), 'Crediting an invoice')
     invoice = row
   }
 
@@ -322,6 +325,15 @@ async function applyCreditWithin(
     throw new Error('A credit can only be applied to the same customer’s invoice.')
   }
 
+  // The note credited Accounts Receivable when it was raised, at its own face
+  // amount. Against a foreign invoice that is the wrong number in the wrong
+  // currency, and no application here can put it right (Phase 35).
+  refuseForeign(
+    invoice,
+    await functionalCurrency(ctx.companyId, tx),
+    'Applying a credit note to an invoice',
+  )
+
   if (input.amountCents > note.remainingCents) {
     throw new Error(
       `Only ${formatCents(note.remainingCents)} of credit note ${note.number} is left to apply.`,
@@ -357,6 +369,8 @@ async function applyCreditWithin(
     .update(invoices)
     .set({
       balanceCents: invoiceBalance,
+      functionalBalanceCents: relieveFunctional(invoice, input.amountCents)
+        .functionalBalanceCents,
       status: invoiceBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })
@@ -435,6 +449,15 @@ export async function writeOffInvoice(
     throw new Error('Bad Debt (6025) is missing from the chart of accounts.')
   }
 
+  // A write-off is the one balance reduction that converts exactly: one amount,
+  // two lines, nothing to spread a rounded cent across. So a foreign invoice
+  // can be written off — the loss is the *home* amount the books were carrying,
+  // at the rate the invoice was raised at. Re-converting at today's rate here
+  // would fold a currency movement into the bad debt, and nobody decided to
+  // recognise one (Phase 35).
+  const relief = relieveFunctional(invoice, amountCents)
+  const lossCents = relief.functionalCents
+
   return db.transaction(async (tx) => {
     const [writeOff] = await tx
       .insert(invoiceWriteOffs)
@@ -457,8 +480,8 @@ export async function writeOffInvoice(
         sourceType: 'invoice_write_off',
         sourceId: writeOff.id,
         lines: [
-          { chartAccountId: badDebtAccount.id, debitCents: amountCents },
-          { chartAccountId: arAccount.id, creditCents: amountCents },
+          { chartAccountId: badDebtAccount.id, debitCents: lossCents },
+          { chartAccountId: arAccount.id, creditCents: lossCents },
         ],
       },
       tx,
@@ -475,6 +498,7 @@ export async function writeOffInvoice(
       .update(invoices)
       .set({
         balanceCents: balance,
+        functionalBalanceCents: relief.functionalBalanceCents,
         // `written_off` rather than `paid`. Nobody paid, and a status saying
         // they did would erase the fact from every report that reads it.
         status: balance === 0 ? 'written_off' : 'partial',

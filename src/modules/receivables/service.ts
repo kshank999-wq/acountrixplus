@@ -25,6 +25,8 @@ import {
 } from '@/modules/payroll/sales-tax'
 import { recordEvent } from '@/modules/worker/outbox'
 import { formatCents } from '@/lib/money'
+import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
+import { relieveFunctional } from '@/modules/fx/documents'
 
 /**
  * Accounts receivable and payable (spec §13, §20 "AR/AP basics").
@@ -216,6 +218,14 @@ export async function createInvoice(
     projectId?: string | null
     /** Portion of the total withheld under a retainage clause. */
     retainageCents?: number
+    /**
+     * What the customer is billed in (Phase 35).
+     *
+     * Defaults to the company's own currency. When it differs, every amount on
+     * this input is in *that* currency — it is what the customer owes — and the
+     * ledger is posted at the rate on file for `issueDate`.
+     */
+    currency?: string
   },
   /**
    * Runs inside an existing transaction when one is supplied.
@@ -304,6 +314,30 @@ export async function createInvoice(
 
   const dueDate = input.dueDate ?? addDays(input.issueDate, customer.paymentTermsDays)
 
+  // Resolved before the transaction opens, for the same reason the retainage
+  // account is: a company with no rate on file should get a message about the
+  // rate rather than a half-written invoice.
+  const home = await functionalCurrency(ctx.companyId)
+  const currency = input.currency ? normalise(input.currency) : home
+  const { rateMillionths } = await rateFor(ctx, currency, input.issueDate)
+
+  // Each credit converts on its own and the receivable is their sum, so the
+  // entry balances by construction. Converting the total and letting the lines
+  // fall where they may would need a plug account for a rounding cent, and a
+  // plug account is a place for real differences to hide.
+  const fx = (cents: number) => convert(cents, rateMillionths)
+  const functionalRetainageCents = fx(retainageCents)
+
+  // Converted once, up here, because the header has to store *what was
+  // posted* rather than its own conversion of the total. Converting the total
+  // separately would leave `functionalBalanceCents` a cent away from the
+  // receivable it is supposed to equal — the precise drift Phase 31's control
+  // account check exists to find, manufactured by the code that should prevent it.
+  const functionalLineCents = lines.map((line) => fx(line.amountCents))
+  const functionalTaxCents = fx(taxCents)
+  const functionalTotalCents =
+    functionalLineCents.reduce((sum, cents) => sum + cents, 0) + functionalTaxCents
+
   const write = async (tx: Executor) => {
     const number = input.number ?? (await nextDocumentNumber(ctx, 'invoice', tx))
 
@@ -322,6 +356,10 @@ export async function createInvoice(
         retainageCents,
         // What the customer owes now. Retainage is billed but not yet due.
         balanceCents: totalCents - retainageCents,
+        currency,
+        exchangeRateMillionths: rateMillionths,
+        functionalTotalCents,
+        functionalBalanceCents: functionalTotalCents - functionalRetainageCents,
         memo: input.memo ?? null,
       })
       .returning()
@@ -345,12 +383,12 @@ export async function createInvoice(
     const journalLineInputs: JournalLineInput[] = [
       {
         chartAccountId: arAccount.id,
-        debitCents: totalCents - retainageCents,
+        debitCents: functionalTotalCents - functionalRetainageCents,
         memo: `Invoice ${number}`,
       },
-      ...lines.map((line) => ({
+      ...lines.map((line, index) => ({
         chartAccountId: line.chartAccountId,
-        creditCents: line.amountCents,
+        creditCents: functionalLineCents[index],
         memo: line.description,
         projectId: line.projectId,
         costCodeId: line.costCodeId,
@@ -361,7 +399,7 @@ export async function createInvoice(
     if (retainageAccount) {
       journalLineInputs.splice(1, 0, {
         chartAccountId: retainageAccount.id,
-        debitCents: retainageCents,
+        debitCents: functionalRetainageCents,
         memo: `Retainage withheld on invoice ${number}`,
         projectId: input.projectId ?? null,
       })
@@ -370,7 +408,7 @@ export async function createInvoice(
     if (taxCents > 0) {
       const taxAccount = await accountByNumber(ctx.companyId, '2200', tx)
       if (!taxAccount) throw new Error('Sales Tax Payable account is missing from the chart.')
-      journalLineInputs.push({ chartAccountId: taxAccount.id, creditCents: taxCents })
+      journalLineInputs.push({ chartAccountId: taxAccount.id, creditCents: functionalTaxCents })
     }
 
     const entry = await createJournalEntry(
@@ -456,6 +494,8 @@ export async function createBill(
     projectId?: string | null
     /** Portion withheld from a subcontractor under a retainage clause. */
     retainageCents?: number
+    /** What the vendor billed in (Phase 35). Defaults to the company's own. */
+    currency?: string
   },
 ) {
   requirePermission(ctx, 'accounting:journal')
@@ -516,6 +556,20 @@ export async function createBill(
 
   const dueDate = input.dueDate ?? addDays(input.issueDate, vendor.paymentTermsDays)
 
+  // The same treatment as an invoice, and for the same reasons — see
+  // `createInvoice`. A bill from a supplier in Milan is for €4,000 whatever
+  // the rate did afterwards.
+  const billHome = await functionalCurrency(ctx.companyId)
+  const billCurrency = input.currency ? normalise(input.currency) : billHome
+  const billRate = (await rateFor(ctx, billCurrency, input.issueDate)).rateMillionths
+  const bfx = (cents: number) => convert(cents, billRate)
+
+  const functionalBillLineCents = lines.map((line) => bfx(line.amountCents))
+  const functionalBillTaxCents = bfx(taxCents)
+  const functionalBillTotalCents =
+    functionalBillLineCents.reduce((sum, cents) => sum + cents, 0) + functionalBillTaxCents
+  const functionalBillRetainageCents = bfx(retainageCents)
+
   return db.transaction(async (tx) => {
     const number = input.number ?? (await nextDocumentNumber(ctx, 'bill', tx))
 
@@ -534,6 +588,10 @@ export async function createBill(
         retainageCents,
         // Retainage is owed, but not yet payable, so it is not in AP.
         balanceCents: totalCents - retainageCents,
+        currency: billCurrency,
+        exchangeRateMillionths: billRate,
+        functionalTotalCents: functionalBillTotalCents,
+        functionalBalanceCents: functionalBillTotalCents - functionalBillRetainageCents,
         memo: input.memo ?? null,
       })
       .returning()
@@ -554,9 +612,9 @@ export async function createBill(
     )
 
     const billJournalLines: JournalLineInput[] = [
-      ...lines.map((line) => ({
+      ...lines.map((line, index) => ({
         chartAccountId: line.chartAccountId,
-        debitCents: line.amountCents,
+        debitCents: functionalBillLineCents[index],
         memo: line.description,
         projectId: line.projectId,
         costCodeId: line.costCodeId,
@@ -564,7 +622,7 @@ export async function createBill(
       })),
       {
         chartAccountId: apAccount.id,
-        creditCents: totalCents - retainageCents,
+        creditCents: functionalBillTotalCents - functionalBillRetainageCents,
         memo: `Bill ${number}`,
       },
     ]
@@ -572,7 +630,7 @@ export async function createBill(
     if (retainageAccount) {
       billJournalLines.push({
         chartAccountId: retainageAccount.id,
-        creditCents: retainageCents,
+        creditCents: functionalBillRetainageCents,
         memo: `Retainage withheld on bill ${number}`,
         projectId: input.projectId ?? null,
       })
@@ -722,6 +780,14 @@ export async function recordPayment(
     customerName = customer?.name ?? null
   }
 
+  // The rate on the day the money moved. Read from the documents being settled
+  // rather than passed in: a receipt against a euro invoice is a euro receipt,
+  // and asking the caller to say so again is asking them to get it wrong.
+  const paymentCurrency = await documentCurrency(ctx, input.kind, input.applications)
+  const paymentRateMillionths = (
+    await rateFor(ctx, paymentCurrency, input.paymentDate)
+  ).rateMillionths
+
   return db.transaction(async (tx) => {
     const [payment] = await tx
       .insert(payments)
@@ -741,9 +807,43 @@ export async function recordPayment(
 
     const settlements: Array<{ documentId: string; number: string }> = []
 
+    // What the documents were carried at, so the entry can credit receivables
+    // by exactly what it took out of them.
+    let carriedCents = 0
+
     for (const application of input.applications) {
       const applied = await applyToDocument(ctx, payment.id, application, input.kind, tx)
       if (applied.settled) settlements.push(applied)
+      carriedCents += applied.functionalCents
+    }
+
+    // What the money is worth today, against what the documents were carried
+    // at. Between raising an invoice and being paid, the rate moves; the
+    // difference is a realised foreign exchange gain or loss — a real profit
+    // and loss event, not a rounding artefact, and not revenue, because
+    // nothing more was sold.
+    const receivedCents = convert(input.amountCents, paymentRateMillionths)
+    const fxCents =
+      input.kind === 'receipt' ? receivedCents - carriedCents : carriedCents - receivedCents
+
+    const paymentLines: JournalLineInput[] =
+      input.kind === 'receipt'
+        ? [
+            { chartAccountId: debitAccountId, debitCents: receivedCents },
+            { chartAccountId: controlAccount.id, creditCents: carriedCents },
+          ]
+        : [
+            { chartAccountId: controlAccount.id, debitCents: carriedCents },
+            { chartAccountId: debitAccountId, creditCents: receivedCents },
+          ]
+
+    if (fxCents !== 0) {
+      const fxAccountId = await ensureFxAccount(ctx, tx)
+      paymentLines.push(
+        fxCents > 0
+          ? { chartAccountId: fxAccountId, creditCents: fxCents, memo: 'Exchange gain' }
+          : { chartAccountId: fxAccountId, debitCents: -fxCents, memo: 'Exchange loss' },
+      )
     }
 
     const entry = await createJournalEntry(
@@ -754,16 +854,7 @@ export async function recordPayment(
         source: 'payment',
         sourceType: 'payment',
         sourceId: payment.id,
-        lines:
-          input.kind === 'receipt'
-            ? [
-                { chartAccountId: debitAccountId, debitCents: input.amountCents },
-                { chartAccountId: controlAccount.id, creditCents: input.amountCents },
-              ]
-            : [
-                { chartAccountId: controlAccount.id, debitCents: input.amountCents },
-                { chartAccountId: debitAccountId, creditCents: input.amountCents },
-              ],
+        lines: paymentLines,
       },
       tx,
     )
@@ -822,13 +913,61 @@ export async function recordPayment(
  * Rejects overpayment: a document cannot go below a zero balance. Credits and
  * refunds are their own workflow (spec §13), not a negative balance here.
  */
+/**
+ * The currency the documents being settled are denominated in.
+ *
+ * Refuses a payment that spans two currencies. One receipt settling a euro
+ * invoice and a dollar one is two receipts wearing a coat: there is no single
+ * amount of money that arrived, and the FX difference on each would have to be
+ * worked out separately anyway.
+ */
+async function documentCurrency(
+  ctx: ActorContext,
+  kind: 'receipt' | 'disbursement',
+  applications: PaymentApplicationInput[],
+): Promise<string> {
+  const table = kind === 'receipt' ? invoices : bills
+  const ids = applications
+    .map((application) => (kind === 'receipt' ? application.invoiceId : application.billId))
+    .filter((id): id is string => Boolean(id))
+
+  if (ids.length === 0) return functionalCurrency(ctx.companyId)
+
+  const rows = await db
+    .selectDistinct({ currency: table.currency })
+    .from(table)
+    .where(and(eq(table.companyId, ctx.companyId), inArray(table.id, ids)))
+
+  if (rows.length > 1) {
+    throw new Error(
+      `That payment settles documents in ${rows.map((row) => row.currency).join(' and ')}. ` +
+        'Record one payment per currency — there is no single amount of money that arrived.',
+    )
+  }
+
+  return rows[0]?.currency ?? (await functionalCurrency(ctx.companyId))
+}
+
 async function applyToDocument(
   ctx: ActorContext,
   paymentId: string,
   application: PaymentApplicationInput,
   kind: 'receipt' | 'disbursement',
   tx: Executor,
-): Promise<{ settled: boolean; documentId: string; number: string }> {
+): Promise<{
+  settled: boolean
+  documentId: string
+  number: string
+  /**
+   * What this application took out of the control account, at the rate the
+   * *document* was raised at (Phase 35).
+   *
+   * Relieving a foreign receivable at today's rate would leave the remaining
+   * balance carried at a rate no part of it was ever booked at, and the control
+   * account permanently out of step with the invoices behind it.
+   */
+  functionalCents: number
+}> {
   if (application.amountCents <= 0) {
     throw new Error('Each application amount must be greater than zero.')
   }
@@ -868,7 +1007,12 @@ async function applyToDocument(
     amountCents: application.amountCents,
   })
 
-  return { settled: reduced.settled, documentId, number: document.number }
+  return {
+    settled: reduced.settled,
+    documentId,
+    number: document.number,
+    functionalCents: reduced.functionalCents,
+  }
 }
 
 /**
@@ -883,10 +1027,16 @@ async function applyToDocument(
 async function reduceDocumentBalance(
   ctx: ActorContext,
   table: typeof invoices | typeof bills,
-  document: { id: string; status: string; balanceCents: number },
+  document: {
+    id: string
+    status: string
+    balanceCents: number
+    exchangeRateMillionths: number
+    functionalBalanceCents: number
+  },
   amountCents: number,
   tx: Executor,
-): Promise<{ settled: boolean; balanceCents: number }> {
+): Promise<{ settled: boolean; balanceCents: number; functionalCents: number }> {
   if (document.status === 'void') {
     throw new Error('That document is voided.')
   }
@@ -898,17 +1048,19 @@ async function reduceDocumentBalance(
   }
 
   const newBalance = document.balanceCents - amountCents
+  const relief = relieveFunctional(document, amountCents)
 
   await tx
     .update(table)
     .set({
       balanceCents: newBalance,
+      functionalBalanceCents: relief.functionalBalanceCents,
       status: newBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })
     .where(and(eq(table.id, document.id), eq(table.companyId, ctx.companyId)))
 
-  return { settled: newBalance === 0, balanceCents: newBalance }
+  return { settled: newBalance === 0, balanceCents: newBalance, functionalCents: relief.functionalCents }
 }
 
 /**
@@ -984,7 +1136,16 @@ export async function voidDocument(
 
     await tx
       .update(table)
-      .set({ status: 'void', balanceCents: 0, updatedAt: new Date() })
+      // Both balances, not just the face one. Voiding removes the journal
+      // entry entirely, so the document is gone from the books — and a row
+      // carrying a home-currency balance it no longer owes is a trap for the
+      // next query that forgets to exclude `void` (Phase 35).
+      .set({
+        status: 'void',
+        balanceCents: 0,
+        functionalBalanceCents: 0,
+        updatedAt: new Date(),
+      })
       .where(and(eq(table.id, documentId), eq(table.companyId, ctx.companyId)))
 
     await recordAudit(

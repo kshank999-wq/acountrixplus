@@ -125,11 +125,13 @@ describe('the register names every check there is (Phase 33)', () => {
     // Listed by name on purpose: this is the tripwire that makes adding a check
     // — or reclassifying one — a deliberate act rather than something that
     // slips in. `cash_drawer.open_tills` joined in Phase 34 and failed here
-    // first, which is the test doing its job.
+    // first, which is the test doing its job; `fx.conversions` did the same in
+    // Phase 35.
     expect(faults.sort()).toEqual([
       'appointments.gift_cards',
       'assets.register',
       'cash_drawer.open_tills',
+      'fx.conversions',
       'inventory.lots',
       'ledger.payables',
       'ledger.receivables',
@@ -156,9 +158,12 @@ describe('running the checks (Phase 33)', () => {
     )
     expect(run.checksRun + run.checksSkipped).toBe(INTEGRITY_CHECKS.length)
 
-    // The three every company gets, whatever industry it is.
+    // The ones every company gets, whatever industry it is. Currency is not an
+    // industry — a general company can raise a euro invoice on any Tuesday —
+    // so `fx.conversions` is ungated too (Phase 35).
     expect(run.findings.map((row) => row.key).sort()).toEqual([
       'assets.register',
+      'fx.conversions',
       'ledger.payables',
       'ledger.receivables',
     ])
