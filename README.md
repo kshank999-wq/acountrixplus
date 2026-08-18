@@ -58,7 +58,8 @@ from the
 [ADR 0033](docs/adr/0033-a-check-nobody-runs-is-not-a-check.md), and
 [ADR 0034](docs/adr/0034-the-drawer-is-counted-and-the-difference-is-named.md), and
 [ADR 0035](docs/adr/0035-a-document-is-owed-in-its-own-currency.md), and
-[ADR 0036](docs/adr/0036-a-plan-is-not-a-second-ledger.md).
+[ADR 0036](docs/adr/0036-a-plan-is-not-a-second-ledger.md), and
+[ADR 0037](docs/adr/0037-a-schedule-is-a-promise-to-bill.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1562,6 +1563,54 @@ differences negative, opposite readings. $31,348.41 of cost and $6,557.94 of inc
 accounts nobody planned for, net **−$24,790.47** on the result. A read-only user sees the plan and
 no variance section at all.
 
+### A schedule is a promise to bill, not a bill (Phase 37)
+
+Phase 11 built recurring *journal entries*; Phase 23 built rent invoicing, gated on the properties
+module and keyed to a lease. Neither covers the commonest arrangement a small business has: **bill
+this customer this amount every month** — a retainer, a maintenance contract, a subscription.
+Without it somebody types the same invoice twelve times a year and eventually forgets one.
+
+- **Nothing is owed until a period arrives.** No receivable, no revenue, nothing ageing, nothing on
+  a statement. A business that set up twelve arrangements has not thereby been owed anything —
+  Phase 29's "a booking is a promise, and a promise is not revenue", on the other side of the year.
+- **What it raises is a real invoice**, through Phase 2's `createInvoice` inside the occurrence's
+  own transaction. Phase 31 cost a whole phase to learn why: a module that hand-posts
+  `Dr AR / Cr Revenue` makes a receivable no aging report knows about and no payment can settle.
+- **The database decides that a period is billed once.** The occurrence row is written *first*,
+  `ON CONFLICT DO NOTHING`, in the same transaction as the invoice. The scheduler guarantees at
+  least once, so something has to make the second attempt harmless — and a read-then-write lets a
+  worker and a person both bill December.
+- **The cadence and the date arithmetic are Phase 11's**, imported rather than reimplemented. Two
+  answers to "what is the next monthly date" drift apart on exactly the dates that are hard. The
+  day is capped at the 28th and the refusal says why.
+- **Automatic, or claimed and waiting.** A fixed retainer is safe to raise; anything whose amount
+  somebody checks first is not. When it waits, the run still *claims* the period — otherwise a
+  schedule somebody is reviewing gets offered again tomorrow, and the day after.
+- **Pausing unbills nothing, and resuming does not replay.** A schedule is switched off rather than
+  deleted, and one switched back on starts from today: catching up automatically would send a
+  customer four invoices the morning somebody flipped a switch.
+- **What is coming is a forecast, posted nowhere.** The largest figure on the screen is not a
+  receivable, so the total row says *"Forecast total — not owed by anybody"* out loud.
+- **It runs daily on the Phase 10 worker**, not monthly — a weekly arrangement and one on the 15th
+  are both real, and a monthly job would bill one four times at once and the other late.
+- **No integrity check, deliberately**, for Phase 36's reason: the invoice and its occurrence are
+  written in one transaction, so there is no pair of independent figures that could drift.
+
+**And the two bugs browser verification caught — both invisible to the tests, because both
+behaviours were exactly what the code said.** The catch-up loop broke on *any* skipped result,
+which is right for "a concurrent worker got there first" and wrong for "waiting for somebody" — so
+a quarterly arrangement nobody attended to claimed April and then silently stopped, and July was
+never billed and appeared nowhere. The symptom on screen was a schedule whose **Next** was a date
+in the past. The second: the forecast window opened at *today*, so that same overdue quarter was
+filtered out of the one report meant to show what is coming. `RunResult` now carries `claimed` and
+the loop stops only when nothing was claimed; the forecast has no lower bound and reports overdue
+as its own figure.
+
+Verified end to end on the demo books: four invoices raised from a monthly retainer for
+**$7,400.00**, **two** overdue quarters waiting for a person at $4,200.00 each, and **$9,750.00**
+forecast to the end of November — owed by nobody. A read-only user sees the arrangements and the
+work list with no buttons and no forecast at all.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -1645,6 +1694,7 @@ Coverage matches what spec §21 asks for:
 | `tests/drawer.test.ts` | **The drawer is counted.** Against a pure core: what a till should hold as float plus what was kept less what was paid out; a short one and an over one named by the same arithmetic; **the float kept on the expected side so a wrong float shows up on the day**; banking what was counted rather than what was expected; never retaining more float than is actually there; a drawer that paid out more than ever went in refused; and a figure the ledger cannot hold refused rather than quietly zeroed. Then against the database: **a float that moves petty cash into 1060 and earns nothing**, the account installed on first use, a till opened empty, **a second shift on one drawer refused by the database with the holder named**, two drawers open side by side, the module gate and the permission. **Cash at the counter landing in the open till rather than Undeposited Funds** with the change in no entry, **a card never entering a drawer**, a mixed tender split between the till and the batch, a fallback to Undeposited Funds with nothing open, **a refusal to guess between two open tills**, and the till that was named being used. A payout recorded with its reason and taken out of the drawer, and one with no reason refused. Then the count: **nothing posted to over-and-short when it balances**, **a short drawer posted rather than absorbed** and an over one as a negative cost, the drawer emptied when no float is retained, **a second count on a closed shift refused**, the drawer freed for the next shift, and what was counted kept unadjusted. And the eleventh check: agreeing with nothing open, after a float and a sale and a payout, **when a float is left in overnight** — the case that would have cried wolf nightly — and with a shut till and an open one counted together |
 | `tests/fx.test.ts` | **A document is owed in its own currency.** Against a pure core: multiplying by a rate and rounding half away from zero; **parity leaving an amount byte-identical**, so no historical figure moves; a rate of zero or less refused; a figure the arithmetic cannot hold exactly refused rather than silently losing precision; a currency code checked for shape rather than against a list; and a rate typed with a **comma refused** rather than read as ten thousand. Then rates as facts: one per pair per day with a correction replacing rather than sitting alongside, **the lookup walking backwards only**, and a **missing rate refusing rather than guessing parity**. Then the documents: a euro invoice carrying both amounts, the ledger carrying only one, **the stored home total being exactly what posted**; a payment at a different rate **realising the gain into 7100** and a loss the other way; a payable's sign flipped; and a payment spanning two currencies refused. Then the exposure: restated at a closing rate, netted across receivables and payables, reported and **posted nowhere**, and refusing when the closing rate is missing. Then the relief rule: a part payment at the document's own rate, **the last payment taking the whole remainder so no cent is stranded**, and every path that reduces a balance moving both numbers — a **write-off on a foreign invoice allowed because it converts exactly**, a **credit note refused because it does not**, and a domestic invoice in the same company still creditable. And the twelfth check: agreeing when freshly raised, agreeing after a part payment within the cent it allows, and ungated because currency is not an industry |
 | `tests/budget.test.ts` | **A plan, and whether missing it is good news.** Against a pure core: an annual figure spread across twelve months with **the four leftover cents placed rather than dropped**, a division that divides exactly, a negative budget carrying its sign, a weighted spread that still sums to the year and **hands the leftover to the months that lost most to rounding** rather than to January, a period weighted to zero for a business that shuts, weights refused when fractional or negative or the wrong number of them, a figure finer than the ledger refused, and a leap February measured without a table. Then the judgement: **under on revenue adverse and under on expenses favourable from the same −$500**, over read the same way round for all four account types, **exactly on plan called favourable rather than adverse**, and a percentage refused when the plan was nothing. Then the model: **no journal entry written, ever**, and the P&L untouched; all twelve months written including the zeros; a second budget of the same name in one year refused and a differently named revision allowed; a yearly figure and the months together refused; **approving one budget archiving the previously approved one** so the plan is never ambiguous; an archived budget refusing edits; clearing an account rather than budgeting it zero; the journal permission; and one company's plan off another's books. Then building from history: **last year copied month by month so the seasonality survives**, a flat uplift in basis points, and a source year with no trading refused rather than writing a budget of nothing. Then the comparison: a revenue shortfall named adverse and an expense saving favourable **in the same report**, the figures **agreeing with the Profit & Loss they are built on**, **an unbudgeted account reported as unbudgeted rather than 100% over**, a budgeted account with no activity reported fully unspent rather than dropped, **a section judged on its totals rather than by counting favourable rows**, whole months only, a year nobody planned refused, and the financial reports permission. And the two things browser verification caught: **the plan grid keeping income and cost apart** rather than adding revenue to rent, and **the unbudgeted total doing the same**. Plus the check this phase deliberately does *not* add |
+| `tests/billing.test.ts` | **A schedule is a promise to bill.** Setting one up leaving **no invoice, nothing in receivables and nothing on the aging report**; Phase 11's cadence reused rather than reimplemented; a day of the month some months do not have refused, along with no lines, a negative price, an empty description and an end before the start; the journal permission; and one company's arrangements off another's books. Then the billing: a real invoice raised and **the second run doing nothing at all**, four months caught up in one run with an invoice each, **two runs racing for the same period and exactly one winning**, **nothing raised when the schedule would bill nothing** rather than a $0.00 document, and a schedule stopping on its end date rather than being deleted. Then what it produced: **ageing, reaching the control accounts and appearing on the aging report** — the Phase 31 lesson — the schedule's own payment terms on the invoice, and a manual schedule **claiming the period but waiting for a person**, then raising it once and refusing a second time. Then stopping: the invoices it already raised standing, a paused schedule raising nothing more, and **a resumed one not replaying the months nobody billed**. Then the forecast: each schedule walked on its own cadence, **posted nowhere**, automatic kept apart from what waits for somebody, stopped at an end date, a paused schedule left out, and the financial-reports permission. And the two things browser verification caught: **every overdue period on a manual schedule claimed rather than only the first**, the break still correct on a genuine conflict, and **an overdue period shown in the forecast rather than hidden behind the window** |
 | `tests/integrity.test.ts` | Money arithmetic, chart-of-accounts consistency, split balancing, transfers, audit trail and undo |
 | `tests/ledger.test.ts` | Balanced-entry validation, normal balances, derived postings, void and reversal, period locking, statements |
 | `tests/reconciliation.test.ts` | Difference arithmetic, balance chaining, completion gating, locking and controlled reopen |
@@ -2872,6 +2922,31 @@ charity — neither has a work in process account.*
 335. **Sign in as `sam@hartleyco.test` and open Budgets.** The plan and its month grid, and **no
      variance section and no editing controls at all**. Writing a plan needs the journal permission;
      reading the result against it needs the financial-reports one.
+336. **Back as the owner, open Accounting → Recurring billing.** Two arrangements: a monthly
+     retainer that raises its own invoices, and a quarterly review that waits for a person. The
+     header says the thing that matters: **a schedule is a promise to bill, not a bill.**
+337. **Read the top section — two periods waiting.** The quarterly review came due on 1 April *and*
+     1 July, and both are listed. That is the bug browser verification caught: the run used to stop
+     at the first one, so July was never claimed, never billed, and appeared nowhere.
+338. **Open the Meridian retainer and read "What it has billed".** Four invoices, INV-1014 to
+     INV-1017, one per month from May, each $1,850.00 and each still owed. They are **real
+     invoices** — they age, reach a statement and can be paid, because the schedule went through
+     the same door as one somebody typed.
+339. **Press "Raise anything due now".** *"Nothing was due."* Everything through today is already
+     billed, and pressing it again changes nothing — the period is claimed by the database rather
+     than by whoever pressed the button.
+340. **Read the forecast: $9,750.00 to the end of November, "not owed by anybody".** Nobody has
+     been invoiced for a penny of it. $5,550.00 raises itself; $4,200.00 waits for somebody. This
+     is the same rule as Phase 35's exposure and Phase 36's plan — reported, posted nowhere.
+341. **Press "Raise the invoice" on the April period.** An invoice appears, the period drops off
+     the work list, and the forecast is unchanged — it was never counting a period that had already
+     come due on this side of the line.
+342. **Open Accounting → Reports → A/R aging, as at 31 December.** Meridian Facilities Ltd shows
+     **$7,400.00** outstanding — the retainer's four invoices, ageing by their own due dates.
+     Nothing about the *schedule* appears anywhere on it: only what it raised.
+343. **Sign in as `sam@hartleyco.test` and open Recurring billing.** The arrangements and the work
+     list, with **no buttons and no forecast**. Reading what is going to be billed is a financial
+     report; raising it is not something a read-only user does.
 
 ## Project layout
 
@@ -2960,6 +3035,7 @@ src/
     drawer/               Tills, shifts, and the count that closes one
     fx/                   Rates as facts, conversion, and what is exposed but unrealised
     budget/               The plan, the spread, and which way a variance reads
+    billing/              Arrangements that invoice a customer every period
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -3361,6 +3437,22 @@ Gaps within the phases already built:
   visible rather than mysterious.
 - **A budget cannot be imported.** Most of them currently live in a spreadsheet, and Phase 17's CSV
   machinery is most of what bringing one in would need.
+
+- **A billing schedule carries one line, through the screen.** The service takes many; the form
+  takes one, because a multi-line editor is a different piece of work and one line covers a
+  retainer.
+- **No tax, no currency and no job on a schedule.** `createInvoice` supports all three and the
+  schedule passes none of them, so a euro retainer or one with sales tax is raised by hand.
+- **A schedule cannot be edited.** Its lines are written once at creation, so changing an amount
+  means a new arrangement — which at least makes "changes the future, not the past" true by
+  construction rather than by rule.
+- **Nothing tells anybody a manual period is waiting.** It is at the top of the screen; Phase 24's
+  scheduler and notifier could make it arrive and are not wired to it.
+- **A voided recurring invoice has to be reissued by hand.** The occurrence stays claimed on
+  purpose — the period *was* billed, and forgetting that would let the next run bill it again — but
+  nothing re-offers it.
+- **The forecast walks at most 200 occurrences per schedule.** A weekly arrangement forecast four
+  years out would truncate silently.
 - **Nothing is repaired automatically, and deliberately.** The nightly check says the books
   disagree; it does not decide which side is right. A tool that journalled a plug to make a control
   account agree would destroy the evidence of what actually went wrong.

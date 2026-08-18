@@ -81,6 +81,17 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
     hourUtc: 7,
     why: 'Once a day, and silent when there is nothing wrong — which is what makes it worth reading.',
   },
+  // --- Phase 37 -------------------------------------------------------------
+  {
+    kind: 'billing.run_schedules',
+    cadence: 'daily',
+    hourUtc: 5,
+    why:
+      'Daily rather than monthly, because a weekly arrangement and one on the 15th are both ' +
+      'real and a monthly job would bill one four times at once and the other late. Before the ' +
+      'working day, so a retainer client is billed on the 1st whether or not anybody thought ' +
+      'about it. Firing twice bills once — the occurrence row decides.',
+  },
   // --- Phase 33 -------------------------------------------------------------
   {
     kind: 'books.integrity_check',

@@ -260,6 +260,13 @@
       "when": 1787025874031,
       "tag": "0036_phase36_budgets",
       "breakpoints": true
+    },
+    {
+      "idx": 37,
+      "version": "7",
+      "when": 1787028345271,
+      "tag": "0037_phase37_recurring_billing",
+      "breakpoints": true
     }
   ]
 }

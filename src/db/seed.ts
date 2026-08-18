@@ -110,6 +110,8 @@ import { balanceForAccount } from '@/modules/ledger/balances'
 import { putRate } from '@/modules/fx/service'
 import { approveBudget, createBudget, setAccountBudget } from '@/modules/budget/service'
 import { budgetVsActual } from '@/modules/budget/reporting'
+import { createSchedule, runDueSchedules } from '@/modules/billing/service'
+import { billingForecast } from '@/modules/billing/reporting'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { adjustStock, receiveStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
 import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
@@ -2936,6 +2938,75 @@ async function main() {
       `${flow.reconciles ? 'reconciles' : 'DOES NOT RECONCILE'} to the cash accounts.`,
   )
 
+  // --- Phase 37: two arrangements that bill on their own -------------------
+  //
+  // One automatic and one that waits for a person, because the difference is
+  // the phase's most useful distinction and it is invisible with only one.
+  // Started in the past so the demo lands on a schedule with history rather
+  // than a promise nobody has seen work.
+  {
+    const meridian = await createCustomer(ctx, {
+      name: 'Meridian Facilities Ltd',
+      email: 'accounts@meridian-facilities.test',
+    })
+
+    const serviceRevenue = await accountByNumber(company.id, '4100')
+
+    if (serviceRevenue) {
+      const retainer = await createSchedule(ctx, {
+        customerId: meridian.id,
+        name: 'Meridian — monthly maintenance retainer',
+        memo: 'Retainer under the 2026 maintenance agreement',
+        cadence: 'monthly',
+        dayOfMonth: 1,
+        paymentTermsDays: 14,
+        autoRaise: true,
+        startsOn: '2026-05-01',
+        lines: [
+          {
+            chartAccountId: serviceRevenue.id,
+            description: 'Monthly maintenance retainer',
+            unitPriceCents: 185_000,
+          },
+        ],
+      })
+
+      // A second arrangement whose amount somebody checks first, so the
+      // "waiting for somebody" work list has something real in it.
+      await createSchedule(ctx, {
+        customerId: harborview.id,
+        name: 'Harborview — quarterly site review',
+        cadence: 'quarterly',
+        dayOfMonth: 1,
+        autoRaise: false,
+        startsOn: '2026-04-01',
+        lines: [
+          {
+            chartAccountId: serviceRevenue.id,
+            description: 'Quarterly site review and report',
+            unitPriceCents: 420_000,
+          },
+        ],
+      })
+
+      const billed = await runDueSchedules(ctx, '2026-08-18')
+      const raised = billed.filter((row) => row.raised)
+      const waiting = billed.filter((row) => row.skipped?.includes('Waiting'))
+      const ahead = await billingForecast(ctx, { from: '2026-08-18', through: '2026-11-30' })
+
+      console.log(
+        `  Recurring billing: ${raised.length} invoice${raised.length === 1 ? '' : 's'} raised ` +
+          `from schedules for ${formatCentsPlain(
+            raised.reduce((sum, row) => sum + row.totalCents, 0),
+          )}, ${waiting.length} period${waiting.length === 1 ? '' : 's'} waiting for somebody. ` +
+          `${formatCentsPlain(ahead.totalCents)} is forecast to the end of November — owed by ` +
+          'nobody, and posted nowhere.',
+      )
+
+      void retainer
+    }
+  }
+
   // --- Phase 36: a plan, and a year going against it -----------------------
   //
   // Deliberately a plan the business is *missing on revenue and beating on
@@ -3046,6 +3117,9 @@ async function main() {
   )
   console.log(
     '  /accounting/budgets   the plan, and which of two negative numbers is the bad news',
+  )
+  console.log(
+    '  /accounting/billing   two arrangements that bill on their own, and what is coming',
   )
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')

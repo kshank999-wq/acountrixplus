@@ -17,5 +17,6 @@ import './integrity'
 import './marketing'
 import './notifications'
 import './retention'
+import './billing'
 
 export {}

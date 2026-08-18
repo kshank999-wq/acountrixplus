@@ -148,6 +148,14 @@ export type AuditAction =
   | 'budget.clear_account'
   | 'budget.approve'
   | 'budget.copy_actuals'
+  // Recurring billing (spec §13, Phase 37). A schedule decides what a customer
+  // is charged every month without anybody touching it again, so who set it up
+  // and who changed the amount is exactly the question asked when a client
+  // rings about their invoice.
+  | 'billing.schedule_create'
+  | 'billing.schedule_pause'
+  | 'billing.schedule_resume'
+  | 'billing.occurrence_raise'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became
