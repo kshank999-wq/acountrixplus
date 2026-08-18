@@ -4,6 +4,7 @@ export const ACCOUNTING_NAV = [
   { href: '/accounting/journal', label: 'Journal' },
   { href: '/accounting/receivables', label: 'Credits & statements' },
   { href: '/accounting/deposits', label: 'Deposits' },
+  { href: '/accounting/budgets', label: 'Budgets' },
   { href: '/accounting/dimensions', label: 'Dimensions' },
   { href: '/accounting/currencies', label: 'Currencies' },
   { href: '/accounting/assets', label: 'Fixed assets' },

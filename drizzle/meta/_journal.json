@@ -253,6 +253,13 @@
       "when": 1787021658693,
       "tag": "0035_phase35_currencies",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "7",
+      "when": 1787025874031,
+      "tag": "0036_phase36_budgets",
+      "breakpoints": true
     }
   ]
 }

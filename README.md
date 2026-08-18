@@ -57,7 +57,8 @@ from the
 [ADR 0032](docs/adr/0032-change-is-not-a-transaction.md), and
 [ADR 0033](docs/adr/0033-a-check-nobody-runs-is-not-a-check.md), and
 [ADR 0034](docs/adr/0034-the-drawer-is-counted-and-the-difference-is-named.md), and
-[ADR 0035](docs/adr/0035-a-document-is-owed-in-its-own-currency.md).
+[ADR 0035](docs/adr/0035-a-document-is-owed-in-its-own-currency.md), and
+[ADR 0036](docs/adr/0036-a-plan-is-not-a-second-ledger.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1509,6 +1510,58 @@ $2,750.00 worth today* — **$41.25 exposed and posted nowhere**; a rate typed a
 with *"uses a comma. Write it with a full stop, like 1.0835"*; and a read-only user sees the check
 and the rates with no exposure section at all rather than a heading with nothing under it.
 
+### A plan is not a second ledger (Phase 36)
+
+Thirty-five phases in, this system could say precisely what a business earned and spent. It could
+not say whether that was what anybody expected. A budget is the first thing here that describes an
+*intention*, and the comparison is the number a small business actually runs on — not "revenue was
+$66,942" but "revenue was $108,057 short of what we told the bank".
+
+- **Nothing here posts.** `budget_lines` is the first table holding money that the trial balance has
+  never heard of, and it has to stay that way: a budget that posted would appear in the actuals it
+  exists to be compared against, and every business would hit its plan exactly.
+- **A variance is signed by what the account is for.** Revenue $100 under plan and rent $50 under
+  plan are both negative numbers and opposite kinds of news. `varianceFor` decides once — more is
+  better for revenue and other income, less is better for costs — so the screen says *adverse* and
+  *favourable* rather than making somebody work it out row by row. Same lesson as
+  `balanceForAccount` returning the normal balance.
+- **A section is judged on its totals, not by counting favourable rows.** Nine rows a dollar under
+  and one row a fortune over is not a favourable section, and a majority vote would say it was.
+- **The remainder is placed, not dropped.** $10,000 across twelve months is $833.33 twelve times,
+  which is $9,999.96. An even spread gives the leftover cents to the earliest months; a **weighted**
+  one gives them to the months that lost the most to rounding, because earliest-first would
+  systematically favour January in a seasonal business.
+- **Whole months only.** A range ending on the 14th has no defensible share of February's plan, and
+  pro-rating would look precise and be arbitrary.
+- **The actuals come from the Profit & Loss itself** — the same function, not a second query that
+  filters the same way. A deliberate departure from the two-independent-derivations pattern of
+  Phases 26 and 31: independence where the point is to catch drift, one source where the point is to
+  be believed.
+- **An unbudgeted account is not an account budgeted at zero.** $400 of legal fees nobody planned
+  for shown as "budget $0, 100% over" is a percentage of nothing, sorted among rows that merely
+  drifted. Those accounts are listed apart with no variance at all. The reverse too: a budgeted
+  account with no activity reports its full budget unspent rather than vanishing.
+- **Several plans per year, and approving one archives the last**, so "the plan" is never ambiguous.
+  Approval is not a lock — ADR 0011's distinction reused — because a plan somebody keeps adjusting is
+  still a plan, and refusing would send the adjusting into a spreadsheet.
+- **No integrity check, deliberately.** A budget posts nothing, so a check could only ever agree,
+  and ADR 0033's argument is that a register stays useful exactly as long as everything in it can
+  fail. A test asserts no `budget.*` key exists.
+
+**And the two bugs browser verification caught — both this phase's own thesis, broken in this
+phase's own report.** The variance screen showed *"NOT BUDGETED AT ALL — $37,906.35"*, one figure
+summing unbudgeted rental income with unbudgeted wages; it reads as an overspend and was really
+$6,558 of unplanned income against $44,464 of unplanned cost. The plan grid did it again, with a
+"Total" row adding planned revenue to planned rent. Both now keep income and cost apart with a net
+that means something. A principle written in a doc comment is not a principle in the code, and
+reading the screen is what found it.
+
+Verified end to end on seven months of the demo books: revenue **$66,942.75 against a plan of
+$175,000.00 — adverse**; operating expenses **$32,250.00 against $35,000.00 — favourable**. Both
+differences negative, opposite readings. $31,348.41 of cost and $6,557.94 of income landed on
+accounts nobody planned for, net **−$24,790.47** on the result. A read-only user sees the plan and
+no variance section at all.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -1591,6 +1644,7 @@ Coverage matches what spec §21 asks for:
 | `tests/rules.test.ts` | Condition evaluation, priority, merchant normalization, vendor memory, auto vs suggest |
 | `tests/drawer.test.ts` | **The drawer is counted.** Against a pure core: what a till should hold as float plus what was kept less what was paid out; a short one and an over one named by the same arithmetic; **the float kept on the expected side so a wrong float shows up on the day**; banking what was counted rather than what was expected; never retaining more float than is actually there; a drawer that paid out more than ever went in refused; and a figure the ledger cannot hold refused rather than quietly zeroed. Then against the database: **a float that moves petty cash into 1060 and earns nothing**, the account installed on first use, a till opened empty, **a second shift on one drawer refused by the database with the holder named**, two drawers open side by side, the module gate and the permission. **Cash at the counter landing in the open till rather than Undeposited Funds** with the change in no entry, **a card never entering a drawer**, a mixed tender split between the till and the batch, a fallback to Undeposited Funds with nothing open, **a refusal to guess between two open tills**, and the till that was named being used. A payout recorded with its reason and taken out of the drawer, and one with no reason refused. Then the count: **nothing posted to over-and-short when it balances**, **a short drawer posted rather than absorbed** and an over one as a negative cost, the drawer emptied when no float is retained, **a second count on a closed shift refused**, the drawer freed for the next shift, and what was counted kept unadjusted. And the eleventh check: agreeing with nothing open, after a float and a sale and a payout, **when a float is left in overnight** — the case that would have cried wolf nightly — and with a shut till and an open one counted together |
 | `tests/fx.test.ts` | **A document is owed in its own currency.** Against a pure core: multiplying by a rate and rounding half away from zero; **parity leaving an amount byte-identical**, so no historical figure moves; a rate of zero or less refused; a figure the arithmetic cannot hold exactly refused rather than silently losing precision; a currency code checked for shape rather than against a list; and a rate typed with a **comma refused** rather than read as ten thousand. Then rates as facts: one per pair per day with a correction replacing rather than sitting alongside, **the lookup walking backwards only**, and a **missing rate refusing rather than guessing parity**. Then the documents: a euro invoice carrying both amounts, the ledger carrying only one, **the stored home total being exactly what posted**; a payment at a different rate **realising the gain into 7100** and a loss the other way; a payable's sign flipped; and a payment spanning two currencies refused. Then the exposure: restated at a closing rate, netted across receivables and payables, reported and **posted nowhere**, and refusing when the closing rate is missing. Then the relief rule: a part payment at the document's own rate, **the last payment taking the whole remainder so no cent is stranded**, and every path that reduces a balance moving both numbers — a **write-off on a foreign invoice allowed because it converts exactly**, a **credit note refused because it does not**, and a domestic invoice in the same company still creditable. And the twelfth check: agreeing when freshly raised, agreeing after a part payment within the cent it allows, and ungated because currency is not an industry |
+| `tests/budget.test.ts` | **A plan, and whether missing it is good news.** Against a pure core: an annual figure spread across twelve months with **the four leftover cents placed rather than dropped**, a division that divides exactly, a negative budget carrying its sign, a weighted spread that still sums to the year and **hands the leftover to the months that lost most to rounding** rather than to January, a period weighted to zero for a business that shuts, weights refused when fractional or negative or the wrong number of them, a figure finer than the ledger refused, and a leap February measured without a table. Then the judgement: **under on revenue adverse and under on expenses favourable from the same −$500**, over read the same way round for all four account types, **exactly on plan called favourable rather than adverse**, and a percentage refused when the plan was nothing. Then the model: **no journal entry written, ever**, and the P&L untouched; all twelve months written including the zeros; a second budget of the same name in one year refused and a differently named revision allowed; a yearly figure and the months together refused; **approving one budget archiving the previously approved one** so the plan is never ambiguous; an archived budget refusing edits; clearing an account rather than budgeting it zero; the journal permission; and one company's plan off another's books. Then building from history: **last year copied month by month so the seasonality survives**, a flat uplift in basis points, and a source year with no trading refused rather than writing a budget of nothing. Then the comparison: a revenue shortfall named adverse and an expense saving favourable **in the same report**, the figures **agreeing with the Profit & Loss they are built on**, **an unbudgeted account reported as unbudgeted rather than 100% over**, a budgeted account with no activity reported fully unspent rather than dropped, **a section judged on its totals rather than by counting favourable rows**, whole months only, a year nobody planned refused, and the financial reports permission. And the two things browser verification caught: **the plan grid keeping income and cost apart** rather than adding revenue to rent, and **the unbudgeted total doing the same**. Plus the check this phase deliberately does *not* add |
 | `tests/integrity.test.ts` | Money arithmetic, chart-of-accounts consistency, split balancing, transfers, audit trail and undo |
 | `tests/ledger.test.ts` | Balanced-entry validation, normal balances, derived postings, void and reversal, period locking, statements |
 | `tests/reconciliation.test.ts` | Difference arithmetic, balance chaining, completion gating, locking and controlled reopen |
@@ -2777,6 +2831,47 @@ charity — neither has a work in process account.*
 324. **Sign in as `sam@hartleyco.test` and open the same page.** No rate form and **no exposure
      section at all** — not a heading with nothing under it. The check and the rates are there,
      because a reconciliation is not a financial report.
+325. **Back as the owner, open Accounting → Budgets.** *"2026 Approved"* is the agreed plan, with
+     *"2026 Revised — if the Bremen work lands"* sitting beside it rather than over the top of it.
+     The header says the thing that matters: **nothing here posts to the ledger.**
+326. **Set the range to 1 January – 31 July and read the two totals.** Revenue **$66,942.75 against
+     a plan of $175,000.00 — adverse**. Operating expenses **$32,250.00 against $35,000.00 —
+     favourable**. Both differences are negative numbers. Only one of them is bad news, and the
+     screen says which without anybody working it out.
+327. **Look at the row level inside operating expenses.** Advertising is $14,000 under plan and
+     reads *favourable*; rent is $11,250 over and reads *adverse*. The **section** reads favourable
+     on its totals — not by counting rows, which would have called it favourable for the wrong
+     reason.
+328. **Read “7 whole months compared”.** August is excluded because the range stops on the 31st of
+     July; a range ending mid-month drops that month entirely rather than pro-rating a plan a
+     business does not earn evenly.
+329. **Scroll to “Not budgeted at all”.** Unplanned income **$6,557.94**, unplanned cost
+     **$31,348.41**, net effect on the result **−$24,790.47** — three figures, never one. Ten
+     accounts nobody planned for, each labelled income or cost. None of them is given a variance,
+     because there is no plan to vary from.
+330. **Note what is *not* in that list: 4000 Sales Revenue**, which was budgeted $35,000 and earned
+     nothing. It is in the revenue section reading −100% adverse, because a budgeted account with no
+     activity is a fact somebody needs, not a row to drop.
+331. **Look at the bottom of “The plan, month by month”.** Three rows — *Planned income*, *Planned
+     cost*, *Planned result* — and no single "Total". Adding $25,000 of planned revenue to $5,000 of
+     planned rent and calling it $30,000 is the mistake this whole phase argues against, and it
+     shipped in that grid until somebody read it on screen.
+332. **Choose 6200 Insurance, type `120,000.00`, and press "Spread across the year".**
+     *"$120,000.00 across the year. The months add back to exactly that — the odd cents are placed,
+     not dropped."* Now type `10000` and spread that instead: seven months of it reads
+     **$5,833.35**, not $5,833.31, because the four cents that would not divide went to the first
+     four months rather than being lost.
+333. **Press "Copy" against 2025.** *"2025 has nothing on the profit and loss to copy. Choose a
+     year with trading in it, or enter the figures by hand."* A budget of nothing is not a budget,
+     so it refuses rather than writing twelve zeros and looking finished.
+334. **Switch the year to 2027, create "2027 Draft", then copy from 2026 with a 5% uplift.**
+     *"13 accounts filled in from 2026, month by month, up 5%."* Look at Contract Revenue across
+     the year — $2,520 in January, $31,080 in July, nothing after August. That shape is the most
+     useful thing last year knows, and spreading the annual total in twelfths would have thrown it
+     away.
+335. **Sign in as `sam@hartleyco.test` and open Budgets.** The plan and its month grid, and **no
+     variance section and no editing controls at all**. Writing a plan needs the journal permission;
+     reading the result against it needs the financial-reports one.
 
 ## Project layout
 
@@ -2864,6 +2959,7 @@ src/
     integrity/            Every reconciliation as named data, and the nightly run of all of them
     drawer/               Tills, shifts, and the count that closes one
     fx/                   Rates as facts, conversion, and what is exposed but unrealised
+    budget/               The plan, the spread, and which way a variance reads
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -3246,6 +3342,25 @@ Gaps within the phases already built:
 - **`createBill` with `taxCents > 0` posts an unbalanced entry** — debits are the subtotal, credits
   the total. Pre-existing and unreachable, since no caller passes it, and left alone deliberately:
   choosing recoverable against non-recoverable input tax is an accounting decision, not a fix.
+
+- **A budget is per account and nothing else.** Not per dimension, not per job, not per customer —
+  so a company with three sites (Phase 16's dimensions) can report them apart and cannot plan them
+  apart.
+- **Fiscal years start in January.** `month` is 1–12 against a calendar year, and a business whose
+  year begins in April has no way to say so.
+- **There is no cash-flow budget**, which is the one a small business actually loses sleep over.
+  This is profit and loss only.
+- **Nothing warns when actuals drift past plan.** The variance answers when somebody opens the
+  page; Phase 24's scheduler and Phase 33's notifier could make it arrive, and neither is wired to
+  it.
+- **Approving a budget does not freeze its figures**, so "the plan we agreed" is a name rather than
+  a guarantee. Every change is in the audit log, which is the honest half of that trade.
+- **The variance sections and net income do not add up when anything is unbudgeted**, deliberately:
+  net income is the income statement's own figure and includes the unplanned accounts, while the
+  sections cover only what was planned. The unbudgeted block sits next to them so the difference is
+  visible rather than mysterious.
+- **A budget cannot be imported.** Most of them currently live in a spreadsheet, and Phase 17's CSV
+  machinery is most of what bringing one in would need.
 - **Nothing is repaired automatically, and deliberately.** The nightly check says the books
   disagree; it does not decide which side is right. A tool that journalled a plug to make a control
   account agree would destroy the evidence of what actually went wrong.

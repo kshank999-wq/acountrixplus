@@ -139,6 +139,15 @@ export type AuditAction =
   // is the one number in the transaction nobody outside the business can
   // check, which makes who set it and when exactly what §19 asks to keep.
   | 'fx.rate_set'
+  // Budgets (spec §13, Phase 36). None of these move a penny in the ledger,
+  // and they are audited anyway: "who changed the number we are being measured
+  // against, and when" is a question somebody asks in every review meeting,
+  // and a plan quietly edited to match the result is the oldest trick there is.
+  | 'budget.create'
+  | 'budget.set_account'
+  | 'budget.clear_account'
+  | 'budget.approve'
+  | 'budget.copy_actuals'
   // Manufacturing (spec §5, Phase 27). Completing a run decides a unit cost
   // that every subsequent sale of that item is measured against, and
   // cancelling one writes off stock that was consumed and never became

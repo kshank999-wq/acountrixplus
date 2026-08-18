@@ -6,8 +6,8 @@
   spec**; this phase is a capability chosen beyond it, and the §19 citation is for the constraints
   it inherits: integer arithmetic on money, complete auditability of the rate an entry used, and
   operations that refuse rather than guess.
-- **Builds on:** [ADR 0002](0002-money-as-integer-cents.md),
-  [ADR 0026](0026-restriction-is-a-property-of-the-gift.md),
+- **Builds on:** [ADR 0002](0002-double-entry-ledger.md),
+  [ADR 0026](0026-a-restriction-is-the-donors-not-the-charitys.md),
   [ADR 0031](0031-what-is-owed-is-owed-by-somebody.md),
   [ADR 0033](0033-a-check-nobody-runs-is-not-a-check.md)
 

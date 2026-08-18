@@ -108,6 +108,8 @@ import {
 import { cashFlowStatement } from '@/modules/ledger/cash-flow'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { putRate } from '@/modules/fx/service'
+import { approveBudget, createBudget, setAccountBudget } from '@/modules/budget/service'
+import { budgetVsActual } from '@/modules/budget/reporting'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { adjustStock, receiveStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
 import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
@@ -1582,6 +1584,7 @@ async function main() {
   await saveStatement(ctx, { customerId: harborview.id, asOfDate: '2026-08-14' })
   console.log('  Saved an open-item statement, with its figures frozen as at that date.')
 
+
   // A recurring entry of each kind, so the autoPost distinction is visible.
   const rentAccount = await accountByNumber(company.id, '6400')
   const accrualsAccount = await accountByNumber(company.id, '2300')
@@ -2933,6 +2936,70 @@ async function main() {
       `${flow.reconciles ? 'reconciles' : 'DOES NOT RECONCILE'} to the cash accounts.`,
   )
 
+  // --- Phase 36: a plan, and a year going against it -----------------------
+  //
+  // Deliberately a plan the business is *missing on revenue and beating on
+  // costs*, because that is the case the variance report exists for: both
+  // differences are negative numbers and only one of them is bad news.
+  //
+  // And one account left out of the plan entirely, so the "not budgeted at
+  // all" section has something in it — an expense nobody planned for is the
+  // most useful thing this report surfaces and the easiest to bury.
+  {
+    const budget = await createBudget(ctx, {
+      name: '2026 Approved',
+      fiscalYear: 2026,
+      notes: 'Agreed with the bank in November. Revised plan lives beside this one, not over it.',
+    })
+
+    const plan: Array<[string, number]> = [
+      ['4000', 60_000_00],
+      ['4200', 240_000_00],
+      ['6400', 36_000_00],
+      ['6000', 24_000_00],
+    ]
+
+    for (const [number, annualCents] of plan) {
+      const account = await accountByNumber(company.id, number)
+      if (account) {
+        await setAccountBudget(ctx, {
+          budgetId: budget.id,
+          chartAccountId: account.id,
+          annualCents,
+        })
+      }
+    }
+
+    await approveBudget(ctx, budget.id)
+
+    // A second, unapproved revision — so the picker shows what "several plans,
+    // one of them agreed" looks like.
+    await createBudget(ctx, {
+      name: '2026 Revised — if the Bremen work lands',
+      fiscalYear: 2026,
+      notes: 'Not agreed. Kept alongside rather than over the top of the approved one.',
+    })
+
+    const against = await budgetVsActual(ctx, {
+      fiscalYear: 2026,
+      startDate: '2026-01-01',
+      endDate: '2026-07-31',
+    })
+
+    console.log(
+      `  2026 Approved: seven months in, revenue ${formatCentsPlain(
+        against.revenue.actualCents,
+      )} against a plan of ${formatCentsPlain(against.revenue.budgetCents)} — ` +
+        `${against.revenue.favourable ? 'favourable' : 'adverse'}; operating expenses ` +
+        `${formatCentsPlain(against.operatingExpenses.actualCents)} against ` +
+        `${formatCentsPlain(against.operatingExpenses.budgetCents)} — ` +
+        `${against.operatingExpenses.favourable ? 'favourable' : 'adverse'}. ` +
+        `Nobody planned for ${formatCentsPlain(against.unbudgetedCostCents)} of cost or ` +
+        `${formatCentsPlain(against.unbudgetedIncomeCents)} of income — net ` +
+        `${formatCentsPlain(against.unbudgetedNetCents)} on the result.`,
+    )
+  }
+
   // Cash versus accrual on the demo's own books, so the difference is a
   // number rather than an explanation.
   const range = { startDate: '2026-01-01', endDate: '2026-12-31' }
@@ -2976,6 +3043,9 @@ async function main() {
   console.log('  /accounting/assets    the register, and whether it agrees with the ledger')
   console.log(
     '  /accounting/currencies  two euro invoices — one paid at a different rate, one still open',
+  )
+  console.log(
+    '  /accounting/budgets   the plan, and which of two negative numbers is the bad news',
   )
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')

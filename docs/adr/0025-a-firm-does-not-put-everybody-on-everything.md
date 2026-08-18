@@ -4,7 +4,7 @@
 - **Date:** 2026-08-17
 - **Context:** Spec §14 ("accountant/client relationships … **granular
   overrides**"), §19 (least privilege)
-- **Builds on:** [ADR 0018](0018-granted-never-claimed.md),
+- **Builds on:** [ADR 0018](0018-access-is-granted-never-claimed.md),
   [ADR 0013](0013-a-stolen-password-is-not-enough.md)
 
 ## Context
