@@ -10,8 +10,10 @@ import {
   completeAction,
   redeemGiftCardAction,
   sellGiftCardAction,
+  takePaymentAction,
   type ActionResult,
 } from '@/app/actions/appointments'
+import { TakePayment } from '@/components/take-payment'
 
 type Row = {
   id: string
@@ -24,6 +26,8 @@ type Row = {
   priceCents: number
   productCents: number
   practitionerCents: number | null
+  invoiceId: string | null
+  outstandingCents: number
 }
 
 type Props = {
@@ -244,8 +248,38 @@ function Diary({ rows, today, canManage, summary, act, pending }: Props & Helper
                       </button>
                     </div>
                   )}
+                  {row.status === 'completed' && row.invoiceId && (
+                    <span
+                      className={`block text-xs ${
+                        row.outstandingCents > 0 ? 'text-warning' : 'text-success'
+                      }`}
+                    >
+                      {row.outstandingCents > 0
+                        ? `${formatCents(row.outstandingCents)} owing`
+                        : 'paid'}
+                    </span>
+                  )}
                   {canManage && row.status === 'completed' && (
-                    <RedeemAgainst appointmentId={row.id} act={act} pending={pending} today={today} />
+                    <>
+                      {row.invoiceId && row.outstandingCents > 0 && (
+                        <div className="mt-1">
+                          <TakePayment
+                            act={act}
+                            invoiceId={row.invoiceId}
+                            outstandingCents={row.outstandingCents}
+                            pending={pending}
+                            takePaymentAction={takePaymentAction}
+                            today={today}
+                          />
+                        </div>
+                      )}
+                      <RedeemAgainst
+                        appointmentId={row.id}
+                        act={act}
+                        pending={pending}
+                        today={today}
+                      />
+                    </>
                   )}
                 </td>
               </tr>

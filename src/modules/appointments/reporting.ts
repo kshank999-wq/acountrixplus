@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, gte, lte, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { appointments, customers, giftCards, practitioners } from '@/db/schema'
+import { appointments, customers, giftCards, invoices, practitioners } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { accountByNumber } from '@/modules/coa/service'
@@ -26,6 +26,10 @@ export type DiaryRow = {
   priceCents: number
   productCents: number
   practitionerCents: number | null
+  /** The bill raised on delivery (Phase 31). Null while it is a promise. */
+  invoiceId: string | null
+  /** What the client still owes on it. Zero once paid at the counter. */
+  outstandingCents: number
 }
 
 /** The diary between two instants, in the order it happens. */
@@ -47,10 +51,13 @@ export async function diary(
       priceCents: appointments.priceCents,
       productCents: appointments.productCents,
       practitionerCents: appointments.practitionerCents,
+      invoiceId: appointments.invoiceId,
+      outstandingCents: invoices.balanceCents,
     })
     .from(appointments)
     .innerJoin(practitioners, eq(practitioners.id, appointments.practitionerId))
     .leftJoin(customers, eq(customers.id, appointments.customerId))
+    .leftJoin(invoices, eq(invoices.id, appointments.invoiceId))
     .where(
       scoped(
         ctx,
@@ -63,6 +70,7 @@ export async function diary(
     )
     .orderBy(asc(appointments.startsAt))
     .limit(opts.limit ?? 200)
+    .then((rows) => rows.map((row) => ({ ...row, outstandingCents: row.outstandingCents ?? 0 })))
 }
 
 export type PayoutPosition = {

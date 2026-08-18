@@ -12,6 +12,7 @@ import {
   openRepairOrder,
   recordOdometer,
 } from '@/modules/vehicles/service'
+import { takePayment } from '@/modules/counter/service'
 import { formatCents } from '@/lib/money'
 
 /** Server actions for the shop (spec §5, Phase 30). */
@@ -172,5 +173,41 @@ export async function recordOdometerAction(input: unknown): Promise<ActionResult
     if (result.unmoved) return 'Recorded. The car has not moved since it was last here.'
     if (result.milesTravelled === null) return 'Recorded — the first reading for this vehicle.'
     return `Recorded. ${result.milesTravelled.toLocaleString()} miles since it was last here.`
+  })
+}
+
+export async function takePaymentAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({
+        invoiceId: z.string().uuid(),
+        receivedOn: isoDate,
+        tenders: z
+          .array(
+            z.object({
+              kind: z.enum(['cash', 'card', 'gift_card', 'bank_transfer', 'cheque', 'other']),
+              amountCents: z.number().int().positive(),
+              reference: z.string().trim().optional(),
+            }),
+          )
+          .min(1),
+      })
+      .parse(input)
+
+    const result = await takePayment(actor, parsed)
+
+    const parts = [`${formatCents(result.settlement.appliedCents)} taken.`]
+
+    if (result.settlement.changeCents > 0) {
+      parts.push(`${formatCents(result.settlement.changeCents)} change.`)
+    }
+    if (result.settlement.stillDueCents > 0) {
+      parts.push(`${formatCents(result.settlement.stillDueCents)} still owing.`)
+    } else {
+      parts.push(`${result.invoiceNumber} settled.`)
+    }
+
+    return parts.join(' ')
   })
 }

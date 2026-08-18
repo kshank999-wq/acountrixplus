@@ -11,8 +11,10 @@ import {
   cancelAction,
   completeAction,
   openRepairOrderAction,
+  takePaymentAction,
   type ActionResult,
 } from '@/app/actions/vehicles'
+import { TakePayment } from '@/components/take-payment'
 
 type Order = {
   id: string
@@ -26,6 +28,8 @@ type Order = {
   ceilingCents: number
   overByCents: number
   withinAuthority: boolean
+  invoiceId: string | null
+  outstandingCents: number
 }
 
 type Car = {
@@ -194,7 +198,7 @@ export function ShopBoard(props: Props) {
 
 type Helpers = { act: (fn: () => Promise<ActionResult>) => void; pending: boolean }
 
-function Ramp({ orders }: Props & Helpers) {
+function Ramp({ orders, today, canBill, act, pending }: Props & Helpers) {
   return (
     <div className="card overflow-hidden">
       <table className="w-full text-sm">
@@ -238,7 +242,27 @@ function Ramp({ orders }: Props & Helpers) {
               </td>
               <td className="px-4 py-2">
                 {row.status === 'completed' ? (
-                  <span className="text-success">billed</span>
+                  row.outstandingCents > 0 ? (
+                    <>
+                      <span className="text-warning">
+                        billed · {formatCents(row.outstandingCents)} owing
+                      </span>
+                      {canBill && row.invoiceId && (
+                        <div className="mt-1">
+                          <TakePayment
+                            act={act}
+                            invoiceId={row.invoiceId}
+                            outstandingCents={row.outstandingCents}
+                            pending={pending}
+                            takePaymentAction={takePaymentAction}
+                            today={today}
+                          />
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-success">billed · paid</span>
+                  )
                 ) : row.status === 'cancelled' ? (
                   <span className="text-faint">cancelled</span>
                 ) : !row.withinAuthority ? (

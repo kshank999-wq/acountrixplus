@@ -53,7 +53,8 @@ from the
 [ADR 0028](docs/adr/0028-a-day-is-a-fact-somebody-else-recorded.md), and
 [ADR 0029](docs/adr/0029-a-booking-is-a-promise-and-part-of-the-money-was-never-yours.md), and
 [ADR 0030](docs/adr/0030-nobody-bills-past-what-was-authorised.md), and
-[ADR 0031](docs/adr/0031-what-is-owed-is-owed-by-somebody.md).
+[ADR 0031](docs/adr/0031-what-is-owed-is-owed-by-somebody.md), and
+[ADR 0032](docs/adr/0032-change-is-not-a-transaction.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1332,6 +1333,41 @@ it for its **reads** as well as its writes, or it cannot see rows the caller cre
 transaction. Always wrong, never mattered — until the walk-in fallback created a customer and
 invoiced it in one go.
 
+### Change is not a transaction (Phase 32)
+
+Phase 31 closed the counter gap *at the ledger* and said so explicitly. This closes it at the till:
+a delivered visit and a billed repair order can each be paid in one press, from the row that shows
+what is owed.
+
+The accounting already existed. What was missing was the gesture, and one piece of arithmetic the
+accounting has no opinion about. A customer hands over $50 for a $20 bill. The business has $50 in
+its hand and $20 of revenue settled — and **the $30 that goes back across the counter is not a
+transaction at all.** No account changes, nothing is owed, nothing is earned; it is the same note
+travelling back. Software that posts a $50 receipt and a $30 disbursement doubles the day's apparent
+cash movement and gives the bank reconciliation two rows to match against a deposit that will only
+ever show $20.
+
+- **Non-cash is applied first**, because only cash can give change. An $80 bill paid with a $50 card
+  and a $50 note charges the card $50, takes $30 of the cash, and hands $20 back. Applying cash
+  first would charge the card the wrong amount — not a rounding difference.
+- **A card over the bill is refused**, with the amount and what to take instead: *"That takes $30.00
+  more than is owed, and change cannot be given on a card. Take $20.00 instead."* Accepting it as a
+  customer credit was the rejected alternative: somebody typing $50 for a $20 card sale has
+  mis-keyed, and the job is to say so before the card is charged rather than invent a liability out
+  of a typo.
+- **Each tender is its own payment.** The card one appears on a merchant statement three days later;
+  the cash one appears in a deposit slip. A bank reconciliation has to match each against what it
+  actually became, and one combined payment matches neither.
+- **It lands in Undeposited Funds** — for card as well as cash. A card sale at 10am is in a batch
+  that settles net of fees on the acquirer's schedule, not in the bank at 10am.
+- **The control is one shared component**, used by both boards. Not for reuse — it is eighty lines —
+  but because it mirrors `tenderFor` client-side to show the change *before* anything is submitted,
+  and that mirror has to be identical in both places or one of them is wrong.
+
+Measured end to end on the seeded demo: a $50 note against Fenwick Row's $20 remainder posted
+`Dr 1200 Undeposited Funds $20.00 / Cr 1100 Accounts Receivable $20.00` and nothing else — the $30
+appears in no entry — and Phase 31's `controlAccounts` still agrees on both sides afterwards.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -1447,6 +1483,7 @@ Coverage matches what spec §21 asks for:
 | `tests/appointments.test.ts` | The split against a pure core: two halves that **always add to the price** across a sweep of awkward prices and rates, the fraction of a penny named and attributed, a discounted service split on **what was charged rather than what was listed**, a nonsense rate clamped as the typo it is, service and retail split at their own rates, and a card that can pay **neither more than it holds nor more than the bill**; a practitioner refused a second place at the same time, **back-to-back slots allowed because the range is half-open**, two practitioners allowed the same hour, **a cancelled slot freed to sell again**, two receptionists racing for one slot and exactly one winning, an appointment that ends before it starts refused, the module gate, the journal permission, and one salon's diary out of another's; **a booking posting nothing at all** while the forward book is still counted, the whole fee booked as revenue with the share as a cost and **never netted**, retail through its own account at its own rate, completing twice posting once, **the rate that was agreed surviving a later rise**, a free visit completed without inventing an entry, **a no-show told from a cancellation** with neither posting, a no-show refused completion and a delivered visit refused un-delivery; and a sold card **on the balance sheet with revenue still at zero**, a redemption earning nothing a second time so one £65 haircut is £65 of income, **no change given in cash**, a card refused a second spend on the same visit, a card refused against a visit that has not happened, a duplicate card code refused, the cards **agreeing with account 2590** and a hand-written entry against it caught, what each practitioner is owed before and after payday, **the diary kept out of revenue**, and one delivered visit as one balanced five-line entry |
 | `tests/vehicles.test.ts` | The ceiling against a pure core: **a tolerance applied to what was authorised and not to the quote**, so it does not grow with the overspend; the headroom and the overage as separate sentences; **the additional amount asked for rather than the new total**, so the allowance cannot compound; a ceiling rounded down; a nonsense tolerance clamped; and nothing authorised meaning nothing may be billed. An odometer accepted on its first reading whatever it says, the distance reported, **a car that has not moved told from one that has**, a reading below the last refused, the write refused without somebody asking for it, and a replaced instrument cluster recorded with an audit event when they do. **The history kept when the car changes hands**, a duplicate VIN refused, and one garage's cars off another's ramp. **An estimate nobody agreed to refused billing** with nothing posted, work priced past the authority but only the bill refused, **billing allowed once the customer says yes to the rest**, a tolerance that is not an open cheque, **every approval kept as its own row with who and how**, an approval withdrawn by a further row rather than by editing history, a withdrawal refused below zero, an over-authority order flagged on the board **without alarming about an estimate that has no authority yet**, an empty order refused, a cancelled order refused both more work and a bill, one bill however many times the button is pressed, the module gate and the journal permission. And **the bill split three ways with the shelf relieved for the parts** at what they actually cost, **the sublet's cost left to the supplier's bill** while its margin stays reportable, the shop's mix counting only what was billed, one balanced entry per order, **a part the shelf could not supply billed with the shortfall named**, a part line with no part refused, the odometer out recorded, and **a car leaving with fewer miles than it arrived refusing the whole completion** |
 | `tests/control-accounts.test.ts` | **What the balance sheet says is owed, against the documents behind it** — the check that would have caught Phases 29 and 30 on their first day. An empty company agreeing; a delivered visit agreeing **and naming who owes it**, with the aging report able to see it too; a billed repair order agreeing against its keeper; **a walk-in billed to one house account** however many of them there are, rather than to nobody; **a hand-written journal entry against 1100 caught** with the difference named, because that is the one thing that genuinely breaks the agreement; payables checked the same way **without blaming receivables for one fault**; one company's control accounts out of another's; and **a gift card settling the invoice and not just the ledger**, so the two sides still agree at £15 after a £50 card is spent on a £65 visit |
+| `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
@@ -2502,6 +2539,26 @@ charity — neither has a work in process account.*
 294. **Open the Vehicles tab and press History on YK21 ZRT.** Both orders, with the odometer at each
      visit. The history is keyed on the car, not the keeper: sell it tomorrow and the record stays
      with the vehicle, which is what makes it worth anything to the next owner.
+295. **Still on the ramp, look at RO-1001: *billed · $365.00 owing*, with a "Take $365.00" button.**
+     Phase 31 made it a real invoice; this is the till. Press it, choose **Card**, leave the amount,
+     and take it. *"$365.00 taken. INV-1001 settled."* The row now reads *billed · paid*.
+296. **Sign back in as `delphine@fenwickrow.test` and open Appointments.** Three delivered visits
+     show what is owed, and the gift-card one already reads *paid* — because Phase 31 made
+     redemption settle the invoice rather than only the ledger.
+297. **Press "Take $80.00" on Rae Lindqvist's visit and type 100.00.** Before anything is submitted:
+     *"$80.00 taken · **$20.00 change**"*. The number is in front of the person counting notes, at
+     the moment they are counting them.
+298. **Now switch the same $100.00 to Card.** *"That is $20.00 more than is owed, and change cannot
+     be given on a card. Take $80.00 instead."* The button greys out. Somebody typing $100 for an
+     $80 card sale has mis-keyed, and the software says so before the card is charged.
+299. **Switch back to Cash and take it.** *"$80.00 taken. $20.00 change. INV-1003 settled."*
+300. **Open Accounting → Journal and find the entry.** `Dr 1200 Undeposited Funds $80.00 /
+     Cr 1100 Accounts Receivable $80.00`, and **that is the whole entry**. The $20 of change is in
+     no journal, on no account, in no report — it is the same note travelling back across the
+     counter, and it was never a transaction.
+301. **Note where it landed: Undeposited Funds, not the bank.** So did the card in step 295. A note
+     in a drawer and a card batch not yet settled are both money at the counter; Phase 12's deposit
+     slip is what moves either of them to a bank account, when somebody actually walks to the bank.
 
 ## Project layout
 
@@ -2585,6 +2642,7 @@ src/
     pos/                  A day's takings as one entry: gross, fees, tips, and the till count
     appointments/         The diary, the practitioner split, and gift cards as a liability
     vehicles/             Customer vehicles, repair orders, and the authorisation ceiling
+    counter/              Settling a bill at the desk: what the tenders cover, and the change
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2932,12 +2990,19 @@ Gaps within the phases already built:
 - **No gift card expiry or breakage.** Recognising revenue on cards nobody will ever use needs a
   judgement about how many never come back, and a wrong one books revenue that has to be given back.
   Cards sit on 2590 indefinitely, and nothing reports how old they are.
-- **Nothing takes money at the counter in one gesture.** Phase 31 made service documents raise real
-  invoices, so Phase 2's `recordPayment` can settle them — that was the point — but a one-press
-  "paid, cash" on the appointment and repair-order screens is not built. The gap is closed at the
-  ledger, not yet at the till.
+- **There is no cash drawer, shift or Z-reading.** Phase 32 settles a named invoice at the counter;
+  a till that is floated, counted, closed and signed off by a named person is Phase 28's
+  `pos_import` shape and a different piece of work. The change figure is shown and deliberately
+  never posted, so a drawer counted against the ledger will show $50 in and $30 out where the ledger
+  says $20 — correct, and a thing to know before reconciling one.
+- **Split tender is in the core but not on the screen.** `takePayment` and `tenderFor` handle
+  several tenders on one bill and the tests cover it; the on-screen control takes one at a time.
+  Pressing it twice does the same thing, which is why it did not earn a second form.
 - **`controlAccounts` is a report somebody opens, not a nightly check.** Phase 24's health surface
-  would be the place, and Phase 31 does not put it there.
+  would be the place, and neither Phase 31 nor Phase 32 puts it there — though there is now a second
+  way for a receivable to move, which makes the omission cost more.
+- **Card fees are not modelled.** A card batch settles net of the acquirer's cut, so Undeposited
+  Funds cannot simply be swept to the bank at face value once card takings are in it.
 - **Opening balances imported through Phase 17 post to AR directly**, so they will show as a
   control-account difference until they are represented as invoices.
 - **No parts markup rule and no clocked labour.** Every line is priced by hand: there is no matrix

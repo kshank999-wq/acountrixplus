@@ -2,6 +2,7 @@ import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   customers,
+  invoices,
   repairOrderAuthorisations,
   repairOrderLines,
   repairOrders,
@@ -164,6 +165,10 @@ export type OrderSummary = {
   ceilingCents: number
   overByCents: number
   withinAuthority: boolean
+  /** The bill raised when it was completed (Phase 31). */
+  invoiceId: string | null
+  /** What the customer still owes on it (Phase 32). */
+  outstandingCents: number
 }
 
 /** The shop's open work, with anything over its authority flagged. */
@@ -180,12 +185,15 @@ export async function openOrders(ctx: ActorContext): Promise<OrderSummary[]> {
       openedOn: repairOrders.openedOn,
       authorisedCents: repairOrders.authorisedCents,
       toleranceBp: repairOrders.toleranceBp,
+      invoiceId: repairOrders.invoiceId,
+      outstandingCents: invoices.balanceCents,
       totalCents: sql<string>`coalesce(sum(round(${repairOrderLines.quantityMilli} * ${repairOrderLines.unitPriceCents} / 1000.0)), 0)`,
     })
     .from(repairOrders)
     .innerJoin(vehicles, eq(vehicles.id, repairOrders.vehicleId))
     .leftJoin(customers, eq(customers.id, repairOrders.customerId))
     .leftJoin(repairOrderLines, eq(repairOrderLines.repairOrderId, repairOrders.id))
+    .leftJoin(invoices, eq(invoices.id, repairOrders.invoiceId))
     .where(scoped(ctx, repairOrders))
     .groupBy(
       repairOrders.id,
@@ -196,6 +204,8 @@ export async function openOrders(ctx: ActorContext): Promise<OrderSummary[]> {
       repairOrders.openedOn,
       repairOrders.authorisedCents,
       repairOrders.toleranceBp,
+      repairOrders.invoiceId,
+      invoices.balanceCents,
     )
     .orderBy(desc(repairOrders.openedOn), asc(repairOrders.number))
     .limit(200)
@@ -219,6 +229,8 @@ export async function openOrders(ctx: ActorContext): Promise<OrderSummary[]> {
       authorisedCents: row.authorisedCents,
       ceilingCents: authority.ceilingCents,
       overByCents: authority.overByCents,
+      invoiceId: row.invoiceId,
+      outstandingCents: row.outstandingCents ?? 0,
       // An estimate nobody has agreed to is not "over authority" — it has no
       // authority yet, which is a different and unalarming state.
       withinAuthority: row.status === 'estimate' ? true : authority.withinAuthority,
