@@ -41,6 +41,7 @@ export const TOPIC_LABELS: Record<NotificationTopic, string> = {
   remittance_due: 'Payroll or sales tax owed to an agency',
   follow_up_due: 'A follow-up you promised is late',
   background_failures: 'Scheduled work failed, or a letter did not arrive',
+  books_disagree: 'The books stopped agreeing with themselves',
 }
 
 export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
@@ -56,6 +57,8 @@ export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
     'Once a day, with a count rather than one message per task. A promise made on a call is chased without anybody opening a page.',
   background_failures:
     'A daily digest of scheduled work that gave up and letters that bounced. Silence means there is nothing to see, which is the point.',
+  books_disagree:
+    'When a nightly reconciliation stops holding — the stock against the balance sheet, the deposits against what is owed to tenants, the invoices against the control account. Sent the night a difference appears, and not again while it is still there.',
 }
 
 /** How many transactions have to be waiting before a nudge is worth sending. */

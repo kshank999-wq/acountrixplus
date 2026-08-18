@@ -81,6 +81,16 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
     hourUtc: 7,
     why: 'Once a day, and silent when there is nothing wrong — which is what makes it worth reading.',
   },
+  // --- Phase 33 -------------------------------------------------------------
+  {
+    kind: 'books.integrity_check',
+    cadence: 'daily',
+    hourUtc: 2,
+    why:
+      'Every reconciliation the books have, run by the machine rather than only when somebody ' +
+      'opens a page. At 2am, after the recurring entries have posted, so the day it checks is ' +
+      'complete. Tells somebody only about what broke since last night.',
+  },
 ]
 
 /** Housekeeping that spans every tenant. */
@@ -134,6 +144,64 @@ export async function installGlobalSchedules(): Promise<number> {
   }
 
   return installed
+}
+
+/**
+ * Gives every company the schedules it is missing (Phase 33).
+ *
+ * ## The defect this closes
+ *
+ * The comment at the top of this file has said since Phase 10 that schedules
+ * are *"installed on demand rather than at registration, because a company
+ * that signed up before this phase existed should get them too"*. Nothing
+ * demanded them. `installCompanySchedules` was called from `src/db/seed.ts`
+ * and from nowhere else, and `registerCompany` never touched schedules at all.
+ *
+ * The consequence: **no company created through the sign-up form ever had a
+ * single schedule**, so no bank sync, no campaign send, no rent run, no
+ * remittance reminder, no failure digest and no nightly books check has ever
+ * fired for one. Every scheduled feature since Phase 10 worked in the demo and
+ * in tests, and silently did nothing in production — the exact shape of
+ * failure Phase 33 exists to catch, in Phase 33's own supporting machinery.
+ *
+ * Found while checking whether "the books are checked nightly" was true.
+ *
+ * ## Why here rather than at registration
+ *
+ * Registration alone would leave every existing company without them, and a
+ * backfill migration that installs schedules is a migration that starts
+ * sending email. Topping up from the worker's tick fixes both at once and
+ * needs no bootstrap: it is two reads, writes only what is missing, and is
+ * safe to run every tick because `upsertSchedule` is keyed on (company, kind).
+ */
+export async function ensureSchedules(): Promise<{ installed: number }> {
+  const { listSchedules } = await import('./schedules')
+  const { db } = await import('@/db')
+  const { companies } = await import('@/db/schema')
+
+  const [rows, existing] = await Promise.all([
+    db.select({ id: companies.id }).from(companies),
+    listSchedules(),
+  ])
+
+  const have = new Set(existing.map((row) => `${row.companyId ?? ''}:${row.kind}`))
+  let installed = 0
+
+  for (const company of rows) {
+    for (const schedule of COMPANY_SCHEDULES) {
+      if (have.has(`${company.id}:${schedule.kind}`)) continue
+      await upsertSchedule({ ...schedule, companyId: company.id })
+      installed++
+    }
+  }
+
+  for (const schedule of GLOBAL_SCHEDULES) {
+    if (have.has(`:${schedule.kind}`)) continue
+    await upsertSchedule({ ...schedule, companyId: null })
+    installed++
+  }
+
+  return { installed }
 }
 
 /** Why each schedule exists, for the operations page. */

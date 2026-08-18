@@ -135,6 +135,11 @@ export const notificationTopicEnum = pgEnum('notification_topic', [
   // switching off the noisy one also switching off the one that matters.
   'follow_up_due',
   'background_failures',
+  // Added in Phase 33, on the same reasoning that added the two above: the
+  // books disagreeing with themselves is not a background failure. One is
+  // "the machinery stopped", the other is "the numbers are wrong", and
+  // somebody who silences a noisy queue must not thereby silence the ledger.
+  'books_disagree',
 ])
 
 /**

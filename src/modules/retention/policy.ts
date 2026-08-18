@@ -39,6 +39,7 @@ export type RetentionKind =
   | 'transactional_messages'
   | 'domain_events'
   | 'orphaned_blobs'
+  | 'integrity_runs'
 
 export type RetentionPolicy = {
   kind: RetentionKind
@@ -155,6 +156,21 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
     why:
       'A crash between committing the row work and freeing the bytes leaves a blob no ' +
       'document references (Phase 20). Age is not the question; reachability is.',
+  },
+  {
+    kind: 'integrity_runs',
+    table: 'integrity_runs',
+    label: 'What the nightly books check found',
+    // A year, because the question this history exists to answer is "when did
+    // this start", and a drift is often first noticed at a year end looking
+    // back at something that happened in the spring. Ten rows a night is
+    // nothing; losing the March run in October is the expensive outcome.
+    days: 365,
+    publicallyWritten: false,
+    why:
+      'A year of nightly results (Phase 33), kept so a difference discovered at a year end can ' +
+      'be dated. Findings hang off the run and go with it — one policy, one table, and the ' +
+      'foreign key does the rest.',
   },
 ] as const
 

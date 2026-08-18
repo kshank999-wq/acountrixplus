@@ -11,6 +11,8 @@ import { workerStatuses } from '@/modules/worker/runner'
 import { listDraftEntries } from '@/modules/ledger/journal'
 import { health } from '@/modules/worker/health'
 import { retentionReport } from '@/modules/retention/sweep'
+import { latestRun } from '@/modules/integrity/service'
+import { checkByKey } from '@/modules/integrity/register'
 import '@/modules/worker/handlers'
 import { OperationsBoard } from './board'
 
@@ -52,8 +54,24 @@ export default async function OperationsPage() {
   // health digest names bounced addresses, which is the same.
   const canAdminister = can(actor, 'company:manage')
 
-  const [counts, workers, jobs, schedules, events, pendingEvents, oldest, drafts, failures, retention] =
-    await Promise.all([
+  // The books check reads every reconciliation in the application, which is a
+  // financial question rather than an administrative one — so it is gated on
+  // reading the accounts rather than on managing the company.
+  const canReadBooks = can(actor, 'reports:financial')
+
+  const [
+    counts,
+    workers,
+    jobs,
+    schedules,
+    events,
+    pendingEvents,
+    oldest,
+    drafts,
+    failures,
+    retention,
+    integrity,
+  ] = await Promise.all([
       queueCounts(actor.companyId),
       workerStatuses(),
       listJobs({ companyId: actor.companyId, limit: 60 }),
@@ -66,6 +84,7 @@ export default async function OperationsPage() {
         ? health(actor, { since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) })
         : Promise.resolve(null),
       canAdminister ? retentionReport() : Promise.resolve(null),
+      canReadBooks ? latestRun(actor) : Promise.resolve(null),
     ])
 
   return (
@@ -138,6 +157,26 @@ export default async function OperationsPage() {
           }
         }
         retention={retention}
+        integrity={
+          integrity && {
+            asOf: integrity.asOf,
+            startedAt: integrity.startedAt.toISOString(),
+            checksRun: integrity.checksRun,
+            checksSkipped: integrity.checksSkipped,
+            faults: integrity.faults,
+            errors: integrity.errors,
+            // `compares` and `meaning` live in the register rather than on the
+            // stored row: they are the current explanation of a check, and a
+            // finding from six months ago should be read with today's words
+            // for what the check does.
+            findings: integrity.findings.map((finding) => ({
+              ...finding,
+              compares: checkByKey(finding.key)?.compares ?? '',
+              meaning: checkByKey(finding.key)?.meaning ?? '',
+            })),
+          }
+        }
+        canSeeIntegrity={canReadBooks}
         drafts={drafts.map((entry) => ({
           id: entry.id,
           entryNumber: entry.entryNumber,

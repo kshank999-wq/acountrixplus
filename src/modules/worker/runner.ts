@@ -7,6 +7,7 @@ import { claimJobs, completeJob, failJob, type ClaimedJob } from './queue'
 import { getHandler, UnknownJobKindError, type JobContext } from './registry'
 import { relayPendingEvents } from './outbox'
 import { runDueSchedules } from './schedules'
+import { ensureSchedules } from './defaults'
 import { systemActor } from './system-actor'
 import './handlers'
 
@@ -31,6 +32,8 @@ import './handlers'
  */
 
 export type TickResult = {
+  /** Schedules that did not exist yet and now do. Zero on a steady state. */
+  schedulesInstalled: number
   eventsRelayed: number
   schedulesFired: number
   jobsRun: number
@@ -61,6 +64,7 @@ export async function runOnce(options: RunnerOptions = {}): Promise<TickResult> 
   const batchSize = options.batchSize ?? 10
 
   const result: TickResult = {
+    schedulesInstalled: 0,
     eventsRelayed: 0,
     schedulesFired: 0,
     jobsRun: 0,
@@ -68,6 +72,13 @@ export async function runOnce(options: RunnerOptions = {}): Promise<TickResult> 
     jobsFailed: 0,
     jobsDead: 0,
   }
+
+  // Before anything is due, make sure it exists. A company created through the
+  // sign-up form got no schedules at all until Phase 33 — see `ensureSchedules`
+  // — so this runs first, writes only what is missing, and costs two reads on a
+  // steady state.
+  const topUp = await ensureSchedules()
+  result.schedulesInstalled = topUp.installed
 
   const relayed = await relayPendingEvents()
   result.eventsRelayed = relayed.relayed

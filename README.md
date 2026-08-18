@@ -54,7 +54,8 @@ from the
 [ADR 0029](docs/adr/0029-a-booking-is-a-promise-and-part-of-the-money-was-never-yours.md), and
 [ADR 0030](docs/adr/0030-nobody-bills-past-what-was-authorised.md), and
 [ADR 0031](docs/adr/0031-what-is-owed-is-owed-by-somebody.md), and
-[ADR 0032](docs/adr/0032-change-is-not-a-transaction.md).
+[ADR 0032](docs/adr/0032-change-is-not-a-transaction.md), and
+[ADR 0033](docs/adr/0033-a-check-nobody-runs-is-not-a-check.md).
 
 > **A note on phase numbering.** Spec §20's Phase 8 is *Payroll/Tax/Advanced
 > Integrations*; the mobile app is not a phase of its own there, and §18 asks
@@ -1368,6 +1369,57 @@ Measured end to end on the seeded demo: a $50 note against Fenwick Row's $20 rem
 `Dr 1200 Undeposited Funds $20.00 / Cr 1100 Accounts Receivable $20.00` and nothing else — the $30
 appears in no entry — and Phase 31's `controlAccounts` still agrees on both sides afterwards.
 
+### A check nobody runs is not a check (Phase 33)
+
+Eleven phases each wrote a reconciliation — the stock lots against the Inventory account, the asset
+register against 1500, the deposits against 2580, the funds, work in process, the tips, the gift
+cards, the authorisation cache, the control accounts. Each was written carefully, tested, and put on
+a page.
+
+Measured before this phase: **nine reconciliation functions across nine modules, and not one of the
+seventeen scheduled job kinds ran any of them.** Every check in the books existed only in the moment
+somebody opened the page that called it — which is the exact inversion of what a reconciliation is
+for. It is meant to catch a drift *nobody is looking for*.
+
+- **Ten checks, one register, run nightly.** `src/modules/integrity/register.ts` names each one: its
+  key, what two things it compares, which module has to be on, and what a difference *means*. A
+  check that exists only as a function called from one page is invisible to anything that wants to
+  run all of them, and all ten were invisible in exactly that way.
+- **Three of the ten are positions, not faults**, and getting this wrong would have made the whole
+  thing worthless. What practitioners have earned differs from account 2320 the moment payroll draws
+  on it; so do tips; and a charity really does receive unrestricted money with no appeal attached.
+  A register that alarmed on those would fire every payday — and an alarm that fires on ordinary
+  trading is switched off before the night it matters.
+- **Three outcomes, kept apart.** Ran and agrees; ran and disagrees; *did not run* — either skipped
+  because the module is off, or errored because the check itself threw. A check that throws and is
+  swallowed looks exactly like one that passed, so an error is its own finding: **"these disagree"
+  and "nobody knows whether these agree" are different problems.** And a skip is not a pass — the
+  page says *"6 run, 5 skipped because their module is switched off — which is not the same as
+  passing."*
+- **One drift is one alarm.** A stock difference from a bad import in March is still there in April,
+  so a nightly digest of everything currently wrong would stop being read by about the time a second
+  drift appeared. Only what broke *since last night* reaches a phone.
+- **The run is written down even when nothing is wrong**, because a company with no findings and a
+  company whose scheduled job stopped firing three weeks ago are otherwise indistinguishable — this
+  phase's own argument, one level up. The page has a distinct *"the books have never been checked"*
+  state and says so.
+
+Verified end to end on the seeded demo. A hand-written entry against 1100 was caught the same night:
+`faults: 1, newlyBroken: 1`. The two runs after it reported `faults: 1, newlyBroken: 0` — still on
+the page, no second notification. And the salon's page reads **"1 check has stopped agreeing"** while
+displaying two differences, because only one of them is a fault.
+
+**And the bug it found on the way, which was worse than the one it set out to fix.** Checking whether
+"the books are checked nightly" was actually *true* turned up that the schedule was never installed.
+`installCompanySchedules` was called from `src/db/seed.ts` and nowhere else, and `registerCompany`
+never touched schedules — so **no company created through the sign-up form had a single schedule.**
+No bank sync, no campaign send, no rent run, no remittance reminder, no follow-up chase, no failure
+digest: six phases of scheduled work that ran in the demo, passed their tests, and did nothing
+whatever in production. `ensureSchedules()` now runs at the top of every worker tick, reading what
+exists and writing only what is missing. That is the same failure this phase exists to catch —
+work written, tested, and silently never performed — found inside the machinery that performs the
+checks.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -1483,6 +1535,7 @@ Coverage matches what spec §21 asks for:
 | `tests/appointments.test.ts` | The split against a pure core: two halves that **always add to the price** across a sweep of awkward prices and rates, the fraction of a penny named and attributed, a discounted service split on **what was charged rather than what was listed**, a nonsense rate clamped as the typo it is, service and retail split at their own rates, and a card that can pay **neither more than it holds nor more than the bill**; a practitioner refused a second place at the same time, **back-to-back slots allowed because the range is half-open**, two practitioners allowed the same hour, **a cancelled slot freed to sell again**, two receptionists racing for one slot and exactly one winning, an appointment that ends before it starts refused, the module gate, the journal permission, and one salon's diary out of another's; **a booking posting nothing at all** while the forward book is still counted, the whole fee booked as revenue with the share as a cost and **never netted**, retail through its own account at its own rate, completing twice posting once, **the rate that was agreed surviving a later rise**, a free visit completed without inventing an entry, **a no-show told from a cancellation** with neither posting, a no-show refused completion and a delivered visit refused un-delivery; and a sold card **on the balance sheet with revenue still at zero**, a redemption earning nothing a second time so one £65 haircut is £65 of income, **no change given in cash**, a card refused a second spend on the same visit, a card refused against a visit that has not happened, a duplicate card code refused, the cards **agreeing with account 2590** and a hand-written entry against it caught, what each practitioner is owed before and after payday, **the diary kept out of revenue**, and one delivered visit as one balanced five-line entry |
 | `tests/vehicles.test.ts` | The ceiling against a pure core: **a tolerance applied to what was authorised and not to the quote**, so it does not grow with the overspend; the headroom and the overage as separate sentences; **the additional amount asked for rather than the new total**, so the allowance cannot compound; a ceiling rounded down; a nonsense tolerance clamped; and nothing authorised meaning nothing may be billed. An odometer accepted on its first reading whatever it says, the distance reported, **a car that has not moved told from one that has**, a reading below the last refused, the write refused without somebody asking for it, and a replaced instrument cluster recorded with an audit event when they do. **The history kept when the car changes hands**, a duplicate VIN refused, and one garage's cars off another's ramp. **An estimate nobody agreed to refused billing** with nothing posted, work priced past the authority but only the bill refused, **billing allowed once the customer says yes to the rest**, a tolerance that is not an open cheque, **every approval kept as its own row with who and how**, an approval withdrawn by a further row rather than by editing history, a withdrawal refused below zero, an over-authority order flagged on the board **without alarming about an estimate that has no authority yet**, an empty order refused, a cancelled order refused both more work and a bill, one bill however many times the button is pressed, the module gate and the journal permission. And **the bill split three ways with the shelf relieved for the parts** at what they actually cost, **the sublet's cost left to the supplier's bill** while its margin stays reportable, the shop's mix counting only what was billed, one balanced entry per order, **a part the shelf could not supply billed with the shortfall named**, a part line with no part refused, the odometer out recorded, and **a car leaving with fewer miles than it arrived refusing the whole completion** |
 | `tests/control-accounts.test.ts` | **What the balance sheet says is owed, against the documents behind it** — the check that would have caught Phases 29 and 30 on their first day. An empty company agreeing; a delivered visit agreeing **and naming who owes it**, with the aging report able to see it too; a billed repair order agreeing against its keeper; **a walk-in billed to one house account** however many of them there are, rather than to nobody; **a hand-written journal entry against 1100 caught** with the difference named, because that is the one thing that genuinely breaks the agreement; payables checked the same way **without blaming receivables for one fault**; one company's control accounts out of another's; and **a gift card settling the invoice and not just the ledger**, so the two sides still agree at £15 after a £50 card is spent on a £65 visit |
+| `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
@@ -2559,6 +2612,30 @@ charity — neither has a work in process account.*
 301. **Note where it landed: Undeposited Funds, not the bank.** So did the card in step 295. A note
      in a drawer and a card batch not yet settled are both money at the counter; Phase 12's deposit
      slip is what moves either of them to a bank account, when somebody actually walks to the bank.
+302. **Open Settings → Background work.** Near the top: *"The books have never been checked. A
+     nightly job runs every reconciliation this application has. Nothing has run one yet — which is
+     not the same as nothing being wrong."* That state exists because those two look identical
+     otherwise, and only one of them is good news.
+303. **Under "Run something now", press "Check that the books still agree with themselves".** With
+     `npm run worker` going it lands within a few seconds. Reload.
+304. **Read the header: *the books agree with themselves*, and the line under it.** *"6 run, 5
+     skipped because their module is switched off — which is not the same as passing."* A module
+     switched off by accident must not read as a module in good order.
+305. **Look at the second row: *What practitioners have earned, against what is still owed them*,
+     chipped "a position, not a fault".** It may well show a difference — money leaves account 2320
+     through payroll, which is payday rather than a defect. Three of the ten checks are like this,
+     and a register that alarmed on them would fire every payday until somebody switched the alarm
+     off.
+306. **Now break something.** In psql, post an entry straight at `1100 Accounts Receivable` against
+     any revenue account — the one thing that genuinely breaks a control account. Press the button
+     again and reload.
+307. **The header changes to *1 check has stopped agreeing*.** The receivables row reads **$250.00
+     apart** in red, with what a difference there means and the name of who owes it. The payouts row
+     is still showing its own difference and is still not counted, which is the whole distinction.
+308. **Press it a third time and reload.** Still *1 check has stopped agreeing*, and no second
+     notification was sent — check the job's result in "Recent jobs": `faults: 1, newlyBroken: 0`.
+     A drift is persistent by nature, and a digest that reported it every night would stop being
+     read by about the time a second one appeared.
 
 ## Project layout
 
@@ -2643,6 +2720,7 @@ src/
     appointments/         The diary, the practitioner split, and gift cards as a liability
     vehicles/             Customer vehicles, repair orders, and the authorisation ceiling
     counter/              Settling a bill at the desk: what the tenders cover, and the change
+    integrity/            Every reconciliation as named data, and the nightly run of all of them
     notify/               Transactional mail, single-use tokens, reset, invitations
     evidence/             Object store, attachments, the subject registry, accountant notes
     pdf/                  A deterministic PDF writer, the layout pass, and the snapshot service
@@ -2998,9 +3076,20 @@ Gaps within the phases already built:
 - **Split tender is in the core but not on the screen.** `takePayment` and `tenderFor` handle
   several tenders on one bill and the tests cover it; the on-screen control takes one at a time.
   Pressing it twice does the same thing, which is why it did not earn a second form.
-- **`controlAccounts` is a report somebody opens, not a nightly check.** Phase 24's health surface
-  would be the place, and neither Phase 31 nor Phase 32 puts it there — though there is now a second
-  way for a receivable to move, which makes the omission cost more.
+- **Nothing enforces that a new reconciliation joins the register.** A twelfth module could add a
+  check and forget, and Phase 33 would not notice — the same class of omission it exists to fix, one
+  level up. The register's own doc comment is the record; a lint rule would be better.
+- **Nothing is repaired automatically, and deliberately.** The nightly check says the books
+  disagree; it does not decide which side is right. A tool that journalled a plug to make a control
+  account agree would destroy the evidence of what actually went wrong.
+- **`checkHistory` has no screen.** It answers "when did this start", which is the first question
+  after being told two things disagree, and no page calls it yet.
+- **The checks only ever run as at today.** A year-end review cannot ask whether the books agreed at
+  the period end, only whether they agree now — and per Phase 31, a historic `asOf` is approximate
+  anyway because invoices keep no record of what they were owed on a past date.
+- **The bank is not in the register.** It is the one comparison a business does daily, and it is a
+  human matching exercise against a statement rather than a two-sided sum, so Phase 2's
+  reconciliation workflow stays what does it.
 - **Card fees are not modelled.** A card batch settles net of the acquirer's cut, so Undeposited
   Funds cannot simply be swept to the bank at face value once card takings are in it.
 - **Opening balances imported through Phase 17 post to AR directly**, so they will show as a

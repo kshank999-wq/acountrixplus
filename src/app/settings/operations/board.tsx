@@ -11,6 +11,7 @@ import {
   setScheduleActiveAction,
   tickWorkerAction,
 } from '@/app/actions/operations'
+import { formatCents } from '@/lib/money'
 
 type Counts = Record<string, number>
 
@@ -84,6 +85,28 @@ type Failures = {
   }>
 } | null
 
+type Integrity = {
+  asOf: string
+  startedAt: string
+  checksRun: number
+  checksSkipped: number
+  faults: number
+  errors: number
+  findings: Array<{
+    key: string
+    label: string
+    severity: string
+    agrees: boolean
+    leftCents: number
+    rightCents: number
+    differenceCents: number
+    detail: string | null
+    error: string | null
+    meaning: string
+    compares: string
+  }>
+} | null
+
 type Retention = Array<{
   kind: string
   label: string
@@ -114,6 +137,8 @@ export function OperationsBoard({
   handlers,
   failures,
   retention,
+  integrity,
+  canSeeIntegrity,
   canManage,
   canPostEntries,
 }: {
@@ -128,6 +153,16 @@ export function OperationsBoard({
   handlers: Handler[]
   failures: Failures
   retention: Retention
+  integrity: Integrity
+  /**
+   * Whether this reader may see the books check at all.
+   *
+   * Separate from `integrity` being null, because a bookkeeper has
+   * `operations:view` and not `reports:financial` — and telling them the books
+   * have never been checked when they simply cannot see the answer would be a
+   * false statement, not a missing one.
+   */
+  canSeeIntegrity: boolean
   canManage: boolean
   canPostEntries: boolean
 }) {
@@ -257,6 +292,8 @@ export function OperationsBoard({
           />
         </Card>
       )}
+
+      {canSeeIntegrity && <IntegritySection integrity={integrity} />}
 
       {failing.length > 0 && (
         <Card
@@ -626,4 +663,110 @@ function Card({
 
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="px-4 py-8 text-center text-sm text-muted">{children}</p>
+}
+
+/**
+ * What the nightly books check found (Phase 33).
+ *
+ * The three outcomes are kept visually apart because they are three different
+ * problems: **these disagree**, **nobody knows whether these agree**, and
+ * **this was never asked**. A page that showed a green tick for a check whose
+ * module is off, or for one that threw, would be worse than no page.
+ *
+ * "Never run" gets its own state and says so, because "no findings" and "the
+ * scheduled job stopped firing three weeks ago" look identical otherwise — and
+ * that confusion is the whole reason this phase exists.
+ */
+function IntegritySection({ integrity }: { integrity: Integrity }) {
+  if (!integrity) {
+    return (
+      <Card
+        title="The books have never been checked"
+        subtitle="A nightly job runs every reconciliation this application has. Nothing has run one yet — which is not the same as nothing being wrong."
+      >
+        <Empty>
+          Run <code className="text-xs">books.integrity_check</code> from the schedules below, or
+          wait for 2am.
+        </Empty>
+      </Card>
+    )
+  }
+
+  // Three disjoint groups, and the disjointness is load-bearing: a *position*
+  // that threw is broken (nobody knows whether it agrees) and must appear once,
+  // under that heading, not once in each list with the same React key.
+  const isBrokenRow = (row: (typeof integrity.findings)[number]) =>
+    Boolean(row.error) || (row.severity === 'fault' && !row.agrees)
+
+  const broken = integrity.findings.filter(isBrokenRow)
+  const rest = integrity.findings.filter((row) => !isBrokenRow(row))
+  const positions = rest.filter((row) => row.severity === 'position')
+  const clean = rest.filter((row) => row.severity === 'fault')
+
+  return (
+    <Card
+      title={
+        broken.length === 0
+          ? `The books agree with themselves (${clean.length} checks)`
+          : `${broken.length} ${broken.length === 1 ? 'check has' : 'checks have'} stopped agreeing`
+      }
+      subtitle={
+        `As at ${integrity.asOf}, run ${integrity.startedAt.slice(0, 16).replace('T', ' ')}. ` +
+        `${integrity.checksRun} run` +
+        (integrity.checksSkipped > 0
+          ? `, ${integrity.checksSkipped} skipped because their module is switched off — which is not the same as passing.`
+          : '.')
+      }
+    >
+      <ul className="divide-y divide-line text-sm">
+        {[...broken, ...positions, ...clean].map((row) => (
+          <li className="px-4 py-3" key={row.key}>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <p className="font-medium">
+                {row.label}
+                {row.severity === 'position' && (
+                  <span className="ml-2 chip bg-raised px-2 py-0.5 text-[11px] text-muted">
+                    a position, not a fault
+                  </span>
+                )}
+              </p>
+              <Verdict row={row} />
+            </div>
+            <p className="text-xs text-faint">{row.compares}</p>
+            {row.error ? (
+              <p className="mt-1 text-xs text-danger">
+                The check itself did not finish, so nothing was proved: {row.error}
+              </p>
+            ) : (
+              !row.agrees && <p className="mt-1 text-xs text-muted">{row.meaning}</p>
+            )}
+            {row.detail && !row.error && <p className="mt-1 text-xs text-faint">{row.detail}</p>}
+          </li>
+        ))}
+      </ul>
+    </Card>
+  )
+}
+
+function Verdict({
+  row,
+}: {
+  row: { agrees: boolean; error: string | null; severity: string; differenceCents: number }
+}) {
+  if (row.error) {
+    return <span className="text-xs text-danger">could not be checked</span>
+  }
+  if (row.agrees) {
+    return <span className="text-xs text-success">agrees</span>
+  }
+
+  const amount = formatCents(Math.abs(row.differenceCents))
+
+  // A position that differs is information; a fault that differs is an
+  // accusation. Same number, deliberately different words.
+  return row.severity === 'position' ? (
+    <span className="tnum text-xs text-muted">{amount} apart</span>
+  ) : (
+    <span className="tnum text-xs text-danger">{amount} apart</span>
+  )
 }

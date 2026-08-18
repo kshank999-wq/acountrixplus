@@ -1,0 +1,1 @@
+ALTER TYPE "public"."notification_topic" ADD VALUE 'books_disagree';

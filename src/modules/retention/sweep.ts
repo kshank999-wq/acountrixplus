@@ -5,6 +5,7 @@ import {
   campaignEvents,
   documentBlobs,
   domainEvents,
+  integrityRuns,
   leadSubmissions,
   loginAttempts,
   proposalViews,
@@ -234,6 +235,24 @@ const SWEEPS: Record<RetentionKind, Sweep> = {
         held: exec.select({ n: N }).from(documentBlobs),
       }),
     remove: (_cutoff, exec) => sweepOrphanedBlobs(exec),
+  },
+
+  integrity_runs: {
+    // Findings are deleted by the foreign key rather than by a second policy,
+    // which is why only the run table is named. One policy, one table, and the
+    // allowlist stays the whole truth about what this module can reach.
+    count: (cutoff, exec) =>
+      tally(exec, {
+        expired: exec.select({ n: N }).from(integrityRuns).where(lt(integrityRuns.startedAt, cutoff!)),
+        held: exec.select({ n: N }).from(integrityRuns),
+      }),
+    remove: async (cutoff, exec) => {
+      const removed = await exec
+        .delete(integrityRuns)
+        .where(lt(integrityRuns.startedAt, cutoff!))
+        .returning({ id: integrityRuns.id })
+      return removed.length
+    },
   },
 }
 
