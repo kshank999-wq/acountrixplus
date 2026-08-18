@@ -69,7 +69,7 @@ every stored TOTP secret undecryptable, and those users will have to re-enrol.
 | `SESSION_SECRET` | from above |
 | `ENCRYPTION_KEY` | from above |
 | `CRON_SECRET` | from above |
-| `PUBLIC_BASE_URL` | `https://your-domain` — links in transactional mail are built from it, and a reset pointing at localhost is a dead link |
+| `PUBLIC_BASE_URL` | `https://your-domain` — links in transactional mail are built from it, and a reset pointing at localhost is a dead link. If the domain is not attached yet, use the `*.vercel.app` URL for now and see step 6 |
 
 Leave `OBJECT_STORE` unset. The default keeps attachments in Postgres, which is
 what you want on a platform with no persistent disk.
@@ -83,7 +83,67 @@ build is `next build` with no special settings.
 once a day** — if you are on Hobby, either accept daily batching or move the
 schedule to an external caller (below).
 
-## 6. Check it works
+## 6. Attach your domain
+
+Two different things get called "moving a domain to Vercel", and they have
+different consequences. Decide which you want before touching anything.
+
+| | What it does | When it makes sense |
+| --- | --- | --- |
+| **Point DNS at Vercel** | The domain stays registered where it is; records send traffic to Vercel | Almost always. Reversible in minutes by changing a record back. |
+| **Transfer the registration** | Vercel becomes your registrar and bills you for it | Only if you want one less account. Locked for **60 days** afterwards by ICANN rule, and it is not reversible on a whim. |
+
+Nothing below requires a transfer. If somebody says "transfer it to Vercel" and
+means "make the site load there", the first row is what they want.
+
+### Pointing DNS at Vercel
+
+1. *Vercel → your project → Settings → Domains → Add*, and enter the domain.
+2. Vercel shows the records it wants. Add them at your current registrar
+   (Cloudflare, Namecheap, GoDaddy, wherever the domain lives today):
+
+   | Record | Host | Points at |
+   | --- | --- | --- |
+   | `A` | `@` (the bare domain) | Vercel's apex IP, as shown on the page |
+   | `CNAME` | `www` | `cname.vercel-dns.com` |
+
+   Vercel is the authority on the exact values — take them from the screen
+   rather than from here, because they have changed before.
+3. Wait for propagation. Usually minutes; the TTL on the old record is the
+   ceiling. `dig +short your-domain` from a shell tells you what the world
+   currently sees.
+4. Vercel issues the TLS certificate on its own once the records resolve. There
+   is nothing to buy or upload.
+
+**If the domain is on Cloudflare**, set the records to *DNS only* (grey cloud)
+rather than proxied, at least until the certificate is issued. An orange-cloud
+proxy in front of Vercel's own TLS is the commonest cause of a redirect loop.
+
+**Alternatively, delegate the whole domain** by pointing your registrar's
+nameservers at Vercel's. Simpler to reason about, and it moves every record —
+including your **mail** records. A domain that receives email needs its `MX` and
+`SPF`/`DKIM` records recreated on the new nameservers, and mail stops arriving
+in the gap if they are not. Prefer the two records above unless you have a
+reason.
+
+### Then update `PUBLIC_BASE_URL`
+
+This is the step people miss, and it fails quietly.
+
+`PUBLIC_BASE_URL` is what every link in outbound mail is built from — password
+resets, invitations, unsubscribe links. It is read from the environment at
+runtime, so it does **not** pick up the new domain on its own:
+
+1. *Settings → Environment Variables* → set `PUBLIC_BASE_URL` to
+   `https://your-domain` (no trailing slash — it is stripped either way).
+2. **Redeploy.** An environment change does not reach the running deployment
+   until something rebuilds.
+
+Until you do, the application keeps working perfectly and every reset link it
+sends points at the old address or at `localhost:3000`. Nothing errors; the
+links are just dead.
+
+## 7. Check it works
 
 ```bash
 # Should be 401 — the endpoint refuses without the secret rather than
