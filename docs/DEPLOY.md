@@ -34,6 +34,18 @@ miserable things to debug. `npm run db:migrate` refuses outright to run through
 
 ## 2. Apply the schema
 
+Steps 2 to 4 are one command, if you would rather not do them by hand:
+
+```bash
+npm run db:setup-production -- 'postgres://…@….pooler.supabase.com:5432/postgres'
+```
+
+It refuses port 6543, refuses a database that already holds companies, applies
+the migrations, checks the schema actually landed, and prints the finished
+environment block for step 4 — including `DATABASE_URL` with the port already
+swapped to 6543. The rest of this section is what it does, for when you want to
+do it yourself or something goes wrong.
+
 From your machine, pointing at the **session** pooler:
 
 ```bash
