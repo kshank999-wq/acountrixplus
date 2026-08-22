@@ -46,6 +46,24 @@ environment block for step 4 — including `DATABASE_URL` with the port already
 swapped to 6543. The rest of this section is what it does, for when you want to
 do it yourself or something goes wrong.
 
+### If you have no machine to run it from
+
+Both of the above need the repository, Node, and a network route to the
+database. From a browser only, flatten the migrations into one file and paste
+it into Supabase's SQL editor instead:
+
+```bash
+npm run db:bundle          # writes drizzle/bundle.sql
+```
+
+It wraps all 38 migrations in a single transaction, so a failure anywhere
+leaves the database untouched rather than half built, and it refuses a database
+that already has the schema. It also writes Drizzle's own bookkeeping rows —
+without those, the next `npm run db:migrate` would see an empty
+`drizzle.__drizzle_migrations` and try to create every table again.
+
+### By hand
+
 From your machine, pointing at the **session** pooler:
 
 ```bash
