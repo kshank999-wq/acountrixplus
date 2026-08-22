@@ -94,7 +94,43 @@ VALUES ('${hash}', ${entry.when});
 `)
 }
 
+// Row Level Security, for the sake of a door this application never uses.
+//
+// Supabase publishes a PostgREST API over the `public` schema and grants the
+// `anon` and `authenticated` roles access to tables created there. This
+// application never touches that API — it connects as the table owner over a
+// normal Postgres connection and enforces tenant isolation in
+// `modules/tenancy` — but the door exists whether or not we walk through it,
+// and behind it is every company's ledger.
+//
+// Enabling RLS with no policies denies those roles everything. It does not
+// affect the application: the owner bypasses RLS unless FORCE ROW LEVEL
+// SECURITY is set, which it deliberately is not.
+//
+// Generated as a loop rather than 166 literal statements so a table added by a
+// future migration cannot be forgotten here.
 parts.push(`
+-- ────────────────────────────────────────────────────────────────────────
+-- Row Level Security
+-- ────────────────────────────────────────────────────────────────────────
+--
+-- Closes Supabase's anon/authenticated API against every table. This
+-- application does not use that API and connects as the table owner, which
+-- bypasses RLS — so this changes nothing for it, and everything for anyone
+-- holding the project's public anon key.
+
+DO $rls$
+DECLARE
+  target record;
+BEGIN
+  FOR target IN
+    SELECT tablename FROM pg_tables WHERE schemaname = 'public'
+  LOOP
+    EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', target.tablename);
+  END LOOP;
+END
+$rls$;
+
 COMMIT;
 `)
 
