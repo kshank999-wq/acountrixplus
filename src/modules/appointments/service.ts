@@ -17,6 +17,7 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { createInvoice } from '@/modules/receivables/service'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { redeemFor, splitFor } from './split'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Appointments, practitioner splits and gift cards (spec §5).
@@ -25,7 +26,7 @@ import { redeemFor, splitFor } from './split'
  * double-booking is refused by Postgres rather than by a check in here.
  */
 
-export class AppointmentError extends Error {
+export class AppointmentError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)
@@ -34,7 +35,7 @@ export class AppointmentError extends Error {
 }
 
 /** Raised when the diary already has that practitioner at that time. */
-export class DoubleBookedError extends Error {
+export class DoubleBookedError extends DomainError {
   readonly status = 409
   constructor(message: string) {
     super(message)

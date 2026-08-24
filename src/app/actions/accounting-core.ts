@@ -23,6 +23,7 @@ import {
 } from '@/modules/banking/deposits'
 import { applyVendorCredit, createVendorCredit } from '@/modules/receivables/vendor-credits'
 import { formatCents } from '@/lib/money'
+import { messageFor } from '@/modules/errors'
 
 /**
  * Server actions for the accounting core (Phase 11).
@@ -47,7 +48,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     for (const path of PATHS) revalidatePath(path)
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 
@@ -241,7 +242,7 @@ export async function closeFiscalYearAction(closingDate: string): Promise<Action
     // A blocked close names exactly what is wrong. There is deliberately no
     // override — closing twice has one outcome and it is wrong.
     if (error instanceof CloseBlockedError) return { ok: false, error: error.message }
-    return { ok: false, error: error instanceof Error ? error.message : 'Could not close the year.' }
+    return { ok: false, error: messageFor(error, 'Could not close the year.') }
   }
 }
 

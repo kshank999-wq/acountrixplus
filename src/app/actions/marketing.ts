@@ -20,6 +20,7 @@ import { segmentDefinitionSchema } from '@/modules/marketing/segments'
 import { createMarketingDocument, duplicateDocument } from '@/modules/design/documents'
 import { reopenOpportunity } from '@/modules/crm/opportunities'
 import type { Stage } from '@/modules/crm/pipeline'
+import { messageFor } from '@/modules/errors'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -34,7 +35,7 @@ async function run(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }
@@ -96,7 +97,7 @@ export async function previewSegmentAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not evaluate that segment.',
+      error: messageFor(error, 'Could not evaluate that segment.'),
     }
   }
 }
@@ -137,7 +138,7 @@ export async function createCampaignAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not create the campaign.',
+      error: messageFor(error, 'Could not create the campaign.'),
     }
   }
 }
@@ -214,7 +215,7 @@ export async function createCreativeAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not create the creative.',
+      error: messageFor(error, 'Could not create the creative.'),
     }
   }
 }
@@ -231,7 +232,7 @@ export async function duplicateCreativeAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not copy that creative.',
+      error: messageFor(error, 'Could not copy that creative.'),
     }
   }
 }

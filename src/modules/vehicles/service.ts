@@ -14,6 +14,7 @@ import { requireModule } from '@/modules/industry/modules'
 import { createInvoice } from '@/modules/receivables/service'
 import { consumeStock } from '@/modules/inventory/service'
 import { authorityFor, odometerStep, type Authority } from './authority'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Customer vehicles and repair orders (spec §5 "Automotive / Repair").
@@ -22,7 +23,7 @@ import { authorityFor, odometerStep, type Authority } from './authority'
  * authorisation is a row rather than a column.
  */
 
-export class RepairError extends Error {
+export class RepairError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)
@@ -31,7 +32,7 @@ export class RepairError extends Error {
 }
 
 /** Raised when the bill would exceed what the customer agreed to. */
-export class UnauthorisedWorkError extends Error {
+export class UnauthorisedWorkError extends DomainError {
   readonly status = 409
   constructor(
     message: string,

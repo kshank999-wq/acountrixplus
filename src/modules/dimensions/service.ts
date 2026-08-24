@@ -10,6 +10,7 @@ import {
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { DomainError } from '@/modules/errors'
 
 /**
  * User-defined accounting dimensions (spec §13).
@@ -55,7 +56,7 @@ export const DEFAULT_OWNER_TYPES = [
 export type DefaultOwnerType = (typeof DEFAULT_OWNER_TYPES)[number]
 
 /** Raised when a dimension assignment does not make sense. */
-export class DimensionError extends Error {
+export class DimensionError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)

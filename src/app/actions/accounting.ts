@@ -11,6 +11,7 @@ import {
   setCleared,
   startReconciliation,
 } from '@/modules/reconciliation/service'
+import { messageFor } from '@/modules/errors'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -23,7 +24,7 @@ async function run(path: string, fn: () => Promise<string | void>): Promise<Acti
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }
@@ -56,7 +57,7 @@ export async function startReconciliationAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not start the reconciliation.',
+      error: messageFor(error, 'Could not start the reconciliation.'),
     }
   }
 }

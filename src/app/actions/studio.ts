@@ -19,6 +19,7 @@ import {
   saveAsTemplate,
   saveDocument,
 } from '@/modules/design/documents'
+import { messageFor } from '@/modules/errors'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -33,7 +34,7 @@ async function run(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }
@@ -236,7 +237,7 @@ export async function createProposalDocumentAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not create the document.',
+      error: messageFor(error, 'Could not create the document.'),
     }
   }
 }

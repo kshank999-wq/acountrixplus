@@ -14,6 +14,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/modules/ledger/journal'
 import { getPayrollProvider, type PayrollLineKind } from './provider'
 import { PAYROLL_ACCOUNTS } from './accounts'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Payroll runs and the entry they post (spec §13, §20 Phase 8).
@@ -143,7 +144,7 @@ export function netPayFor(payslip: PayslipInput): number {
  * into the wrong column, or a deduction entered against the wrong person. It
  * balances perfectly as an entry, which is exactly why it needs its own check.
  */
-export class NegativeNetPayError extends Error {
+export class NegativeNetPayError extends DomainError {
   readonly status = 422
   constructor(readonly employeeName: string, readonly netPayCents: number) {
     super(

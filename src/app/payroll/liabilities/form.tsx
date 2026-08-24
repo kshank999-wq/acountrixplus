@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { recordRemittanceAction } from '@/app/actions/payroll'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { messageFor } from '@/modules/errors'
 
 type Position = {
   accountId: string
@@ -60,7 +61,7 @@ export function RemittanceForm({
     try {
       amountCents = parseAmountToCents(amount)
     } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : 'Bad amount.', ok: false })
+      setMessage({ text: messageFor(error, 'Bad amount.'), ok: false })
       return
     }
 

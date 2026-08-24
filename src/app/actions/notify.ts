@@ -18,6 +18,7 @@ import {
 import { createSession, SESSION_COOKIE, sessionCookieOptions } from '@/modules/auth/session'
 import { practicesFor } from '@/modules/practice/service'
 import { reachableCompanies } from '@/modules/practice/switching'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for password reset and invitations (spec §19, Phase 19). */
 
@@ -103,7 +104,7 @@ export async function inviteToCompanyAction(input: unknown): Promise<ActionResul
         : `Invitation sent to ${parsed.email}. They choose their own password; you never see it.`,
     }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 
@@ -117,7 +118,7 @@ export async function withdrawInvitationAction(tokenId: unknown): Promise<Action
       ? { ok: true, message: 'Withdrawn. That link no longer works.' }
       : { ok: false, error: 'That invitation has already been accepted or withdrawn.' }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 
@@ -145,7 +146,7 @@ export async function inviteToPracticeAction(input: unknown): Promise<ActionResu
         : `Invitation sent to ${parsed.email}. They choose their own password.`,
     }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

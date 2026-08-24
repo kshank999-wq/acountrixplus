@@ -20,6 +20,7 @@ import { revokeAllOtherDevices, revokeDevice } from '@/modules/mobile/devices'
 import { exportCompanyData, DATASETS, type DatasetName } from '@/modules/tenancy/export'
 import { SESSION_COOKIE } from '@/modules/auth/session'
 import { resolveSession } from '@/modules/auth/session'
+import { messageFor } from '@/modules/errors'
 
 /**
  * Server actions for the security workspace (spec §14, §19).
@@ -48,7 +49,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     revalidatePath(SECURITY_PATH)
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 
@@ -71,7 +72,7 @@ export async function beginMfaEnrollmentAction(): Promise<EnrollResult> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not start setup.',
+      error: messageFor(error, 'Could not start setup.'),
     }
   }
 }
@@ -141,7 +142,7 @@ export async function regenerateRecoveryCodesAction(): Promise<RecoveryCodesResu
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not issue new codes.',
+      error: messageFor(error, 'Could not issue new codes.'),
     }
   }
 }
@@ -289,7 +290,7 @@ export async function exportCompanyDataAction(datasets: unknown): Promise<Export
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Could not build the export.',
+      error: messageFor(error, 'Could not build the export.'),
     }
   }
 }

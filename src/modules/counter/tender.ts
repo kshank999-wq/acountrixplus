@@ -27,6 +27,7 @@
  */
 
 import { formatCents } from '@/lib/money'
+import { DomainError } from '@/modules/errors'
 
 /**
  * How the money arrived.
@@ -64,7 +65,7 @@ export type Settlement = {
 }
 
 /** Raised when the tenders cannot be made to work against the bill. */
-export class TenderError extends Error {
+export class TenderError extends DomainError {
   constructor(message: string) {
     super(message)
     this.name = 'TenderError'

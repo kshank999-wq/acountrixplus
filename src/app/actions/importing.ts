@@ -14,6 +14,7 @@ import {
 import { revertImport } from '@/modules/importing/reversal'
 import type { ImportPlan } from '@/modules/importing/plan'
 import { IMPORT_KINDS } from '@/modules/importing/vocabulary'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for the migration wizard (spec §20 Phase 8). */
 
@@ -29,7 +30,7 @@ async function run<T>(fn: () => Promise<{ message?: string; data?: T }>): Promis
     for (const path of PATHS) revalidatePath(path)
     return { ok: true, message, data }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

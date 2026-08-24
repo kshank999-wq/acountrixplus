@@ -10,6 +10,7 @@ import { getHandler } from '@/modules/worker/registry'
 import { runOnce } from '@/modules/worker/runner'
 import { postDraftEntry, discardDraftEntry } from '@/modules/ledger/journal'
 import '@/modules/worker/handlers'
+import { messageFor } from '@/modules/errors'
 
 /**
  * Server actions for the operations page.
@@ -27,7 +28,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     revalidatePath('/settings/operations')
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 
@@ -132,7 +133,7 @@ export async function postDraftEntryAction(entryId: string): Promise<ActionResul
 
     return { ok: true, message: `Entry ${entry.entryNumber} posted.` }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Could not post it.' }
+    return { ok: false, error: messageFor(error, 'Could not post it.') }
   }
 }
 
@@ -146,6 +147,6 @@ export async function discardDraftEntryAction(entryId: string): Promise<ActionRe
 
     return { ok: true, message: 'Proposal discarded. Nothing reached the books.' }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Could not discard it.' }
+    return { ok: false, error: messageFor(error, 'Could not discard it.') }
   }
 }

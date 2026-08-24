@@ -16,6 +16,7 @@ import {
   vendors,
 } from '@/db/schema'
 import type { Permission } from '@/modules/permissions'
+import { DomainError } from '@/modules/errors'
 
 /**
  * What may carry evidence, and who may see it.
@@ -197,7 +198,7 @@ export function subjectDefinition(subject: EvidenceSubject): SubjectDefinition {
   return definition
 }
 
-export class UnknownSubjectError extends Error {
+export class UnknownSubjectError extends DomainError {
   readonly status = 400
   constructor(subject: string) {
     super(`Nothing can be attached to a "${subject}".`)
@@ -205,7 +206,7 @@ export class UnknownSubjectError extends Error {
   }
 }
 
-export class NoSuchSubjectError extends Error {
+export class NoSuchSubjectError extends DomainError {
   readonly status = 404
   constructor(subject: EvidenceSubject) {
     super(`That ${SUBJECTS[subject]?.label.toLowerCase() ?? 'record'} does not exist.`)

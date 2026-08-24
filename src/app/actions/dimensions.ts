@@ -15,6 +15,7 @@ import {
   registerAsset,
   runDepreciation,
 } from '@/modules/assets/service'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for accounting dimensions and the fixed asset register. */
 
@@ -28,7 +29,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     for (const path of PATHS) revalidatePath(path)
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

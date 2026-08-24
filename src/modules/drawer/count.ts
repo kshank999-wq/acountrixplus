@@ -1,4 +1,5 @@
 import { formatCents } from '@/lib/money'
+import { DomainError } from '@/modules/errors'
 
 /**
  * What a drawer should hold, and what it actually held (spec §5, §13).
@@ -81,7 +82,7 @@ export type ShiftCount = {
 }
 
 /** Raised when a count cannot be made sense of. */
-export class DrawerError extends Error {
+export class DrawerError extends DomainError {
   constructor(message: string) {
     super(message)
     this.name = 'DrawerError'

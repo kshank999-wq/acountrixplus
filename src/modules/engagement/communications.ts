@@ -2,6 +2,7 @@ import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { communications, contacts, opportunities, organizations } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { DomainError } from '@/modules/errors'
 
 /**
  * The communications log (spec §16 `Communication`, §6).
@@ -19,7 +20,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 export type CommunicationChannel = 'email' | 'call' | 'meeting' | 'note' | 'letter' | 'message'
 export type CommunicationDirection = 'outbound' | 'inbound' | 'internal'
 
-export class CommunicationError extends Error {
+export class CommunicationError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

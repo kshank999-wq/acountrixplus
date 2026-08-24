@@ -12,6 +12,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import type { Role } from '@/modules/permissions'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Accountant practice mode (spec §14).
@@ -38,7 +39,7 @@ import type { Role } from '@/modules/permissions'
  * call written over eighteen phases keeps working unchanged.
  */
 
-export class PracticeError extends Error {
+export class PracticeError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)
@@ -47,7 +48,7 @@ export class PracticeError extends Error {
 }
 
 /** Raised when the side that asked tries to be the side that agrees. */
-export class SelfAcceptanceError extends Error {
+export class SelfAcceptanceError extends DomainError {
   readonly status = 403
   constructor(readonly initiatedBy: 'practice' | 'client') {
     super(

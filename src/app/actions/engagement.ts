@@ -12,6 +12,7 @@ import {
   createTask,
   reopenTask,
 } from '@/modules/engagement/tasks'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for communications and tasks (spec §6, §16, Phase 22). */
 
@@ -27,7 +28,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     }
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

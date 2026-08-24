@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createEmployeeAction } from '@/app/actions/payroll'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { messageFor } from '@/modules/errors'
 
 type Person = {
   id: string
@@ -46,7 +47,7 @@ export function Roster({ people, canManage }: { people: Person[]; canManage: boo
     try {
       baseRateCents = rate.trim() ? parseAmountToCents(rate) : 0
     } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : 'Bad amount.', ok: false })
+      setMessage({ text: messageFor(error, 'Bad amount.'), ok: false })
       return
     }
 

@@ -7,6 +7,7 @@ import {
   subscribePushAction,
   unsubscribePushAction,
 } from '@/app/actions/mobile'
+import { messageFor } from '@/modules/errors'
 
 type Topic = { topic: string; label: string; description: string; enabled: boolean }
 type Recent = { id: string; title: string; outcome: string; createdAt: string }
@@ -108,7 +109,7 @@ export function NotificationSettings({
       })
     } catch (error) {
       setMessage({
-        text: error instanceof Error ? error.message : 'Could not subscribe.',
+        text: messageFor(error, 'Could not subscribe.'),
         ok: false,
       })
     }

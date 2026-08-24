@@ -6,6 +6,7 @@ import { budgetForYear, budgetGrid, listBudgets } from '@/modules/budget/service
 import { budgetVsActual, type BudgetVsActual } from '@/modules/budget/reporting'
 import { ACCOUNTING_NAV } from '../nav'
 import { BudgetBoard } from './board'
+import { messageFor } from '@/modules/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -72,7 +73,7 @@ export default async function BudgetsPage({
       })
     } catch (error) {
       varianceError =
-        error instanceof Error ? error.message : 'The variance could not be worked out.'
+        messageFor(error, 'The variance could not be worked out.')
     }
   }
 

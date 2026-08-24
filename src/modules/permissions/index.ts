@@ -1,3 +1,4 @@
+import { DomainError } from '@/modules/errors'
 /**
  * Role-based permissions with optional per-membership overrides (spec §14).
  *
@@ -223,7 +224,7 @@ export function hasPermission(
 }
 
 /** Thrown when an actor lacks a required permission. Maps to HTTP 403. */
-export class PermissionError extends Error {
+export class PermissionError extends DomainError {
   readonly status = 403
   constructor(readonly permission: Permission) {
     super(`Missing required permission: ${permission}`)

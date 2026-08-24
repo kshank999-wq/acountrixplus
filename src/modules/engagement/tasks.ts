@@ -2,6 +2,7 @@ import { and, asc, desc, eq, gte, inArray, isNull, lte, or, sql } from 'drizzle-
 import { db, type Executor } from '@/db'
 import { contacts, memberships, opportunities, organizations, tasks, users } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Follow-up work (spec §16 `Task`, §10 "engagement can create tasks").
@@ -21,7 +22,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 export type TaskPriority = 'low' | 'normal' | 'high'
 export type TaskStatus = 'open' | 'done' | 'cancelled'
 
-export class TaskError extends Error {
+export class TaskError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

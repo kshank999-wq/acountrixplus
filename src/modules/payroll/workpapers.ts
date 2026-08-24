@@ -10,6 +10,7 @@ import { payrollSummary } from './service'
 import { liabilityPositions, remittancesInPeriod } from './remittance'
 import { salesTaxReturn } from './sales-tax'
 import { contractorPayments } from './vendor-reporting'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Tax workpapers (spec §13: "tax-workpaper-friendly reports").
@@ -274,7 +275,7 @@ export async function prepareFiling(
 }
 
 /** Raised when a filing would be prepared from books with a known problem. */
-export class FilingBlockedError extends Error {
+export class FilingBlockedError extends DomainError {
   readonly status = 409
   constructor(readonly blockers: Exception[]) {
     super(

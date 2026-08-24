@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import { addDrawer, closeShift, openShift, payOut } from '@/modules/drawer/service'
 import { formatCents } from '@/lib/money'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for cash drawers (spec §5, §13, Phase 34). */
 
@@ -18,7 +19,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     }
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

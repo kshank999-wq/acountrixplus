@@ -1,3 +1,4 @@
+import { DomainError } from '@/modules/errors'
 /**
  * Reading a file somebody exported from their old accounting system
  * (spec §20 Phase 8, "advanced integrations").
@@ -19,7 +20,7 @@
  */
 
 /** Raised when a file cannot be read as delimited text at all. */
-export class MalformedFileError extends Error {
+export class MalformedFileError extends DomainError {
   readonly status = 422
   constructor(
     message: string,

@@ -17,6 +17,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { consumeStock, receiveStock } from '@/modules/inventory/service'
 import { explodeBom, unitCostOf, type BomLine, type Requirement } from './bom'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Bills of materials and work orders (spec §5, Manufacturing).
@@ -26,7 +27,7 @@ import { explodeBom, unitCostOf, type BomLine, type Requirement } from './bom'
  * from raw materials, through work in process, into finished goods.
  */
 
-export class ManufacturingError extends Error {
+export class ManufacturingError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)

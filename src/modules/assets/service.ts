@@ -22,6 +22,7 @@ import {
   type DepreciationMethod,
   type SchedulePeriod,
 } from './depreciation'
+import { DomainError } from '@/modules/errors'
 
 /**
  * The fixed asset register (spec §13).
@@ -41,7 +42,7 @@ import {
  * findings, and neither is fixed by adjusting the register to match.
  */
 
-export class AssetError extends Error {
+export class AssetError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)
@@ -50,7 +51,7 @@ export class AssetError extends Error {
 }
 
 /** Raised when a concurrent run claimed the same period first. */
-export class DepreciationRaceError extends Error {
+export class DepreciationRaceError extends DomainError {
   readonly status = 409
   constructor(
     readonly expected: number,

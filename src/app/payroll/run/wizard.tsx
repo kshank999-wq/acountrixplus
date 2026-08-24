@@ -14,6 +14,7 @@ import {
   PAYROLL_KIND_LABELS,
 } from '@/modules/payroll/vocabulary'
 import type { PayrollLineKind } from '@/modules/payroll/provider'
+import { messageFor } from '@/modules/errors'
 
 type Person = {
   id: string
@@ -174,7 +175,7 @@ export function RunWizard({
     try {
       payload = buildPayload()
     } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : 'Bad amount.', ok: false })
+      setMessage({ text: messageFor(error, 'Bad amount.'), ok: false })
       return
     }
 
@@ -196,7 +197,7 @@ export function RunWizard({
     try {
       payload = buildPayload()
     } catch (error) {
-      setMessage({ text: error instanceof Error ? error.message : 'Bad amount.', ok: false })
+      setMessage({ text: messageFor(error, 'Bad amount.'), ok: false })
       return
     }
 

@@ -3,6 +3,7 @@ import { and, eq, lt } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { idempotencyKeys } from '@/db/schema'
 import type { ActorContext } from '@/modules/tenancy/context'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Replay-safe operations (spec §19 "idempotent bank imports and
@@ -57,7 +58,7 @@ export function isReplayableOperation(value: string): value is ReplayableOperati
 }
 
 /** Raised when a key is reused with different arguments. Maps to HTTP 409. */
-export class IdempotencyConflictError extends Error {
+export class IdempotencyConflictError extends DomainError {
   readonly status = 409
   constructor(readonly key: string) {
     super(
@@ -182,7 +183,7 @@ function replay<T>(
 }
 
 /** Raised when a retry arrives while the original is still running. HTTP 409. */
-export class InFlightError extends Error {
+export class InFlightError extends DomainError {
   readonly status = 409
   constructor(readonly key: string) {
     super('That operation is still being processed. Retry in a moment.')

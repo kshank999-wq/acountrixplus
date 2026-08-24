@@ -12,6 +12,7 @@ import {
   issueMaterial,
 } from '@/modules/manufacturing/service'
 import { formatCents } from '@/lib/money'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for bills of materials and work orders (spec §5, Phase 27). */
 
@@ -29,7 +30,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     }
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server'
 import { currentActor } from '@/lib/current-user'
 import { PermissionError } from '@/modules/permissions'
 import { MAX_RECEIPT_BYTES, uploadReceipt } from '@/modules/mobile/receipts'
+import { messageFor } from '@/modules/errors'
 
 /**
  * Receipt upload (spec §3).
@@ -82,7 +83,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(
       {
-        error: error instanceof Error ? error.message : 'That upload failed.',
+        error: messageFor(error, 'That upload failed.'),
         code: 'rejected',
       },
       { status: 400 },

@@ -11,6 +11,7 @@ import {
 import { touchDevice } from '@/modules/mobile/devices'
 import { categorizableAccounts } from '@/modules/coa/service'
 import { inboxCounts } from '@/modules/bookkeeping/transactions'
+import { messageFor } from '@/modules/errors'
 
 /**
  * The mobile sync endpoint (spec §18 versioned contracts, §19 idempotency).
@@ -184,7 +185,7 @@ function describeFailure(error: unknown): Omit<OperationOutcome, 'key'> {
 
   return {
     status: 'rejected',
-    error: error instanceof Error ? error.message : 'That operation failed.',
+    error: messageFor(error, 'That operation failed.'),
     code: 'rejected',
   }
 }

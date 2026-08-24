@@ -1,4 +1,5 @@
 import type { opportunityStageEnum } from '@/db/schema'
+import { DomainError } from '@/modules/errors'
 
 /**
  * The opportunity pipeline (spec §6).
@@ -64,7 +65,7 @@ export const STAGE_PROBABILITY: Record<Stage, number> = {
 }
 
 /** Raised when a stage change is not allowed. */
-export class InvalidStageTransitionError extends Error {
+export class InvalidStageTransitionError extends DomainError {
   readonly status = 422
   constructor(
     readonly from: Stage,

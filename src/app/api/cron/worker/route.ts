@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { runOnce } from '@/modules/worker/runner'
+import { messageFor } from '@/modules/errors'
 
 /**
  * One tick of the background worker, over HTTP (spec §18).
@@ -77,7 +78,7 @@ export async function GET(request: Request) {
     console.error('Worker tick failed:', error)
 
     return NextResponse.json(
-      { ok: false, error: error instanceof Error ? error.message : 'Worker tick failed.' },
+      { ok: false, error: messageFor(error, 'Worker tick failed.') },
       { status: 500 },
     )
   }

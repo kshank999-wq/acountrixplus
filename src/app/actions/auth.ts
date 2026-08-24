@@ -26,6 +26,7 @@ import { lockoutState, recordLoginAttempt } from '@/modules/auth/login-history'
 import { companiesForUser, registerCompany } from '@/modules/tenancy/onboarding'
 import { registerDevice } from '@/modules/mobile/devices'
 import { industryEnum } from '@/db/schema'
+import { messageFor } from '@/modules/errors'
 
 export type FormState = { error?: string } | null
 
@@ -58,7 +59,7 @@ export async function registerAction(_prev: FormState, formData: FormData): Prom
     companyId = result.company.id
     userId = result.user.id
   } catch (error) {
-    return { error: error instanceof Error ? error.message : 'Could not create the company.' }
+    return { error: messageFor(error, 'Could not create the company.') }
   }
 
   const device = await registerDevice({

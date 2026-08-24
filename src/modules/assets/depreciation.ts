@@ -1,3 +1,4 @@
+import { DomainError } from '@/modules/errors'
 /**
  * Depreciation schedules (spec §13: "Fixed asset register/depreciation
  * support can be a later professional module if not in MVP").
@@ -90,7 +91,7 @@ export type SchedulePeriod = {
 }
 
 /** Raised when an asset's terms cannot produce a schedule. */
-export class InvalidScheduleError extends Error {
+export class InvalidScheduleError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)

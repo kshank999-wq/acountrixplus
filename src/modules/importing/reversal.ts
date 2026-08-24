@@ -15,6 +15,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { voidJournalEntry } from '@/modules/ledger/journal'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Undoing an import (spec §19: nothing destroys history).
@@ -45,7 +46,7 @@ import { voidJournalEntry } from '@/modules/ledger/journal'
  * old name would undo a correction somebody may have built on since.
  */
 
-export class ImportNotReversibleError extends Error {
+export class ImportNotReversibleError extends DomainError {
   readonly status = 409
   constructor(readonly reasons: string[]) {
     super(

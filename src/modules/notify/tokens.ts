@@ -4,6 +4,7 @@ import { db, type Executor } from '@/db'
 import { actionTokens } from '@/db/schema'
 import { hashPassword, verifyPassword } from '@/modules/auth/password'
 import type { Role } from '@/modules/permissions'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Single-use links (spec §19).
@@ -189,7 +190,7 @@ export async function lookupToken(
   return { ok: false, reason: 'not_found' }
 }
 
-export class TokenSpentError extends Error {
+export class TokenSpentError extends DomainError {
   readonly status = 409
   constructor() {
     super('That link has already been used.')

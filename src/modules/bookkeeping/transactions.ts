@@ -22,6 +22,7 @@ import {
   unpostTransaction,
 } from '@/modules/ledger/posting'
 import { rememberVendor } from './rules-engine'
+import { DomainError } from '@/modules/errors'
 
 export type ReviewState =
   | 'new'
@@ -157,7 +158,7 @@ async function loadTransaction(ctx: ActorContext, transactionId: string) {
 }
 
 /** Raised when a transaction is locked by a completed reconciliation. */
-export class ReconciledTransactionError extends Error {
+export class ReconciledTransactionError extends DomainError {
   readonly status = 409
   constructor() {
     super(

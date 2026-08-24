@@ -7,6 +7,7 @@ import {
   type Permission,
   type Role,
 } from '@/modules/permissions'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Who is acting, and on whose books.
@@ -71,7 +72,7 @@ export function scoped<T extends PgTable & { companyId: PgColumn }>(
 }
 
 /** Raised when a record exists but belongs to a different tenant. */
-export class TenantIsolationError extends Error {
+export class TenantIsolationError extends DomainError {
   readonly status = 404
   constructor(entity: string) {
     // Deliberately reported as "not found": confirming that an id exists in

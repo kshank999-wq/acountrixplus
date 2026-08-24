@@ -8,6 +8,7 @@ import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry, voidJournalEntry } from '@/modules/ledger/journal'
 import { accountBalances } from './balances'
 import { formatCents } from '@/lib/money'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Year-end closing entries (spec §13: "recurring entries, adjusting entries,
@@ -161,7 +162,7 @@ export async function previewClose(
   }
 }
 
-export class CloseBlockedError extends Error {
+export class CloseBlockedError extends DomainError {
   readonly status = 409
   constructor(readonly blockers: CloseCheck[]) {
     super(blockers.map((check) => check.message).join(' '))

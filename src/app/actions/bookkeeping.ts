@@ -16,6 +16,7 @@ import {
 import { createRule } from '@/modules/bookkeeping/rules-engine'
 import { connectInstitution, syncConnection, listConnections } from '@/modules/banking/sync'
 import { parseAmountToCents } from '@/lib/money'
+import { messageFor } from '@/modules/errors'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -31,7 +32,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }

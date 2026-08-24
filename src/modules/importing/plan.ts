@@ -1,3 +1,4 @@
+import { DomainError } from '@/modules/errors'
 /**
  * What an import would do, worked out before it does any of it.
  *
@@ -89,7 +90,7 @@ export function finishPlan<T>(
 }
 
 /** Raised when a commit is attempted on a plan that has errors. */
-export class ImportNotReadyError extends Error {
+export class ImportNotReadyError extends DomainError {
   readonly status = 422
   constructor(readonly errors: number) {
     super(

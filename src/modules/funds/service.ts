@@ -6,6 +6,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { requireModule } from '@/modules/industry/modules'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import type { Restriction } from './restriction'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Funds, and the dimension that makes them reportable (spec §5, Nonprofit).
@@ -17,7 +18,7 @@ import type { Restriction } from './restriction'
 /** The company-wide dimension every fund is a value of. */
 export const FUND_DIMENSION_CODE = 'FUND'
 
-export class FundError extends Error {
+export class FundError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

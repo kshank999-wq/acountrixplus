@@ -21,6 +21,7 @@ import { amountForMinutes, minutesToQuantityMilli } from './rates'
 import { rateForEntry } from './service'
 import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
 import { functionalCurrency } from '@/modules/fx/service'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Turning recorded work into an invoice (spec §5).
@@ -188,7 +189,7 @@ export async function previewBilling(
 }
 
 /** Raised when somebody else billed the same work first. */
-export class AlreadyBilledError extends Error {
+export class AlreadyBilledError extends DomainError {
   readonly status = 409
   constructor(readonly expected: number, readonly claimed: number) {
     super(

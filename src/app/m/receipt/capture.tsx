@@ -3,6 +3,7 @@
 import { useRef, useState } from 'react'
 import { formatCents } from '@/lib/money'
 import { OutboxBadge } from '../outbox-badge'
+import { messageFor } from '@/modules/errors'
 
 type Candidate = { id: string; postedDate: string; amountCents: number; label: string }
 
@@ -71,7 +72,7 @@ export function ReceiptCapture({ transactions }: { transactions: Candidate[] }) 
       setMessage({ text: 'Uploaded. Now choose what it belongs to.', ok: true })
     } catch (error) {
       setMessage({
-        text: error instanceof Error ? error.message : 'Could not read that photo.',
+        text: messageFor(error, 'Could not read that photo.'),
         ok: false,
       })
     } finally {

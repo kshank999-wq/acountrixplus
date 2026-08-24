@@ -12,6 +12,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Properties, units and leases (spec §5 Real Estate / Property, §20 Phase 7).
@@ -36,7 +37,7 @@ import { requireModule } from '@/modules/industry/modules'
 /** The code of the dimension this module keeps for itself. */
 export const PROPERTY_DIMENSION_CODE = 'PROP'
 
-export class PropertyError extends Error {
+export class PropertyError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

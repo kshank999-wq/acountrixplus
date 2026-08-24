@@ -1,4 +1,5 @@
 import { formatCents } from '@/lib/money'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Money in two currencies (spec §19).
@@ -41,7 +42,7 @@ import { formatCents } from '@/lib/money'
 export const RATE_ONE = 1_000_000
 
 /** Raised when a conversion cannot honestly be done. */
-export class RateError extends Error {
+export class RateError extends DomainError {
   constructor(message: string) {
     super(message)
     this.name = 'RateError'

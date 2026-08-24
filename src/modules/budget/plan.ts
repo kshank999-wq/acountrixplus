@@ -1,4 +1,5 @@
 import type { AccountType } from '@/modules/coa/standard'
+import { DomainError } from '@/modules/errors'
 
 /**
  * What a plan says, and whether missing it is good news (spec §13).
@@ -11,7 +12,7 @@ import type { AccountType } from '@/modules/coa/standard'
  * service above can be about persistence rather than about rounding.
  */
 
-export class BudgetError extends Error {
+export class BudgetError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

@@ -15,6 +15,7 @@ import {
   assignLineDimensions,
   type DimensionAssignment,
 } from '@/modules/dimensions/service'
+import { DomainError } from '@/modules/errors'
 
 /**
  * The double-entry journal (spec §13).
@@ -93,7 +94,7 @@ export type JournalEntryInput = {
 }
 
 /** Raised when an entry's debits and credits disagree. */
-export class UnbalancedEntryError extends Error {
+export class UnbalancedEntryError extends DomainError {
   readonly status = 422
   constructor(
     readonly debitCents: number,
@@ -108,7 +109,7 @@ export class UnbalancedEntryError extends Error {
 }
 
 /** Raised when a change would land inside a closed accounting period. */
-export class ClosedPeriodError extends Error {
+export class ClosedPeriodError extends DomainError {
   readonly status = 409
   constructor(readonly entryDate: string) {
     super(

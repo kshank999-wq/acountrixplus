@@ -1,3 +1,4 @@
+import { DomainError } from '@/modules/errors'
 /**
  * Bank aggregation provider abstraction (spec §3).
  *
@@ -89,7 +90,7 @@ export interface BankProvider {
 }
 
 /** Raised when a provider call fails in a way the caller should surface. */
-export class BankProviderError extends Error {
+export class BankProviderError extends DomainError {
   constructor(
     message: string,
     readonly provider: string,

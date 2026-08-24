@@ -13,6 +13,7 @@ import {
 } from '@/modules/timebilling/service'
 import { billWork, receiveRetainer } from '@/modules/timebilling/billing'
 import { parseDuration } from '@/modules/timebilling/rates'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for the time and billing workspace (spec §5, Phase 15). */
 
@@ -26,7 +27,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     for (const path of PATHS) revalidatePath(path)
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

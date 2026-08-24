@@ -14,6 +14,7 @@ import {
   type QueueSummary,
 } from '@/modules/mobile/outbox'
 import type { ReplayableOperation } from '@/modules/mobile/idempotency'
+import { messageFor } from '@/modules/errors'
 
 /**
  * The browser half of the offline outbox.
@@ -161,7 +162,7 @@ export async function drainOutbox(opts: { installed?: boolean } = {}): Promise<D
       })
     } catch (error) {
       // No response at all. Every entry goes back to pending with backoff.
-      const outcome = networkOutcome(error instanceof Error ? error.message : '')
+      const outcome = networkOutcome(messageFor(error, ''))
       const reverted = marked.map((entry) =>
         ready.some((candidate) => candidate.id === entry.id)
           ? applyOutcome({ ...entry, status: 'pending' }, outcome, now)

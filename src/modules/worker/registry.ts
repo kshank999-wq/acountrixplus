@@ -1,4 +1,5 @@
 import type { ActorContext } from '@/modules/tenancy/context'
+import { DomainError } from '@/modules/errors'
 
 /**
  * The handler registry.
@@ -79,7 +80,7 @@ export function registeredKinds(): HandlerDefinition[] {
  * to skip straight to dead, so the queue does not spend an hour rediscovering
  * that the code is missing.
  */
-export class UnknownJobKindError extends Error {
+export class UnknownJobKindError extends DomainError {
   constructor(readonly kind: string) {
     super(
       `No handler registered for "${kind}". Registered: ${[...handlers.keys()].sort().join(', ') || '(none)'}`,

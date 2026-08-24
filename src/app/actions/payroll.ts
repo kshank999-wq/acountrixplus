@@ -15,6 +15,7 @@ import { recordRemittance } from '@/modules/payroll/remittance'
 import { createTaxCode } from '@/modules/payroll/sales-tax'
 import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
 import { FilingBlockedError, markFiledExternally, prepareFiling } from '@/modules/payroll/workpapers'
+import { messageFor } from '@/modules/errors'
 
 /**
  * Server actions for the payroll and tax workspace.
@@ -46,7 +47,7 @@ async function run(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }
@@ -186,7 +187,7 @@ export async function previewPayrollAction(input: unknown): Promise<
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Those figures could not be read.',
+      error: messageFor(error, 'Those figures could not be read.'),
     }
   }
 }
@@ -270,7 +271,7 @@ export async function calculatePayrollAction(input: {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The payroll adapter could not be reached.',
+      error: messageFor(error, 'The payroll adapter could not be reached.'),
     }
   }
 }
@@ -396,7 +397,7 @@ export async function prepareFilingAction(input: unknown): Promise<ActionResult>
     }
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'That filing could not be prepared.',
+      error: messageFor(error, 'That filing could not be prepared.'),
     }
   }
 }

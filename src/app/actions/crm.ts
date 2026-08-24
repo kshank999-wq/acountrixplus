@@ -21,6 +21,7 @@ import {
 import { convertWonOpportunity } from '@/modules/crm/conversion'
 import { createIntakeKey, revokeIntakeKey } from '@/modules/crm/intake'
 import type { Stage } from '@/modules/crm/pipeline'
+import { messageFor } from '@/modules/errors'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -32,7 +33,7 @@ async function run(path: string, fn: () => Promise<string | void>): Promise<Acti
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }

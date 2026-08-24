@@ -14,6 +14,7 @@ import {
 } from './tokens'
 import { grantAtLiveEngagements } from '@/modules/practice/service'
 import { sendCompanyInvitation, sendPracticeInvitation } from './service'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Invitations (spec §14: "invite each professional using an individual account;
@@ -33,7 +34,7 @@ import { sendCompanyInvitation, sendPracticeInvitation } from './service'
  * granting access to a stranger who has been handed a working password.
  */
 
-export class InvitationError extends Error {
+export class InvitationError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)

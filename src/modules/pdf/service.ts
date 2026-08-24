@@ -12,6 +12,7 @@ import { proposalRenderContext } from '@/modules/design/documents'
 import { storeDocument, attachDocument } from '@/modules/evidence/service'
 import { scoped, requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { renderDocumentPdf, type BrandTokens, type RenderInput } from './layout'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Rendering the documents this application already knows how to display
@@ -64,7 +65,7 @@ async function brandFor(
   }
 }
 
-export class NoDocumentError extends Error {
+export class NoDocumentError extends DomainError {
   readonly status = 404
   constructor() {
     super('That proposal has no document to render yet.')

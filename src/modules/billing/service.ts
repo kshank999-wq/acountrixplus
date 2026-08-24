@@ -12,6 +12,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { recordAudit } from '@/modules/audit'
 import { createInvoice } from '@/modules/receivables/service'
 import { firstOccurrence, nextOccurrence, type Cadence } from '@/modules/ledger/recurring'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Invoicing a customer every period (spec §13).
@@ -29,7 +30,7 @@ import { firstOccurrence, nextOccurrence, type Cadence } from '@/modules/ledger/
  * knows about. Everything that bills a customer goes through the one door.
  */
 
-export class BillingError extends Error {
+export class BillingError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

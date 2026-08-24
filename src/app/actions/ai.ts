@@ -20,6 +20,7 @@ import {
 import { rejectSuggestion } from '@/modules/ai/suggestions'
 import { updateSettings } from '@/modules/ai/settings'
 import { activatePromptVersion, savePromptVersion } from '@/modules/ai/prompts'
+import { messageFor } from '@/modules/errors'
 
 /**
  * Server actions for the AI module.
@@ -42,7 +43,7 @@ async function run(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'Something went wrong.',
+      error: messageFor(error, 'Something went wrong.'),
     }
   }
 }
@@ -82,7 +83,7 @@ export async function suggestCategoryAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -138,7 +139,7 @@ export async function suggestRuleAction(transactionId: string): Promise<RuleSugg
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -171,7 +172,7 @@ export async function summarizeInboxAction(): Promise<SummaryResult> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -214,7 +215,7 @@ export async function reviewAnomaliesAction(): Promise<AnomalyResult> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -253,7 +254,7 @@ export async function explainReconciliationAction(
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -280,7 +281,7 @@ export async function draftProposalAction(opportunityId: string): Promise<Propos
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -315,7 +316,7 @@ export async function draftCampaignAction(input: {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }
@@ -338,7 +339,7 @@ export async function businessInsightsAction(): Promise<InsightsResult> {
   } catch (error) {
     return {
       ok: false,
-      error: error instanceof Error ? error.message : 'The assistant is unavailable.',
+      error: messageFor(error, 'The assistant is unavailable.'),
     }
   }
 }

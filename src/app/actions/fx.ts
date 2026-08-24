@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import { putRate, describeRate, normalise, parseRate } from '@/modules/fx/service'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for exchange rates (spec §19, Phase 35). */
 
@@ -17,7 +18,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     }
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 

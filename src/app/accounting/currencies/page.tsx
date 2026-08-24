@@ -5,6 +5,7 @@ import { currenciesInUse, functionalCurrency, listRates } from '@/modules/fx/ser
 import { conversionsAgree, foreignExposure, realisedMovement } from '@/modules/fx/reporting'
 import { ACCOUNTING_NAV } from '../nav'
 import { CurrencyBoard } from './board'
+import { messageFor } from '@/modules/errors'
 
 export const dynamic = 'force-dynamic'
 
@@ -61,7 +62,7 @@ export default async function CurrenciesPage({
     try {
       exposure = await foreignExposure(actor, { asOf })
     } catch (error) {
-      exposureError = error instanceof Error ? error.message : 'The exposure could not be worked out.'
+      exposureError = messageFor(error, 'The exposure could not be worked out.')
     }
   }
 

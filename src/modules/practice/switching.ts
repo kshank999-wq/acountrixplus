@@ -12,6 +12,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import type { ActorContext } from '@/modules/tenancy/context'
 import type { Role } from '@/modules/permissions'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Switching between the companies one person can reach (spec §14).
@@ -77,7 +78,7 @@ export async function reachableCompanies(
   }))
 }
 
-export class NoSuchCompanyError extends Error {
+export class NoSuchCompanyError extends DomainError {
   readonly status = 404
   constructor() {
     // Reported as not-found rather than forbidden, for the same reason

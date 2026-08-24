@@ -9,6 +9,7 @@ import {
   type TransactionalMessage,
 } from './transactional'
 import { recordOutboundMail } from '@/modules/engagement/outbound'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Sending a letter that must arrive (spec §19).
@@ -51,7 +52,7 @@ const HOURLY_LIMIT: Record<TransactionalKind, number> = {
   security_alert: 20,
 }
 
-export class RateLimitedError extends Error {
+export class RateLimitedError extends DomainError {
   readonly status = 429
   constructor(readonly kind: TransactionalKind) {
     super('That has been sent several times already. Check the inbox, including spam, and wait a few minutes.')

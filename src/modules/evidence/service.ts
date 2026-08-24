@@ -10,6 +10,7 @@ import {
   type EvidenceSubject,
   type SubjectRef,
 } from './subjects'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Attachments (spec §13, §18).
@@ -59,7 +60,7 @@ export const EVIDENCE_CONTENT_TYPES = [
  */
 export const MAX_EVIDENCE_BYTES = 10 * 1024 * 1024
 
-export class EvidenceError extends Error {
+export class EvidenceError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

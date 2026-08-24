@@ -14,6 +14,7 @@ import { requireModule } from '@/modules/industry/modules'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { accountByNumber } from '@/modules/coa/service'
 import { POS_ACCOUNTS, planImbalanceCents, summariseDay, type DayInput, type DayPlan } from './summary'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Importing a day's takings (spec §5, Restaurant and E-commerce).
@@ -22,7 +23,7 @@ import { POS_ACCOUNTS, planImbalanceCents, summariseDay, type DayInput, type Day
  * one row with a unique key. This file writes it down and posts it.
  */
 
-export class TakingsError extends Error {
+export class TakingsError extends DomainError {
   readonly status = 422
   constructor(message: string) {
     super(message)

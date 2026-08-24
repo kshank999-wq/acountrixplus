@@ -4,6 +4,7 @@ import { companies, companyProfiles, customers, invoiceLines, invoices } from '@
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { renderDocumentPdf, type BrandTokens } from './layout'
 import type { Block } from '@/modules/design/blocks'
+import { DomainError } from '@/modules/errors'
 
 /**
  * An invoice as a PDF (spec §13, §18).
@@ -32,7 +33,7 @@ const INVOICE_BRAND: BrandTokens = {
   baseSizePt: 11,
 }
 
-export class NoInvoiceError extends Error {
+export class NoInvoiceError extends DomainError {
   readonly status = 404
   constructor() {
     super('That invoice does not exist.')

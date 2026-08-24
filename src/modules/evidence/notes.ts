@@ -10,6 +10,7 @@ import {
   type EvidenceSubject,
   type SubjectRef,
 } from './subjects'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Accountant notes (spec §13 "audit trail, accountant notes, attachments").
@@ -35,7 +36,7 @@ import {
  * the point of writing one down is that it survives the disagreement.
  */
 
-export class NoteError extends Error {
+export class NoteError extends DomainError {
   readonly status = 400
   constructor(message: string) {
     super(message)

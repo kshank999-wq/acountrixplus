@@ -9,6 +9,7 @@ import {
   type Industry,
   type IndustryModule,
 } from '@/modules/coa/industry'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Which optional modules a company has switched on (spec §5, §20, §23).
@@ -185,7 +186,7 @@ export async function moduleEnabled(
 }
 
 /** Raised when a workflow is used while its module is switched off. */
-export class ModuleDisabledError extends Error {
+export class ModuleDisabledError extends DomainError {
   readonly status = 409
   constructor(readonly module: IndustryModule) {
     super(

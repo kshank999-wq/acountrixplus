@@ -23,6 +23,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { companies } from '@/db/schema'
 import { inviteToPractice } from '@/modules/notify/invitations'
+import { messageFor } from '@/modules/errors'
 
 /** Server actions for accountant practice mode (spec §14, Phase 18). */
 
@@ -36,7 +37,7 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
     for (const path of PATHS) revalidatePath(path)
     return { ok: true, message: message ?? undefined }
   } catch (error) {
-    return { ok: false, error: error instanceof Error ? error.message : 'Something went wrong.' }
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
 }
 
