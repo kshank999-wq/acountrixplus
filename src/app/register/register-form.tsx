@@ -1,13 +1,14 @@
 'use client'
 
-import { useActionState } from 'react'
+import { useActionState, useState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { registerAction, type FormState } from '@/app/actions/auth'
+import { PasswordField } from '@/components/password-field'
 
-function SubmitButton() {
+function SubmitButton({ blocked }: { blocked: boolean }) {
   const { pending } = useFormStatus()
   return (
-    <button type="submit" className="btn btn-primary w-full" disabled={pending}>
+    <button type="submit" className="btn btn-primary w-full" disabled={pending || blocked}>
       {pending ? 'Creating…' : 'Create company'}
     </button>
   )
@@ -19,6 +20,21 @@ export function RegisterForm({
   industries: Array<{ key: string; label: string }>
 }) {
   const [state, formAction] = useActionState<FormState, FormData>(registerAction, null)
+  const [password, setPassword] = useState('')
+  const [again, setAgain] = useState('')
+
+  /*
+   * Checked here and nowhere else, matching the reset and invitation forms: a
+   * confirmation guards against a typo, not against an attacker, so it belongs
+   * where the typo happens. The length rule is enforced on the server, because
+   * that is the rule.
+   *
+   * It matters more on this form than on the others. This is the only password
+   * nobody can recover: it creates the first account, and until a real mail
+   * provider is configured a reset link is generated and delivered nowhere.
+   */
+  const mismatch = again.length > 0 && again !== password
+  const blocked = password.length < 8 || mismatch
 
   return (
     <form action={formAction} className="space-y-4">
@@ -58,20 +74,25 @@ export function RegisterForm({
         <input id="email" name="email" type="email" required className="field" />
       </div>
 
-      <div>
-        <label htmlFor="password" className="mb-1.5 block text-sm font-medium">
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          required
-          minLength={8}
-          className="field"
-        />
-        <p className="mt-1 text-xs text-faint">At least 8 characters.</p>
-      </div>
+      <PasswordField
+        id="password"
+        name="password"
+        label="Password"
+        autoComplete="new-password"
+        minLength={8}
+        value={password}
+        onChange={setPassword}
+        hint="At least 8 characters."
+      />
+
+      <PasswordField
+        id="again"
+        label="Again"
+        autoComplete="new-password"
+        value={again}
+        onChange={setAgain}
+        error={mismatch ? 'Those two do not match.' : undefined}
+      />
 
       {state?.error && (
         <p role="alert" className="text-sm text-negative">
@@ -79,7 +100,7 @@ export function RegisterForm({
         </p>
       )}
 
-      <SubmitButton />
+      <SubmitButton blocked={blocked} />
     </form>
   )
 }

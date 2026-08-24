@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import Link from 'next/link'
 import { completeResetAction } from '@/app/actions/notify'
+import { PasswordField } from '@/components/password-field'
 
 /**
  * Choose a new password.
@@ -48,38 +49,24 @@ export function ResetForm({ token, email }: { token: string; email: string }) {
         Setting a new password for <span className="text-fg">{email}</span>.
       </p>
 
-      <div>
-        <label htmlFor="password" className="mb-1.5 block text-sm font-medium">
-          New password
-        </label>
-        <input
-          id="password"
-          type="password"
-          autoComplete="new-password"
-          required
-          minLength={8}
-          value={password}
-          onChange={(event) => setPassword(event.target.value)}
-          className="field"
-        />
-        <p className="mt-1 text-xs text-faint">At least 8 characters.</p>
-      </div>
+      <PasswordField
+        id="password"
+        label="New password"
+        autoComplete="new-password"
+        minLength={8}
+        value={password}
+        onChange={setPassword}
+        hint="At least 8 characters."
+      />
 
-      <div>
-        <label htmlFor="again" className="mb-1.5 block text-sm font-medium">
-          Again
-        </label>
-        <input
-          id="again"
-          type="password"
-          autoComplete="new-password"
-          required
-          value={again}
-          onChange={(event) => setAgain(event.target.value)}
-          className="field"
-        />
-        {mismatch && <p className="mt-1 text-xs text-danger">Those two do not match.</p>}
-      </div>
+      <PasswordField
+        id="again"
+        label="Again"
+        autoComplete="new-password"
+        value={again}
+        onChange={setAgain}
+        error={mismatch ? 'Those two do not match.' : undefined}
+      />
 
       {error && (
         <p role="alert" className="text-sm text-danger">

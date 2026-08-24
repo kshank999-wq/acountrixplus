@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { acceptInvitationAction } from '@/app/actions/notify'
+import { PasswordField } from '@/components/password-field'
 
 /**
  * Accept an invitation.
@@ -72,40 +73,24 @@ export function InviteForm({
             />
           </div>
 
-          <div>
-            <label htmlFor="password" className="mb-1.5 block text-sm font-medium">
-              Choose a password
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="new-password"
-              required
-              minLength={8}
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              className="field"
-            />
-            <p className="mt-1 text-xs text-faint">
-              At least 8 characters. Nobody who invited you will ever see it.
-            </p>
-          </div>
+          <PasswordField
+            id="password"
+            label="Choose a password"
+            autoComplete="new-password"
+            minLength={8}
+            value={password}
+            onChange={setPassword}
+            hint="At least 8 characters. Nobody who invited you will ever see it."
+          />
 
-          <div>
-            <label htmlFor="again" className="mb-1.5 block text-sm font-medium">
-              Again
-            </label>
-            <input
-              id="again"
-              type="password"
-              autoComplete="new-password"
-              required
-              value={again}
-              onChange={(event) => setAgain(event.target.value)}
-              className="field"
-            />
-            {mismatch && <p className="mt-1 text-xs text-danger">Those two do not match.</p>}
-          </div>
+          <PasswordField
+            id="again"
+            label="Again"
+            autoComplete="new-password"
+            value={again}
+            onChange={setAgain}
+            error={mismatch ? 'Those two do not match.' : undefined}
+          />
         </>
       )}
 

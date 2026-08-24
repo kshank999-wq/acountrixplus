@@ -3,6 +3,7 @@
 import { useActionState } from 'react'
 import { useFormStatus } from 'react-dom'
 import { loginAction, type FormState } from '@/app/actions/auth'
+import { PasswordField } from '@/components/password-field'
 
 function SubmitButton() {
   const { pending } = useFormStatus()
@@ -34,19 +35,12 @@ export function LoginForm({ next }: { next?: string }) {
         />
       </div>
 
-      <div>
-        <label htmlFor="password" className="mb-1.5 block text-sm font-medium">
-          Password
-        </label>
-        <input
-          id="password"
-          name="password"
-          type="password"
-          autoComplete="current-password"
-          required
-          className="field"
-        />
-      </div>
+      <PasswordField
+        id="password"
+        name="password"
+        label="Password"
+        autoComplete="current-password"
+      />
 
       {state?.error && (
         <p role="alert" className="text-sm text-negative">
