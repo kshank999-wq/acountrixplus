@@ -1754,6 +1754,63 @@ account reads **$5,000.00 in the ledger against $5,000.00 in the feed** with
 the balance sheet naming *"1000 Barclays Current ••8812"*. A fresh seed
 produces no shared ledger accounts anywhere.
 
+### The document you raise yourself (Phase 41)
+
+`createInvoice`, `createBill`, `recordPayment`, `createCustomer` and
+`createVendor` have been written, posted, audited and tested since Phase 2.
+**Not one of them was reachable from a screen.**
+
+Every invoice in the system arrived as a by-product of something else: a won
+opportunity, a completed appointment, a repair order, a rent schedule, a
+progress claim, a recurring arrangement. All real paths, and none of them is
+*"bill this customer for a day's work"*. So the application could age a
+receivable, chase it, credit it, write it off, recover the write-off, put it on
+a statement, render it as a PDF and reconcile the cash that settled it — for
+invoices a business had no way to create. A plumber who signed up, opened a
+bank account and imported a statement still could not invoice anybody.
+
+- **Allocation is a decision, made in one place.** `recordPayment` has required
+  applications summing exactly to the amount since Phase 2 — a payment that
+  half-lands is worse than one refused — which pushes the real question up:
+  £1,000 arrives against three open invoices and nobody said which. Oldest
+  first, never past a balance (that leaves a negative one and a control account
+  that no longer ties), and never absorbing the remainder (cash against nothing
+  balances the bank and not the customer's statement). An overpayment is
+  refused **with the arithmetic**, not recorded and parked.
+- **A written-off invoice is not open.** Money against it is a *recovery*,
+  which posts differently and takes the bad debt back off the P&L. Applying a
+  receipt to it silently would make that decision in the direction that
+  flatters the result.
+- **The account list is where the invariants get protected.** Income on an
+  invoice, costs and assets on a bill — a van arrives on a supplier bill. But
+  never the accounts something else maintains (receivables, payables,
+  undeposited funds, accumulated depreciation), and never cash, because each
+  has an integrity check that coding a line to it would break.
+- **No default account on a line.** The party defaults, the date defaults; the
+  account does not. Coding a sale to whichever revenue account is first is a
+  quiet mistake that surfaces a quarter later on a P&L nobody can explain.
+
+**And the three bugs browser verification caught.** Adding your first customer
+from inside the composer refreshed the party list underneath held state, so the
+select displayed "Harborview LLC" while the value was still `''` — the form
+looked complete and refused to submit under a hint asking for a customer. A
+bill line could be coded to Accounts Receivable or to a bank account, both
+invariant-breaking and both invisible until the list was read on screen. And
+the fix for that was *half* a fix: excluding cash by "has a bank account
+pointing at it" leaves a brand-new company's 1000 Checking Account on the list,
+because nobody has opened one yet — which is exactly the company this phase is
+for. Written the obvious way, the replacement then removed nearly the whole
+cost side, because `subtype NOT IN (...)` is unknown rather than true when
+subtype is NULL and most expense accounts have none.
+
+Verified end to end on a company registered from scratch: no customers, added
+one from inside the composer, raised **INV-1001 for $1,350.00** (3 × $450.00,
+totalled live) and **INV-1002 for $800.00**, took **$1,500.00** which settled
+1001 in full and 1002 in part and said so, had **$99,999.00 refused** with
+*"more than the $650.00 outstanding"*, and saw $650.00 land on the A/R aging
+and $2,150.00 on the profit and loss. Then a supplier and a bill for $125.40 on
+the other side of the same screen.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

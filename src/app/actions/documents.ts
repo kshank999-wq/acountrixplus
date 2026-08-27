@@ -1,0 +1,318 @@
+'use server'
+
+import { revalidatePath } from 'next/cache'
+import { z } from 'zod'
+import { requireActor } from '@/lib/current-user'
+import {
+  createBill,
+  createCustomer,
+  createInvoice,
+  createVendor,
+  recordPayment,
+  voidDocument,
+} from '@/modules/receivables/service'
+import { openDocumentsFor, type PaymentSide } from '@/modules/receivables/open-documents'
+import { allocate } from '@/modules/receivables/allocation'
+import { DomainError, messageFor } from '@/modules/errors'
+import { formatCents, parseAmountToCents } from '@/lib/money'
+
+/**
+ * Raising the documents a business actually raises (spec §3, §13).
+ *
+ * ## Why this file exists
+ *
+ * `createInvoice`, `createBill`, `recordPayment`, `createCustomer` and
+ * `createVendor` have been written, posted and tested since Phase 2 — and
+ * until now **not one of them was reachable from a screen**. Every invoice in
+ * the system arrived as a by-product of something else: a won opportunity, a
+ * completed appointment, a repair order, a rent schedule, a progress claim.
+ *
+ * So the application could age a receivable, chase it, credit it, write it
+ * off, recover the write-off, print it and put it on a statement — for
+ * invoices a business had no way to create. Nothing here is new accounting.
+ * It is a door onto rooms that were already built.
+ */
+
+export type ActionResult<T = undefined> =
+  | { ok: true; message?: string; data?: T }
+  | { ok: false; error: string }
+
+const PATHS = [
+  '/accounting',
+  '/accounting/receivables',
+  '/accounting/reports',
+  '/accounting/journal',
+  '/accounting/deposits',
+  '/crm',
+]
+
+async function run<T>(fn: () => Promise<{ message?: string; data?: T }>): Promise<ActionResult<T>> {
+  try {
+    const { message, data } = await fn()
+    for (const path of PATHS) revalidatePath(path)
+    return { ok: true, message, data }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
+  }
+}
+
+const uuid = z.string().uuid()
+const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-03-31.')
+
+/**
+ * An amount as somebody types it.
+ *
+ * Parsed here rather than in the browser so "1,234.50", "1234.5" and "£1234.50"
+ * all mean the same thing and the number that reaches the ledger is an integer
+ * of cents — never a float that has been through a text field.
+ */
+const money = z
+  .string()
+  .trim()
+  .min(1, 'Enter an amount.')
+  .transform((raw, ctx) => {
+    const cents = parseAmountToCents(raw)
+    if (cents === null) {
+      ctx.addIssue({ code: 'custom', message: `“${raw}” is not an amount.` })
+      return z.NEVER
+    }
+    return cents
+  })
+
+/** Thousandths, so 1.5 hours is 1500. Blank means one unit. */
+const quantity = z
+  .string()
+  .trim()
+  .optional()
+  .transform((raw, ctx) => {
+    if (!raw) return 1000
+    const parsed = Number(raw.replace(/,/g, ''))
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      ctx.addIssue({ code: 'custom', message: `“${raw}” is not a quantity.` })
+      return z.NEVER
+    }
+    return Math.round(parsed * 1000)
+  })
+
+const lineSchema = z.object({
+  chartAccountId: uuid,
+  description: z.string().trim().min(1, 'Every line needs a description.'),
+  quantity,
+  unitPrice: money,
+})
+
+// --- Parties ---------------------------------------------------------------
+
+const partySchema = z.object({
+  name: z.string().trim().min(1, 'Give them a name.'),
+  email: z.string().trim().email('That is not an email address.').optional().or(z.literal('')),
+  paymentTermsDays: z.coerce.number().int().min(0).max(365).optional(),
+})
+
+export async function createCustomerAction(
+  input: unknown,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = partySchema.parse(input)
+
+    const customer = await createCustomer(actor, {
+      name: parsed.name,
+      email: parsed.email || undefined,
+      paymentTermsDays: parsed.paymentTermsDays,
+    })
+
+    return {
+      message: `${customer.name} added, on ${customer.paymentTermsDays}-day terms.`,
+      data: { id: customer.id, name: customer.name },
+    }
+  })
+}
+
+export async function createVendorAction(
+  input: unknown,
+): Promise<ActionResult<{ id: string; name: string }>> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = partySchema.parse(input)
+
+    const vendor = await createVendor(actor, {
+      name: parsed.name,
+      email: parsed.email || undefined,
+      paymentTermsDays: parsed.paymentTermsDays,
+    })
+
+    return {
+      message: `${vendor.name} added, on ${vendor.paymentTermsDays}-day terms.`,
+      data: { id: vendor.id, name: vendor.name },
+    }
+  })
+}
+
+// --- Documents -------------------------------------------------------------
+
+const documentSchema = z.object({
+  partyId: uuid,
+  issueDate: isoDate,
+  dueDate: isoDate.optional().or(z.literal('')),
+  number: z.string().trim().optional(),
+  memo: z.string().trim().optional(),
+  tax: money.optional().or(z.literal('').transform(() => 0)),
+  lines: z.array(lineSchema).min(1, 'An invoice needs at least one line.'),
+})
+
+export async function createInvoiceAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = documentSchema.parse(input)
+
+    const invoice = await createInvoice(actor, {
+      customerId: parsed.partyId,
+      number: parsed.number || undefined,
+      issueDate: parsed.issueDate,
+      dueDate: parsed.dueDate || undefined,
+      memo: parsed.memo || undefined,
+      taxCents: parsed.tax || 0,
+      lines: parsed.lines.map((line) => ({
+        chartAccountId: line.chartAccountId,
+        description: line.description,
+        quantityMilli: line.quantity,
+        unitPriceCents: line.unitPrice,
+      })),
+    })
+
+    return {
+      message:
+        `Invoice ${invoice.number} raised for ${formatCents(invoice.totalCents)}, ` +
+        `due ${invoice.dueDate}. It is on the ledger and on the aging report.`,
+    }
+  })
+}
+
+export async function createBillAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = documentSchema.parse(input)
+
+    const bill = await createBill(actor, {
+      vendorId: parsed.partyId,
+      number: parsed.number || undefined,
+      issueDate: parsed.issueDate,
+      dueDate: parsed.dueDate || undefined,
+      memo: parsed.memo || undefined,
+      taxCents: parsed.tax || 0,
+      lines: parsed.lines.map((line) => ({
+        chartAccountId: line.chartAccountId,
+        description: line.description,
+        quantityMilli: line.quantity,
+        unitPriceCents: line.unitPrice,
+      })),
+    })
+
+    return {
+      message:
+        `Bill ${bill.number} entered for ${formatCents(bill.totalCents)}, due ${bill.dueDate}.`,
+    }
+  })
+}
+
+export async function voidDocumentAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z.object({ kind: z.enum(['invoice', 'bill']), id: uuid }).parse(input)
+
+    await voidDocument(actor, parsed.kind, parsed.id)
+
+    return {
+      message:
+        'Voided. The entry it posted was reversed rather than deleted — the number stays, ' +
+        'so an auditor is never looking at a gap.',
+    }
+  })
+}
+
+// --- Payments --------------------------------------------------------------
+
+const paymentSchema = z.object({
+  kind: z.enum(['receipt', 'disbursement']),
+  partyId: uuid,
+  paymentDate: isoDate,
+  amount: money,
+  /** Omitted on a receipt, the money waits in Undeposited Funds. */
+  financialAccountId: uuid.optional().or(z.literal('')),
+  /** Named explicitly when somebody knows which document the money is for. */
+  documentIds: z.array(uuid).optional(),
+  reference: z.string().trim().optional(),
+})
+
+/**
+ * Records a payment and works out what it settles.
+ *
+ * The allocation is decided here rather than asked for, because most of the
+ * time nobody has said: a customer sends a round figure against three open
+ * invoices. `recordPayment` requires applications summing exactly to the
+ * amount, so an overpayment cannot be quietly recorded — it is refused with
+ * the reason, which is the honest answer to "this is more than they owe".
+ */
+export async function recordPaymentAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = paymentSchema.parse(input)
+
+    const side: PaymentSide = parsed.kind === 'receipt' ? 'customer' : 'vendor'
+    const open = await openDocumentsFor(actor, side, parsed.partyId)
+
+    // A named document means somebody has said where the money goes, so the
+    // order they gave is the order it is applied in.
+    const chosen = parsed.documentIds?.length
+      ? parsed.documentIds
+          .map((id) => open.find((document) => document.id === id))
+          .filter((document): document is (typeof open)[number] => document !== undefined)
+      : open
+
+    const allocation = allocate(parsed.amount, chosen, {
+      respectOrder: Boolean(parsed.documentIds?.length),
+    })
+
+    if (allocation.applications.length === 0) {
+      throw new DomainError(
+        open.length === 0
+          ? 'There is nothing outstanding to apply this to. Raise the document first — a payment cannot be recorded against nothing.'
+          : 'That payment could not be applied to any of the open documents.',
+      )
+    }
+
+    if (allocation.unappliedCents > 0) {
+      throw new DomainError(
+        `${formatCents(parsed.amount)} is more than the ${formatCents(allocation.appliedCents)} outstanding. ` +
+          `Reduce it to ${formatCents(allocation.appliedCents)}, or raise the document the rest covers first.`,
+      )
+    }
+
+    await recordPayment(actor, {
+      kind: parsed.kind,
+      customerId: parsed.kind === 'receipt' ? parsed.partyId : undefined,
+      vendorId: parsed.kind === 'disbursement' ? parsed.partyId : undefined,
+      paymentDate: parsed.paymentDate,
+      amountCents: parsed.amount,
+      financialAccountId: parsed.financialAccountId || undefined,
+      reference: parsed.reference || undefined,
+      applications: allocation.applications.map((application) => ({
+        invoiceId: parsed.kind === 'receipt' ? application.documentId : undefined,
+        billId: parsed.kind === 'disbursement' ? application.documentId : undefined,
+        amountCents: application.amountCents,
+      })),
+    })
+
+    const settled = allocation.applications
+      .map((application) => `${application.number} ${formatCents(application.amountCents)}`)
+      .join(', ')
+
+    const held =
+      parsed.kind === 'receipt' && !parsed.financialAccountId
+        ? ' Held in Undeposited Funds until you bank it.'
+        : ''
+
+    return { message: `${formatCents(parsed.amount)} against ${settled}.${held}` }
+  })
+}
