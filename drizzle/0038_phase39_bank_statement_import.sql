@@ -1,0 +1,1 @@
+ALTER TYPE "public"."import_kind" ADD VALUE 'bank_statement';

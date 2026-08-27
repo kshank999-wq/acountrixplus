@@ -1611,6 +1611,89 @@ Verified end to end on the demo books: four invoices raised from a monthly retai
 forecast to the end of November — owed by nobody. A read-only user sees the arrangements and the
 work list with no buttons and no forecast at all.
 
+### Two adapters, or the interface is a guess (Phase 38)
+
+`TransactionalProvider` had existed since Phase 19 with exactly one
+implementation, and that implementation always succeeded. The consequence
+surfaced in production: a deployment with real users had no way to send a
+password reset, and the honest advice was *write the password down.*
+
+- **Mail leaves over HTTP, not SMTP.** A serverless invocation is good at one
+  request and bad at a stateful socket it may be frozen inside. No new
+  dependency — it is `fetch`.
+- **`retryable` now means something**, derived from the status rather than
+  guessed: 429/408/5xx transient, every other 4xx permanent, a thrown fetch
+  transient by construction because nothing about the message was read.
+  Classified in one place rather than copied per vendor.
+- **Two adapters, and Postmark is why.** It answers `200` and means no — a
+  rejection arrives as HTTP 200 with a non-zero `ErrorCode`. Written against
+  Resend alone, "2xx means sent" is obvious and correct, and would have
+  recorded rejected messages as delivered on the one channel where a lost
+  message locks somebody out of their own books.
+- **A delivery failure is not a second enumeration channel.** `/forgot` says
+  the same sentence whether the address exists, does not, or bounced.
+
+**And the bug browser verification caught, which falsified this phase's own
+documentation.** A failed reset was correctly recorded — and then appeared on
+no operations screen, where the ADR and the deploy guide both said it would.
+`failedDeliveries` filters `company_id = $1`, and **a password reset has no
+company**: it is a pre-authentication act. `= $1` never matches NULL, so every
+failed reset was invisible to every operator. Latent since Phase 19, and
+unsurfaceable until a provider existed that could fail. Resets are now
+attributed to the recipient's oldest membership — deliberately not shown to
+every tenant, which is what Phase 10 does for dead jobs, because a dead job
+carries no personal data and a bounced reset carries an email address.
+
+### A statement row has no name, so it is given one (Phase 39)
+
+Transactions could only arrive through a `BankProvider`, and the only adapter
+is the mock — so a real business could not get a single real transaction in,
+and the whole of Phase 1 and 2 was unreachable with their own money. Every bank
+on earth exports CSV. This is the path that needs no vendor.
+
+- **It imports into the feed, not the ledger.** Rows land in the same inbox at
+  `review_state = 'new'`. Nothing posts. A statement is evidence of what
+  happened, not a decision about which account it belongs in, and
+  categorisation, the rules engine and reconciliation are all reached
+  unchanged.
+- **A content hash alone silently loses money.** `bank_transactions` dedups on
+  the provider's immutable id, and a CSV has none. Hashing
+  `(date, amount, description)` looks sufficient: somebody who buys two
+  identical coffees on one day then has **two transactions and one hash**, and
+  the second disappears with no error at all. So the fingerprint carries an
+  **ordinal** — the position among otherwise-identical rows — and two coffees
+  stay two transactions while the same file twice imports nothing.
+- **The bank's debit is money leaving you**, because the statement is written
+  from their side, where your balance is their liability. Getting it backwards
+  inverts every figure on the profit and loss. A magnitude is used in a column
+  already labelled Withdrawal, and a row with figures in *both* columns is a
+  refusal rather than a sum — netting would post a transaction appearing
+  nowhere on the statement.
+- **Reversal deletes rather than voids**, because a feed row is not a posted
+  entry, and refuses once a row has been categorised and posted or cleared on a
+  reconciliation. Re-importing the file puts a deleted row back identically,
+  which is the fingerprint earning its keep twice.
+- **Importing a statement is a bookkeeper's job, and so is undoing it.**
+  Reversal wanted `accounting:journal`, which a bookkeeper does not have —
+  meaning the person who imported the wrong file had to find somebody else to
+  fix it. The permission now matches the run, and the wizard shows each person
+  the kinds they may actually import.
+
+**And the bug browser verification caught.** Re-importing last month's file
+said **"Ready to import"** over **"To add: 0"**, with a live button.
+`canCommit` is `errors === 0 && total > 0`, which is right for every kind that
+came before — a statement is the first where every row can be a legitimate
+skip. Committing would have written a run of three rows and nought created: a
+line saying an import happened when none did, in the one place that exists to
+answer *"where did these come from"*. It now refuses with the true reason —
+*you already have all 3 of these* — and the screen says "You already have all
+of this" rather than sending somebody to hunt for a problem in a good file.
+
+Verified end to end on the demo books: four rows imported into Business
+Checking for a net **$1,678.60**, two identical coffees kept apart, the same
+file re-previewed as **0 to add, 4 already have**, the rows reachable and
+uncategorised in the inbox, and **"Removed 4 bank transactions"** on undo.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

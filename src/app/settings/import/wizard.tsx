@@ -33,6 +33,11 @@ type Plan = {
   }
   canCommit: boolean
   blankRowsSkipped: number
+  // Bank-statement extras.
+  accountName?: string
+  netCentsToAdd?: number
+  earliest?: string | null
+  latest?: string | null
   // Trial-balance extras.
   fileDebitCents?: number
   fileCreditCents?: number
@@ -55,6 +60,8 @@ type Readiness = {
   diagnosis: string
 }
 
+type Account = { id: string; name: string; mask: string | null }
+
 type Run = {
   id: string
   kind: string
@@ -67,6 +74,7 @@ type Run = {
   createdAt: string
   notes: string[]
   blockers: string[]
+  canUndo: boolean
 }
 
 /**
@@ -79,23 +87,31 @@ type Run = {
 export function ImportWizard({
   readiness,
   runs,
-  canImport,
+  allowedKinds,
+  accounts,
 }: {
   readiness: Readiness | null
   runs: Run[]
-  canImport: boolean
+  allowedKinds: ImportKind[]
+  accounts: Account[]
 }) {
   const router = useRouter()
-  const [kind, setKind] = useState<ImportKind>('chart_of_accounts')
+  const steps = STEPS.filter((entry) => allowedKinds.includes(entry.kind))
+  const [kind, setKind] = useState<ImportKind>(steps[0]?.kind ?? 'chart_of_accounts')
   const [text, setText] = useState('')
   const [fileName, setFileName] = useState('')
   const [asOfDate, setAsOfDate] = useState(new Date().toISOString().slice(0, 10))
   const [dateOrder, setDateOrder] = useState<'mdy' | 'dmy'>('mdy')
+  const [financialAccountId, setFinancialAccountId] = useState(accounts[0]?.id ?? '')
   const [plan, setPlan] = useState<Plan | null>(null)
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
-  const step = STEPS.find((entry) => entry.kind === kind)!
+  const step = steps.find((entry) => entry.kind === kind)
+  const isStatement = kind === 'bank_statement'
+  // A statement has to go somewhere. Without an account there is nothing to
+  // preview, so the button says why rather than failing on the server.
+  const ready = text.trim().length > 0 && (!isStatement || financialAccountId !== '')
 
   function act(fn: () => Promise<ActionResult<unknown>>, onOk?: (data: unknown) => void) {
     startTransition(async () => {
@@ -112,14 +128,27 @@ export function ImportWizard({
   function preview() {
     setPlan(null)
     act(
-      () => planImportAction({ kind, text, dateOrder }),
+      () => planImportAction({ kind, text, dateOrder, financialAccountId: statementAccount() }),
       (data) => setPlan(data as Plan),
     )
   }
 
+  /** Only sent for a statement — the other kinds reject an unknown field. */
+  function statementAccount() {
+    return isStatement && financialAccountId ? financialAccountId : undefined
+  }
+
   function commit() {
     act(
-      () => commitImportAction({ kind, text, fileName, asOfDate, dateOrder }),
+      () =>
+        commitImportAction({
+          kind,
+          text,
+          fileName,
+          asOfDate,
+          dateOrder,
+          financialAccountId: statementAccount(),
+        }),
       () => {
         setPlan(null)
         setText('')
@@ -141,6 +170,9 @@ export function ImportWizard({
   const allProblems = [...(plan?.fileProblems ?? []), ...rowProblems]
   const errors = allProblems.filter((problem) => problem.severity === 'error')
   const warnings = allProblems.filter((problem) => problem.severity === 'warning')
+  // A file that is perfectly readable and adds nothing, which only a statement
+  // can be: every row is one you already have.
+  const nothingNew = plan !== null && errors.length === 0 && plan.counts.willCreate === 0
 
   return (
     <div className="space-y-6">
@@ -166,11 +198,11 @@ export function ImportWizard({
 
       {readiness && <ReadinessCard readiness={readiness} />}
 
-      {canImport && (
+      {step && (
         <Card title="Import a file" subtitle={step.blurb}>
           <div className="space-y-3 px-4 py-3">
             <div className="flex flex-wrap gap-1">
-              {STEPS.map((entry) => (
+              {steps.map((entry) => (
                 <button
                   key={entry.kind}
                   onClick={() => {
@@ -204,7 +236,34 @@ export function ImportWizard({
                 </label>
               )}
 
-              {(kind === 'open_invoices' || kind === 'open_bills') && (
+              {isStatement && (
+                <label className="text-xs text-muted">
+                  <span className="mb-1 block">Statement for</span>
+                  {accounts.length === 0 ? (
+                    <span className="block py-1.5 text-sm text-warning">
+                      No bank accounts yet — add one first.
+                    </span>
+                  ) : (
+                    <select
+                      value={financialAccountId}
+                      onChange={(event) => {
+                        setFinancialAccountId(event.target.value)
+                        setPlan(null)
+                      }}
+                      className="field py-1.5 text-sm"
+                    >
+                      {accounts.map((account) => (
+                        <option key={account.id} value={account.id}>
+                          {account.name}
+                          {account.mask ? ` ••${account.mask}` : ''}
+                        </option>
+                      ))}
+                    </select>
+                  )}
+                </label>
+              )}
+
+              {(kind === 'open_invoices' || kind === 'open_bills' || isStatement) && (
                 <label className="text-xs text-muted">
                   <span className="mb-1 block">Read numeric dates as</span>
                   <select
@@ -232,13 +291,17 @@ export function ImportWizard({
                 }}
                 rows={6}
                 spellCheck={false}
-                placeholder={'Account #,Account Name,Account Type\n1000,Checking Account,Bank'}
+                placeholder={
+                  isStatement
+                    ? 'Date,Description,Amount\n03/14/2026,COFFEE HOUSE,-4.50'
+                    : 'Account #,Account Name,Account Type\n1000,Checking Account,Bank'
+                }
                 className="field w-full font-mono text-xs"
               />
             </label>
 
             <div className="flex items-center gap-2">
-              <button className="btn btn-ghost" disabled={pending || !text.trim()} onClick={preview}>
+              <button className="btn btn-ghost" disabled={pending || !ready} onClick={preview}>
                 See what this would do
               </button>
               {plan?.canCommit && (
@@ -253,18 +316,34 @@ export function ImportWizard({
 
       {plan && (
         <Card
-          title={plan.canCommit ? 'Ready to import' : 'Not ready yet'}
+          title={
+            plan.canCommit
+              ? 'Ready to import'
+              : nothingNew
+                ? 'You already have all of this'
+                : 'Not ready yet'
+          }
           subtitle={
             plan.canCommit
               ? 'Nothing has been written. Check the figures, then import.'
-              : 'Every problem is listed. Fix them in the file and try again — an import goes in whole or not at all.'
+              : nothingNew
+                ? // Not a failure. Re-importing an overlapping window is the
+                  // normal way this gets used, and saying "fix the problems"
+                  // about a perfectly good file would send somebody hunting
+                  // for a problem that is not there.
+                  'Every row in this file is already in the inbox, so there is nothing to add.'
+                : 'Every problem is listed. Fix them in the file and try again — an import goes in whole or not at all.'
           }
         >
           <div className="space-y-3 px-4 py-3">
             <div className="grid gap-3 sm:grid-cols-4">
               <Stat label="Rows" value={`${plan.counts.total}`} />
               <Stat label="To add" value={`${plan.counts.willCreate}`} />
-              <Stat label="To update" value={`${plan.counts.willUpdate}`} />
+              {isStatement ? (
+                <Stat label="Already have" value={`${plan.counts.willSkip}`} />
+              ) : (
+                <Stat label="To update" value={`${plan.counts.willUpdate}`} />
+              )}
               <Stat
                 label="Problems"
                 value={`${plan.counts.errors}`}
@@ -287,6 +366,26 @@ export function ImportWizard({
               </p>
             )}
 
+            {plan.netCentsToAdd !== undefined && !nothingNew && (
+              <p className="text-sm">
+                <span className="tnum font-medium">{formatCents(plan.netCentsToAdd)}</span>{' '}
+                <span className="text-muted">
+                  net change to {plan.accountName} from the {plan.counts.willCreate} new{' '}
+                  {plan.counts.willCreate === 1 ? 'row' : 'rows'}
+                  {plan.earliest && plan.latest && (
+                    <>
+                      , covering {plan.earliest} to {plan.latest}
+                    </>
+                  )}
+                  .
+                </span>
+                <span className="block text-xs text-muted">
+                  Check that against the movement on the statement itself. Nothing posts — these
+                  land in the inbox to be categorised.
+                </span>
+              </p>
+            )}
+
             {plan.totalCents !== undefined && (
               <p className="text-sm">
                 <span className="tnum font-medium">{formatCents(plan.totalCents)}</span>{' '}
@@ -302,7 +401,13 @@ export function ImportWizard({
 
             {errors.length > 0 && <ProblemList title="Must be fixed" problems={errors} tone="danger" />}
             {warnings.length > 0 && (
-              <ProblemList title="Worth a look — these will import anyway" problems={warnings} tone="warning" />
+              <ProblemList
+                title={
+                  nothingNew ? 'Worth a look' : 'Worth a look — these will import anyway'
+                }
+                problems={warnings}
+                tone="warning"
+              />
             )}
           </div>
         </Card>
@@ -339,7 +444,7 @@ export function ImportWizard({
                   <td className="tnum px-4 py-1.5 text-right text-muted">{run.rowCount}</td>
                   <td className="tnum px-4 py-1.5 text-right">{run.createdCount}</td>
                   <td className="px-4 py-1.5 text-right">
-                    {canImport && run.status === 'committed' && (
+                    {run.canUndo && run.status === 'committed' && (
                       run.blockers.length === 0 ? (
                         <button
                           className="btn btn-ghost text-xs text-danger"

@@ -3,6 +3,8 @@ import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listImportRuns, reversalBlockers } from '@/modules/importing/reversal'
 import { openingReadiness } from '@/modules/importing/opening-balances'
+import { listStatementAccounts } from '@/modules/importing/statements'
+import { IMPORT_KINDS } from '@/modules/importing/vocabulary'
 import { SETTINGS_NAV } from '../nav'
 import { ImportWizard } from './wizard'
 
@@ -32,9 +34,10 @@ export default async function ImportPage() {
 
   const canReport = can(actor, 'reports:financial')
 
-  const [runs, readiness] = await Promise.all([
+  const [runs, readiness, accounts] = await Promise.all([
     listImportRuns(actor),
     canReport ? openingReadiness(actor) : Promise.resolve(null),
+    listStatementAccounts(actor),
   ])
 
   // Worked out on the server so "Undo" is never a button that fails.
@@ -42,6 +45,16 @@ export default async function ImportPage() {
     runs.map(async (run) =>
       run.status === 'committed' ? await reversalBlockers(actor, run.id) : [],
     ),
+  )
+
+  // A bookkeeper imports bank statements and an accountant brings the opening
+  // books across. They are different jobs with different permissions, so the
+  // page names what this person may do rather than gating the whole wizard on
+  // the stricter of the two.
+  const canOpenBooks = can(actor, 'accounting:journal')
+  const canImportStatement = can(actor, 'bookkeeping:import')
+  const allowedKinds = IMPORT_KINDS.filter((kind) =>
+    kind === 'bank_statement' ? canImportStatement : canOpenBooks,
   )
 
   return (
@@ -65,8 +78,10 @@ export default async function ImportPage() {
           createdAt: run.createdAt.toISOString().slice(0, 10),
           notes: run.notes,
           blockers: blockers[index],
+          canUndo: run.kind === 'bank_statement' ? canImportStatement : canOpenBooks,
         }))}
-        canImport={can(actor, 'accounting:journal')}
+        allowedKinds={allowedKinds}
+        accounts={accounts}
       />
     </AppShell>
   )

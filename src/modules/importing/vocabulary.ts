@@ -19,11 +19,18 @@ export const IMPORT_KINDS = [
   'trial_balance',
   'open_invoices',
   'open_bills',
+  'bank_statement',
 ] as const
 
 export type ImportKind = (typeof IMPORT_KINDS)[number]
 
-/** The order a migration actually happens in, with why each step comes first. */
+/**
+ * The order a migration actually happens in, with why each step comes first.
+ *
+ * The bank statement is last and is not really part of that sequence — it is
+ * not an opening position but ongoing activity, and it is the one kind that
+ * can be run again next month.
+ */
 export const IMPORT_STEPS: Array<{ kind: ImportKind; label: string; blurb: string }> = [
   {
     kind: 'chart_of_accounts',
@@ -49,6 +56,12 @@ export const IMPORT_STEPS: Array<{ kind: ImportKind; label: string; blurb: strin
       'What customers still owe, one row each. This is where the receivable enters the ledger.',
   },
   { kind: 'open_bills', label: 'Open bills', blurb: 'What you still owe suppliers.' },
+  {
+    kind: 'bank_statement',
+    label: 'Bank statement',
+    blurb:
+      'A statement downloaded from your bank. Rows land in the transaction inbox to be categorised — nothing posts until you code them, and importing the same window twice adds nothing.',
+  },
 ]
 
 export const IMPORT_KIND_LABELS: Record<string, string> = Object.fromEntries(

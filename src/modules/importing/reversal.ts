@@ -1,6 +1,7 @@
-import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNotNull, ne, or, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
+  bankTransactions,
   bills,
   chartAccounts,
   customers,
@@ -199,6 +200,50 @@ export async function reversalBlockers(
     }
   }
 
+  // A statement import (Phase 39) puts rows in the feed, not the ledger. An
+  // untouched row is safe to remove — nobody has said anything about it. A row
+  // somebody has since coded carries a journal entry, and one that has been
+  // cleared is part of a reconciliation, so both are somebody else's work now.
+  const transactionIds = ids('bank_transaction')
+  if (transactionIds.length > 0) {
+    const posted = await db
+      .select({ id: journalEntries.sourceId })
+      .from(journalEntries)
+      .where(
+        scoped(
+          ctx,
+          journalEntries,
+          eq(journalEntries.sourceType, 'bank_transaction'),
+          inArray(journalEntries.sourceId, transactionIds),
+          ne(journalEntries.status, 'void'),
+        ),
+      )
+
+    if (posted.length > 0) {
+      blockers.push(
+        `${posted.length} imported ${posted.length === 1 ? 'transaction has' : 'transactions have'} been categorised and posted.`,
+      )
+    }
+
+    const cleared = await db
+      .select({ id: bankTransactions.id })
+      .from(bankTransactions)
+      .where(
+        scoped(
+          ctx,
+          bankTransactions,
+          inArray(bankTransactions.id, transactionIds),
+          isNotNull(bankTransactions.clearedAt),
+        ),
+      )
+
+    if (cleared.length > 0) {
+      blockers.push(
+        `${cleared.length} imported ${cleared.length === 1 ? 'transaction has' : 'transactions have'} been cleared on a reconciliation.`,
+      )
+    }
+  }
+
   const documentIds = [...ids('invoice'), ...ids('bill')]
   if (documentIds.length > 0) {
     // Two `inArray`s rather than one `= ANY($1)`: the driver sends a uuid[]
@@ -239,7 +284,18 @@ export async function revertImport(
   ctx: ActorContext,
   runId: string,
 ): Promise<ReversalResult> {
-  requirePermission(ctx, 'accounting:journal')
+  const [subject] = await db
+    .select({ kind: importRuns.kind })
+    .from(importRuns)
+    .where(scoped(ctx, importRuns, eq(importRuns.id, runId)))
+    .limit(1)
+
+  // Undoing an opening balance voids journal entries, so it is an accountant's
+  // act. Undoing a statement import deletes uncategorised feed rows and touches
+  // no ledger at all — and the person who imported the wrong file into the
+  // wrong account is a bookkeeper, who would otherwise have to find somebody
+  // else to clean up after them.
+  requirePermission(ctx, subject?.kind === 'bank_statement' ? 'bookkeeping:import' : 'accounting:journal')
 
   const blockers = await reversalBlockers(ctx, runId)
   if (blockers.length > 0) throw new ImportNotReversibleError(blockers)
@@ -293,6 +349,11 @@ export async function revertImport(
       [customers, ids('customer'), 'customer'],
       [vendors, ids('vendor'), 'vendor'],
       [chartAccounts, ids('chart_account'), 'account'],
+      // Safe to delete outright rather than void, because a feed row is not
+      // history — nothing posted, and the blockers above have already refused
+      // if anything did. Re-importing the file puts them back identically,
+      // which is the whole point of the fingerprint.
+      [bankTransactions, ids('bank_transaction'), 'bank transaction'],
     ] as const) {
       if (entityIds.length === 0) continue
       const removed = await tx

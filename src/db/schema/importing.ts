@@ -29,6 +29,16 @@ export const importKindEnum = pgEnum('import_kind', [
   'trial_balance',
   'open_invoices',
   'open_bills',
+  /**
+   * A downloaded bank statement (Phase 39).
+   *
+   * Unlike the others, this one imports into a *feed* rather than the ledger:
+   * rows land in the transaction inbox exactly where a bank connection would
+   * have put them, and nothing posts until somebody categorises them. So a
+   * reversal removes uncategorised rows and refuses once they carry entries,
+   * which is the same rule the other kinds follow for a different reason.
+   */
+  'bank_statement',
 ])
 
 export const importStatusEnum = pgEnum('import_status', [
@@ -133,7 +143,7 @@ export const importRecords = pgTable(
       .notNull()
       .references(() => importRuns.id, { onDelete: 'cascade' }),
 
-    /** `chart_account`, `customer`, `vendor`, `invoice`, `bill`. */
+    /** `chart_account`, `customer`, `vendor`, `invoice`, `bill`, `bank_transaction`. */
     entityType: text('entity_type').notNull(),
     entityId: uuid('entity_id').notNull(),
     /** `created` or `updated`. Only `created` rows are reversible. */

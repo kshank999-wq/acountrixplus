@@ -12,6 +12,11 @@ import {
   planTrialBalanceImport,
 } from '@/modules/importing/opening-balances'
 import { revertImport } from '@/modules/importing/reversal'
+import {
+  commitStatementImport,
+  planStatementImport,
+  StatementImportError,
+} from '@/modules/importing/statements'
 import type { ImportPlan } from '@/modules/importing/plan'
 import { IMPORT_KINDS } from '@/modules/importing/vocabulary'
 import { messageFor } from '@/modules/errors'
@@ -39,6 +44,8 @@ const planSchema = z.object({
   text: z.string().min(1, 'Paste the file’s contents, or choose a file.'),
   columns: z.record(z.string(), z.string().nullable()).optional(),
   dateOrder: z.enum(['mdy', 'dmy']).optional(),
+  /** Which account the statement belongs to. Only a bank statement needs one. */
+  financialAccountId: z.string().uuid().optional(),
 })
 
 /**
@@ -79,6 +86,16 @@ async function buildPlan(
     case 'open_bills':
       return planOpenDocumentImport(actor, {
         kind: input.kind,
+        text: input.text,
+        columns: input.columns,
+        dateOrder: input.dateOrder,
+      })
+    case 'bank_statement':
+      if (!input.financialAccountId) {
+        throw new StatementImportError('Choose which account this statement is for.')
+      }
+      return planStatementImport(actor, {
+        financialAccountId: input.financialAccountId,
         text: input.text,
         columns: input.columns,
         dateOrder: input.dateOrder,
@@ -144,6 +161,15 @@ export async function commitImportAction(input: unknown): Promise<ActionResult> 
         const noun = parsed.kind === 'open_invoices' ? 'invoice' : 'bill'
         return {
           message: `${result.created} open ${result.created === 1 ? noun : `${noun}s`} brought across.`,
+        }
+      }
+      case 'bank_statement': {
+        const result = await commitStatementImport(actor, plan as never, meta)
+        return {
+          message:
+            `${result.created} ${result.created === 1 ? 'transaction' : 'transactions'} added to the inbox` +
+            (result.skipped > 0 ? `, ${result.skipped} you already had.` : '.') +
+            ' Nothing has posted — categorise them in the inbox.',
         }
       }
     }
