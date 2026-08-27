@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
+import Link from 'next/link'
 import {
   commitImportAction,
   planImportAction,
@@ -241,7 +242,11 @@ export function ImportWizard({
                   <span className="mb-1 block">Statement for</span>
                   {accounts.length === 0 ? (
                     <span className="block py-1.5 text-sm text-warning">
-                      No bank accounts yet — add one first.
+                      No bank accounts yet —{' '}
+                      <Link className="underline" href="/settings/accounts">
+                        add one first
+                      </Link>
+                      .
                     </span>
                   ) : (
                     <select

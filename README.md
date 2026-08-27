@@ -1694,6 +1694,66 @@ Checking for a net **$1,678.60**, two identical coffees kept apart, the same
 file re-previewed as **0 to add, 4 already have**, the rows reachable and
 uncategorised in the inbox, and **"Removed 4 bank transactions"** on undo.
 
+### A bank account is an account, not a label on somebody else's (Phase 40)
+
+Two things were wrong, and the second was hiding behind the first.
+
+**A business could not open a bank account at all.** `financial_accounts` rows
+were only ever written by an aggregator or the seed — so a company that signed
+up and banked somewhere the aggregator does not reach had none, and without one
+there is no statement import, no reconciliation, no deposit, no counter takings
+and no payroll remittance. Phase 39 shipped a statement importer whose account
+picker, for a real new customer, was empty. The only button that made one
+connects the mock provider, which invents transactions and files them in real
+books.
+
+**And the accounts that did exist shared ledger accounts.** Everything that was
+not a credit card pointed at `1000 Checking Account`, so the seeded demo had a
+current account and a deposit account on one balance-sheet line.
+
+- **One bank account, one ledger account**, enforced by a unique index rather
+  than remembered — two people connecting institutions at once would both pass
+  an application check. A line covering two real accounts can say what the two
+  hold together and cannot say what either holds, which is the only question a
+  bank statement asks.
+- **Opening an account mints its ledger account**, so nobody needs to know what
+  a chart account is to open one. Numbering is banded by kind — checking
+  1000–1009, savings 1010–1039, cards 2100–2139 — because every report sorts by
+  number and a current account at 1150 would sit among the receivables for ever.
+  The first of a kind reuses the number the standard chart already names, but
+  only that one and only when nothing posts to it: renaming an account that
+  carries a balance would relabel history.
+- **Closed, never deleted**, and the ledger account goes inactive with it — an
+  account still offered for categorisation is one somebody posts to by accident
+  and that never reconciles. Refused while a reconciliation is open.
+- **A tie-out per account that could not have existed before.** With two
+  accounts on one ledger account the ledger figure covers both, so the
+  comparison is meaningless in exactly the case somebody needs it. Reported as a
+  *position*, not a fault: money legitimately enters an account from an invoice
+  payment with no feed row, and rows in the inbox have not posted.
+- **A migration that repairs existing books, honestly.** Each sharing account
+  gets a line of its own and the postings that *provably* belong to it move —
+  only entries derived from its own bank transactions. A payment recorded
+  against an invoice names a chart account and nothing else, so nobody can now
+  say which real account it went into, and those lines stay put rather than
+  being guessed at.
+
+**And the bug browser verification caught.** The tie-out finding read
+*"difference $92,279.30 — Business Checking −$92,476.00, Business Credit Card
+$196.70"*. One finding, one word, two signs: the register computes
+`left − right` with left the subledger side, and `cashTieOut` computed its
+per-account difference the other way round. Both internally consistent,
+contradicting each other on the same row. Invisible to the tests, because the
+only per-account assertion was that a balanced account differs by zero — and
+zero has no sign.
+
+Verified end to end by registering a company from scratch: no accounts, the
+import wizard now links to somewhere real, three accounts opened onto **1000,
+1001 and 2100**, a statement imported into the first, and after coding it the
+account reads **$5,000.00 in the ledger against $5,000.00 in the feed** with
+the balance sheet naming *"1000 Barclays Current ••8812"*. A fresh seed
+produces no shared ledger accounts anywhere.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

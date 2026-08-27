@@ -220,6 +220,16 @@ Neither blocks a deployment, and both are behind provider interfaces:
 - **Bank feeds** (`BANK_PROVIDER=mock`). Transactions are generated, not
   fetched. Everything downstream — rules, categorisation, reconciliation — is
   real.
+
+  **"Sync bank" on a real company's books puts invented transactions in them.**
+  The result message says so, but the rows are as real as any others once
+  written, and undoing them means deleting rows by hand. Tell whoever is
+  testing not to press it on books that matter.
+
+  The path that needs no vendor is **Settings → Bank accounts** to open the
+  account, then **Settings → Bring in your books → Bank statement** to import a
+  CSV the bank exported. That is the supported way to get real transactions in
+  until an aggregator is contracted.
 - **Transactional email** (`TRANSACTIONAL_EMAIL_PROVIDER=mock`). Mail is kept in
   memory and logged. **Password resets and invitations will not arrive** until a
   real provider is configured, so plan to create the first account yourself

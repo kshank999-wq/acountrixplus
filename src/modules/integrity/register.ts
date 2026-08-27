@@ -3,6 +3,7 @@ import type { ActorContext } from '@/modules/tenancy/context'
 import type { IndustryModule } from '@/modules/coa/industry'
 
 import { giftCardPosition, payoutPosition } from '@/modules/appointments/reporting'
+import { cashTieOut, sharedLedgerAccounts } from '@/modules/banking/accounts'
 import { reconcileFixedAssets } from '@/modules/assets/service'
 import { netAssets } from '@/modules/funds/reporting'
 import { reconcileInventory } from '@/modules/inventory/service'
@@ -155,6 +156,81 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
         leftCents: result.payables.subledgerCents,
         rightCents: result.payables.ledgerCents,
         detail: named(result.payables.parties),
+      }
+    },
+  },
+  {
+    key: 'banking.shared_ledger_accounts',
+    label: 'Bank accounts that share one ledger account',
+    compares: 'Bank accounts against the ledger accounts they post to',
+    module: null,
+    severity: 'fault',
+    meaning:
+      'Two bank accounts on one ledger account give the balance sheet a single figure covering ' +
+      'both, so it can never say what either holds — which is the only question a bank statement ' +
+      'asks, and neither account can be tied out. A unique index refuses new pairs; this catches ' +
+      'books that were migrated with one already in place.',
+    run: async (ctx) => {
+      const shared = await sharedLedgerAccounts(ctx)
+      const accounts = shared.reduce((sum, entry) => sum + entry.names.length, 0)
+
+      return {
+        agrees: shared.length === 0,
+        // Counts, not money. The number that matters is how many real accounts
+        // are hidden behind how few ledger lines.
+        leftCents: accounts,
+        rightCents: shared.length,
+        detail:
+          shared.length === 0
+            ? undefined
+            : shared
+                .map((entry) => `${entry.chartAccountNumber}: ${entry.names.join(' and ')}`)
+                .join('; '),
+      }
+    },
+  },
+  {
+    key: 'banking.cash_tie_out',
+    label: 'What each bank account holds, against its feed',
+    compares: 'Σ per account (its ledger account) against its own posted transactions',
+    module: null,
+    // Deliberately a position rather than a fault. Money legitimately enters a
+    // bank account from an invoice payment or a manual journal that never
+    // appeared in the feed, and rows still in the inbox have not posted at
+    // all — so a difference is a number worth knowing, not an accusation.
+    severity: 'position',
+    meaning:
+      'A difference is not automatically wrong: a payment recorded against an invoice moves the ' +
+      'ledger without a feed row, and anything still in the inbox has not posted. It is the ' +
+      'figure to look at when the balance sheet and the bank disagree, and it is only answerable ' +
+      'at all because each account now has a ledger account of its own.',
+    run: async (ctx) => {
+      const rows = await cashTieOut(ctx)
+      const ledger = rows.reduce((sum, row) => sum + row.ledgerCents, 0)
+      const feed = rows.reduce((sum, row) => sum + row.feedCents, 0)
+      const waiting = rows.reduce((sum, row) => sum + row.uncategorizedCount, 0)
+      const apart = rows.filter((row) => row.differenceCents !== 0)
+
+      return {
+        agrees: apart.length === 0,
+        leftCents: feed,
+        rightCents: ledger,
+        detail: (() => {
+          if (rows.length === 0) return 'No bank accounts.'
+          const parts: string[] = []
+          if (apart.length > 0) {
+            parts.push(
+              apart
+                .slice(0, 3)
+                .map((row) => `${row.accountName} ${formatCents(row.differenceCents)}`)
+                .join(', ') + (apart.length > 3 ? ` and ${apart.length - 3} more` : ''),
+            )
+          }
+          if (waiting > 0) {
+            parts.push(`${waiting} still in the inbox`)
+          }
+          return parts.length > 0 ? parts.join('; ') : undefined
+        })(),
       }
     },
   },

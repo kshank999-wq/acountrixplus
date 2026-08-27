@@ -112,5 +112,18 @@ export const financialAccounts = pgTable(
       t.companyId,
       t.providerAccountId,
     ),
+    /**
+     * One bank account, one ledger account (Phase 40).
+     *
+     * Two accounts sharing a chart account give the balance sheet one figure
+     * covering both, so it cannot say what either holds — which is the only
+     * question a bank statement asks. Enforced here rather than remembered,
+     * because two people connecting institutions at once would otherwise both
+     * pass an application-level check.
+     */
+    chartAccountUnique: unique('financial_accounts_chart_account_unique').on(
+      t.companyId,
+      t.chartAccountId,
+    ),
   }),
 )

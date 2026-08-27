@@ -112,6 +112,10 @@ describe('the register names every check there is (Phase 33)', () => {
     // trading, and an alarm that fires on ordinary trading gets switched off.
     expect(positions.sort()).toEqual([
       'appointments.payouts',
+      // A bank account and its feed differ in ordinary trading: a payment
+      // recorded against an invoice moves the ledger with no feed row, and
+      // rows still in the inbox have not posted (Phase 40).
+      'banking.cash_tie_out',
       'funds.untagged_contributions',
       'pos.tips',
     ])
@@ -130,6 +134,10 @@ describe('the register names every check there is (Phase 33)', () => {
     expect(faults.sort()).toEqual([
       'appointments.gift_cards',
       'assets.register',
+      // Nothing legitimately puts two bank accounts on one ledger account —
+      // a unique index refuses new ones, and this catches migrated books
+      // (Phase 40).
+      'banking.shared_ledger_accounts',
       'cash_drawer.open_tills',
       'fx.conversions',
       'inventory.lots',
@@ -163,6 +171,10 @@ describe('running the checks (Phase 33)', () => {
     // so `fx.conversions` is ungated too (Phase 35).
     expect(run.findings.map((row) => row.key).sort()).toEqual([
       'assets.register',
+      // Every company has bank accounts, or should — neither banking check is
+      // gated on an industry (Phase 40).
+      'banking.cash_tie_out',
+      'banking.shared_ledger_accounts',
       'fx.conversions',
       'ledger.payables',
       'ledger.receivables',

@@ -172,8 +172,15 @@ export async function undoAction(): Promise<ActionResult> {
 }
 
 /**
- * Connects the sandbox feed and imports it. With BANK_PROVIDER=mock this needs
- * no credentials, which is what makes the demo checklist runnable end to end.
+ * Connects the feed and imports it.
+ *
+ * With `BANK_PROVIDER=mock` — the default, and what every deployment runs
+ * until an aggregator is contracted — the transactions this brings in are
+ * **generated, not real**. That is right for a demo and wrong to do quietly to
+ * somebody's books, so the result says which it was rather than letting
+ * "Imported 60 transactions" read the same either way. The honest path for a
+ * real business is a statement import (`/settings/import`), which needs no
+ * vendor at all.
  */
 export async function connectAndSyncAction(): Promise<ActionResult> {
   return run(async () => {
@@ -185,6 +192,7 @@ export async function connectAndSyncAction(): Promise<ActionResult> {
       (await connectInstitution(actor, { publicToken: 'demo' })).connectionId
 
     const summary = await syncConnection(actor, connectionId)
+    const isDemoFeed = (process.env.BANK_PROVIDER?.trim() || 'mock') === 'mock'
 
     if (summary.imported === 0) {
       return 'Already up to date — no new transactions.'
@@ -193,6 +201,10 @@ export async function connectAndSyncAction(): Promise<ActionResult> {
     const parts = [`Imported ${summary.imported} transactions`]
     if (summary.autoCategorized > 0) parts.push(`${summary.autoCategorized} auto-categorized`)
     if (summary.suggested > 0) parts.push(`${summary.suggested} suggested`)
-    return `${parts.join(', ')}.`
+
+    return isDemoFeed
+      ? `${parts.join(', ')} — from the sample feed, not a real bank. ` +
+          'To bring in your own, import a statement from Settings → Bring in your books.'
+      : `${parts.join(', ')}.`
   })
 }

@@ -11,6 +11,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { accountByNumber } from '@/modules/coa/service'
 import { applyRulesToNewTransactions } from '@/modules/bookkeeping/rules-engine'
+import { mintChartAccount } from './accounts'
 import { getBankProvider } from './registry'
 import type { ProviderAccount, ProviderTransaction } from './provider'
 
@@ -54,7 +55,7 @@ export async function connectInstitution(
       .returning()
 
     const accountsCreated = await createFinancialAccounts(
-      ctx.companyId,
+      ctx,
       connection.id,
       providerAccounts,
       tx,
@@ -80,20 +81,30 @@ export async function connectInstitution(
 }
 
 /**
- * Maps provider accounts onto financial accounts, each pointing at a suitable
- * GL account. Credit cards post to the card liability, everything else to the
- * default checking asset.
+ * Maps provider accounts onto financial accounts, each with a ledger account
+ * of its own.
+ *
+ * This used to point every account that was not a credit card at `1000
+ * Checking Account`, so a business with a current account and a deposit
+ * account had one balance-sheet line covering both — and the ledger could not
+ * say what either held, which is the only question a bank statement asks. Each
+ * account now gets its own line, in the band its kind belongs to
+ * (`numbering.ts`), and the first of each kind lands on the number the
+ * standard chart already names.
  */
 async function createFinancialAccounts(
-  companyId: string,
+  ctx: ActorContext,
   connectionId: string,
   providerAccounts: ProviderAccount[],
   exec: Executor,
 ): Promise<number> {
-  const checking = await accountByNumber(companyId, SYSTEM_ACCOUNTS.defaultChecking, exec)
-  const card = await accountByNumber(companyId, SYSTEM_ACCOUNTS.defaultCreditCard, exec)
+  const companyId = ctx.companyId
 
-  if (!checking || !card) {
+  // Still checked, because a company with no chart at all is a company that
+  // was not onboarded, and the error should say that rather than surfacing as
+  // a numbering surprise later.
+  const checking = await accountByNumber(companyId, SYSTEM_ACCOUNTS.defaultChecking, exec)
+  if (!checking) {
     throw new Error(
       'Chart of accounts is not installed for this company. Run onboarding before connecting a bank.',
     )
@@ -108,20 +119,30 @@ async function createFinancialAccounts(
   const pending = providerAccounts.filter((a) => !known.has(a.providerAccountId))
   if (pending.length === 0) return 0
 
-  await exec.insert(financialAccounts).values(
-    pending.map((account) => ({
+  // One at a time rather than one bulk insert: each needs its own ledger
+  // account, and the number for the second depends on the first having taken
+  // one.
+  for (const account of pending) {
+    const mask = account.mask ?? null
+    const chartAccountId = await mintChartAccount(
+      ctx,
+      { name: account.name, mask, kind: account.kind },
+      exec,
+    )
+
+    await exec.insert(financialAccounts).values({
       companyId,
       bankConnectionId: connectionId,
-      chartAccountId: account.kind === 'credit_card' ? card.id : checking.id,
+      chartAccountId,
       name: account.name,
-      mask: account.mask ?? null,
+      mask,
       kind: account.kind,
       currency: account.currency,
       currentBalanceCents: account.currentBalanceCents,
       availableBalanceCents: account.availableBalanceCents ?? null,
       providerAccountId: account.providerAccountId,
-    })),
-  )
+    })
+  }
 
   return pending.length
 }

@@ -24,7 +24,12 @@ export function SyncButton() {
 
   return (
     <div className="relative">
-      <button onClick={sync} disabled={pending} className="btn btn-primary text-xs">
+      <button
+        onClick={sync}
+        disabled={pending}
+        className="btn btn-primary text-xs"
+        title="Pulls the connected feed. With no aggregator contracted this is a sample feed, and the result says so."
+      >
         {pending ? 'Syncing…' : 'Sync bank'}
       </button>
 

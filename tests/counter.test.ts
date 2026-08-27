@@ -6,6 +6,7 @@ import { createCompanyFixture, type Fixture } from './helpers'
 import { PermissionError } from '@/modules/permissions'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { accountByNumber } from '@/modules/coa/service'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { controlAccounts } from '@/modules/ledger/receivables-check'
 import { createInvoice } from '@/modules/receivables/service'
@@ -234,19 +235,14 @@ describe('taking the money (Phase 32)', () => {
     const fixture = await shop()
     const { invoice } = await aBill(fixture)
 
-    const { financialAccounts } = await import('@/db/schema')
-    const bankAccount = await accountByNumber(fixture.companyId, '1000')
-    const [account] = await db
-      .insert(financialAccounts)
-      .values({
-        companyId: fixture.companyId,
-        chartAccountId: bankAccount!.id,
-        name: 'Current account',
-        mask: '0001',
-        kind: 'checking',
-        providerAccountId: 'seed-counter-test',
-      })
-      .returning()
+    // Opened through the service rather than written straight in: since Phase
+    // 40 a bank account gets a ledger account of its own, and two on one line
+    // is refused by the database.
+    const account = await createFinancialAccount(fixture.ctx, {
+      name: 'Current account',
+      mask: '0001',
+      kind: 'checking',
+    })
 
     await takePayment(fixture.ctx, {
       invoiceId: invoice.id,
@@ -258,7 +254,7 @@ describe('taking the money (Phase 32)', () => {
     // A transfer really did land in the bank, so it does not pretend to sit in
     // a drawer.
     const undeposited = await accountByNumber(fixture.companyId, '1200')
-    expect(await balanceForAccount(fixture.ctx, bankAccount!.id)).toBe(3_650)
+    expect(await balanceForAccount(fixture.ctx, account.chartAccountId)).toBe(3_650)
     expect(await balanceForAccount(fixture.ctx, undeposited!.id)).toBe(0)
   })
 
