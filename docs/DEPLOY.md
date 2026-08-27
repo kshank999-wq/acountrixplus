@@ -223,7 +223,42 @@ Neither blocks a deployment, and both are behind provider interfaces:
 - **Transactional email** (`TRANSACTIONAL_EMAIL_PROVIDER=mock`). Mail is kept in
   memory and logged. **Password resets and invitations will not arrive** until a
   real provider is configured, so plan to create the first account yourself
-  through `/register` rather than by invitation.
+  through `/register` rather than by invitation. Turning it on is the next
+  section, and it is worth doing before you have anything to lose: with the
+  mock, an account whose password is forgotten cannot be recovered through any
+  screen.
+
+## Turning on real email
+
+Two adapters ship. Both talk JSON over HTTPS rather than SMTP, which is what a
+serverless runtime is good at.
+
+**1. Verify your sending domain** with whichever provider you pick. This is not
+optional and it is not a step you can retry past: every provider refuses to
+send as a domain you have not proved you own, permanently.
+
+**2. Set the variables**, then redeploy:
+
+| Provider | Variables |
+| --- | --- |
+| [Resend](https://resend.com) | `TRANSACTIONAL_EMAIL_PROVIDER=resend`, `RESEND_API_KEY` |
+| [Postmark](https://postmarkapp.com) | `TRANSACTIONAL_EMAIL_PROVIDER=postmark`, `POSTMARK_SERVER_TOKEN` |
+
+Also set `TRANSACTIONAL_FROM_EMAIL` to an address at the verified domain. The
+default is `no-reply@accountrixplus.test`, which no provider will accept.
+
+**3. Check it.** Ask for a password reset at `/forgot` for an address you own.
+
+The one thing that screen will never tell you is whether it worked — it says
+the same sentence whether the address exists, does not exist, or exists and
+bounced, because anything else turns the form into a way to discover who has an
+account. **Delivery failures are reported to you instead**, on
+`/settings/operations`, which is where to look when somebody says a link never
+arrived.
+
+A misconfigured provider fails loudly rather than quietly: an unknown name or a
+missing key throws instead of falling back to the mock, so the failure is at
+deploy time rather than the first time somebody is locked out.
 
 ## Upgrading later
 

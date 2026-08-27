@@ -201,12 +201,30 @@ export async function sendPasswordReset(input: {
   token: string
   expiresAt: Date
   reference: string
+  /**
+   * A company the recipient belongs to, so the *failure* has somewhere to be
+   * seen (Phase 38).
+   *
+   * A reset is a pre-authentication act and has no tenant of its own, so this
+   * was null and `failedDeliveries` — which filters on `company_id = $1` —
+   * could never match it. The consequence only became visible once mail could
+   * genuinely fail: every failed reset, the one letter whose loss locks
+   * somebody out, was invisible to every operator.
+   *
+   * Attributed to a company the person is already a member of, which leaks
+   * nothing: that operator can see the address on the member list anyway. It
+   * is deliberately not shown to every tenant, which is the other way to make
+   * a null-tenant row visible and would publish "this address asked for a
+   * reset" to strangers.
+   */
+  companyId?: string | null
 }): Promise<SendOutcome> {
   const minutes = Math.max(1, Math.round((input.expiresAt.getTime() - Date.now()) / 60_000))
 
   return sendTransactional({
     to: input.to,
     toName: input.toName,
+    companyId: input.companyId ?? null,
     kind: 'password_reset',
     subject: 'Reset your Accountrix Plus password',
     body: [

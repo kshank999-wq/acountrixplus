@@ -57,6 +57,24 @@ export async function requestPasswordReset(input: {
       requestedIp: truncateIp(input.ipAddress ?? null),
     })
 
+    /*
+     * A company this person belongs to, so a failed send lands somewhere an
+     * operator will see it (Phase 38). A reset has no tenant of its own, and
+     * `failedDeliveries` filters on one — so before this, every failed reset
+     * was invisible to everybody.
+     *
+     * The oldest membership, so the same person always lands in the same
+     * place rather than moving between operators run to run. Null for a user
+     * who belongs to no company, which is a state registration does not
+     * produce.
+     */
+    const [membership] = await db
+      .select({ companyId: memberships.companyId })
+      .from(memberships)
+      .where(eq(memberships.userId, user.id))
+      .orderBy(memberships.createdAt)
+      .limit(1)
+
     // A rate-limit refusal is swallowed rather than surfaced, for the same
     // reason the missing-account case is: "you have asked five times already"
     // tells an attacker their guess was a real address.
@@ -66,6 +84,7 @@ export async function requestPasswordReset(input: {
       token: issued.token,
       expiresAt: issued.expiresAt,
       reference: issued.id,
+      companyId: membership?.companyId ?? null,
     }).catch(() => undefined)
   }
 

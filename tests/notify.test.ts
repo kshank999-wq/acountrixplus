@@ -19,7 +19,7 @@ import {
   mockTransactionalProvider,
   type TransactionalMessage,
 } from '@/modules/notify/transactional'
-import { RateLimitedError, sendTransactional } from '@/modules/notify/service'
+import { failedDeliveries, RateLimitedError, sendTransactional } from '@/modules/notify/service'
 import {
   issueToken,
   lookupToken,
@@ -273,6 +273,34 @@ describe('password reset', () => {
     expect(mock.sent).toHaveLength(1)
   })
 
+  /**
+   * Phase 38. Now that a real adapter can fail, the failure must not become a
+   * second channel for enumeration.
+   *
+   * The temptation once mail can genuinely bounce is to tell the requester —
+   * "we could not send to that address" is helpful, and it also confirms the
+   * address exists. The operator learns about the failure through the health
+   * report Phase 24 built; the person at the form learns nothing they could
+   * not have learned by guessing.
+   */
+  it('says the same thing when delivery fails', async () => {
+    const person = await registerUser({
+      name: 'Bouncing Person',
+      email: nextEmail('bounce'),
+      password: 'correct-horse-battery',
+    })
+
+    const delivered = await requestPasswordReset({ email: person.email })
+
+    mock.failing.add(person.email.toLowerCase())
+    const bounced = await requestPasswordReset({ email: person.email })
+
+    expect(bounced).toEqual(delivered)
+    expect(bounced.accepted).toBe(true)
+
+    mock.failing.clear()
+  })
+
   it('reaches somebody who unsubscribed from marketing', async () => {
     const fixture = await createCompanyFixture({ name: 'Suppressed Co' })
     const person = await registerUser({
@@ -289,6 +317,34 @@ describe('password reset', () => {
 
     expect(mock.lastTo(person.email)).toBeDefined()
     expect((mock.lastTo(person.email) as TransactionalMessage).kind).toBe('password_reset')
+  })
+
+  /**
+   * Phase 38, and a bug browser verification found.
+   *
+   * A reset is a pre-authentication act with no tenant of its own, so its
+   * message was written with `company_id = NULL`. `failedDeliveries` filters
+   * on `company_id = $1`, which never matches NULL — so a failed reset, the
+   * one letter whose loss locks somebody out of their own books, was invisible
+   * to every operator on every company.
+   *
+   * It could not be seen before this phase because the mock never failed.
+   */
+  it('files a failed reset where an operator will find it', async () => {
+    const fixture = await createCompanyFixture({ name: 'Bounced Reset Co' })
+    const [owner] = await db.select().from(users).where(eq(users.id, fixture.userId))
+
+    mock.failing.add(owner.email.toLowerCase())
+    await requestPasswordReset({ email: owner.email })
+    mock.failing.clear()
+
+    const failures = await failedDeliveries(fixture.companyId)
+    const mine = failures.filter((row) => row.email === owner.email.toLowerCase())
+
+    expect(mine).toHaveLength(1)
+    expect(mine[0].kind).toBe('password_reset')
+    // The provider's own words, so somebody can act on it.
+    expect(mine[0].error).toContain('Mailbox does not exist')
   })
 
   it('changes the password, ends every session, and audits into each company', async () => {

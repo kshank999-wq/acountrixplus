@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { buildTransactionalProvider } from './providers'
 
 /**
  * Transactional email (spec §19, §14).
@@ -117,22 +118,38 @@ export function mockTransactionalProvider(): MockTransactionalProvider {
   return mock
 }
 
+/**
+ * The constructed adapter, kept because building one reads the environment and
+ * validates it. Keyed so a test that changes the variable gets the provider it
+ * asked for rather than the one before it.
+ */
+let resolved: { key: string; provider: TransactionalProvider } | null = null
+
+/** Drops the memoised adapter. For tests that move between providers. */
+export function resetTransactionalProvider(): void {
+  registered = null
+  resolved = null
+}
+
 export function getTransactionalProvider(): TransactionalProvider {
   if (registered) return registered
 
-  const key = process.env.TRANSACTIONAL_EMAIL_PROVIDER ?? 'mock'
-  if (key !== 'mock') {
-    // Named rather than silently falling back. A deployment that thinks it
-    // configured a real sender and is actually dropping every password reset
-    // into memory is the kind of thing discovered by a support ticket.
-    throw new Error(
-      `No transactional email adapter is registered for "${key}". ` +
-        'Register one at startup with registerTransactionalProvider(), or unset ' +
-        'TRANSACTIONAL_EMAIL_PROVIDER to use the in-memory one.',
-    )
-  }
+  // `|| 'mock'` rather than `??`, because a variable set to the empty string is
+  // not unset. Every hosting panel lets you save a blank value, and treating
+  // that as a provider named "" fails every send with an error about an unknown
+  // provider rather than doing the obvious thing.
+  const key = process.env.TRANSACTIONAL_EMAIL_PROVIDER?.trim() || 'mock'
+  if (key === 'mock') return mock
 
-  return mock
+  if (resolved?.key === key) return resolved.provider
+
+  // Throws for an unknown name, and throws for a known one whose credentials
+  // are missing. Named rather than silently falling back: a deployment that
+  // thinks it configured a real sender and is actually dropping every password
+  // reset into memory is the kind of thing discovered by a support ticket.
+  const provider = buildTransactionalProvider(key)
+  resolved = { key, provider }
+  return provider
 }
 
 /**
