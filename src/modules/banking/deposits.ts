@@ -104,6 +104,8 @@ export async function undepositedReceipts(ctx: ActorContext) {
         ctx,
         payments,
         eq(payments.kind, 'receipt'),
+        // Never offer to bank money that was taken back (Phase 52).
+        eq(payments.status, 'posted'),
         isNull(payments.financialAccountId),
         isNull(depositItems.id),
       ),
@@ -144,7 +146,9 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
           financialAccountId: payments.financialAccountId,
         })
         .from(payments)
-        .where(scoped(ctx, payments, inArray(payments.id, paymentIds)))
+        .where(
+          scoped(ctx, payments, inArray(payments.id, paymentIds), eq(payments.status, 'posted')),
+        )
     : []
 
   if (receipts.length !== paymentIds.length) {

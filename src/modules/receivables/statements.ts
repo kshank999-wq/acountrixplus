@@ -219,6 +219,9 @@ async function customerActivity(
       .where(
         and(
           eq(paymentApplications.companyId, ctx.companyId),
+          // A statement showing a payment that was taken back would be a
+          // statement the customer can disprove (Phase 52).
+          eq(payments.status, 'posted'),
           eq(payments.customerId, customerId),
           lte(payments.paymentDate, asOfDate),
         ),

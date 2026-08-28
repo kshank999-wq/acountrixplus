@@ -62,6 +62,11 @@ export type AuditAction =
   | 'payables.policy'
   | 'bill.void'
   | 'payment.record'
+  /**
+   * A payment taken back (Phase 52). Carries the reason, because a void with
+   * no reason is a hole somebody has to reconstruct from dates months later.
+   */
+  | 'payment.void'
   // Phase 44. A card payment is initiated by somebody who is not a user of
   // this system, so "who took this money, and what did the processor keep"
   // has an answer that is not a person's name.

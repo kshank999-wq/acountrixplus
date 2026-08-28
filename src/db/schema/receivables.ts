@@ -470,10 +470,34 @@ export const payments = pgTable(
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),
+    /**
+     * Whether this payment happened (Phase 52).
+     *
+     * There was no such column until Phase 52, and so no way to record that a
+     * payment did not happen — a receipt keyed at ten times its amount was
+     * permanent. Void payments stay listed, and every reader that sums
+     * payments or their applications excludes them.
+     */
+    status: text('status', { enum: ['posted', 'void'] })
+      .notNull()
+      .default('posted'),
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    // Not a foreign key to `users`, for the reason given on `bills.approvedBy`
+    // above: the person can go, the fact that they did it must not.
+    voidedBy: uuid('voided_by'),
+    /** Why. A void with no reason is a hole somebody has to reconstruct later. */
+    voidReason: text('void_reason'),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     companyDateIdx: index('payments_company_date_idx').on(t.companyId, t.paymentDate),
+    // What makes excluding void payments cheap everywhere they are summed.
+    companyStatusIdx: index('payments_company_status_idx').on(
+      t.companyId,
+      t.status,
+      t.paymentDate,
+    ),
     // The index a shift's takings are summed on.
     drawerShiftIdx: index('payments_drawer_shift_idx').on(t.drawerShiftId),
     // Named explicitly: the generated name would exceed Postgres's 63-byte limit.

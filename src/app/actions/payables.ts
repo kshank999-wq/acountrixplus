@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import { recordPayment, DocumentError } from '@/modules/receivables/service'
 import { applyVendorCredit } from '@/modules/receivables/vendor-credits'
+import { voidPayment } from '@/modules/receivables/payment-voiding'
 import { billsByIds } from '@/modules/payables/queue'
 import { applicationOrder, planRun } from '@/modules/payables/run'
 import { describeHeld, splitByApproval } from '@/modules/payables/approval'
@@ -35,6 +36,7 @@ import { formatCents } from '@/lib/money'
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
 const PATHS = [
+  '/accounting/payments',
   '/accounting/payables',
   '/accounting/invoices',
   '/accounting/receivables',
@@ -248,5 +250,47 @@ export async function updatePayablesPolicyAction(input: unknown): Promise<Action
     }
   } catch (error) {
     return { ok: false, error: messageFor(error, 'That could not be saved.') }
+  }
+}
+
+const voidSchema = z.object({
+  paymentId: uuid,
+  reason: z.string().trim().min(1, 'Say why this payment is being taken back.').max(500),
+})
+
+/**
+ * Takes a payment back (Phase 52).
+ *
+ * Lives here rather than in `documents.ts` because this is the money half, not
+ * the document half: `voidDocumentAction` cancels an invoice or a bill, and
+ * this cancels the payment that settled one. Voiding a document that has been
+ * paid and voiding the payment against a document that stands are different
+ * decisions with different consequences, and putting them on one action would
+ * have hidden that.
+ */
+export async function voidPaymentAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const parsed = voidSchema.parse(input)
+
+    const result = await voidPayment(actor, parsed)
+
+    for (const path of PATHS) revalidatePath(path)
+
+    return {
+      ok: true,
+      message:
+        `${formatCents(result.amountCents)} taken back. ` +
+        (result.restorations.length > 0
+          ? `${result.restorations.map((r) => r.number).join(', ')} ` +
+            `${result.restorations.length === 1 ? 'is' : 'are'} owed again. `
+          : '') +
+        (result.ledger === 'reverse'
+          ? `The ledger is corrected by reversing entry #${result.reversalNumber}, because the ` +
+            'original falls in a closed period.'
+          : 'The ledger entry is void with it.'),
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That payment could not be taken back.') }
   }
 }

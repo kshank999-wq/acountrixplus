@@ -564,6 +564,10 @@ export async function cashBasisBalances(
     .where(
       and(
         eq(paymentApplications.companyId, ctx.companyId),
+        // A voided payment never happened (Phase 52). Leaving it in would
+        // report revenue on a cash basis that was never received — the single
+        // worst place for a void to be forgotten.
+        eq(payments.status, 'posted'),
         ...([
           range.startDate ? gte(payments.paymentDate, range.startDate) : undefined,
           range.endDate ? lte(payments.paymentDate, range.endDate) : undefined,
@@ -740,6 +744,7 @@ export async function cashBasisCaveats(
       .where(
         and(
           eq(payments.companyId, ctx.companyId),
+          eq(payments.status, 'posted'),
           gte(payments.paymentDate, range.startDate),
           lte(payments.paymentDate, range.endDate),
           sql`NOT EXISTS (

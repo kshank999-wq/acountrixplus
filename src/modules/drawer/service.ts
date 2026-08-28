@@ -428,7 +428,12 @@ export async function shiftPosition(
       count: sql<string>`count(*)`,
     })
     .from(payments)
-    .where(scoped(ctx, payments, eq(payments.drawerShiftId, shiftId)))
+    // A voided receipt is not in the till (Phase 52). A closed shift's cash
+    // cannot be voided at all, so this only ever excludes something taken back
+    // while the shift was still open — which is exactly when it should be.
+    .where(
+      scoped(ctx, payments, eq(payments.drawerShiftId, shiftId), eq(payments.status, 'posted')),
+    )
 
   const paidOut = await db
     .select({
@@ -814,7 +819,9 @@ export async function drawerPosition(
       const [takings] = await db
         .select({ total: sql<string>`coalesce(sum(${payments.amountCents}), 0)` })
         .from(payments)
-        .where(scoped(ctx, payments, eq(payments.drawerShiftId, open.id)))
+        .where(
+          scoped(ctx, payments, eq(payments.drawerShiftId, open.id), eq(payments.status, 'posted')),
+        )
 
       const [paid] = await db
         .select({ total: sql<string>`coalesce(sum(${drawerPayouts.amountCents}), 0)` })

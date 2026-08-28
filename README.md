@@ -2365,6 +2365,57 @@ bills"*; a hand-posted entry offered both corrections and reversing #94 gave
 visible"*; and an entry dated 2026-03-15 with January–June closed offered
 **only** *"Reverse it"*, landing #98 on 2026-08-28.
 
+### The payment you cannot take back (Phase 52)
+
+Not a function with no caller. Not a screen missing a button. **Nothing at
+all** — no status column on `payments`, no service function, no action.
+
+`recordPayment` has existed since Phase 2; Phase 41 made it reachable, Phase 44
+gave it a card path, Phase 49 turned it into a batch that pays several suppliers
+in one click. A receipt keyed as $1,500 instead of $150, or a pay run aimed at
+the wrong supplier, was **permanent**: the document showed settled, the bank
+showed the money gone, and the only move left was a hand-posted journal entry
+that fixes the ledger and leaves the invoice still claiming to be paid. Phase 51
+then closed the last bad door and its refusal read *"Void the payment that
+produced it"* — pointing at nothing.
+
+**The costly wrong answer is not the missing button. It is unwinding a payment
+whose money somebody else has already counted.** A receipt banked on a deposit,
+counted into a till at the end of a shift, or settled by a card processor is
+money a second record already claims.
+
+- **Four refusals, ordered by whose record it is**: banked on a deposit, counted
+  into a closed shift, settled at the processor, or settling a document that has
+  since been voided. A deposit outranks a closed period even when both are true,
+  because *"the bank has this money"* is the more useful thing to hear first.
+- **The ledger unwinds by Phase 51's rule** — voided in an open period, reversed
+  in a closed one — through the *internal* path, so Phase 51's guard on
+  person-initiated voids stays intact rather than being routed around.
+- **The applications stay, and eight query sites now exclude void payments**:
+  cash-basis reporting above all (a voided receipt left in place reports revenue
+  never received), plus 1099 reporting, customer statements, the chase run,
+  undeposited funds, deposit creation and two drawer sums.
+- **A reason is required.** A void with no reason is a hole somebody
+  reconstructs from dates six months later.
+- **A document goes back to `open` or `partial`, never `draft`** — one that was
+  issued and part-paid was still issued.
+
+Payments were also never listed anywhere, so **Money in and out** is now a
+screen.
+
+**Browser verification found the refusal naming an operation that does not
+exist.** Its first draft said *"take it off the deposit first"*; there is no
+such thing — a deposit is voided whole. That is exactly the defect Phase 51
+shipped and this phase existed to fix, and it was found by *following* the
+sentence rather than reading it.
+
+Verified on the demo: taking back a $5,040 cheque gave *"INV-1008 is owed again.
+The ledger entry is void with it"*, the invoice went `paid` → `partial` at
+$5,040 outstanding, its journal entry read `void`, and the AR control account
+still equalled the sum of open invoice functional balances to the cent. Banking
+a receipt turned its row from "Take it back" to *"cannot be undone"* naming
+DEP-1001.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

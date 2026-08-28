@@ -55,7 +55,9 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
     })
     .from(paymentApplications)
     .innerJoin(payments, eq(payments.id, paymentApplications.paymentId))
-    .where(eq(paymentApplications.companyId, companyId))
+    // A voided payment bought no quiet (Phase 52): if the money went back,
+    // the invoice is owed again and the chase should resume.
+    .where(and(eq(paymentApplications.companyId, companyId), eq(payments.status, 'posted')))
     .groupBy(paymentApplications.invoiceId)
     .as('last_payment')
 

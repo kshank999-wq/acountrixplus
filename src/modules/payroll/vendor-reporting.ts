@@ -100,7 +100,11 @@ export async function contractorPayments(
         // no payments this year still appears — "paid nothing" is an answer,
         // and a vendor silently missing from a year-end report is worse than
         // one showing zero.
-        sql`(${payments.id} IS NULL OR (${payments.paymentDate} BETWEEN ${startDate} AND ${endDate} AND ${payments.kind} = 'disbursement'))`,
+        // A voided payment is not money a contractor received, and a 1099 is
+        // filed with a tax authority (Phase 52). It stays inside this same
+        // expression rather than becoming its own condition, so a vendor with
+        // no qualifying payments still appears at zero.
+        sql`(${payments.id} IS NULL OR (${payments.paymentDate} BETWEEN ${startDate} AND ${endDate} AND ${payments.kind} = 'disbursement' AND ${payments.status} = 'posted'))`,
       ),
     )
     .groupBy(vendors.id, vendors.name, vendors.is1099Vendor, vendors.taxId)
@@ -224,6 +228,7 @@ export async function vendorPaymentDetail(
         payments,
         eq(payments.vendorId, vendorId),
         eq(payments.kind, 'disbursement'),
+        eq(payments.status, 'posted'),
         gte(payments.paymentDate, range.startDate),
         lte(payments.paymentDate, range.endDate),
       ),

@@ -10,6 +10,10 @@ export const ACCOUNTING_NAV = [
   // asks itself every Friday, and until Phase 49 it had no screen — only an
   // as-of aging report with nothing on it clickable.
   { href: '/accounting/payables', label: 'What we owe' },
+  // Fourth, because until Phase 52 payments were recorded from two screens and
+  // then vanished into balances — "did that $1,500 go in twice?" was a question
+  // with no screen behind it, and taking one back was impossible.
+  { href: '/accounting/payments', label: 'Money in and out' },
   { href: '/accounting/reports', label: 'Reports' },
   { href: '/accounting/journal', label: 'Journal' },
   { href: '/accounting/receivables', label: 'Credits & statements' },
