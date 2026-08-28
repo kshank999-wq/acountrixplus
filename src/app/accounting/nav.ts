@@ -6,6 +6,10 @@ export const ACCOUNTING_NAV = [
   // Beside the documents they appear on, because the reason somebody opens
   // this screen is almost always a document they were just looking at.
   { href: '/accounting/people', label: 'Customers & suppliers' },
+  // Third, because "what do I owe and what is late" is the question a business
+  // asks itself every Friday, and until Phase 49 it had no screen — only an
+  // as-of aging report with nothing on it clickable.
+  { href: '/accounting/payables', label: 'What we owe' },
   { href: '/accounting/reports', label: 'Reports' },
   { href: '/accounting/journal', label: 'Journal' },
   { href: '/accounting/receivables', label: 'Credits & statements' },

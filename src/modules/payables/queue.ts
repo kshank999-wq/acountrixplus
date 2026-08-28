@@ -1,0 +1,235 @@
+import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
+import { db } from '@/db'
+import { bills, creditNotes, vendors } from '@/db/schema'
+import { balanceForAccount } from '@/modules/ledger/balances'
+import { listFinancialAccounts } from '@/modules/banking/accounts'
+import { bandFor } from '@/modules/banking/numbering'
+import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { bucketFor, type PayableBill } from './run'
+
+/**
+ * The work queue for money going out (spec §13).
+ *
+ * ## Why a queue rather than a report
+ *
+ * A/P aging has existed since Phase 2. It is an as-of snapshot: correct,
+ * printable, and inert — nothing on it is clickable and nothing can be paid
+ * from it. The bill list on the invoices screen is ordered by issue date with
+ * no totals and no overdue marking.
+ *
+ * So the question a business asks itself every Friday — *what do I owe, what is
+ * late, and can I cover it?* — had no screen, and the answer had to be
+ * assembled by eye from a report and a list that disagree about ordering.
+ *
+ * This is the AP mirror of Phase 43's chase queue, and it stops at the same
+ * place: it says what is owed and when. **Which supplier waits is a judgement
+ * about relationships and cash, and no amount of arithmetic replaces it.**
+ */
+
+export type QueuedBill = PayableBill & {
+  vendorReference: string | null
+  issueDate: string
+  totalCents: number
+  bucket: ReturnType<typeof bucketFor>
+  /** Credit sitting with this supplier that could reduce what is paid. */
+  vendorCreditCents: number
+}
+
+/**
+ * Everything open, oldest due first.
+ *
+ * Ordered by due date rather than by issue date, because the question is "what
+ * has to be paid next" and a bill raised in January on 90-day terms is not more
+ * urgent than one raised in March on 7-day terms.
+ */
+export async function payableQueue(
+  ctx: ActorContext,
+  opts: { asOf?: string; limit?: number } = {},
+): Promise<QueuedBill[]> {
+  requirePermission(ctx, 'accounting:view')
+
+  const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10)
+
+  const rows = await db
+    .select({
+      id: bills.id,
+      number: bills.number,
+      vendorReference: bills.vendorReference,
+      vendorId: bills.vendorId,
+      vendorName: vendors.name,
+      issueDate: bills.issueDate,
+      dueDate: bills.dueDate,
+      totalCents: bills.totalCents,
+      balanceCents: bills.balanceCents,
+    })
+    .from(bills)
+    .innerJoin(vendors, eq(vendors.id, bills.vendorId))
+    .where(
+      scoped(
+        ctx,
+        bills,
+        inArray(bills.status, ['open', 'partial'] as const),
+        gt(bills.balanceCents, 0),
+      ),
+    )
+    .orderBy(asc(bills.dueDate), asc(bills.number))
+    .limit(opts.limit ?? 200)
+
+  const credits = await vendorCreditBalances(ctx)
+
+  return rows.map((row) => ({
+    ...row,
+    bucket: bucketFor(row.dueDate, asOf),
+    vendorCreditCents: credits.get(row.vendorId) ?? 0,
+  }))
+}
+
+/**
+ * Credit each supplier is still holding for us.
+ *
+ * Surfaced beside what is owed because it is the same money seen from the other
+ * side, and a business paying a supplier in full while holding an unused credit
+ * from them is paying twice for something it already sent back.
+ */
+export async function vendorCreditBalances(
+  ctx: ActorContext,
+): Promise<Map<string, number>> {
+  const rows = await db
+    .select({
+      vendorId: creditNotes.vendorId,
+      remainingCents: sql<string>`sum(${creditNotes.remainingCents})`,
+    })
+    .from(creditNotes)
+    .where(
+      scoped(
+        ctx,
+        creditNotes,
+        eq(creditNotes.party, 'vendor'),
+        gt(creditNotes.remainingCents, 0),
+      ),
+    )
+    .groupBy(creditNotes.vendorId)
+
+  // `vendorId` is nullable on the table — exactly one of customer/vendor is
+  // set, matching `party` — and the filter above already guarantees which.
+  return new Map(
+    rows
+      .filter((row): row is typeof row & { vendorId: string } => row.vendorId !== null)
+      .map((row) => [row.vendorId, Number(row.remainingCents)]),
+  )
+}
+
+/** Unused vendor credits, so one can be chosen and applied to a bill. */
+export async function openVendorCredits(ctx: ActorContext) {
+  requirePermission(ctx, 'accounting:view')
+
+  return db
+    .select({
+      id: creditNotes.id,
+      number: creditNotes.number,
+      issueDate: creditNotes.issueDate,
+      vendorId: creditNotes.vendorId,
+      vendorName: vendors.name,
+      totalCents: creditNotes.totalCents,
+      remainingCents: creditNotes.remainingCents,
+    })
+    .from(creditNotes)
+    .innerJoin(vendors, eq(vendors.id, creditNotes.vendorId))
+    .where(
+      scoped(
+        ctx,
+        creditNotes,
+        eq(creditNotes.party, 'vendor'),
+        gt(creditNotes.remainingCents, 0),
+      ),
+    )
+    .orderBy(asc(creditNotes.issueDate))
+}
+
+/**
+ * What each account holds — or owes, which is not the same thing.
+ *
+ * ## The defect browser verification found
+ *
+ * The picker offers every active account, and paying a supplier by company
+ * credit card is perfectly ordinary. But a card's balance is what the business
+ * **owes**, not what it has, and the screen said:
+ *
+ * > *Business Credit Card holds $1,404.79 on the ledger. $154.79 left
+ * > afterwards.*
+ *
+ * That is exactly backwards. Paying $1,250 by card takes the debt to $2,654.79
+ * — and somebody reading "$154.79 left" would think they had headroom.
+ *
+ * So a liability account reports **no available figure at all**. Its headroom
+ * is its credit limit less its balance, and this system does not know the
+ * limit; inventing one would be worse than saying nothing. `planRun` already
+ * takes `availableCents: null` to mean "say nothing about coverage", which is
+ * the honest answer here.
+ *
+ * The figure for a bank account is still the *ledger's*, not the bank's — a
+ * cheque written last week may not have cleared — which is why a shortfall is
+ * a warning rather than a refusal.
+ */
+export type AccountBalance = {
+  id: string
+  name: string
+  mask: string | null
+  kind: string
+  chartAccountNumber: string
+  /** What it holds. Null for a card, which owes rather than holds. */
+  availableCents: number | null
+  /** What is owed on it. Null for a bank account, which holds rather than owes. */
+  owingCents: number | null
+}
+
+export async function accountsWithBalances(ctx: ActorContext): Promise<AccountBalance[]> {
+  requirePermission(ctx, 'accounting:view')
+
+  const accounts = await listFinancialAccounts(ctx, { activeOnly: true })
+
+  return Promise.all(
+    accounts.map(async (account) => {
+      const balance = await balanceForAccount(ctx, account.chartAccountId)
+      // Decided from the band the kind belongs to rather than by listing
+      // kinds here, so a loan account gets the same treatment as a card
+      // without anybody having to remember to add it.
+      const owes = bandFor(account.kind).type === 'liability'
+
+      return {
+        id: account.id,
+        name: account.name,
+        mask: account.mask,
+        kind: account.kind,
+        chartAccountNumber: account.chartAccountNumber,
+        availableCents: owes ? null : balance,
+        owingCents: owes ? balance : null,
+      }
+    }),
+  )
+}
+
+/** The bills a caller named, as the pay run needs them. Scoped and open only. */
+export async function billsByIds(
+  ctx: ActorContext,
+  billIds: string[],
+): Promise<QueuedBill[]> {
+  if (billIds.length === 0) return []
+
+  const queue = await payableQueue(ctx, { limit: 1000 })
+  const wanted = new Set(billIds)
+
+  return queue.filter((bill) => wanted.has(bill.id))
+}
+
+/** Used by the screen's heading: one number for "what we owe". */
+export async function totalPayable(ctx: ActorContext): Promise<number> {
+  const [row] = await db
+    .select({ total: sql<string>`coalesce(sum(${bills.balanceCents}), 0)` })
+    .from(bills)
+    .where(
+      scoped(ctx, bills, and(inArray(bills.status, ['open', 'partial'] as const), gt(bills.balanceCents, 0))),
+    )
+
+  return Number(row?.total ?? 0)
+}

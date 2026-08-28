@@ -2207,6 +2207,59 @@ it, `2050` reads **$0.00**, `1400` is unchanged at $28,559.20 — the cost was n
 counted twice — `5450` carries the $40, and both bills are on the payables
 screen against Cascade Building Supply.
 
+### What you owe, and choosing what to pay (Phase 49)
+
+Two things were missing, and the second is the serious one.
+
+**No work queue.** A/P aging has existed since Phase 2 as an as-of snapshot —
+correct, printable, and inert, with nothing on it clickable and nothing payable
+from it. The bill list is ordered by issue date with no totals and no overdue
+marking. Neither answers the question a business asks itself every Friday.
+
+**The selection was never sent.** `recordPaymentAction` has accepted
+`documentIds` since Phase 41 and honours the order given — and **no screen ever
+sent them.** Selection was per *vendor*, and `allocate` then consumed oldest
+first, so a business paying a supplier's third invoice while disputing the first
+two could not: the money landed on the disputed bills and marked them settled.
+That is not a missing feature; it is the application overriding a decision the
+business made.
+
+- **The choice is respected absolutely.** A bill nobody ticked is never touched.
+  Within what *was* ticked, the oldest settles first — what a supplier expects
+  and what keeps an aging report sensible — but the boundary of the selection is
+  inviolable.
+- **One payment per supplier**, not one per bill. Four ledger rows against one
+  bank statement line is a reconciliation nobody can do.
+- **A shortfall warns, never refuses.** The figure is the *ledger's*, not the
+  bank's — a cheque written last week may not have cleared — and refusing on it
+  would stop a business paying suppliers over a timing difference.
+- **A stranded credit is money.** `applyVendorCredit` and its server action have
+  existed since Phase 12 with **no caller anywhere in `src/app`**, so a credit
+  with anything left was unusable and the screen showed its balance beside no
+  control. Applying one posts *no journal entry* — the ledger moved when the
+  credit note was raised — and the tests say so rather than leaving it assumed.
+
+**The defect browser verification found was in this phase's own screen.** The
+account picker offers every active account, and paying a supplier by company
+card is ordinary — but `balanceForAccount` signs in the account's *normal*
+direction, so a card's credit balance comes back positive and the screen said:
+
+> *Business Credit Card holds $1,404.79 on the ledger. $154.79 left afterwards.*
+
+Exactly backwards. That $1,404.79 is what the business **owes**; paying $1,250 by
+card takes the debt to $2,654.79, and somebody reading "$154.79 left" would think
+they had headroom. A liability account now reports no available figure at all —
+its headroom is its credit limit less its balance and this system does not know
+the limit, so saying nothing is the only honest answer.
+
+Verified on the demo: ticked one supplier's newest bill and another supplier's,
+deliberately skipping the *overdue* one, and got *"$18,254.00 paid — 2 payments,
+one per supplier, settling 2 bills"* with the overdue bill still sitting
+untouched at the top of the queue. And a vendor credit raised against a
+part-paid bill stranded **$142** with nowhere to go — now offered against
+another of that supplier's bills and reported as *"$142.00 of credit applied.
+That credit is used up."*
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
