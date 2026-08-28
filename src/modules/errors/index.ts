@@ -58,7 +58,7 @@ export class DomainError extends Error {
  * usually lives — postgres.js wraps a connection failure in a "Failed query"
  * whose own message names only the SQL.
  */
-function logUnexpected(error: unknown, context: string): void {
+export function logUnexpected(error: unknown, context: string): void {
   const parts: string[] = [`[error] ${context}:`]
 
   if (error instanceof Error) {

@@ -87,6 +87,10 @@ export default async function InvoicesPage() {
           status: row.status,
           totalCents: row.totalCents,
           balanceCents: row.balanceCents,
+          sentAt: row.sentAt ? row.sentAt.toISOString().slice(0, 10) : null,
+          sentTo: row.sentTo,
+          viewCount: row.viewCount,
+          shareToken: row.shareToken,
         }))}
         bills={bills.map((row) => ({
           id: row.id,

@@ -1811,6 +1811,61 @@ totalled live) and **INV-1002 for $800.00**, took **$1,500.00** which settled
 and $2,150.00 on the profit and loss. Then a supplier and a bill for $125.40 on
 the other side of the same screen.
 
+### What the customer opens is the ledger, not a copy of it (Phase 42)
+
+Every piece existed and none were joined. Phase 21 renders an invoice as a PDF
+— behind `requireActor()`, so only somebody signed in to the company can fetch
+it. Phase 38 can put a letter on the internet. Phase 22 logs communications on
+a customer's timeline. `TransactionalKind` had four values and none was an
+invoice. So the only way to get an invoice to the person who owed it was to
+sign in, download the PDF, open your own email client and attach it.
+
+- **A link to the live record, not a snapshot** — against the obvious build,
+  because an earlier phase argued the case at the top of
+  `modules/pdf/invoice.ts`: a stored copy would be *"a second answer to how
+  much does this customer owe"*. Phase 41 strengthened it, since an invoice
+  cannot be edited. So a snapshot would differ from the record in exactly one
+  way — it would keep showing the original amount after a payment, which is the
+  wrong behaviour. A customer part-pays in April and opens the link in October;
+  what they need is what is *still* outstanding. What gets stored is the
+  communication — who, when, how often, whether they opened it — which is
+  evidence of *asking*, a different claim from evidence of the amount.
+- **The projection is an allowlist.** `/i/[token]` is unauthenticated, so the
+  question is not "how do we display an invoice" but "which fields may leave
+  the building". Built field by field from named inputs: a subtraction leaks by
+  default the moment somebody adds a field and forgets. A test hands it a row
+  stuffed with `internalNotes`, `marginBp` and a cost code and asserts none of
+  them come out.
+- **The token is the whole of the security** — 32 random bytes, unique across
+  every company, minted on the first send rather than at creation, never
+  rotated after. Revoking kills the door without touching the debt. A wrong
+  token, a revoked one and a voided invoice are all the same 404, because
+  distinguishing them tells somebody probing which invoices exist.
+- **The record moves before the send.** A message that leaves unrecorded means
+  a customer holds an invoice the business does not know it sent;
+  recorded-but-not-sent shows up as a failure somebody can act on, and the
+  action says so rather than reporting success.
+
+**And the three bugs browser verification caught.** The view counter never
+worked and said nothing: a raw `Date` inside a `sql` template loses its type,
+the driver refused the whole statement, and a bare `.catch(() => {})` swallowed
+it — best-effort was right for a page render, *silent* was not. A shared
+invoice read as **"not sent"** and hid the view count with it, because the
+column had two states where there are three — so a business could share a link,
+watch the customer open it twice, and see a row saying nobody had been asked.
+And the refusal for a customer with no address said *"type one below"* when
+there was no below: the add-customer form never asked for an email, so a
+customer created there could never be sent anything.
+
+Verified end to end on a company registered from scratch: raised an invoice,
+had the send refused honestly, took a link, opened it in a **clean browser with
+no session** — the page showed the invoice and nothing else, no owner name, no
+navigation, no links at all, and `/accounting/invoices` bounced the stranger to
+`/login`. Part-paid $200.00 and the customer's page moved from **$1,200.00 to
+$1,000.00** with *"$200.00 received, thank you"*. Revoked, and the link 404s.
+Then a second customer with an address: **sent**, and **reminded**, both
+recorded on the row.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

@@ -1178,6 +1178,11 @@ export async function listInvoices(ctx: ActorContext, opts: { limit?: number } =
       status: invoices.status,
       totalCents: invoices.totalCents,
       balanceCents: invoices.balanceCents,
+      // Phase 42: whether the customer has been asked, and whether they looked.
+      sentAt: invoices.sentAt,
+      sentTo: invoices.sentTo,
+      viewCount: invoices.viewCount,
+      shareToken: invoices.shareToken,
     })
     .from(invoices)
     .innerJoin(customers, eq(customers.id, invoices.customerId))

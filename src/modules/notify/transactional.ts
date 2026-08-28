@@ -31,6 +31,15 @@ export type TransactionalKind =
   | 'company_invitation'
   | 'practice_invitation'
   | 'security_alert'
+  /**
+   * An invoice, sent to the customer who owes it (Phase 42).
+   *
+   * Transactional rather than marketing, and the distinction is the one this
+   * module's header draws: it carries no unsubscribe link, because a business
+   * asking to be paid is not making an offer somebody can decline. A customer
+   * who does not want it should be sent it on paper, not silenced.
+   */
+  | 'invoice'
 
 export type TransactionalMessage = {
   to: string

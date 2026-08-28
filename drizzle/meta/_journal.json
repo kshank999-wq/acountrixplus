@@ -281,6 +281,13 @@
       "when": 1787867109016,
       "tag": "0039_phase40_one_account_one_ledger_account",
       "breakpoints": true
+    },
+    {
+      "idx": 40,
+      "version": "7",
+      "when": 1787874415116,
+      "tag": "0040_phase42_invoice_sharing",
+      "breakpoints": true
     }
   ]
 }

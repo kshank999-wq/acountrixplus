@@ -47,6 +47,10 @@ export type AuditAction =
   // Receivables and payables (spec §13)
   | 'invoice.create'
   | 'invoice.void'
+  // Phase 42. Sending is not the same act as raising, and "who asked this
+  // customer for the money, and when" is a question people ask.
+  | 'invoice.send'
+  | 'invoice.share'
   | 'bill.create'
   | 'bill.void'
   | 'payment.record'

@@ -1,3 +1,4 @@
+import { invoiceSubject } from '@/modules/receivables/sharing'
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { transactionalMessages } from '@/db/schema'
@@ -50,6 +51,12 @@ const HOURLY_LIMIT: Record<TransactionalKind, number> = {
   company_invitation: 20,
   practice_invitation: 20,
   security_alert: 20,
+  // Higher, because this one is a business doing its job rather than a
+  // credential being handled: a builder sending out Friday's invoices can
+  // legitimately send thirty in a minute, all to different addresses. The
+  // limit is per address per hour, so it still stops the same customer being
+  // mailed the same invoice over and over.
+  invoice: 12,
 }
 
 export class RateLimitedError extends DomainError {
@@ -193,6 +200,58 @@ export function resetUrl(token: string): string {
 
 export function invitationUrl(token: string): string {
   return `${appBaseUrl()}/invite?token=${encodeURIComponent(token)}`
+}
+
+/** Where a customer opens the invoice they were sent (Phase 42). */
+export function invoiceUrl(token: string): string {
+  return `${appBaseUrl()}/i/${encodeURIComponent(token)}`
+}
+
+/**
+ * Sends an invoice to the customer who owes it.
+ *
+ * A link rather than an attachment. The page renders the **live** record, so
+ * the balance somebody opens in October is what is still outstanding in
+ * October rather than what it was in March — which is the number a customer
+ * chasing their own accounts payable actually needs, and the reason
+ * `modules/pdf/invoice.ts` refused to snapshot in the first place.
+ */
+export async function sendInvoiceEmail(input: {
+  to: string
+  toName: string | null
+  companyId: string
+  companyName: string
+  invoiceNumber: string
+  amountDue: string
+  dueDate: string
+  token: string
+  isReminder: boolean
+  reference: string
+}): Promise<SendOutcome> {
+  return sendTransactional({
+    to: input.to,
+    toName: input.toName,
+    companyId: input.companyId,
+    kind: 'invoice',
+    subject: invoiceSubject({
+      companyName: input.companyName,
+      number: input.invoiceNumber,
+      isReminder: input.isReminder,
+    }),
+    body: [
+      input.toName ? `Hello ${input.toName},` : 'Hello,',
+      input.isReminder
+        ? `Invoice ${input.invoiceNumber} from ${input.companyName} is still outstanding: ` +
+          `${input.amountDue}, due ${input.dueDate}.`
+        : `Here is invoice ${input.invoiceNumber} from ${input.companyName} for ` +
+          `${input.amountDue}, due ${input.dueDate}.`,
+    ],
+    action: { label: 'View the invoice', url: invoiceUrl(input.token) },
+    footnote:
+      'The link shows what is currently outstanding, so it stays right after a part payment. ' +
+      'Reply to this message if anything on it looks wrong.',
+    reference: input.reference,
+  })
 }
 
 export async function sendPasswordReset(input: {

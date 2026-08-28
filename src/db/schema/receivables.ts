@@ -183,6 +183,29 @@ export const invoices = pgTable(
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),
+
+    /**
+     * Getting it to the customer (Phase 42).
+     *
+     * `shareToken` is minted the first time an invoice is sent and never
+     * rotated, so the link in an email somebody filed two years ago still
+     * opens. Random per invoice — possessing one link reveals nothing about
+     * any other, which is the same reasoning `proposals.public_token` follows.
+     *
+     * Nullable because an invoice that has never been sent has no link, and a
+     * token that exists before anybody asked for one is a door standing open
+     * for no reason.
+     */
+    shareToken: text('share_token'),
+    sentAt: timestamp('sent_at', { withTimezone: true }),
+    /** The address it actually went to, which may not be the one on file. */
+    sentTo: text('sent_to'),
+    /** How many times it has been sent. A second send is a reminder. */
+    sendCount: integer('send_count').notNull().default(0),
+    firstViewedAt: timestamp('first_viewed_at', { withTimezone: true }),
+    lastViewedAt: timestamp('last_viewed_at', { withTimezone: true }),
+    viewCount: integer('view_count').notNull().default(0),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -190,6 +213,10 @@ export const invoices = pgTable(
     numberUnique: unique('invoices_company_number_unique').on(t.companyId, t.number),
     agingIdx: index('invoices_aging_idx').on(t.companyId, t.status, t.dueDate),
     customerIdx: index('invoices_customer_idx').on(t.companyId, t.customerId),
+    // Unique across every company: the token is the only thing identifying the
+    // invoice on the public route, so a collision would show one company's
+    // invoice to another's customer.
+    shareTokenUnique: unique('invoices_share_token_unique').on(t.shareToken),
   }),
 )
 

@@ -12,6 +12,7 @@ import {
   voidDocument,
 } from '@/modules/receivables/service'
 import { openDocumentsFor, type PaymentSide } from '@/modules/receivables/open-documents'
+import { revokeShareLink, sendInvoice, shareLinkFor } from '@/modules/receivables/send'
 import { allocate } from '@/modules/receivables/allocation'
 import { DomainError, messageFor } from '@/modules/errors'
 import { formatCents, parseAmountToCents } from '@/lib/money'
@@ -314,5 +315,70 @@ export async function recordPaymentAction(input: unknown): Promise<ActionResult>
         : ''
 
     return { message: `${formatCents(parsed.amount)} against ${settled}.${held}` }
+  })
+}
+
+// --- Getting it to the customer (Phase 42) ---------------------------------
+
+const sendSchema = z.object({
+  invoiceId: uuid,
+  /** Overrides the address on file, for a one-off. */
+  to: z.string().trim().optional(),
+})
+
+/**
+ * Sends an invoice, and says plainly whether it left.
+ *
+ * A failed delivery is reported as a failure rather than swallowed: the whole
+ * point of the action is that somebody now believes the customer has been
+ * asked for the money, and they should only believe it if it is true.
+ */
+export async function sendInvoiceAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = sendSchema.parse(input)
+
+    const result = await sendInvoice(actor, parsed.invoiceId, { to: parsed.to || null })
+
+    if (!result.delivered) {
+      throw new DomainError(
+        `The link is ready but the email did not go: ${result.error ?? 'the provider refused it'}. ` +
+          'Copy the link and send it yourself, or check the address and try again.',
+      )
+    }
+
+    return {
+      message:
+        `${result.isReminder ? 'Reminder sent' : 'Sent'} to ${result.to}. ` +
+        'They see what is currently outstanding, so it stays right after a part payment.',
+    }
+  })
+}
+
+export async function shareInvoiceAction(input: unknown): Promise<ActionResult<{ url: string }>> {
+  return run(async () => {
+    const actor = await requireActor()
+    const { invoiceId } = z.object({ invoiceId: uuid }).parse(input)
+
+    const url = await shareLinkFor(actor, invoiceId)
+    // The URL goes in the message as well as the data, because a "link ready"
+    // notice with no link in it is the whole feature missing.
+    return {
+      message: `Anybody with this link can see the invoice:\n${url}`,
+      data: { url },
+    }
+  })
+}
+
+export async function revokeInvoiceLinkAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const { invoiceId } = z.object({ invoiceId: uuid }).parse(input)
+
+    await revokeShareLink(actor, invoiceId)
+    return {
+      message:
+        'That link no longer works. The invoice is untouched — sending it again makes a new one.',
+    }
   })
 }

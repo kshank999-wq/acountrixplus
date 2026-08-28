@@ -8,6 +8,9 @@ import {
   createInvoiceAction,
   createVendorAction,
   recordPaymentAction,
+  revokeInvoiceLinkAction,
+  sendInvoiceAction,
+  shareInvoiceAction,
   voidDocumentAction,
   type ActionResult,
 } from '@/app/actions/documents'
@@ -25,6 +28,11 @@ type Document = {
   status: string
   totalCents: number
   balanceCents: number
+  /** Invoices only (Phase 42). Bills are received, not sent. */
+  sentAt?: string | null
+  sentTo?: string | null
+  viewCount?: number
+  shareToken?: string | null
 }
 
 type Owed = { id: string; name: string; outstandingCents: number; documentCount: number }
@@ -202,6 +210,7 @@ function Composer({
   // later on a profit and loss nobody can explain.
   const [lines, setLines] = useState<Line[]>([{ ...BLANK_LINE }])
   const [newParty, setNewParty] = useState('')
+  const [newPartyEmail, setNewPartyEmail] = useState('')
 
   /**
    * The chosen party, or the first one there is.
@@ -520,6 +529,21 @@ function Composer({
                   className="field py-1.5 text-sm"
                 />
               </label>
+              <label className="text-xs text-muted">
+                {/* Asked for here because without it an invoice can be raised
+                    for this customer and never sent to them — the address is
+                    the difference between a document and a request for money. */}
+                <span className="mb-1 block">
+                  Email {isCustomer && <span className="text-faint">(to send invoices)</span>}
+                </span>
+                <input
+                  value={newPartyEmail}
+                  onChange={(event) => setNewPartyEmail(event.target.value)}
+                  placeholder="ap@harborview.test"
+                  type="email"
+                  className="field py-1.5 text-sm"
+                />
+              </label>
               <button
                 className="btn btn-ghost text-sm"
                 disabled={pending || !newParty.trim()}
@@ -527,9 +551,12 @@ function Composer({
                   act(
                     () =>
                       isCustomer
-                        ? createCustomerAction({ name: newParty })
-                        : createVendorAction({ name: newParty }),
-                    () => setNewParty(''),
+                        ? createCustomerAction({ name: newParty, email: newPartyEmail })
+                        : createVendorAction({ name: newParty, email: newPartyEmail }),
+                    () => {
+                      setNewParty('')
+                      setNewPartyEmail('')
+                    },
                   )
                 }
               >
@@ -735,6 +762,7 @@ function DocumentList({
                 <th className="px-4 py-2 font-medium">Dated</th>
                 <th className="px-4 py-2 font-medium">Due</th>
                 <th className="px-4 py-2 font-medium">State</th>
+                {isCustomer && <th className="px-4 py-2 font-medium">Sent</th>}
                 <th className="px-4 py-2 text-right font-medium">Total</th>
                 <th className="px-4 py-2 text-right font-medium">Outstanding</th>
                 <th className="px-4 py-2" />
@@ -748,6 +776,30 @@ function DocumentList({
                   <td className="px-4 py-1.5 text-muted">{document.issueDate}</td>
                   <td className="px-4 py-1.5 text-muted">{document.dueDate}</td>
                   <td className="px-4 py-1.5 text-muted">{document.status.replace('_', ' ')}</td>
+                  {isCustomer && (
+                    <td className="px-4 py-1.5 text-xs text-muted">
+                      {/* Three states, not two. An invoice shared by link has
+                          never been emailed and is still out there — saying
+                          "not sent" about it hides the fact that somebody can
+                          read it, and hid the view count with it. */}
+                      {document.sentAt ? (
+                        <>
+                          {document.sentAt}
+                          <span className="block text-faint">{document.sentTo}</span>
+                        </>
+                      ) : document.shareToken ? (
+                        <span className="text-faint">link shared</span>
+                      ) : (
+                        <span className="text-faint">not sent</span>
+                      )}
+                      {(document.viewCount ?? 0) > 0 && (
+                        <span className="block">
+                          opened {document.viewCount}
+                          {document.viewCount === 1 ? ' time' : ' times'}
+                        </span>
+                      )}
+                    </td>
+                  )}
                   <td className="tnum px-4 py-1.5 text-right">
                     {formatCents(document.totalCents)}
                   </td>
@@ -758,7 +810,31 @@ function DocumentList({
                       formatCents(document.balanceCents)
                     )}
                   </td>
-                  <td className="px-4 py-1.5 text-right">
+                  <td className="whitespace-nowrap px-4 py-1.5 text-right">
+                    {canManage && isCustomer && document.status !== 'void' && (
+                      <>
+                        <button
+                          className="btn btn-ghost text-xs"
+                          disabled={pending}
+                          onClick={() => act(() => sendInvoiceAction({ invoiceId: document.id }))}
+                        >
+                          {document.sentAt ? 'Remind' : 'Send'}
+                        </button>
+                        <button
+                          className="btn btn-ghost text-xs"
+                          disabled={pending}
+                          onClick={() =>
+                            act(() =>
+                              document.shareToken
+                                ? revokeInvoiceLinkAction({ invoiceId: document.id })
+                                : shareInvoiceAction({ invoiceId: document.id }),
+                            )
+                          }
+                        >
+                          {document.shareToken ? 'Revoke link' : 'Get link'}
+                        </button>
+                      </>
+                    )}
                     {canManage &&
                       document.status !== 'void' &&
                       document.balanceCents === document.totalCents && (
