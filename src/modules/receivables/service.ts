@@ -27,6 +27,8 @@ import { recordEvent } from '@/modules/worker/outbox'
 import { formatCents } from '@/lib/money'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { relieveFunctional } from '@/modules/fx/documents'
+import { CUSTOMER_FIELDS, VENDOR_FIELDS, diffParty } from '@/modules/parties/changes'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Accounts receivable and payable (spec §13, §20 "AR/AP basics").
@@ -101,7 +103,26 @@ export function lineAmountCents(quantityMilli: number, unitPriceCents: number): 
 
 export async function createCustomer(
   ctx: ActorContext,
-  input: { name: string; email?: string; phone?: string; paymentTermsDays?: number },
+  input: {
+    name: string
+    email?: string
+    phone?: string
+    paymentTermsDays?: number
+    /**
+     * The address (Phase 45).
+     *
+     * `modules/pdf/invoice.ts` has read `customer.addressLine1` since Phase 21
+     * and nothing has ever written it, so every invoice PDF this application
+     * has produced carried a blank billing address. Accepted here and on the
+     * edit form; the PDF needed no change at all.
+     */
+    addressLine1?: string
+    addressLine2?: string
+    city?: string
+    region?: string
+    postalCode?: string
+    notes?: string
+  },
 ) {
   requirePermission(ctx, 'crm:manage')
 
@@ -110,9 +131,7 @@ export async function createCustomer(
       .insert(customers)
       .values({
         companyId: ctx.companyId,
-        name: input.name,
-        email: input.email ?? null,
-        phone: input.phone ?? null,
+        ...normaliseParty(input),
         paymentTermsDays: input.paymentTermsDays ?? 30,
       })
       .returning()
@@ -137,9 +156,16 @@ export async function createVendor(
   input: {
     name: string
     email?: string
+    phone?: string
     paymentTermsDays?: number
     taxId?: string
     is1099Vendor?: boolean
+    addressLine1?: string
+    addressLine2?: string
+    city?: string
+    region?: string
+    postalCode?: string
+    notes?: string
   },
 ) {
   requirePermission(ctx, 'accounting:view')
@@ -149,10 +175,8 @@ export async function createVendor(
       .insert(vendors)
       .values({
         companyId: ctx.companyId,
-        name: input.name,
-        email: input.email ?? null,
+        ...normaliseParty(input),
         paymentTermsDays: input.paymentTermsDays ?? 30,
-        taxId: input.taxId ?? null,
         is1099Vendor: input.is1099Vendor ?? false,
       })
       .returning()
@@ -170,6 +194,184 @@ export async function createVendor(
 
     return vendor
   })
+}
+
+/**
+ * Corrects a customer (Phase 45).
+ *
+ * ## Why this did not exist until now
+ *
+ * It should have from Phase 2, and its absence was quietly severe: a typo in
+ * an email meant that customer could never be sent an invoice or a reminder,
+ * for ever, and the only escape was a second customer record — which splits
+ * their history, their aging and their statement in two.
+ *
+ * ## A correction is not a rewrite of history
+ *
+ * The name and address are **descriptions**: correcting one corrects it
+ * everywhere it appears, including on an invoice already sent, which is right.
+ * A document showing a stale spelling of somebody's name is showing something
+ * that was never true, and it is the same live-record argument ADR 0042 made
+ * about the balance.
+ *
+ * Payment terms are a **default**: they decide the next invoice's due date and
+ * do not touch one already raised, whose due date is a fact somebody was told.
+ * Nothing here reaches into `invoices`, deliberately.
+ *
+ * Every change carries before and after into the audit log. That is not
+ * decoration on a party record — see `modules/parties/changes.ts`.
+ */
+export async function updateCustomer(
+  ctx: ActorContext,
+  customerId: string,
+  input: Partial<{
+    name: string
+    email: string | null
+    phone: string | null
+    addressLine1: string | null
+    addressLine2: string | null
+    city: string | null
+    region: string | null
+    postalCode: string | null
+    paymentTermsDays: number
+    notes: string | null
+    isActive: boolean
+  }>,
+) {
+  requirePermission(ctx, 'crm:manage')
+
+  const [before] = await db
+    .select()
+    .from(customers)
+    .where(scoped(ctx, customers, eq(customers.id, customerId)))
+    .limit(1)
+
+  if (!before) throw new DomainError('That customer is not on these books.')
+
+  if (input.name !== undefined && !input.name.trim()) {
+    throw new DomainError('A customer needs a name.')
+  }
+  if (input.paymentTermsDays !== undefined && input.paymentTermsDays < 0) {
+    throw new DomainError('Payment terms cannot be negative.')
+  }
+
+  const changes = diffParty({ fields: CUSTOMER_FIELDS, before, after: input })
+
+  // An untouched form saved is not a change. Writing one anyway fills the
+  // audit log with noise and buries the one edit that mattered.
+  if (changes.length === 0 && input.isActive === undefined) return before
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(customers)
+      .set({ ...normaliseParty(input) })
+      .where(scoped(ctx, customers, eq(customers.id, customerId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'customer.update',
+        entityType: 'customer',
+        entityId: customerId,
+        before: Object.fromEntries(changes.map((change) => [change.key, change.from])),
+        after: Object.fromEntries(changes.map((change) => [change.key, change.to])),
+      },
+      tx,
+    )
+
+    return updated
+  })
+}
+
+/** Corrects a vendor. See `updateCustomer` — the reasoning is the same. */
+export async function updateVendor(
+  ctx: ActorContext,
+  vendorId: string,
+  input: Partial<{
+    name: string
+    email: string | null
+    phone: string | null
+    addressLine1: string | null
+    addressLine2: string | null
+    city: string | null
+    region: string | null
+    postalCode: string | null
+    paymentTermsDays: number
+    taxId: string | null
+    is1099Vendor: boolean
+    notes: string | null
+    isActive: boolean
+  }>,
+) {
+  // Editing a vendor changes where money goes. `accounting:journal` rather
+  // than the `accounting:view` that creating one needs, because reading a
+  // supplier list and redirecting a payment run are different powers.
+  requirePermission(ctx, 'accounting:journal')
+
+  const [before] = await db
+    .select()
+    .from(vendors)
+    .where(scoped(ctx, vendors, eq(vendors.id, vendorId)))
+    .limit(1)
+
+  if (!before) throw new DomainError('That vendor is not on these books.')
+
+  if (input.name !== undefined && !input.name.trim()) {
+    throw new DomainError('A vendor needs a name.')
+  }
+  if (input.paymentTermsDays !== undefined && input.paymentTermsDays < 0) {
+    throw new DomainError('Payment terms cannot be negative.')
+  }
+
+  const changes = diffParty({ fields: VENDOR_FIELDS, before, after: input })
+  if (changes.length === 0 && input.isActive === undefined) return before
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(vendors)
+      .set({ ...normaliseParty(input) })
+      .where(scoped(ctx, vendors, eq(vendors.id, vendorId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'vendor.update',
+        entityType: 'vendor',
+        entityId: vendorId,
+        before: Object.fromEntries(changes.map((change) => [change.key, change.from])),
+        after: Object.fromEntries(changes.map((change) => [change.key, change.to])),
+      },
+      tx,
+    )
+
+    return updated
+  })
+}
+
+/**
+ * Trims text and turns an emptied field into a null.
+ *
+ * A form that submits `""` for a cleared address must store nothing rather
+ * than an empty string, or every `is not null` check downstream — the invoice
+ * PDF's address block, the chase decision's "has an email" — reads a blank as
+ * a value and behaves as though it were filled in.
+ */
+function normaliseParty<T extends Record<string, unknown>>(input: T): T {
+  const out: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      out[key] = key === 'name' ? trimmed : trimmed === '' ? null : trimmed
+    } else {
+      out[key] = value
+    }
+  }
+
+  return out as T
 }
 
 export async function listCustomers(ctx: ActorContext) {

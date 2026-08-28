@@ -3,6 +3,9 @@ export const ACCOUNTING_NAV = [
   // First, because raising an invoice and entering a bill are what a business
   // does daily and every other screen here is about what happened afterwards.
   { href: '/accounting/invoices', label: 'Invoices & bills' },
+  // Beside the documents they appear on, because the reason somebody opens
+  // this screen is almost always a document they were just looking at.
+  { href: '/accounting/people', label: 'Customers & suppliers' },
   { href: '/accounting/reports', label: 'Reports' },
   { href: '/accounting/journal', label: 'Journal' },
   { href: '/accounting/receivables', label: 'Credits & statements' },

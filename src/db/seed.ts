@@ -291,12 +291,32 @@ async function main() {
     name: 'Harborview Development LLC',
     email: 'ap@harborview.test',
     paymentTermsDays: 30,
+    // Addresses, so the invoice PDF's "Billed to" block has something to
+    // print. It has composed one since Phase 21 out of fields nothing could
+    // write until Phase 45.
+    addressLine1: '1120 Harborview Way',
+    city: 'Bellingham',
+    region: 'WA',
+    postalCode: '98225',
+    phone: '(360) 555-0182',
   })
   const cityWorks = await createCustomer(ctx, {
     name: 'City Works Authority',
     paymentTermsDays: 45,
+    addressLine1: '2 Civic Plaza',
+    city: 'Bellingham',
+    region: 'WA',
+    postalCode: '98225',
   })
-  const supplyDepot = await createVendor(ctx, { name: 'Supply Depot', paymentTermsDays: 30 })
+  const supplyDepot = await createVendor(ctx, {
+    name: 'Supply Depot',
+    paymentTermsDays: 30,
+    email: 'ar@supplydepot.test',
+    addressLine1: '88 Trade Park',
+    city: 'Bellingham',
+    region: 'WA',
+    postalCode: '98225',
+  })
 
   if (contractRevenue) {
     // One paid, one outstanding, one well past due — so the aging report has
@@ -626,6 +646,10 @@ async function main() {
     name: 'Foxglove Cabinetry',
     email: 'accounts@foxglovecabinetry.test',
     paymentTermsDays: 5,
+    addressLine1: 'Unit 4, Kiln Yard',
+    city: 'Bellingham',
+    region: 'WA',
+    postalCode: '98226',
   })
 
   const workshopLease = await createLease(ctx, {
@@ -2950,6 +2974,10 @@ async function main() {
     const meridian = await createCustomer(ctx, {
       name: 'Meridian Facilities Ltd',
       email: 'accounts@meridian-facilities.test',
+      addressLine1: '40 Meridian Court',
+      city: 'Ferndale',
+      region: 'WA',
+      postalCode: '98248',
     })
 
     const serviceRevenue = await accountByNumber(company.id, '4100')
@@ -3165,6 +3193,9 @@ async function main() {
   )
   console.log(
     '  /accounting/billing   two arrangements that bill on their own, and what is coming',
+  )
+  console.log(
+    '  /accounting/people    every customer and supplier — and the form that corrects one',
   )
   console.log(
     '  /settings/chasing     what would be chased today, and why the rest would not — off by default',

@@ -124,7 +124,9 @@ export async function createCustomerAction(
     })
 
     return {
-      message: `${customer.name} added, on ${customer.paymentTermsDays}-day terms.`,
+      message:
+        `${customer.name} added, on ${customer.paymentTermsDays}-day terms. ` +
+        'Add their address under Customers & suppliers — it prints on the invoice.',
       data: { id: customer.id, name: customer.name },
     }
   })
@@ -144,7 +146,9 @@ export async function createVendorAction(
     })
 
     return {
-      message: `${vendor.name} added, on ${vendor.paymentTermsDays}-day terms.`,
+      message:
+        `${vendor.name} added, on ${vendor.paymentTermsDays}-day terms. ` +
+        'Their address and tax details are under Customers & suppliers.',
       data: { id: vendor.id, name: vendor.name },
     }
   })

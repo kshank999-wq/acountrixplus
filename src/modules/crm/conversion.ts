@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   customers,
@@ -69,7 +69,7 @@ export async function convertWonOpportunity(
   const result = await db.transaction(async (tx) => {
     // Reuse the organization's existing customer record if it has one — a
     // repeat client should not accumulate duplicates.
-    const [existingCustomer] = await tx
+    const [linkedCustomer] = await tx
       .select()
       .from(customers)
       .where(
@@ -80,8 +80,46 @@ export async function convertWonOpportunity(
       )
       .limit(1)
 
+    /**
+     * ...and adopt one that was created on the accounting side (Phase 45).
+     *
+     * The check above only ever matched a customer already linked to this
+     * organization, so a client invoiced before they were ever won in the CRM
+     * — which is the ordinary order of events for a repeat customer — got a
+     * **second** customer record here. Two records for one client split their
+     * aging, their statement and their balance, and until Phase 45 there was
+     * no screen on which anybody could even see it had happened. The demo seed
+     * produced exactly this, twice over, which is how it was found.
+     *
+     * Adoption is narrow on purpose: an exact, case-insensitive name match, in
+     * this company, on a customer belonging to **no** organization. One
+     * already linked elsewhere is a different client who happens to share a
+     * name, and is left alone.
+     */
+    const [adoptable] = linkedCustomer
+      ? []
+      : await tx
+          .select()
+          .from(customers)
+          .where(
+            and(
+              eq(customers.companyId, ctx.companyId),
+              isNull(customers.organizationId),
+              sql`lower(${customers.name}) = lower(${organization.name})`,
+            ),
+          )
+          .limit(1)
+
+    if (adoptable) {
+      await tx
+        .update(customers)
+        .set({ organizationId: organization.id })
+        .where(eq(customers.id, adoptable.id))
+    }
+
     const customer =
-      existingCustomer ??
+      linkedCustomer ??
+      adoptable ??
       (
         await tx
           .insert(customers)

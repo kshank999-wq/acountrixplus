@@ -1988,6 +1988,61 @@ fee of **−$53.95**. "Check for deposits" posted one deposit dated **2026-08-28
 — today, not Sunday — the row moved to *in your bank*, and the clearing account
 went to zero.
 
+### The record you can never fix (Phase 45)
+
+Customers and vendors have existed since Phase 2 as a dropdown inside the
+invoice composer and nothing else — no page listing them, no way to reach one,
+and **no update function of any kind**. A typo in an email meant that customer
+could never be sent an invoice (Phase 42) and never be chased (Phase 43), for
+ever, and the only escape was a second record that splits their aging, their
+statement and their balance in two.
+
+A smaller find of the same shape: `modules/pdf/invoice.ts` has composed a
+"Billed to" block from `addressLine1`, `city` and `postalCode` since Phase 21,
+and **nothing has ever written any of the three**. Every invoice PDF carried a
+billing address consisting of the customer's name. The PDF needed no change; it
+needed somewhere to type.
+
+- **Three kinds of field, not one.** A **description** — name, email, address —
+  says how to refer to somebody, so correcting one corrects it everywhere,
+  including on invoices already sent; that is ADR 0042's live-record argument
+  applied consistently, since a document showing a stale spelling is showing
+  something never true. A **default** — payment terms — decides the *next*
+  invoice and must not move a due date somebody was already told, so nothing
+  reaches into `invoices` and the form says so. A **consequence** — a vendor's
+  tax ID and 1099 status — is a position taken for a filing, and changing one
+  after a year is reported restates it, so the notice says what it did.
+- **A partial update, so a form cannot destroy what it did not ask about.** The
+  commonest way an edit screen loses data is blanking the columns its form
+  omitted. Saving an untouched form writes no audit entry at all, or the log
+  fills with noise and the one real edit is buried.
+- **The audit trail here is not decoration.** Changing a vendor's payment
+  details is the commonest invoice-fraud vector a small business meets — an
+  email saying "our bank has changed", a quiet edit, and the next payment run
+  goes to a stranger. Before *and* after are recorded, which is the whole
+  reason to prefer an update over a delete-and-recreate, and editing a vendor
+  needs a stronger permission than creating one.
+- **Archive, never delete**, and refused while there is open business: a
+  customer hidden from every picker while still owing money is a debt nobody
+  will chase.
+
+**Two defects this turned up.** Reseeding onto the new screen showed **two
+customers both called Harborview Development LLC** — `convertWonOpportunity`
+deduplicated only against a customer already linked to the organization, so a
+client invoiced *before* being won in the CRM got a second record. It now adopts
+an unlinked exact-name match instead. That the demo had carried that duplicate
+for many phases is the point: until there was a screen listing customers, there
+was nowhere it could be seen. And in the browser, a refusal **followed the user
+to the next record** — "there is still money outstanding" sat above a supplier
+owing nothing, because a notice raised on one party stayed up while another was
+opened.
+
+Verified on the demo: filled in an address and corrected an email in one form,
+and got back *"Email, address, city and postcode updated."*; saved the same
+form untouched and got *"Nothing changed."*; tried to archive a customer owing
+$9,400 and was refused with the reason; and the invoice PDF now prints the
+street, city and postcode it has been asking for since Phase 21.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

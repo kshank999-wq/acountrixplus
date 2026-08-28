@@ -66,6 +66,13 @@ export type AuditAction =
   | 'payments.payout_import'
   | 'customer.create'
   | 'vendor.create'
+  // Phase 45. Changing a vendor's details is the commonest invoice-fraud
+  // vector a small business meets — an email saying "our bank has changed",
+  // a quiet edit, and the next payment run goes to a stranger. Before and
+  // after are both recorded, which is the whole reason to prefer an update
+  // over a delete and recreate.
+  | 'customer.update'
+  | 'vendor.update'
   // Time and expense billing (spec §5, Phase 15)
   | 'time.log'
   | 'time.approve'
