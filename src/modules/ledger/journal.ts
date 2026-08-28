@@ -409,9 +409,40 @@ export async function voidJournalEntry(
     )
 }
 
-/** Voids an entry as a user-initiated action, with permission and audit. */
+/**
+ * Voids an entry as a user-initiated action, with permission and audit.
+ *
+ * ## Why this refuses an entry that belongs to a document (Phase 51)
+ *
+ * It used to check a permission and an open period and nothing else, which
+ * meant a person could void the entry behind INV-1002 and leave the invoice
+ * claiming $24,000 that Accounts Receivable no longer carried — the one
+ * disagreement between subledger and ledger that Phase 31 went to the trouble
+ * of proving never happens. It never bit only because the server action that
+ * called this had no caller on any screen.
+ *
+ * A document still voids **its own** entry, through `voidJournalEntry` in the
+ * same transaction as the document changes. That is the path that keeps both
+ * halves moving together, and it is untouched. This one is for a person, and a
+ * person may only void what they posted by hand.
+ */
 export async function voidEntry(ctx: ActorContext, entryId: string) {
   requirePermission(ctx, 'accounting:journal')
+
+  const [entry] = await db
+    .select({ source: journalEntries.source, sourceType: journalEntries.sourceType })
+    .from(journalEntries)
+    .where(scoped(ctx, journalEntries, eq(journalEntries.id, entryId)))
+    .limit(1)
+
+  if (!entry) throw new DomainError('That entry is not on these books.')
+
+  if (entry.sourceType !== null || (entry.source !== 'manual' && entry.source !== 'adjusting')) {
+    throw new DomainError(
+      'That entry is the ledger half of a document. Correct the document instead — voiding ' +
+        'this would leave the document claiming money the ledger no longer carries.',
+    )
+  }
 
   return db.transaction(async (tx) => {
     await voidJournalEntry(ctx, entryId, tx)

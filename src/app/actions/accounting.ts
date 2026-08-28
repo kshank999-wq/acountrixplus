@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import { parseAmountToCents } from '@/lib/money'
-import { closePeriod, postManualEntry, reopenPeriod, voidEntry } from '@/modules/ledger/journal'
+import { closePeriod, postManualEntry, reopenPeriod } from '@/modules/ledger/journal'
+import { correctEntry, entryDetail } from '@/modules/ledger/corrections-service'
 import {
   completeReconciliation,
   reopenReconciliation,
@@ -138,12 +139,55 @@ export async function postEntryAction(
   })
 }
 
-export async function voidEntryAction(entryId: string): Promise<ActionResult> {
+/**
+ * Corrects one entry, by voiding it or by reversing it (Phase 51).
+ *
+ * One action for both, because which of the two is right is an accounting
+ * decision the service makes from the entry's source and its period — not a
+ * preference the caller announces. What arrives here is what a person pressed,
+ * and `correctEntry` checks it rather than trusting it.
+ */
+export async function correctEntryAction(input: {
+  entryId: string
+  method: 'void' | 'reverse'
+  memo?: string
+}): Promise<ActionResult> {
   return run('/accounting/journal', async () => {
     const actor = await requireActor()
-    await voidEntry(actor, entryId)
-    return 'Entry voided.'
+    const parsed = correctionSchema.parse(input)
+    const result = await correctEntry(actor, parsed)
+    return result.message
   })
+}
+
+const correctionSchema = z.object({
+  entryId: z.string().uuid(),
+  method: z.enum(['void', 'reverse']),
+  memo: z.string().trim().max(500).optional(),
+})
+
+/**
+ * One entry with its lines.
+ *
+ * `entryWithLines` has existed since Phase 2 with no caller anywhere in
+ * `src/app`, so the journal listed a number, a date, a memo and a status and
+ * showed no money at all.
+ */
+export async function entryDetailAction(
+  entryId: string,
+): Promise<
+  | { ok: true; detail: NonNullable<Awaited<ReturnType<typeof entryDetail>>> }
+  | { ok: false; error: string }
+> {
+  try {
+    const actor = await requireActor()
+    const detail = await entryDetail(actor, entryId)
+
+    if (!detail) return { ok: false, error: 'That entry is not on these books.' }
+    return { ok: true, detail }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That entry could not be read.') }
+  }
 }
 
 // --- Period close ----------------------------------------------------------

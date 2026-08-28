@@ -2317,6 +2317,54 @@ threshold stayed freely payable. Approving one and paying gave *"$1,968.00 paid
 ones untouched, and an approval taken back returned its bill to *"Needs
 approving"*.
 
+### The entry you cannot correct, and the one you must not (Phase 51)
+
+The journal screen has told users this since Phase 2:
+
+> *Voided entries stay listed — the ledger corrects by reversal, never by
+> deletion.*
+
+It then showed number, date, memo, source and status — **no debits, no credits,
+no money at all** — beside no correction of any kind. Three functions had
+existed since Phase 2 with no caller anywhere in `src/app`: `entryWithLines`,
+`voidEntry` (called only by a server action no screen ever called) and
+`reverseEntry`. An entry posted to the wrong account could neither be read nor
+put right.
+
+**The costly wrong answer is not the missing button — it is wiring it up
+naively.** `voidEntry` checked a permission and an open period and nothing else,
+so voiding the entry behind INV-1002 would leave the invoice claiming $24,000
+that Accounts Receivable no longer carried: the one disagreement Phase 31 went
+to the trouble of proving never happens, with a nightly check that would notice
+and nothing that would prevent it. It never bit because the button was missing,
+not because it was guarded.
+
+- **A derived entry is corrected by correcting its document.** The refusal names
+  where to go — *"Void the bill on Invoices & bills; the ledger follows it"*.
+  The guard sits on the person-initiated path only; a document still voids its
+  own entry internally, in the same transaction, so both halves move together.
+- **An entry in a closed period is reversed, not voided.** Voiding silently
+  changes numbers somebody has already given to a bank. A reversal shows the
+  correction in the current period, with both entries standing and pointing at
+  each other.
+- **Reversing is allowed wherever voiding is; the reverse is not.** An open
+  period is not proof nobody has reported on it, so *"Reverse it instead"* sits
+  beside *"Void it"* — but asking to void a closed period is refused either way.
+- **You can see what an entry says**, fetched when you open a row rather than
+  shipped with all hundred.
+
+Browser verification found a React key warning on the first render — the row and
+its expanded detail are two `<tr>`s for one entry and the fragment wrapping them
+carried no key. Smaller than what the last few phases turned up, and worth
+saying so.
+
+Verified on the demo: a bill's entry showed its two lines and refused correction
+with *"Entry #91 is the ledger half of a document… Void the bill on Invoices &
+bills"*; a hand-posted entry offered both corrections and reversing #94 gave
+*"reversed by #95 — both stay on the books, that is what makes the correction
+visible"*; and an entry dated 2026-03-15 with January–June closed offered
+**only** *"Reverse it"*, landing #98 on 2026-08-28.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

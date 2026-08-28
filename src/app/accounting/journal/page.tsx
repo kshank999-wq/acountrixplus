@@ -1,11 +1,13 @@
 import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
-import { listEntries, listPeriods } from '@/modules/ledger/journal'
+import { listPeriods } from '@/modules/ledger/journal'
+import { correctableEntries } from '@/modules/ledger/corrections-service'
 import { listAccounts } from '@/modules/coa/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { JournalForm } from './journal-form'
 import { PeriodControls } from './period-controls'
+import { JournalEntries } from './entries'
 
 export const dynamic = 'force-dynamic'
 
@@ -25,7 +27,7 @@ export default async function JournalPage() {
   }
 
   const [entries, accounts, periods] = await Promise.all([
-    listEntries(actor, { limit: 100, includeVoid: true }),
+    correctableEntries(actor, { limit: 100 }),
     listAccounts(actor, { activeOnly: true }),
     listPeriods(actor),
   ])
@@ -51,56 +53,20 @@ export default async function JournalPage() {
         </div>
       )}
 
-      <section className="card mt-4 overflow-hidden">
-        <header className="border-b border-line px-4 py-3">
-          <h2 className="text-sm font-semibold">Journal entries</h2>
-          <p className="text-xs text-muted">
-            Most entries are derived from bank transactions, invoices, and payments. Voided
-            entries stay listed — the ledger corrects by reversal, never by deletion.
-          </p>
-        </header>
-
-        {entries.length === 0 ? (
-          <p className="px-4 py-8 text-center text-sm text-muted">No entries yet.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
-                <tr>
-                  <th className="px-4 py-2 font-medium">#</th>
-                  <th className="px-4 py-2 font-medium">Date</th>
-                  <th className="px-4 py-2 font-medium">Memo</th>
-                  <th className="px-4 py-2 font-medium">Source</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {entries.map((entry) => (
-                  <tr key={entry.id} className="border-t border-line">
-                    <td className="tnum px-4 py-1.5 text-faint">{entry.entryNumber}</td>
-                    <td className="tnum whitespace-nowrap px-4 py-1.5">{entry.entryDate}</td>
-                    <td className="px-4 py-1.5">{entry.memo ?? '—'}</td>
-                    <td className="px-4 py-1.5 text-xs text-muted">
-                      {entry.source.replace('_', ' ')}
-                    </td>
-                    <td className="px-4 py-1.5">
-                      <span
-                        className={`chip ${
-                          entry.status === 'posted'
-                            ? 'bg-positive/15 text-positive'
-                            : 'bg-raised text-faint'
-                        }`}
-                      >
-                        {entry.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </section>
+      <JournalEntries
+        rows={entries.map((row) => ({
+          id: row.id,
+          entryNumber: row.entryNumber,
+          entryDate: row.entryDate,
+          memo: row.memo,
+          source: row.source,
+          status: row.status,
+          reversalOfId: row.reversalOfId,
+          reversedBy: row.reversedBy,
+          correction: row.correction,
+        }))}
+        canPost={canPost}
+      />
     </AppShell>
   )
 }
