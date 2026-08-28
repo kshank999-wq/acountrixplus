@@ -67,6 +67,9 @@ export type AuditAction =
    * no reason is a hole somebody has to reconstruct from dates months later.
    */
   | 'payment.void'
+  /** Held overpayment put against a later invoice, or given back (Phase 53). */
+  | 'payment.credit_applied'
+  | 'payment.credit_refunded'
   // Phase 44. A card payment is initiated by somebody who is not a user of
   // this system, so "who took this money, and what did the processor keep"
   // has an answer that is not a person's name.

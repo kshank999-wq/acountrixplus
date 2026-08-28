@@ -356,26 +356,32 @@ describe('a payment across several invoices', () => {
     expect(aged.rows.map((row) => row.partyName)).toContain('Harborview LLC')
   })
 
-  it('cannot be applied to more than is owed', async () => {
+  /**
+   * Rewritten in Phase 53. This used to assert that recordPayment refused a
+   * receipt bigger than what was owed — and the refusal was the defect. A
+   * customer who sends $500 against $300 outstanding has sent $500, and the
+   * books have to say so or the bank reconciliation is out for ever.
+   */
+  it('holds what is owed nothing, rather than refusing the whole receipt', async () => {
     const { customer } = await aCustomerOwing([{ cents: 30_000, due: '2026-03-31' }])
     const open = await openDocumentsFor(fixture.ctx, 'customer', customer.id)
 
     const allocation = allocate(50_000, open)
     expect(allocation.unappliedCents).toBe(20_000)
 
-    // And recordPayment refuses the mismatch rather than half-landing it.
-    await expect(
-      recordPayment(fixture.ctx, {
-        kind: 'receipt',
-        customerId: customer.id,
-        paymentDate: '2026-04-01',
-        amountCents: 50_000,
-        financialAccountId: fixture.financialAccountId,
-        applications: allocation.applications.map((application) => ({
-          invoiceId: application.documentId,
-          amountCents: application.amountCents,
-        })),
-      }),
-    ).rejects.toThrow(/must match exactly/)
+    const payment = await recordPayment(fixture.ctx, {
+      kind: 'receipt',
+      customerId: customer.id,
+      paymentDate: '2026-04-01',
+      amountCents: 50_000,
+      financialAccountId: fixture.financialAccountId,
+      applications: allocation.applications.map((application) => ({
+        invoiceId: application.documentId,
+        amountCents: application.amountCents,
+      })),
+    })
+
+    expect(payment.amountCents).toBe(50_000)
+    expect(payment.unappliedCents).toBe(20_000)
   })
 })

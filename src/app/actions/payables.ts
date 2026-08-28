@@ -6,6 +6,7 @@ import { requireActor } from '@/lib/current-user'
 import { recordPayment, DocumentError } from '@/modules/receivables/service'
 import { applyVendorCredit } from '@/modules/receivables/vendor-credits'
 import { voidPayment } from '@/modules/receivables/payment-voiding'
+import { applyCredit, refundCredit } from '@/modules/receivables/customer-credit'
 import { billsByIds } from '@/modules/payables/queue'
 import { applicationOrder, planRun } from '@/modules/payables/run'
 import { describeHeld, splitByApproval } from '@/modules/payables/approval'
@@ -292,5 +293,73 @@ export async function voidPaymentAction(input: unknown): Promise<ActionResult> {
     }
   } catch (error) {
     return { ok: false, error: messageFor(error, 'That payment could not be taken back.') }
+  }
+}
+
+const applyCreditSchema = z.object({
+  paymentId: uuid,
+  invoiceId: uuid,
+  amountCents: z.number().int().positive().optional(),
+  appliedOn: isoDate,
+})
+
+/** Puts a customer's held overpayment against one of their invoices. */
+export async function applyCustomerCreditAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const parsed = applyCreditSchema.parse(input)
+
+    const result = await applyCredit(actor, parsed)
+
+    for (const path of PATHS) revalidatePath(path)
+
+    return {
+      ok: true,
+      message:
+        `${formatCents(result.appliedCents)} of credit put against ${result.invoiceNumber}. ` +
+        (result.remainingCents === 0
+          ? 'That credit is used up.'
+          : `${formatCents(result.remainingCents)} of it is still held.`),
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That credit could not be applied.') }
+  }
+}
+
+const refundSchema = z.object({
+  paymentId: uuid,
+  amountCents: z.number().int().positive(),
+  financialAccountId: uuid,
+  refundedOn: isoDate,
+  reference: z.string().trim().max(200).optional(),
+})
+
+/**
+ * Gives a customer's held overpayment back.
+ *
+ * Phase 52's named follow-up. Deliberately its own action rather than a shape
+ * of `voidPaymentAction`: a void says the payment never happened, a refund
+ * says it happened and then went the other way, and the customer's own bank
+ * statement can tell the two apart even if this application could not.
+ */
+export async function refundCustomerCreditAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const parsed = refundSchema.parse(input)
+
+    const result = await refundCredit(actor, parsed)
+
+    for (const path of PATHS) revalidatePath(path)
+
+    return {
+      ok: true,
+      message:
+        `${formatCents(result.refundedCents)} refunded to ${result.customerName}. ` +
+        (result.remainingCents === 0
+          ? 'Nothing is held for them now.'
+          : `${formatCents(result.remainingCents)} is still held.`),
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That refund could not be made.') }
   }
 }

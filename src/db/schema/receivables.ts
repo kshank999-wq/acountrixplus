@@ -471,6 +471,20 @@ export const payments = pgTable(
       onDelete: 'set null',
     }),
     /**
+     * How much of this receipt is against nothing (Phase 53).
+     *
+     * A customer who sends more than they owe used to be refused outright —
+     * the screen said *"reduce it"*, which puts a figure in the books the bank
+     * disagrees with. The difference is now held here and credited to
+     * `2520 Customer Overpayments`, and it goes down as the credit is applied
+     * to a later invoice or refunded.
+     *
+     * Stored rather than derived for the reason document balances are: the
+     * alternative is summing the whole application history on every read.
+     */
+    unappliedCents: bigint('unapplied_cents', { mode: 'number' }).notNull().default(0),
+
+    /**
      * Whether this payment happened (Phase 52).
      *
      * There was no such column until Phase 52, and so no way to record that a
@@ -497,6 +511,10 @@ export const payments = pgTable(
       t.companyId,
       t.status,
       t.paymentDate,
+    ),
+    unappliedWithinAmount: check(
+      'payments_unapplied_within_amount',
+      sql`${t.unappliedCents} >= 0 AND ${t.unappliedCents} <= ${t.amountCents}`,
     ),
     // The index a shift's takings are summed on.
     drawerShiftIdx: index('payments_drawer_shift_idx').on(t.drawerShiftId),

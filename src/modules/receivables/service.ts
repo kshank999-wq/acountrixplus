@@ -26,6 +26,7 @@ import {
 import { recordEvent } from '@/modules/worker/outbox'
 import { formatCents } from '@/lib/money'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
+import { splitReceipt } from './overpayment'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { CUSTOMER_FIELDS, VENDOR_FIELDS, diffParty } from '@/modules/parties/changes'
 import {
@@ -1112,12 +1113,32 @@ export async function recordPayment(
     throw new DocumentError('A payment amount must be greater than zero.')
   }
 
+  /**
+   * What the applications do not cover is **held**, not refused (Phase 53).
+   *
+   * This used to insist the two matched exactly, and the screen above it told
+   * anybody who sent more than was owed to *"reduce it"* — putting a figure in
+   * the books the bank statement disagrees with, and leaving the
+   * reconciliation out for ever because the difference was never recorded as
+   * anything.
+   *
+   * `splitReceipt` decides whether the leftover may be held at all: a
+   * disbursement cannot (that leaves the supplier owing us, which is an asset
+   * and what vendor credits are for), and neither can a receipt with nobody
+   * named to hold it for.
+   */
   const applied = input.applications.reduce((sum, a) => sum + a.amountCents, 0)
-  if (applied !== input.amountCents) {
-    throw new DocumentError(
-      `Applications total ${applied} but the payment is ${input.amountCents}. They must match exactly.`,
-    )
-  }
+
+  const split = splitReceipt({
+    kind: input.kind,
+    amountCents: input.amountCents,
+    appliedCents: applied,
+    hasParty: Boolean(input.kind === 'receipt' ? input.customerId : input.vendorId),
+  })
+
+  if (!split.ok) throw new DocumentError(split.why)
+
+  const heldCents = split.split.heldCents
 
   if (!input.financialAccountId && input.kind !== 'receipt') {
     throw new DocumentError('A disbursement has to say which account the money left.')
@@ -1196,6 +1217,7 @@ export async function recordPayment(
         vendorId: input.vendorId ?? null,
         paymentDate: input.paymentDate,
         amountCents: input.amountCents,
+        unappliedCents: heldCents,
         financialAccountId: input.financialAccountId ?? null,
         drawerShiftId: input.financialAccountId ? null : (input.drawerShiftId ?? null),
         reference: input.reference ?? null,
@@ -1221,19 +1243,61 @@ export async function recordPayment(
     // and loss event, not a rounding artefact, and not revenue, because
     // nothing more was sold.
     const receivedCents = convert(input.amountCents, paymentRateMillionths)
+
+    /**
+     * The exchange difference is on what was **applied**, not on the whole
+     * receipt (Phase 53).
+     *
+     * Comparing the full amount against what the documents were relieved by
+     * would read a $600 overpayment on a domestic receipt as a $600 exchange
+     * gain — inventing profit out of a customer rounding up. What is held was
+     * never carried at any document's rate, so there is no rate difference on
+     * it to realise.
+     */
+    const appliedFunctionalCents = convert(applied, paymentRateMillionths)
+    const heldFunctionalCents = receivedCents - appliedFunctionalCents
+
     const fxCents =
-      input.kind === 'receipt' ? receivedCents - carriedCents : carriedCents - receivedCents
+      input.kind === 'receipt'
+        ? appliedFunctionalCents - carriedCents
+        : carriedCents - appliedFunctionalCents
 
     const paymentLines: JournalLineInput[] =
       input.kind === 'receipt'
         ? [
             { chartAccountId: debitAccountId, debitCents: receivedCents },
-            { chartAccountId: controlAccount.id, creditCents: carriedCents },
+            // Only what the documents were carried at comes out of the control
+            // account. What was sent beyond that never entered receivables and
+            // must not be relieved from it.
+            ...(carriedCents > 0
+              ? [{ chartAccountId: controlAccount.id, creditCents: carriedCents }]
+              : []),
           ]
         : [
             { chartAccountId: controlAccount.id, debitCents: carriedCents },
             { chartAccountId: debitAccountId, creditCents: receivedCents },
           ]
+
+    /**
+     * The leftover is a liability to the customer (Phase 53).
+     *
+     * Credited to `2520 Customer Overpayments` rather than left in receivables
+     * as a negative balance. Netting it against what other customers owe would
+     * hide it inside the aging report and overstate collectable cash — and the
+     * business genuinely owes this money, either against the next invoice or
+     * back to the customer.
+     */
+    if (heldCents > 0) {
+      const held = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.customerOverpayments)
+      if (!held) {
+        throw new DocumentError('The Customer Overpayments account is missing from the chart.')
+      }
+      paymentLines.push({
+        chartAccountId: held.id,
+        creditCents: heldFunctionalCents,
+        memo: 'More than was owed, held as credit',
+      })
+    }
 
     if (fxCents !== 0) {
       const fxAccountId = await ensureFxAccount(ctx, tx)

@@ -2,9 +2,14 @@
 
 import { Fragment, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { voidPaymentAction, type ActionResult } from '@/app/actions/payables'
+import {
+  applyCustomerCreditAction,
+  refundCustomerCreditAction,
+  voidPaymentAction,
+  type ActionResult,
+} from '@/app/actions/payables'
 import type { VoidVerdict } from '@/modules/receivables/payment-void'
-import { formatCents } from '@/lib/money'
+import { formatCents, parseAmountToCents } from '@/lib/money'
 
 type Row = {
   id: string
@@ -19,20 +24,51 @@ type Row = {
   verdict: VoidVerdict
 }
 
+type Credit = {
+  paymentId: string
+  customerId: string
+  customerName: string
+  paymentDate: string
+  reference: string | null
+  availableCents: number
+  openInvoices: { id: string; number: string; balanceCents: number }[]
+}
+
+type Account = { id: string; name: string; mask: string | null }
+
 /**
- * Money in and out (Phase 52).
+ * Money in and out (Phase 52, Phase 53).
  *
  * Payments were recorded from two screens and never listed again, and there was
  * no way to take one back at all — no status column on `payments`, no service
  * function, nothing. A receipt keyed at ten times its amount was permanent.
  */
-export function PaymentsBoard({ rows, canVoid }: { rows: Row[]; canVoid: boolean }) {
+export function PaymentsBoard({
+  rows,
+  credits,
+  accounts,
+  today,
+  canVoid,
+}: {
+  rows: Row[]
+  credits: Credit[]
+  accounts: Account[]
+  today: string
+  canVoid: boolean
+}) {
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
   const [openId, setOpenId] = useState<string | null>(null)
   const [reason, setReason] = useState('')
+
+  // Held credit (Phase 53).
+  const [creditId, setCreditId] = useState('')
+  const [creditInvoiceId, setCreditInvoiceId] = useState('')
+  const [refundAmount, setRefundAmount] = useState('')
+  const [refundAccountId, setRefundAccountId] = useState(accounts[0]?.id ?? '')
+  const [refundReference, setRefundReference] = useState('')
 
   const totals = useMemo(() => {
     const live = rows.filter((row) => row.status === 'posted')
@@ -45,6 +81,8 @@ export function PaymentsBoard({ rows, canVoid }: { rows: Row[]; canVoid: boolean
     }
   }, [rows])
 
+  const chosenCredit = credits.find((row) => row.paymentId === creditId) ?? null
+
   function act(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
       const result = await fn()
@@ -56,6 +94,10 @@ export function PaymentsBoard({ rows, canVoid }: { rows: Row[]; canVoid: boolean
       if (result.ok) {
         setOpenId(null)
         setReason('')
+        setCreditId('')
+        setCreditInvoiceId('')
+        setRefundAmount('')
+        setRefundReference('')
         router.refresh()
       }
     })
@@ -99,6 +141,172 @@ export function PaymentsBoard({ rows, canVoid }: { rows: Row[]; canVoid: boolean
           <p className="tnum text-xl font-semibold text-faint">{totals.voided}</p>
         </div>
       </div>
+
+      {/* Money customers sent beyond what they owed (Phase 53). The screen
+          used to refuse to record it at all, telling the business to write
+          down a figure the bank statement disagrees with. */}
+      {credits.length > 0 && (
+        <section className="card px-4 py-4">
+          <h3 className="text-sm font-semibold">Credit we are holding for customers</h3>
+          <p className="mt-1 text-sm text-muted">
+            Money sent beyond what was owed.{' '}
+            <span className="text-faint">
+              It goes against their next invoice, or back to them — and until one of those
+              happens the business owes it.
+            </span>
+          </p>
+
+          <table className="mt-3 w-full text-sm">
+            <thead className="text-left text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="py-1 font-medium">Customer</th>
+                <th className="py-1 font-medium">Received</th>
+                <th className="py-1 text-right font-medium">Held</th>
+              </tr>
+            </thead>
+            <tbody>
+              {credits.map((credit) => (
+                <tr key={credit.paymentId} className="border-t border-line/60">
+                  <td className="py-1">{credit.customerName}</td>
+                  <td className="tnum py-1 text-muted">{credit.paymentDate}</td>
+                  <td className="tnum py-1 text-right font-medium">
+                    {formatCents(credit.availableCents)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {canVoid && (
+            <div className="mt-4 space-y-3 border-t border-line pt-3">
+              <label className="block text-xs text-muted">
+                <span className="mb-1 block">Whose credit</span>
+                <select
+                  value={creditId}
+                  onChange={(event) => {
+                    setCreditId(event.target.value)
+                    setCreditInvoiceId('')
+                    setRefundAmount('')
+                  }}
+                  className="field py-1.5 text-sm"
+                >
+                  <option value="">Choose…</option>
+                  {credits.map((credit) => (
+                    <option key={credit.paymentId} value={credit.paymentId}>
+                      {credit.customerName} — {formatCents(credit.availableCents)} held
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              {chosenCredit && (
+                <div className="flex flex-wrap items-end gap-4">
+                  <div className="flex flex-wrap items-end gap-2">
+                    <label className="text-xs text-muted">
+                      <span className="mb-1 block">Put it against</span>
+                      <select
+                        value={creditInvoiceId}
+                        onChange={(event) => setCreditInvoiceId(event.target.value)}
+                        className="field py-1.5 text-sm"
+                      >
+                        <option value="">
+                          {chosenCredit.openInvoices.length === 0
+                            ? 'Nothing open for them'
+                            : 'Choose…'}
+                        </option>
+                        {chosenCredit.openInvoices.map((invoice) => (
+                          <option key={invoice.id} value={invoice.id}>
+                            {invoice.number} — {formatCents(invoice.balanceCents)} outstanding
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button
+                      className="btn btn-ghost text-sm"
+                      disabled={pending || !creditInvoiceId}
+                      onClick={() =>
+                        act(() =>
+                          applyCustomerCreditAction({
+                            paymentId: chosenCredit.paymentId,
+                            invoiceId: creditInvoiceId,
+                            appliedOn: today,
+                          }),
+                        )
+                      }
+                    >
+                      Apply it
+                    </button>
+                  </div>
+
+                  {/* Or give it back. A refund is not a void: the money did
+                      arrive, and the customer's bank statement says so. */}
+                  <div className="flex flex-wrap items-end gap-2 border-l border-line pl-4">
+                    <label className="text-xs text-muted">
+                      <span className="mb-1 block">Or refund</span>
+                      <input
+                        value={refundAmount}
+                        onChange={(event) => setRefundAmount(event.target.value)}
+                        placeholder={(chosenCredit.availableCents / 100).toFixed(2)}
+                        className="field w-28 py-1.5 text-right text-sm tnum"
+                      />
+                    </label>
+                    <label className="text-xs text-muted">
+                      <span className="mb-1 block">Out of</span>
+                      <select
+                        value={refundAccountId}
+                        onChange={(event) => setRefundAccountId(event.target.value)}
+                        className="field py-1.5 text-sm"
+                      >
+                        {accounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name}
+                            {account.mask ? ` ••${account.mask}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="text-xs text-muted">
+                      <span className="mb-1 block">Reference</span>
+                      <input
+                        value={refundReference}
+                        onChange={(event) => setRefundReference(event.target.value)}
+                        placeholder="BACS refund"
+                        className="field w-32 py-1.5 text-sm"
+                      />
+                    </label>
+                    <button
+                      className="btn btn-ghost text-sm"
+                      disabled={pending || !refundAccountId}
+                      onClick={() => {
+                        const typed = refundAmount.trim()
+                          ? parseAmountToCents(refundAmount)
+                          : chosenCredit.availableCents
+
+                        if (typed === null) {
+                          setNotice({ ok: false, text: `“${refundAmount}” is not an amount.` })
+                          return
+                        }
+
+                        act(() =>
+                          refundCustomerCreditAction({
+                            paymentId: chosenCredit.paymentId,
+                            amountCents: typed,
+                            financialAccountId: refundAccountId,
+                            refundedOn: today,
+                            reference: refundReference || undefined,
+                          }),
+                        )
+                      }}
+                    >
+                      Give it back
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </section>
+      )}
 
       {rows.length === 0 ? (
         <p className="card px-4 py-8 text-center text-sm text-muted">

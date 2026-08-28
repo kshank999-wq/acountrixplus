@@ -2416,6 +2416,57 @@ still equalled the sum of open invoice functional balances to the cent. Banking
 a receipt turned its row from "Take it back" to *"cannot be undone"* naming
 DEP-1001.
 
+### The money you cannot bank (Phase 53)
+
+A customer owed $7,400 and sent $8,000. The screen said:
+
+> *"$8,000.00 is more than the $7,400.00 outstanding. **Reduce it to $7,400.00**,
+> or raise the document the rest covers first."*
+
+Both instructions are wrong, and the first is worse. **"Reduce it"** puts a
+figure in the books the bank statement disagrees with, and the reconciliation
+stays $600 out *for ever* — the difference was never recorded as anything, so no
+later event resolves it. **"Raise the document the rest covers"** means inventing
+an invoice for money the customer does not owe, fabricating $600 of revenue to
+make a bank line match.
+
+`allocate` had computed the leftover correctly since Phase 41. Nothing was ever
+done with it except refuse. And this is not exotic: a customer rounding up,
+paying an invoice twice, paying the gross when a credit note reduced it, or
+sending a deposit before the invoice exists all hit it.
+
+- **The leftover is a liability** — `2520 Customer Overpayments`. Not revenue
+  (nothing more was sold), not a negative receivable (netting it hides it inside
+  the aging report and overstates collectable cash), and not `2500 Unearned
+  Revenue` (that is money for work that *will be done*; an overpayment is often
+  a keying error whose honest end is a refund).
+- **Two refusals survive.** Overpaying a *supplier* leaves them owing you, which
+  is an asset and what vendor credits are for; and a leftover with nobody named
+  has nowhere to attach, which is how Phase 46's stranded payments happened.
+- **It has an end, built in the same phase** — applied to a later invoice or
+  refunded. Phase 49 found `applyVendorCredit` uncalled since Phase 12 stranding
+  real money, and Phase 48 found a clearing account grown to $28,700 that
+  nothing could clear. Once each is enough.
+- **A refund is not a void.** A void says the payment never happened; a refund
+  says it happened and then went back, and the customer's bank statement can
+  tell them apart.
+- **A check ships with the account**: unapplied receipts against 2520, as a
+  fault.
+
+**Caught while writing the ledger lines**: `fxCents` compared the *whole* receipt
+against what the documents were relieved by, so a domestic $600 overpayment read
+as a $600 exchange gain — inventing profit from a customer rounding up. The
+wrong version would have balanced perfectly.
+
+Verified on the demo: the same $8,000 now records as *"$600.00 more than was
+owed is held as credit for them"*, the credit appears on **Money in and out**,
+$400 of it settled a new invoice and $200 was refunded — and both control
+accounts still agreed to the cent afterwards.
+
+Two exports were deleted before commit rather than shipped: `describeCredit` and
+`creditFor` were written, tested and called from nowhere — the exact pattern
+Phases 48, 49 and 51 each found as a live defect.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

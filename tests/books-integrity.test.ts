@@ -158,6 +158,10 @@ describe('the register names every check there is (Phase 33)', () => {
       // artefact (Phase 44).
       'payments.in_transit',
       'properties.deposits',
+      // Phase 53. Money a customer sent beyond what they owed is held in 2520
+      // until it goes against their next invoice or back to them, and nothing
+      // else posts there — so a difference is a fault, not a timing artefact.
+      'receivables.customer_credit',
       'vehicles.authorisations',
     ])
   })
@@ -197,6 +201,9 @@ describe('running the checks (Phase 33)', () => {
       // Ungated: any company can be switched on to take cards, and the check
       // is zero against zero until one is (Phase 44).
       'payments.in_transit',
+      // Ungated for the same reason: any company can be overpaid by a
+      // customer, whatever industry it is in (Phase 53).
+      'receivables.customer_credit',
     ])
 
     for (const finding of run.findings) {

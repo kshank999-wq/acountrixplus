@@ -2,6 +2,9 @@ import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listPayments } from '@/modules/receivables/payment-voiding'
+import { heldCredits } from '@/modules/receivables/customer-credit'
+import { openDocumentsFor } from '@/modules/receivables/open-documents'
+import { listFinancialAccounts } from '@/modules/banking/accounts'
 import { ACCOUNTING_NAV } from '../nav'
 import { PaymentsBoard } from './board'
 
@@ -31,7 +34,26 @@ export default async function PaymentsPage() {
   }
 
   const today = new Date().toISOString().slice(0, 10)
-  const rows = await listPayments(actor, { limit: 100, today })
+
+  const [rows, credits, accounts] = await Promise.all([
+    listPayments(actor, { limit: 100, today }),
+    heldCredits(actor),
+    listFinancialAccounts(actor),
+  ])
+
+  // The invoices each holder could put their credit against. Read here rather
+  // than in the browser because a credit belongs to one customer and may only
+  // settle that customer's documents — offering anything else would be
+  // offering a refusal.
+  const openByCustomer = new Map<string, { id: string; number: string; balanceCents: number }[]>()
+  for (const credit of credits) {
+    if (openByCustomer.has(credit.customerId)) continue
+    const open = await openDocumentsFor(actor, 'customer', credit.customerId)
+    openByCustomer.set(
+      credit.customerId,
+      open.map((row) => ({ id: row.id, number: row.number, balanceCents: row.balanceCents })),
+    )
+  }
 
   return (
     <AppShell
@@ -57,6 +79,17 @@ export default async function PaymentsPage() {
           })),
           verdict: row.verdict,
         }))}
+        credits={credits.map((row) => ({
+          paymentId: row.paymentId,
+          customerId: row.customerId,
+          customerName: row.customerName,
+          paymentDate: row.paymentDate,
+          reference: row.reference,
+          availableCents: row.availableCents,
+          openInvoices: openByCustomer.get(row.customerId) ?? [],
+        }))}
+        accounts={accounts.map((row) => ({ id: row.id, name: row.name, mask: row.mask }))}
+        today={today}
         canVoid={can(actor, 'accounting:journal')}
       />
     </AppShell>

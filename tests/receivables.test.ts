@@ -241,7 +241,17 @@ describe('payments', () => {
     expect(rows.every((row) => row.status === 'paid')).toBe(true)
   })
 
-  it('refuses when the applications do not sum to the payment', async () => {
+  /**
+   * Rewritten in Phase 53. This used to assert that `recordPayment` refused
+   * any receipt whose applications did not sum to it exactly — and that
+   * refusal was the defect: the screen above it told a business whose customer
+   * had sent more than was owed to *"reduce it"*, putting a figure in the
+   * books the bank statement disagrees with.
+   *
+   * What the applications do not cover is now **held** as credit for the
+   * customer, so what is recorded is what arrived.
+   */
+  it('holds what the applications do not cover, rather than refusing it', async () => {
     const fixture = await createCompanyFixture()
     const revenue = await fixture.account('4100')
     const customer = await createCustomer(fixture.ctx, { name: 'Mismatch Co' })
@@ -252,16 +262,17 @@ describe('payments', () => {
       lines: [{ chartAccountId: revenue.id, description: 'Work', unitPriceCents: 100_000 }],
     })
 
-    await expect(
-      recordPayment(fixture.ctx, {
-        kind: 'receipt',
-        customerId: customer.id,
-        paymentDate: '2026-08-20',
-        amountCents: 100_000,
-        financialAccountId: fixture.financialAccountId,
-        applications: [{ invoiceId: invoice.id, amountCents: 90_000 }],
-      }),
-    ).rejects.toThrow(/must match exactly/i)
+    const payment = await recordPayment(fixture.ctx, {
+      kind: 'receipt',
+      customerId: customer.id,
+      paymentDate: '2026-08-20',
+      amountCents: 100_000,
+      financialAccountId: fixture.financialAccountId,
+      applications: [{ invoiceId: invoice.id, amountCents: 90_000 }],
+    })
+
+    expect(payment.amountCents).toBe(100_000)
+    expect(payment.unappliedCents).toBe(10_000)
   })
 
   it('refuses to overpay a document', async () => {

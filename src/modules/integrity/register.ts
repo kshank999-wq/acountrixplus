@@ -15,6 +15,7 @@ import { conversionsAgree } from '@/modules/fx/reporting'
 import { depositsHeld } from '@/modules/properties/deposits'
 import { authorisationsAgree } from '@/modules/vehicles/reporting'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
+import { heldCredits } from '@/modules/receivables/customer-credit'
 import { duplicateExposure } from '@/modules/payables/duplicates'
 import { unbilledReceiptValue } from '@/modules/payables/receipt-billing'
 import { balanceForAccount } from '@/modules/ledger/balances'
@@ -508,6 +509,52 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
             ? undefined
             : `${unbilled.count} deliver${unbilled.count === 1 ? 'y is' : 'ies are'} unbilled, ` +
               `worth ${formatCents(unbilled.totalCents)}; the account carries ${formatCents(ledgerCents)}.`,
+      }
+    },
+  },
+  {
+    key: 'receivables.customer_credit',
+    label: 'What customers have overpaid, against the account holding it',
+    compares: 'Σ unapplied receipts against 2520',
+    // Core accounting rather than an optional module: every company can be
+    // overpaid, so this runs for all of them.
+    module: null,
+    /**
+     * A fault, not a position. Nothing legitimately posts to 2520 except a
+     * receipt holding a leftover and the application or refund that clears it,
+     * so a difference is not a timing artefact — the two are the same event
+     * seen from either end.
+     *
+     * Added with the account rather than after it, because Phase 48 found a
+     * clearing account with no check on it and $28,700 in it that nothing in
+     * the application could clear. Once is enough to learn that.
+     */
+    severity: 'fault',
+    meaning:
+      'A customer who sends more than they owe has the difference held here until it goes ' +
+      'against their next invoice or back to them. The account should equal exactly what is ' +
+      'still unapplied on their receipts — an accountant asking "whose money is this" should ' +
+      'get a list of customers rather than a number.',
+    run: async (ctx) => {
+      const rows = await heldCredits(ctx)
+      const heldTotal = rows.reduce((sum, row) => sum + row.availableCents, 0)
+
+      const account = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.customerOverpayments)
+      // `balanceForAccount` signs in the account's *normal* direction, so a
+      // liability holding a credit balance comes back positive — which is
+      // already what "how much of other people's money are we holding" means.
+      const ledgerCents = account ? await balanceForAccount(ctx, account.id) : 0
+
+      return {
+        agrees: heldTotal === ledgerCents,
+        leftCents: heldTotal,
+        rightCents: ledgerCents,
+        detail:
+          heldTotal === ledgerCents
+            ? undefined
+            : `${rows.length} receipt${rows.length === 1 ? '' : 's'} hold ` +
+              `${formatCents(heldTotal)} between them; the account carries ` +
+              `${formatCents(ledgerCents)}.`,
       }
     },
   },

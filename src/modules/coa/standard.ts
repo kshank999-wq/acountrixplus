@@ -104,6 +104,24 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
   // it is what makes a deposit revenue on a cash-basis report and not on an
   // accrual one.
   { number: '2500', name: 'Unearned Revenue', type: 'liability', subtype: 'deferred_revenue' },
+  /**
+   * Money customers sent beyond what they owed (Phase 53).
+   *
+   * Deliberately not `2500`: unearned revenue is money taken for work that
+   * *will be done*, and an overpayment carries no promise of future work —
+   * often it is a keying error whose honest end is a refund. Netting it into
+   * receivables instead would hide it inside the aging report and overstate
+   * collectable cash.
+   */
+  {
+    number: '2520',
+    name: 'Customer Overpayments',
+    type: 'liability',
+    subtype: 'other_current_liability',
+    description:
+      'Money customers have sent beyond what they owed, held until it is applied to an invoice or refunded.',
+    isSystem: true,
+  },
 
   // --- Equity -------------------------------------------------------------
   { number: '3000', name: "Owner's Equity", type: 'equity' },
@@ -209,6 +227,8 @@ export const SYSTEM_ACCOUNTS = {
   inventoryShrinkage: '5400',
   purchasePriceVariance: '5450',
   undepositedFunds: '1200',
+  // Phase 53. Where a receipt larger than what was owed puts the difference.
+  customerOverpayments: '2520',
   // Phase 44. Deliberately *not* Undeposited Funds: that is cash in hand
   // waiting to be walked to the bank, and a deposit slip offers to bank it.
   // Money at a processor is neither in hand nor bankable — it arrives on its

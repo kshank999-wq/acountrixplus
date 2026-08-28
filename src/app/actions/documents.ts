@@ -328,18 +328,23 @@ export async function recordPaymentAction(input: unknown): Promise<ActionResult>
       respectOrder: Boolean(parsed.documentIds?.length),
     })
 
-    if (allocation.applications.length === 0) {
+    /**
+     * A receipt bigger than what is owed is **held**, not refused (Phase 53).
+     *
+     * This used to say *"reduce it to $7,400"* — asking somebody to record a
+     * figure the bank statement disagrees with, and leaving the reconciliation
+     * out for ever. `recordPayment` now decides through `splitReceipt` whether
+     * the leftover may be held, so the only refusal left here is the one about
+     * paying suppliers, which that function makes with a better sentence.
+     *
+     * A *disbursement* that applies to nothing is still refused, because
+     * money leaving against no bill is a bank withdrawal, not a payment.
+     */
+    if (allocation.applications.length === 0 && parsed.kind === 'disbursement') {
       throw new DomainError(
         open.length === 0
-          ? 'There is nothing outstanding to apply this to. Raise the document first — a payment cannot be recorded against nothing.'
-          : 'That payment could not be applied to any of the open documents.',
-      )
-    }
-
-    if (allocation.unappliedCents > 0) {
-      throw new DomainError(
-        `${formatCents(parsed.amount)} is more than the ${formatCents(allocation.appliedCents)} outstanding. ` +
-          `Reduce it to ${formatCents(allocation.appliedCents)}, or raise the document the rest covers first.`,
+          ? 'There is nothing outstanding to apply this to. Enter the bill first — a supplier payment cannot be recorded against nothing.'
+          : 'That payment could not be applied to any of the open bills.',
       )
     }
 
@@ -367,7 +372,18 @@ export async function recordPaymentAction(input: unknown): Promise<ActionResult>
         ? ' Held in Undeposited Funds until you bank it.'
         : ''
 
-    return { message: `${formatCents(parsed.amount)} against ${settled}.${held}` }
+    // What was sent beyond what was owed, named on the way past rather than
+    // left to be discovered on a balance sheet (Phase 53).
+    const over =
+      allocation.unappliedCents > 0
+        ? ` ${formatCents(allocation.unappliedCents)} more than was owed is held as credit for them.`
+        : ''
+
+    return {
+      message: settled
+        ? `${formatCents(parsed.amount)} against ${settled}.${held}${over}`
+        : `${formatCents(parsed.amount)} received.${held}${over}`,
+    }
   })
 }
 
