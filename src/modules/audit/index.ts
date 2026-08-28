@@ -58,6 +58,12 @@ export type AuditAction =
   | 'bill.create'
   | 'bill.void'
   | 'payment.record'
+  // Phase 44. A card payment is initiated by somebody who is not a user of
+  // this system, so "who took this money, and what did the processor keep"
+  // has an answer that is not a person's name.
+  | 'payment.card_captured'
+  | 'payments.settings_update'
+  | 'payments.payout_import'
   | 'customer.create'
   | 'vendor.create'
   // Time and expense billing (spec §5, Phase 15)

@@ -1,6 +1,8 @@
 import { notFound } from 'next/navigation'
 import { invoiceByShareToken, recordInvoiceView } from '@/modules/receivables/send'
+import { canTakeCards } from '@/app/actions/pay'
 import { formatCents } from '@/lib/money'
+import { PayPanel } from './pay-panel'
 
 export const dynamic = 'force-dynamic'
 
@@ -29,6 +31,11 @@ export default async function PublicInvoicePage({
   if (!found) notFound()
 
   await recordInvoiceView(token)
+
+  // Rendered only when the business has actually switched card payments on. A
+  // Pay button that leads to "this business cannot take cards" is worse than
+  // no button, because the customer concludes they cannot pay at all.
+  const payable = !found.view.isSettled && (await canTakeCards(found.companyId))
 
   const { view } = found
   const quantity = (milli: number) => (milli / 1000).toLocaleString(undefined, { maximumFractionDigits: 3 })
@@ -155,6 +162,10 @@ export default async function PublicInvoicePage({
           )}
         </tfoot>
       </table>
+
+      {payable && (
+        <PayPanel token={token} balanceCents={view.balanceCents} currency={view.currency} />
+      )}
 
       {view.memo && <p className="mt-6 text-sm text-muted">{view.memo}</p>}
 

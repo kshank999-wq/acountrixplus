@@ -1928,6 +1928,66 @@ pressed **Send today's now**: *"5 sent"*, and the five moved to **chased
 recently** with **2026-09-11** beside them. Pressed it again: *"Nothing was due
 today."*
 
+### The money is not at the bank yet (Phase 44)
+
+Four phases built a path — open a bank account, raise an invoice, send it,
+chase it — and at the end of it the customer opens a link, reads what they owe,
+and has no way to hand the money over. The chart of accounts had been saying so
+for longer: **`6850 Merchant and Processing Fees` has been in the standard
+chart since Phase 0 and used by nothing.**
+
+- **Three entries, because there are three events.** The obvious entry for a
+  $1,000 card payment is `Dr Bank / Cr Accounts Receivable`, and it is wrong
+  twice. The amount is wrong — the processor keeps a fee, $970.70 arrives, and
+  booking the gross overstates cash while hiding a real cost that never reaches
+  the profit and loss. The shape is wrong — the money is at the processor on
+  Tuesday and arrives Friday *batched* with eleven others as one deposit, so
+  the statement has one line and the ledger has twelve on three days, and Phase
+  40's tie-out cannot be made to pass. So the money goes to **1250 Payments in
+  Transit** at capture, the fee to 6850, and the payout moves it to the bank as
+  the single row the statement shows.
+- **Not Undeposited Funds**, deliberately: that is cash in hand waiting to be
+  walked to the bank and Phase 12's deposit screen offers to bank it. Money at
+  a processor is neither in hand nor bankable.
+- **The gross settles the debt.** The customer paid what they were asked for;
+  charging the fee back to their balance would leave every card-paid invoice
+  showing 29 dollars owing for ever. And `net = gross − fee` by subtraction, so
+  no rounding rule can strand a penny in an account that then never clears — a
+  test walks every amount from nothing to $50 and asserts they add up.
+- **No card data ever touches this application.** `createCheckout` returns a
+  URL, not a form: a payment form served from here would put the whole
+  application in PCI DSS scope. The mock's stand-in page says so out loud
+  rather than dressing itself as a card form, and the one endpoint that can
+  mark a payment succeeded without a processor saying so refuses to run at all
+  once a real adapter is configured.
+- **The database stops the double payment.** `checkouts.payment_id` is unique
+  and claiming a checkout is a conditional update that only fires while it is
+  pending — the loser of the race reads back what already happened and reports
+  success, because from the customer's point of view nothing is wrong. Three
+  things can settle a checkout and all three racing is the expected case.
+- **The clearing account is checkable, and that is the point.** Nothing posts
+  to 1250 except those three entries, so `payments.in_transit` is a *fault*
+  where the bank tie-out is a position — a difference means a fee without a
+  capture, a payout that swept something it did not settle, or the expensive
+  one: a payment the customer made that never reached these books.
+
+**The defect browser verification caught: the deposit posted two days before it
+arrived.** The processor announced a batch arriving on the 30th and the import
+posted it on the 28th, so the bank ledger showed $23,303.70 the business did
+not have — the exact error the phase exists to prevent, committed at the last
+step instead of the first. An unarrived batch is now left alone; the money
+stays in 1250 until it lands. Every unit test passed while this was broken,
+because each asked about balances rather than dates.
+
+Verified on the demo end to end: switching on was refused until a payout
+account was chosen; a stranger opened a shared invoice for **$1,850.00**,
+pressed Pay, saw a page saying plainly that no card was being taken, and paid.
+The invoice went to **paid in full**, the Pay button disappeared, and the
+business's screen read **$1,796.05 at the processor** with 1250 agreeing and a
+fee of **−$53.95**. "Check for deposits" posted one deposit dated **2026-08-28**
+— today, not Sunday — the row moved to *in your bank*, and the clearing account
+went to zero.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

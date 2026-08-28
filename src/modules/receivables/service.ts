@@ -709,6 +709,21 @@ export async function recordPayment(
      * the money went.
      */
     drawerShiftId?: string
+    /**
+     * The money is at a card processor, not at a bank (Phase 44).
+     *
+     * Debits `1250 Payments in Transit` rather than a bank account or
+     * Undeposited Funds. Deliberately its own case rather than reusing
+     * Undeposited Funds: that is cash in hand waiting to be walked to the
+     * bank, and the deposit screen offers to bank it. Money at a processor is
+     * neither in hand nor bankable — it arrives on its own, net of a fee, in
+     * a batch — and summing the two would offer to deposit money that is
+     * already on its way.
+     *
+     * Ignored alongside an explicit `financialAccountId`, which is somebody
+     * saying they already know where the money went.
+     */
+    viaPaymentsInTransit?: boolean
     applications: PaymentApplicationInput[]
     reference?: string
     memo?: string
@@ -744,6 +759,12 @@ export async function recordPayment(
 
     if (!account) throw new Error('Financial account not found')
     debitAccountId = account.chartAccountId
+  } else if (input.viaPaymentsInTransit) {
+    const inTransit = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.paymentsInTransit)
+    if (!inTransit) {
+      throw new Error('The Payments in Transit account is missing from the chart.')
+    }
+    debitAccountId = inTransit.id
   } else if (input.drawerShiftId) {
     // Resolved by account number rather than by importing the drawer module,
     // which would make receivables depend on a module that depends on it.

@@ -102,6 +102,16 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
       'opens a page. At 2am, after the recurring entries have posted, so the day it checks is ' +
       'complete. Tells somebody only about what broke since last night.',
   },
+  // --- Phase 44 -------------------------------------------------------------
+  {
+    kind: 'payments.import_payouts',
+    cadence: 'daily',
+    hourUtc: 6,
+    why:
+      'Card money arrives on the processor\'s schedule, not on anybody\'s. Before the working ' +
+      'day, so the bank balance is right when somebody opens it rather than right after they ' +
+      'remember to press a button. Firing twice deposits once — the payout row decides.',
+  },
   // --- Phase 43 -------------------------------------------------------------
   {
     kind: 'receivables.chase_overdue',

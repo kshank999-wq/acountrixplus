@@ -48,6 +48,15 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
     isSystem: true,
     description: 'Payments received but not yet deposited to a bank account.',
   },
+  {
+    number: '1250',
+    name: 'Payments in Transit',
+    type: 'asset',
+    subtype: 'other_current_asset',
+    isSystem: true,
+    description:
+      'Card payments the processor has taken and not yet deposited. Cleared by the payout.',
+  },
   // Subtype `prepaid_expense`, not `other_current_asset`, since Phase 12: it is
   // what tells cash-basis reporting this account holds a timing difference
   // rather than an asset the business owns. See `coa/classification.ts`.
@@ -193,6 +202,12 @@ export const SYSTEM_ACCOUNTS = {
   costOfGoodsSold: '5000',
   inventoryShrinkage: '5400',
   undepositedFunds: '1200',
+  // Phase 44. Deliberately *not* Undeposited Funds: that is cash in hand
+  // waiting to be walked to the bank, and a deposit slip offers to bank it.
+  // Money at a processor is neither in hand nor bankable — it arrives on its
+  // own, net, in a batch — and the two must not be summed into one figure.
+  paymentsInTransit: '1250',
+  merchantFees: '6850',
   accountsPayable: '2000',
   retainedEarnings: '3200',
   openingBalanceEquity: '3900',

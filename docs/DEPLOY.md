@@ -245,6 +245,32 @@ Neither blocks a deployment, and both are behind provider interfaces:
   chasing on only *after* email is live, so the first run is the one you can
   see land.
 
+## Card payments are a mock, and must stay one until reviewed
+
+**Settings → Card payments** ships with a demonstration processor
+(`PAYMENT_PROVIDER=mock`). It takes no card details and moves no money; a
+payment "succeeds" when somebody presses a button on a page that says so.
+
+Everything downstream of it is real — the invoice is settled, the fee posts to
+6850, the money sits in 1250 Payments in Transit, the payout posts to the bank,
+and the nightly check reconciles the clearing account. That is deliberate: the
+ledger work is what makes contracting a real processor an adapter rather than a
+rewrite.
+
+Two things before this goes anywhere near real money:
+
+- **Spec §19 requires a security review before payment features are used in
+  production.** This has not had one.
+- **No card data must ever reach this application.** The provider interface
+  returns a URL for the customer to visit, not a form to fill in here, and a
+  real adapter must keep it that way — a hosted page on the processor's own
+  domain. Serving a card form from this application would put the whole
+  deployment in PCI DSS scope.
+
+The mock's confirm endpoint, which is the only thing that can mark a payment
+succeeded without a processor saying so, refuses to run once `PAYMENT_PROVIDER`
+names a configured adapter. Do not weaken that.
+
 ## A word about chasing
 
 **Settings → Chasing** emails a company's customers, over that company's name,

@@ -144,6 +144,10 @@ describe('the register names every check there is (Phase 33)', () => {
       'ledger.payables',
       'ledger.receivables',
       'manufacturing.wip',
+      // Nothing posts to 1250 Payments in Transit except a capture, its fee,
+      // and the payout that clears it, so a difference is never a timing
+      // artefact (Phase 44).
+      'payments.in_transit',
       'properties.deposits',
       'vehicles.authorisations',
     ])
@@ -178,6 +182,9 @@ describe('running the checks (Phase 33)', () => {
       'fx.conversions',
       'ledger.payables',
       'ledger.receivables',
+      // Ungated: any company can be switched on to take cards, and the check
+      // is zero against zero until one is (Phase 44).
+      'payments.in_transit',
     ])
 
     for (const finding of run.findings) {

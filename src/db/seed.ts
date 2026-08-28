@@ -3166,6 +3166,12 @@ async function main() {
   console.log(
     '  /accounting/billing   two arrangements that bill on their own, and what is coming',
   )
+  console.log(
+    '  /settings/chasing     what would be chased today, and why the rest would not — off by default',
+  )
+  console.log(
+    '  /settings/payments    take cards: switch it on, share an invoice, pay it as the customer',
+  )
   console.log('  /settings/import      bring an existing business’s books in — the README has a sample')
   console.log('  /settings/access      who can open these books, and one click to stop them')
   console.log('  /practice             sign in as robin@hartleyco.test — two clients, one at a time')

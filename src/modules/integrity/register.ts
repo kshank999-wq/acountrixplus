@@ -14,6 +14,7 @@ import { drawerPosition } from '@/modules/drawer/service'
 import { conversionsAgree } from '@/modules/fx/reporting'
 import { depositsHeld } from '@/modules/properties/deposits'
 import { authorisationsAgree } from '@/modules/vehicles/reporting'
+import { paymentsInTransitPosition } from '@/modules/payments/reporting'
 
 /**
  * Every reconciliation this application has, as named data (spec §19).
@@ -231,6 +232,34 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
           }
           return parts.length > 0 ? parts.join('; ') : undefined
         })(),
+      }
+    },
+  },
+  {
+    key: 'payments.in_transit',
+    label: 'What the card processor is holding, against the clearing account',
+    compares: 'Σ captured, unswept checkouts (net) against 1250',
+    module: null,
+    // A fault rather than a position, unlike the bank tie-out. Nothing
+    // legitimately posts to 1250 except this module's own three entries, so a
+    // difference is not a timing artefact — it means a fee posted without a
+    // capture, a payout swept a checkout it did not settle, or the processor
+    // took a customer's money and nothing recorded it.
+    severity: 'fault',
+    meaning:
+      'Card money sits at the processor for days before it is deposited. This is the only ' +
+      'account that holds it, and the only thing that posts there is a capture, its fee, and ' +
+      'the payout that clears it. A difference means one of the three is missing — and the ' +
+      'expensive one is a payment the customer made that never reached these books.',
+    run: async (ctx, asOf) => {
+      const position = await paymentsInTransitPosition(ctx, asOf)
+      return {
+        agrees: position.agrees,
+        leftCents: position.owedCents,
+        rightCents: position.ledgerCents,
+        detail: position.agrees
+          ? undefined
+          : `The processor owes ${formatCents(position.owedCents)}; the account carries ${formatCents(position.ledgerCents)}.`,
       }
     },
   },
