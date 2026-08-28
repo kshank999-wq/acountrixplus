@@ -2043,6 +2043,56 @@ form untouched and got *"Nothing changed."*; tried to archive a customer owing
 $9,400 and was refused with the reason; and the invoice PDF now prints the
 street, city and postcode it has been asking for since Phase 21.
 
+### The payment nobody came back from (Phase 46)
+
+Phase 44 settled a card payment when the customer's browser returned to the
+"thank you" page. That is the **least reliable moment in the whole flow** — the
+tab gets closed, the phone loses signal, the redirect fails — and the processor
+has taken the money either way. When it did not happen the checkout stayed
+`pending`, nothing posted, the invoice still read unpaid, and **Phase 43 chased
+the customer by email for an invoice they had already paid**.
+
+And ADR 0044 claimed the nightly `payments.in_transit` check would catch exactly
+this. **It could not.** The processor side of that comparison counted only
+checkouts already marked `succeeded`, so a stranded one contributed zero to
+*both* sides and the check reported agreement. The one failure it was written
+for was the one it was blind to. A test that passed before the fix existed is
+what proved it.
+
+- **Ask the processor, hourly.** Everything else on the schedule is money the
+  business is waiting for. This is money it already **has** and does not know
+  about, so the gap between being paid and knowing has to be short.
+- **A processor's answer beats our own record.** `succeeded` settles a checkout
+  even if we had written it off as expired — it is the party holding the money.
+- **An unknown is never an abandonment.** If the processor cannot say what
+  happened, expiring the checkout writes off a customer's money in silence and
+  no later answer reopens it. `unknown` is a distinct status from `failed`, is
+  never resolved by the machine in either direction, and is the *only* thing
+  that wakes a person: a recovered payment is the sweep working and an expired
+  one is a customer changing their mind, and alerting on either teaches somebody
+  to ignore the alert that matters.
+- **The check now counts what it cannot value.** It refuses to report agreement
+  while any checkout is unresolved, without inventing an amount for it — an
+  unresolved payment is worth its gross or nothing, and there is no third figure
+  that is honest.
+
+**The defect browser verification turned up was the phase's own shape.** The
+sweep correctly reported *"1 the processor cannot account for — somebody needs
+to look"* — into a toast that was gone on reload, leaving the row sitting under
+a heading whose copy says most of these are customers who changed their mind.
+The alarming row looked exactly like the harmless ones, for ever. Checkouts now
+record what the processor last said and when, and the screen splits into **"The
+processor has no record of these"** — red, with the reference to paste into the
+processor's own dashboard — and a quiet "Started and never finished". A finding
+nobody can see an hour later is a finding the sweep did not make.
+
+Verified on the demo: started a payment and closed the tab, and *"Nothing to
+resolve — 1 still with a customer"*; a day later, *"1 abandoned"* and the row
+correctly closed with "the processor took nothing"; and with the processor
+unable to account for a payment, *"1 the processor cannot account for"* — the
+row left open, not written off, listed with its reference and the date it was
+last asked.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

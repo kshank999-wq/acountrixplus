@@ -14,9 +14,12 @@ import {
   recentCheckouts,
   settleCheckout,
   startCheckout,
+  sweepUnresolvedCheckouts,
+  unresolvedCheckouts,
   PaymentError,
 } from '@/modules/payments/service'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
+import { unresolvedKind } from '@/modules/payments/reconcile'
 import { mockPaymentProvider } from '@/modules/payments/mock-provider'
 import { DomainError } from '@/modules/errors'
 import { PermissionError } from '@/modules/permissions'
@@ -525,5 +528,211 @@ describe('the clearing account, checked', () => {
 
     // Only the second is still at the processor.
     expect(await heldByProcessor(fixture.companyId)).toBe(48_520)
+  })
+})
+
+describe('the payment nobody came back from', () => {
+  /**
+   * The hole Phase 46 closed, and the reason the check needed a third number.
+   *
+   * The customer pays and closes the tab. The processor has the money; our
+   * checkout is still `pending`, so nothing posted. `heldByProcessor` counts
+   * only `succeeded` rows, so the processor side reads zero — and the ledger
+   * side reads zero because nothing posted. Before this phase the subtraction
+   * compared nothing against nothing and reported agreement, while the money
+   * sat unrecorded and Phase 43 chased the customer for an invoice they had
+   * paid. Two zeroes agreeing is not the same as nothing being wrong.
+   */
+  it('is counted by the clearing-account check, which no subtraction could do', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+
+    const started = await startCheckout({ invoiceId: invoice.id })
+    const [row] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+
+    // Money really moved at the processor. Nobody told us.
+    await mockPaymentProvider.confirm(row.providerCheckoutId)
+
+    // A day later, nobody having come back.
+    const asOf = new Date(Date.now() + 3 * 86_400_000).toISOString()
+    const position = await paymentsInTransitPosition(fixture.ctx, asOf.slice(0, 10))
+
+    // Both sides of the subtraction still read zero...
+    expect(position.owedCents).toBe(0)
+    expect(position.ledgerCents).toBe(0)
+    expect(position.differenceCents).toBe(0)
+    // ...and the check no longer calls that agreement.
+    expect(position.unresolvedCount).toBe(1)
+    expect(position.unresolvedCents).toBe(100_000)
+    expect(position.agrees).toBe(false)
+  })
+
+  /**
+   * What the sweep is for: the money comes back onto the books without
+   * anybody noticing it was missing.
+   */
+  it('is recovered by the sweep, invoice and all', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+
+    const started = await startCheckout({ invoiceId: invoice.id })
+    const [row] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    await mockPaymentProvider.confirm(row.providerCheckoutId)
+
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx)
+
+    expect(summary.settled).toBe(1)
+    expect(summary.investigate).toBe(0)
+
+    const [after] = await db.select().from(invoices).where(eq(invoices.id, invoice.id))
+    expect(after.balanceCents).toBe(0)
+    expect(await balanceOf('1250')).toBe(97_070)
+
+    // And the check is clean again.
+    const position = await paymentsInTransitPosition(fixture.ctx)
+    expect(position.agrees).toBe(true)
+  })
+
+  it('leaves one the customer is still looking at alone', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+    await startCheckout({ invoiceId: invoice.id })
+
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx)
+
+    expect(summary.waiting).toBe(1)
+    expect(summary.settled).toBe(0)
+    expect(summary.expired).toBe(0)
+  })
+
+  it('expires one that was started and abandoned', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+    await startCheckout({ invoiceId: invoice.id })
+
+    // Two days on, with the processor still saying pending.
+    const asOf = new Date(Date.now() + 2 * 86_400_000).toISOString()
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx, { asOf })
+
+    expect(summary.expired).toBe(1)
+
+    const [row] = await db.select().from(checkouts).where(eq(checkouts.invoiceId, invoice.id))
+    expect(row.status).toBe('expired')
+
+    // Nothing was charged, so the invoice is untouched.
+    const [after] = await db.select().from(invoices).where(eq(invoices.id, invoice.id))
+    expect(after.balanceCents).toBe(100_000)
+  })
+
+  /**
+   * The assertion the phase turns on. An outage at the processor must never
+   * become a customer's money written off — so an unknown is counted for a
+   * person and resolves nothing in either direction.
+   */
+  it('never writes off one the processor cannot account for', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+    await startCheckout({ invoiceId: invoice.id })
+
+    // The processor loses its record — which is exactly what the mock does
+    // across a restart, and what a real one does during an outage.
+    mockPaymentProvider.reset()
+
+    const asOf = new Date(Date.now() + 5 * 86_400_000).toISOString()
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx, { asOf })
+
+    expect(summary.investigate).toBe(1)
+    expect(summary.expired).toBe(0)
+    expect(summary.failed).toBe(0)
+
+    // Left exactly as it was, so a later answer can still settle it.
+    const [row] = await db.select().from(checkouts).where(eq(checkouts.invoiceId, invoice.id))
+    expect(row.status).toBe('pending')
+  })
+
+  it('records the decline the processor reports', async () => {
+    await enable()
+    // The mock declines an amount ending in 13 cents.
+    const { invoice } = await anInvoice(100_013)
+    const started = await startCheckout({ invoiceId: invoice.id })
+    const [row] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    await mockPaymentProvider.confirm(row.providerCheckoutId)
+
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx)
+
+    expect(summary.failed).toBe(1)
+    const [after] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    expect(after.status).toBe('failed')
+  })
+
+  it('sweeping twice settles once', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+    const started = await startCheckout({ invoiceId: invoice.id })
+    const [row] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    await mockPaymentProvider.confirm(row.providerCheckoutId)
+
+    const first = await sweepUnresolvedCheckouts(fixture.ctx)
+    const second = await sweepUnresolvedCheckouts(fixture.ctx)
+
+    expect(first.settled).toBe(1)
+    expect(second.considered).toBe(0)
+    expect(await balanceOf('1250')).toBe(97_070)
+  })
+
+  it('is quiet on a company with nothing outstanding', async () => {
+    await enable()
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx)
+
+    expect(summary).toMatchObject({ considered: 0, settled: 0, investigate: 0 })
+  })
+
+  /**
+   * Browser verification found the finding evaporating. The sweep announced
+   * "1 the processor cannot account for — somebody needs to look" into a
+   * notice that was gone on reload, and the row it meant was left sitting
+   * beside the abandoned ones under copy saying most of these are harmless.
+   * An answer nobody can see an hour later is an answer the sweep did not get.
+   */
+  it('writes down what the processor said, so the finding outlives the run', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+    const started = await startCheckout({ invoiceId: invoice.id })
+
+    const before = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    expect(before[0].lastReportedStatus).toBeNull()
+    expect(before[0].lastCheckedAt).toBeNull()
+
+    // The processor forgets — a restart, an outage, the wrong credentials.
+    mockPaymentProvider.reset()
+    const summary = await sweepUnresolvedCheckouts(fixture.ctx)
+
+    expect(summary.investigate).toBe(1)
+
+    const [after] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    expect(after.status).toBe('pending')
+    expect(after.lastReportedStatus).toBe('unknown')
+    expect(after.lastCheckedAt).not.toBeNull()
+
+    // And the screen can find it: it is unresolved, and it is the kind that
+    // needs a person rather than the kind that needs patience.
+    const open = await unresolvedCheckouts(
+      fixture.companyId,
+      new Date(Date.now() + 3 * 86_400_000).toISOString(),
+    )
+    expect(open).toHaveLength(1)
+    expect(unresolvedKind(open[0].lastReportedStatus)).toBe('unaccounted')
+  })
+
+  it('records the ordinary answer too, so "not yet asked" stays distinguishable', async () => {
+    await enable()
+    const { invoice } = await anInvoice()
+    const started = await startCheckout({ invoiceId: invoice.id })
+
+    await sweepUnresolvedCheckouts(fixture.ctx)
+
+    const [after] = await db.select().from(checkouts).where(eq(checkouts.id, started.checkoutId))
+    expect(after.lastReportedStatus).toBe('pending')
+    expect(unresolvedKind(after.lastReportedStatus)).toBe('unanswered')
   })
 })

@@ -106,14 +106,19 @@ export class MockPaymentProvider implements PaymentProvider {
     const held = payments.get(providerCheckoutId)
 
     if (!held) {
+      // `unknown`, not `failed`. A processor that has never heard of a
+      // checkout has not declined it — and a sweep that read this as a
+      // decline would mark a real payment dead. The mock loses its store on
+      // restart, so this is the answer a demo genuinely gets after a reload,
+      // which makes it the right one to exercise.
       return {
         providerCheckoutId,
         providerPaymentId: null,
-        status: 'failed',
+        status: 'unknown',
         grossCents: 0,
         feeCents: 0,
         currency: 'USD',
-        failureReason: 'No such checkout.',
+        failureReason: 'No record of this checkout.',
       }
     }
 

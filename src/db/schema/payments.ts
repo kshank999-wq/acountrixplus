@@ -131,6 +131,22 @@ export const checkouts = pgTable(
     /** The processor's own words when it declined. Not shown to a customer raw. */
     failureReason: text('failure_reason'),
 
+    /**
+     * What the processor said last time the sweep asked, and when (Phase 46).
+     *
+     * Separate from `status`, because they answer different questions. `status`
+     * is what these books have concluded; this is what the other party
+     * reported, unresolved. A checkout still `pending` because the processor
+     * says it is pending and one still `pending` because the processor has
+     * never heard of it are the same row without these columns, and they need
+     * opposite responses — wait, versus go and look.
+     *
+     * Null means the sweep has not asked yet, which is itself worth being able
+     * to say rather than showing a stale answer as a current one.
+     */
+    lastReportedStatus: text('last_reported_status'),
+    lastCheckedAt: timestamp('last_checked_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     completedAt: timestamp('completed_at', { withTimezone: true }),
     expiresAt: timestamp('expires_at', { withTimezone: true }),

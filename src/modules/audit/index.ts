@@ -64,6 +64,10 @@ export type AuditAction =
   | 'payment.card_captured'
   | 'payments.settings_update'
   | 'payments.payout_import'
+  // Phase 46. A sweep that recovers a payment nobody came back from has moved
+  // real money onto the books without a person present, and one that cannot
+  // account for a checkout is the start of an investigation.
+  | 'payments.sweep'
   | 'customer.create'
   | 'vendor.create'
   // Phase 45. Changing a vendor's details is the commonest invoice-fraud

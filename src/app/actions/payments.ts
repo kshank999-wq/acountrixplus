@@ -4,7 +4,8 @@ import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import { updatePaymentSettings } from '@/modules/payments/settings'
-import { importPayouts } from '@/modules/payments/service'
+import { importPayouts, sweepUnresolvedCheckouts } from '@/modules/payments/service'
+import { describeSweep } from '@/modules/payments/reconcile'
 import { messageFor } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
 
@@ -63,5 +64,28 @@ export async function importPayoutsAction(): Promise<ActionResult> {
         : ''
 
     return `${result.imported} deposit${result.imported === 1 ? '' : 's'} posted, ${formatCents(result.postedCents)} in total.${discrepancy}`
+  })
+}
+
+/**
+ * Asks the processor about every payment nobody came back from.
+ *
+ * Manual as well as hourly, because the moment somebody notices an invoice
+ * reading unpaid that the customer swears they paid, "wait for the next hour"
+ * is not an answer.
+ */
+export async function sweepCheckoutsAction(): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const summary = await sweepUnresolvedCheckouts(actor)
+
+    const sentence = describeSweep(summary)
+    if (!sentence) {
+      return summary.considered === 0
+        ? 'Nothing was waiting on an answer.'
+        : `Nothing to resolve — ${summary.waiting} still with a customer.`
+    }
+
+    return sentence
   })
 }

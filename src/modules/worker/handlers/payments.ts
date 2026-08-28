@@ -1,6 +1,7 @@
 import { formatCents } from '@/lib/money'
 import { getPaymentSettings } from '@/modules/payments/settings'
-import { importPayouts } from '@/modules/payments/service'
+import { importPayouts, sweepUnresolvedCheckouts } from '@/modules/payments/service'
+import { describeSweep, needsAttention } from '@/modules/payments/reconcile'
 import { registerHandler, type JobContext } from '../registry'
 
 /**
@@ -54,6 +55,57 @@ registerHandler({
       // the company believes, or a double-counted payment — three different
       // problems, and the operations screen is where somebody finds out which.
       discrepancies: result.discrepancies,
+    }
+  },
+})
+
+/**
+ * Asking the processor about payments nobody came back from (Phase 46).
+ *
+ * ## Why hourly rather than daily
+ *
+ * Everything else on this schedule is money the business is waiting for.
+ * This is money the business **already has** and does not know about — and
+ * while it does not know, the invoice reads unpaid and Phase 43 chases the
+ * customer for it. A day of that is a day of asking somebody for money they
+ * have already sent, which is the worst thing this system can do to a
+ * customer, so the loop runs as often as is reasonable.
+ *
+ * ## Silent unless something happened
+ *
+ * A run that only found payments still with the customer reports a skip. A
+ * job announcing "0 recovered" every hour is one nobody reads by the
+ * afternoon (ADR 0024), and the hour that matters is buried with it.
+ */
+registerHandler({
+  kind: 'payments.sweep_checkouts',
+  label: 'Find out what happened to payments nobody came back from',
+  handler: async (context: JobContext) => {
+    const actor = context.actor!
+
+    const settings = await getPaymentSettings(actor.companyId)
+    if (!settings.enabled) {
+      return { skipped: 'Card payments are switched off for this company.' }
+    }
+
+    const summary = await sweepUnresolvedCheckouts(actor, {
+      asOf: context.payload.asOf ? String(context.payload.asOf) : undefined,
+    })
+
+    const sentence = describeSweep(summary)
+    if (!sentence) {
+      return { skipped: `Nothing to resolve. ${summary.waiting} still with a customer.` }
+    }
+
+    return {
+      summary: sentence,
+      settled: summary.settled,
+      expired: summary.expired,
+      failed: summary.failed,
+      // The one number worth waking somebody for. Everything else here is the
+      // sweep working, or a customer changing their mind.
+      investigate: summary.investigate,
+      needsAttention: needsAttention(summary),
     }
   },
 })

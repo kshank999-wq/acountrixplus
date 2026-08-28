@@ -25,7 +25,17 @@ export type Checkout = {
   expiresAt: Date
 }
 
-export type ProviderPaymentStatus = 'pending' | 'succeeded' | 'failed'
+/**
+ * What the processor says about a payment.
+ *
+ * `unknown` is distinct from `failed` and the distinction is the whole reason
+ * Phase 46 exists: "we declined this card" and "we have no record of this"
+ * are different answers, and conflating them means an outage at the processor
+ * gets recorded as a customer not having paid. An adapter must return
+ * `unknown` for anything it cannot positively resolve — a network failure, a
+ * 404, a checkout created against other credentials.
+ */
+export type ProviderPaymentStatus = 'pending' | 'succeeded' | 'failed' | 'unknown'
 
 export type ProviderPayment = {
   providerCheckoutId: string

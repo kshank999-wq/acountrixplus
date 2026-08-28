@@ -4,9 +4,11 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   importPayoutsAction,
+  sweepCheckoutsAction,
   updatePaymentSettingsAction,
   type ActionResult,
 } from '@/app/actions/payments'
+import { unresolvedKind } from '@/modules/payments/reconcile'
 import { formatCents } from '@/lib/money'
 
 type Settings = {
@@ -34,6 +36,19 @@ type CheckoutRow = {
   failureReason: string | null
   paidOut: boolean
   on: string
+}
+
+type UnresolvedRow = {
+  id: string
+  providerCheckoutId: string
+  grossCents: number
+  currency: string
+  invoiceNumber: string
+  customerName: string
+  startedOn: string
+  /** What the sweep was last told. Null until it has asked once. */
+  lastReportedStatus: string | null
+  lastCheckedOn: string | null
 }
 
 type PayoutRow = {
@@ -67,15 +82,24 @@ export function PaymentsBoard({
   accounts,
   checkouts,
   payouts,
+  unresolved,
   canManage,
 }: {
   settings: Settings
   feeDescription: string
   health: { selected: string; effective: string; fellBack: boolean }
-  position: { agrees: boolean; owedCents: number; ledgerCents: number; differenceCents: number }
+  position: {
+    agrees: boolean
+    owedCents: number
+    ledgerCents: number
+    differenceCents: number
+    unresolvedCount: number
+    unresolvedCents: number
+  }
   accounts: Account[]
   checkouts: CheckoutRow[]
   payouts: PayoutRow[]
+  unresolved: UnresolvedRow[]
   canManage: boolean
 }) {
   const router = useRouter()
@@ -109,6 +133,17 @@ export function PaymentsBoard({
   }
 
   const held = checkouts.filter((row) => row.status === 'succeeded' && !row.paidOut).length
+
+  // Two lists, not one. The row the processor cannot account for and the row a
+  // customer abandoned are the same shape and need opposite responses, and
+  // browser verification showed what happens when they share a heading: the
+  // alarming one sits under copy that says most of these are harmless.
+  const unaccounted = unresolved.filter(
+    (row) => unresolvedKind(row.lastReportedStatus) === 'unaccounted',
+  )
+  const openQuestions = unresolved.filter(
+    (row) => unresolvedKind(row.lastReportedStatus) !== 'unaccounted',
+  )
 
   return (
     <div className="space-y-6">
@@ -154,14 +189,24 @@ export function PaymentsBoard({
         {canManage && (
           <div className="flex gap-2">
             {settings.enabled && (
-              <button
-                type="button"
-                className="btn"
-                disabled={pending}
-                onClick={() => act(importPayoutsAction)}
-              >
-                Check for deposits
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={pending}
+                  onClick={() => act(importPayoutsAction)}
+                >
+                  Check for deposits
+                </button>
+                <button
+                  type="button"
+                  className="btn"
+                  disabled={pending}
+                  onClick={() => act(sweepCheckoutsAction)}
+                >
+                  Chase up unfinished
+                </button>
+              </>
             )}
             <button
               type="button"
@@ -193,11 +238,108 @@ export function PaymentsBoard({
             <p className={`text-sm ${position.agrees ? 'text-success' : 'text-danger'}`}>
               {position.agrees
                 ? 'Agrees with the ledger.'
-                : `Out by ${formatCents(position.differenceCents)} — checked nightly.`}
+                : position.differenceCents !== 0
+                  ? `Out by ${formatCents(position.differenceCents)} — checked nightly.`
+                  : unaccounted.length > 0
+                    ? `${unaccounted.length} the processor cannot account for.`
+                    : `${position.unresolvedCount} payment${position.unresolvedCount === 1 ? '' : 's'} unaccounted for.`}
             </p>
           </div>
         </div>
       </section>
+
+      {unaccounted.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-danger">The processor has no record of these</h3>
+          <p className="text-sm text-muted">
+            This system started a payment and the processor cannot account for it.{' '}
+            <span className="text-faint">
+              It is not being written off, because writing one off would decide on its own that a
+              customer was never charged. Sign in to your processor and search for the reference
+              below. If money was taken, record it against the invoice; if it was not, the next
+              sweep will close it once the processor says so.
+            </span>
+          </p>
+          <div className="card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="px-4 py-2">Invoice</th>
+                  <th className="px-4 py-2">Customer</th>
+                  <th className="px-4 py-2 text-right">If they were charged</th>
+                  <th className="px-4 py-2">Started</th>
+                  <th className="px-4 py-2">Last asked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {unaccounted.map((row) => (
+                  <tr key={row.id} className="border-t border-line">
+                    <td className="px-4 py-2 font-medium">{row.invoiceNumber}</td>
+                    <td className="px-4 py-2">{row.customerName}</td>
+                    <td className="tnum px-4 py-2 text-right">
+                      {formatCents(row.grossCents, row.currency)}
+                    </td>
+                    <td className="px-4 py-2 text-muted">{row.startedOn}</td>
+                    <td className="px-4 py-2 text-muted">{row.lastCheckedOn ?? '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {/* The reference somebody actually types into the processor's own
+              search box. Without it "go and look" is advice with no handle. */}
+          <ul className="space-y-1 text-xs text-faint">
+            {unaccounted.map((row) => (
+              <li key={row.id}>
+                {row.invoiceNumber}: <code>{row.providerCheckoutId}</code>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {openQuestions.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold">Started and never finished</h3>
+          <p className="text-sm text-muted">
+            Somebody opened a payment page and never came back.{' '}
+            <span className="text-faint">
+              Most are customers who changed their mind and were charged nothing. Some are
+              customers who paid and closed the tab — their money is at the processor and not on
+              these books, and the invoice still reads unpaid. <strong>Chase up unfinished</strong>{' '}
+              asks the processor about every one of them.
+            </span>
+          </p>
+          <div className="card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="px-4 py-2">Invoice</th>
+                  <th className="px-4 py-2">Customer</th>
+                  <th className="px-4 py-2 text-right">If they were charged</th>
+                  <th className="px-4 py-2">Started</th>
+                  <th className="px-4 py-2">Last asked</th>
+                </tr>
+              </thead>
+              <tbody>
+                {openQuestions.map((row) => (
+                  <tr key={row.id} className="border-t border-line">
+                    <td className="px-4 py-2 font-medium">{row.invoiceNumber}</td>
+                    <td className="px-4 py-2">{row.customerName}</td>
+                    <td className="tnum px-4 py-2 text-right">
+                      {formatCents(row.grossCents, row.currency)}
+                    </td>
+                    <td className="px-4 py-2 text-muted">{row.startedOn}</td>
+                    <td className="px-4 py-2 text-muted">
+                      {row.lastCheckedOn ?? 'not yet asked'}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
 
       {checkouts.length > 0 && (
         <section className="space-y-3">

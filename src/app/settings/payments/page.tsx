@@ -4,7 +4,7 @@ import { AppShell, SubNav } from '@/components/app-shell'
 import { listFinancialAccounts } from '@/modules/banking/accounts'
 import { getPaymentSettings } from '@/modules/payments/settings'
 import { paymentProviderHealth } from '@/modules/payments/registry'
-import { recentCheckouts, recentPayouts } from '@/modules/payments/service'
+import { recentCheckouts, recentPayouts, unresolvedCheckouts } from '@/modules/payments/service'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
 import { describeSchedule } from '@/modules/payments/settlement'
 import { SETTINGS_NAV } from '../nav'
@@ -37,11 +37,12 @@ export default async function PaymentsPage() {
 
   const settings = await getPaymentSettings(actor.companyId)
 
-  const [accounts, checkouts, payouts, position] = await Promise.all([
+  const [accounts, checkouts, payouts, position, unresolved] = await Promise.all([
     listFinancialAccounts(actor),
     recentCheckouts(actor),
     recentPayouts(actor),
     paymentsInTransitPosition(actor),
+    unresolvedCheckouts(actor.companyId),
   ])
 
   const health = paymentProviderHealth(settings.provider)
@@ -89,6 +90,17 @@ export default async function PaymentsPage() {
           amountCents: row.amountCents,
           currency: row.currency,
           differenceCents: row.differenceCents,
+        }))}
+        unresolved={unresolved.map((row) => ({
+          id: row.id,
+          providerCheckoutId: row.providerCheckoutId,
+          grossCents: row.grossCents,
+          currency: row.currency,
+          invoiceNumber: row.invoiceNumber,
+          customerName: row.customerName,
+          startedOn: row.createdAt.toISOString().slice(0, 10),
+          lastReportedStatus: row.lastReportedStatus,
+          lastCheckedOn: row.lastCheckedAt ? row.lastCheckedAt.toISOString().slice(0, 10) : null,
         }))}
         canManage={can(actor, 'accounting:journal')}
       />

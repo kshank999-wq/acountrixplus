@@ -2,7 +2,7 @@ import { balanceForAccount } from '@/modules/ledger/balances'
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import type { ActorContext } from '@/modules/tenancy/context'
-import { heldByProcessor } from './service'
+import { heldByProcessor, unresolvedCheckouts } from './service'
 
 /**
  * Whether `1250 Payments in Transit` holds what the processor actually owes
@@ -23,11 +23,26 @@ import { heldByProcessor } from './service'
  * ## Why a difference is a fault rather than a position
  *
  * Unlike the bank tie-out, nothing legitimately posts to `1250` except this
- * module. Every entry that touches it is one of the three this phase writes,
- * so a difference means something is genuinely wrong: a fee posted without a
- * capture, a payout that swept a checkout it did not settle, or a payment
- * captured at the processor and never posted here — the last being the one
- * failure mode that leaves a customer's money unrecorded.
+ * module. Every entry that touches it is one of the three Phase 44 writes, so
+ * a difference means something is genuinely wrong: a fee posted without a
+ * capture, or a payout that swept a checkout it did not settle.
+ *
+ * ## The failure the comparison alone cannot see (Phase 46)
+ *
+ * ADR 0044 claimed this check would also catch *"a payment the customer made
+ * that never reached these books"*. **It could not**, and the reason is worth
+ * stating rather than quietly fixing.
+ *
+ * A customer who pays and closes the tab leaves the checkout `pending`.
+ * `heldByProcessor` counts only `succeeded` rows, so the processor side reads
+ * zero; nothing posted, so the ledger side reads zero. The comparison agrees
+ * perfectly while the money sits at the processor unrecorded — and Phase 43
+ * chases the customer for an invoice they have already paid.
+ *
+ * Two zeroes agreeing is not the same as nothing being wrong. So the check
+ * carries a third number that no subtraction can produce: how many checkouts
+ * were started and never resolved. A stale one is not "in progress"; it is a
+ * question nobody has answered, and the honest thing is to count it.
  */
 export async function paymentsInTransitPosition(
   ctx: ActorContext,
@@ -39,6 +54,10 @@ export async function paymentsInTransitPosition(
   /** What the clearing account carries. */
   ledgerCents: number
   differenceCents: number
+  /** Checkouts started and never resolved. Invisible to the subtraction. */
+  unresolvedCount: number
+  /** What those are worth, if the customer was charged. */
+  unresolvedCents: number
 }> {
   const account = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.paymentsInTransit)
 
@@ -46,18 +65,32 @@ export async function paymentsInTransitPosition(
     // A company whose chart predates this phase and whose migration has not
     // run. Nothing has been captured either, so zero against zero is the
     // truthful answer rather than an error.
-    return { agrees: true, owedCents: 0, ledgerCents: 0, differenceCents: 0 }
+    return {
+      agrees: true,
+      owedCents: 0,
+      ledgerCents: 0,
+      differenceCents: 0,
+      unresolvedCount: 0,
+      unresolvedCents: 0,
+    }
   }
 
-  const [owedCents, ledgerCents] = await Promise.all([
+  const [owedCents, ledgerCents, unresolved] = await Promise.all([
     heldByProcessor(ctx.companyId),
     balanceForAccount(ctx, account.id, asOf ? { endDate: asOf } : undefined),
+    unresolvedCheckouts(ctx.companyId, asOf),
   ])
 
+  const unresolvedCents = unresolved.reduce((sum, row) => sum + Number(row.grossCents), 0)
+
   return {
-    agrees: owedCents === ledgerCents,
+    // Both halves have to hold. Agreeing figures with an unanswered checkout
+    // behind them is the state this check was blind to.
+    agrees: owedCents === ledgerCents && unresolved.length === 0,
     owedCents,
     ledgerCents,
     differenceCents: owedCents - ledgerCents,
+    unresolvedCount: unresolved.length,
+    unresolvedCents,
   }
 }

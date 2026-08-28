@@ -20,6 +20,13 @@ import { appBaseUrl } from '@/modules/notify/transactional'
 import { getPaymentSettings } from './settings'
 import { getPaymentProvider } from './registry'
 import { feeFor, payableAmount, payoutReconciliation } from './settlement'
+import {
+  EMPTY_SWEEP,
+  STALE_AFTER_DAYS,
+  sweepDecision,
+  type SweepSummary,
+} from './reconcile'
+import type { ProviderPaymentStatus } from './provider'
 
 /**
  * Taking a card payment, and following the money until it reaches the bank
@@ -190,6 +197,18 @@ export async function settleCheckout(providerCheckoutId: string): Promise<Settle
 
   if (reported.status === 'pending') {
     return { ok: false, reason: 'That payment has not completed yet.' }
+  }
+
+  // The processor has no record of it (Phase 46). Deliberately *not* treated
+  // as a decline: marking a checkout failed because the processor was
+  // unreachable is how a real payment gets written off. The row is left
+  // exactly as it is, the sweep keeps asking, and the integrity check counts
+  // it as unresolved until somebody or something settles the question.
+  if (reported.status === 'unknown') {
+    return {
+      ok: false,
+      reason: 'The processor has no record of that payment yet. It has not been written off.',
+    }
   }
 
   if (reported.status === 'failed') {
@@ -384,6 +403,171 @@ async function postFee(
     },
     db,
   )
+}
+
+// --- The sweep -------------------------------------------------------------
+
+/**
+ * Asks the processor about every checkout still hanging, and resolves what it
+ * can (spec §13, §19, Phase 46).
+ *
+ * ## Why the browser returning is not enough
+ *
+ * Phase 44 settled a payment when the customer's browser came back from the
+ * processor. That is the least reliable moment in the flow: the tab is closed,
+ * the redirect fails, the phone loses signal. The processor took the money
+ * either way, and until this sweep existed nothing ever asked again — the
+ * checkout sat `pending`, the invoice still said the money was owed, and
+ * Phase 43 chased the customer for an invoice they had paid.
+ *
+ * ## What it will not do
+ *
+ * Decide, on its own, that a customer was not charged. An `unknown` from the
+ * processor — an outage, a 404, a checkout raised against other credentials —
+ * resolves nothing in either direction and is counted for a person. Waiting
+ * another hour costs an hour; writing off a payment costs the payment.
+ */
+export async function sweepUnresolvedCheckouts(
+  ctx: ActorContext,
+  opts: { asOf?: string; limit?: number } = {},
+): Promise<SweepSummary & { considered: number }> {
+  requirePermission(ctx, 'accounting:journal')
+
+  const asOf = opts.asOf ?? new Date().toISOString()
+
+  const pending = await db
+    .select()
+    .from(checkouts)
+    .where(and(eq(checkouts.companyId, ctx.companyId), eq(checkouts.status, 'pending')))
+    .orderBy(checkouts.createdAt)
+    .limit(opts.limit ?? 200)
+
+  const summary = { ...EMPTY_SWEEP, considered: pending.length }
+  if (pending.length === 0) return summary
+
+  const provider = getPaymentProvider(pending[0].provider)
+
+  for (const row of pending) {
+    // Each one caught on its own. A processor refusing one lookup must not
+    // leave the other eleven unasked — the shape Phase 33's check runner
+    // settled on, for the same reason.
+    let reported: ProviderPaymentStatus = 'unknown'
+    try {
+      reported = (await provider.getPayment(row.providerCheckoutId)).status
+    } catch (error) {
+      logUnexpected(error, `asking the processor about checkout ${row.providerCheckoutId}`)
+    }
+
+    const verdict = sweepDecision({
+      checkout: {
+        id: row.id,
+        status: row.status,
+        expiresAt: row.expiresAt ? row.expiresAt.toISOString() : null,
+        createdAt: row.createdAt.toISOString(),
+      },
+      reported,
+      asOf,
+    })
+
+    // Written down before anything is decided, and for every answer including
+    // the boring ones. Browser verification found the sweep saying "somebody
+    // needs to look" into a toast that vanished on reload, leaving the row
+    // indistinguishable from the abandoned ones it sits beside. A finding
+    // nobody can see an hour later is a finding the sweep did not make.
+    await db
+      .update(checkouts)
+      .set({ lastReportedStatus: reported, lastCheckedAt: new Date(asOf) })
+      .where(eq(checkouts.id, row.id))
+
+    if (verdict.action === 'settle') {
+      const result = await settleCheckout(row.providerCheckoutId)
+      if (result.ok) summary.settled++
+      else summary.investigate++
+      continue
+    }
+
+    if (verdict.action === 'mark_failed') {
+      await db
+        .update(checkouts)
+        .set({ status: 'failed', failureReason: verdict.why, completedAt: new Date() })
+        .where(and(eq(checkouts.id, row.id), eq(checkouts.status, 'pending')))
+      summary.failed++
+      continue
+    }
+
+    if (verdict.action === 'expire') {
+      // Only while it is still pending. If something settled it between the
+      // read and here, that write wins — the database arbitrates, as it does
+      // everywhere else two things can act at once.
+      await db
+        .update(checkouts)
+        .set({ status: 'expired', failureReason: verdict.why, completedAt: new Date() })
+        .where(and(eq(checkouts.id, row.id), eq(checkouts.status, 'pending')))
+      summary.expired++
+      continue
+    }
+
+    if (verdict.action === 'investigate') summary.investigate++
+    else summary.waiting++
+  }
+
+  if (summary.settled > 0 || summary.investigate > 0) {
+    await recordAudit(ctx, {
+      action: 'payments.sweep',
+      entityType: 'checkout',
+      entityId: null,
+      after: {
+        settled: summary.settled,
+        investigate: summary.investigate,
+        expired: summary.expired,
+      },
+    })
+  }
+
+  return summary
+}
+
+/**
+ * Checkouts that started and were never resolved.
+ *
+ * What the integrity check needs, and the number the screen shows. A pending
+ * checkout past its window is not "in progress" — it is a question nobody has
+ * answered, and the honest thing is to count it rather than to assume either
+ * way.
+ */
+export async function unresolvedCheckouts(companyId: string, asOf?: string) {
+  const now = asOf ? new Date(asOf) : new Date()
+  const stale = new Date(now.getTime() - STALE_AFTER_DAYS * 86_400_000)
+
+  return db
+    .select({
+      id: checkouts.id,
+      providerCheckoutId: checkouts.providerCheckoutId,
+      grossCents: checkouts.grossCents,
+      currency: checkouts.currency,
+      createdAt: checkouts.createdAt,
+      expiresAt: checkouts.expiresAt,
+      // What the sweep was last told, so the screen can separate "the
+      // processor says it is still pending" from "the processor has never
+      // heard of this" — two rows that look identical without it and need
+      // opposite responses.
+      lastReportedStatus: checkouts.lastReportedStatus,
+      lastCheckedAt: checkouts.lastCheckedAt,
+      invoiceNumber: invoices.number,
+      customerName: customers.name,
+    })
+    .from(checkouts)
+    .innerJoin(invoices, eq(invoices.id, checkouts.invoiceId))
+    .innerJoin(customers, eq(customers.id, invoices.customerId))
+    .where(
+      and(
+        eq(checkouts.companyId, companyId),
+        eq(checkouts.status, 'pending'),
+        // Past its own expiry, or past the generous fallback window.
+        sql`coalesce(${checkouts.expiresAt}, ${checkouts.createdAt}) < ${stale.toISOString()}`,
+      ),
+    )
+    .orderBy(checkouts.createdAt)
 }
 
 // --- Payouts ---------------------------------------------------------------

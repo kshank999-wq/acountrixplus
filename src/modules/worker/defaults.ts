@@ -112,6 +112,16 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
       'day, so the bank balance is right when somebody opens it rather than right after they ' +
       'remember to press a button. Firing twice deposits once — the payout row decides.',
   },
+  // --- Phase 46 -------------------------------------------------------------
+  {
+    kind: 'payments.sweep_checkouts',
+    cadence: 'hourly',
+    why:
+      'Hourly, because this is money the business already has and does not know about. ' +
+      'A customer who paid and closed the tab leaves an invoice reading unpaid, and the chase ' +
+      'job will ask them for it again — so the gap between being paid and knowing it has to be ' +
+      'short. Never writes off a payment the processor cannot account for.',
+  },
   // --- Phase 43 -------------------------------------------------------------
   {
     kind: 'receivables.chase_overdue',

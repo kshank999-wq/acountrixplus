@@ -249,17 +249,31 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Card money sits at the processor for days before it is deposited. This is the only ' +
       'account that holds it, and the only thing that posts there is a capture, its fee, and ' +
-      'the payout that clears it. A difference means one of the three is missing — and the ' +
-      'expensive one is a payment the customer made that never reached these books.',
+      'the payout that clears it. A difference means one of the three is missing. It also ' +
+      'counts checkouts that were started and never resolved, which no subtraction can find: ' +
+      'a customer who paid and closed the tab leaves both sides reading zero while their ' +
+      'money sits at the processor unrecorded (Phase 46).',
     run: async (ctx, asOf) => {
       const position = await paymentsInTransitPosition(ctx, asOf)
+
+      const parts: string[] = []
+      if (position.differenceCents !== 0) {
+        parts.push(
+          `The processor owes ${formatCents(position.owedCents)}; the account carries ${formatCents(position.ledgerCents)}.`,
+        )
+      }
+      if (position.unresolvedCount > 0) {
+        parts.push(
+          `${position.unresolvedCount} payment${position.unresolvedCount === 1 ? '' : 's'} ` +
+            `started and never resolved, worth ${formatCents(position.unresolvedCents)} if they were charged.`,
+        )
+      }
+
       return {
         agrees: position.agrees,
         leftCents: position.owedCents,
         rightCents: position.ledgerCents,
-        detail: position.agrees
-          ? undefined
-          : `The processor owes ${formatCents(position.owedCents)}; the account carries ${formatCents(position.ledgerCents)}.`,
+        detail: parts.length > 0 ? parts.join(' ') : undefined,
       }
     },
   },
