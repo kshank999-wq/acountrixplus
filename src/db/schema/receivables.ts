@@ -469,3 +469,52 @@ export const paymentApplications = pgTable(
     amountPositive: check('payment_applications_amount_positive', sql`${t.amountCents} > 0`),
   }),
 )
+
+/**
+ * How a company wants its overdue invoices chased (Phase 43).
+ *
+ * One row per company, and **absent means off**. This is the only table in the
+ * schema whose default behaviour sends email to somebody who is not a user of
+ * this system, over the company's own name, without anybody present. So the
+ * state you get by doing nothing has to be silence, and turning it on has to
+ * be a deliberate act somebody can point at later.
+ *
+ * The numbers are a policy rather than constants in code because the right
+ * cadence is not a fact about accounting — a builder chasing a homeowner and a
+ * wholesaler chasing a chain do not want the same letters, and neither of them
+ * wants to change a deployment to say so.
+ */
+export const chaseSettings = pgTable('chase_settings', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id, { onDelete: 'cascade' }),
+
+  enabled: boolean('enabled').notNull().default(false),
+
+  /** Days after the due date before the first chase. Zero is the day it falls due. */
+  firstAfterDays: integer('first_after_days').notNull().default(3),
+  /** Days between chases after the first. */
+  everyDays: integer('every_days').notNull().default(14),
+  /**
+   * Chases before this stops and the debt becomes somebody's job.
+   *
+   * An invoice chased for ever is a relationship being ended by automation.
+   */
+  maxChases: integer('max_chases').notNull().default(3),
+  /** Nothing below this is chased. A rounding difference is not worth an email. */
+  minimumBalanceCents: bigint('minimum_balance_cents', { mode: 'number' }).notNull().default(500),
+  /** Days of quiet after money lands. Somebody who part-paid has engaged. */
+  quietDaysAfterPayment: integer('quiet_days_after_payment').notNull().default(5),
+  /**
+   * A ceiling on one day's run.
+   *
+   * Not a rate limit — Phase 42 has one of those, per address. This is a guard
+   * against the shape of accident that only happens once: a company switches
+   * chasing on for the first time with four years of unpaid invoices behind
+   * it, and every customer they have ever had is emailed within a minute.
+   */
+  maxPerRun: integer('max_per_run').notNull().default(50),
+
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})

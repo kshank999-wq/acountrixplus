@@ -51,6 +51,10 @@ export type AuditAction =
   // customer for the money, and when" is a question people ask.
   | 'invoice.send'
   | 'invoice.share'
+  // Phase 43. Switching chasing on decides that invoices will be sent without
+  // anybody deciding again, so "why did our customer get three emails" needs
+  // an answer somebody can find.
+  | 'chase.settings_update'
   | 'bill.create'
   | 'bill.void'
   | 'payment.record'

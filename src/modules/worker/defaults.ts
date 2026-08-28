@@ -102,6 +102,17 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
       'opens a page. At 2am, after the recurring entries have posted, so the day it checks is ' +
       'complete. Tells somebody only about what broke since last night.',
   },
+  // --- Phase 43 -------------------------------------------------------------
+  {
+    kind: 'receivables.chase_overdue',
+    cadence: 'daily',
+    hourUtc: 9,
+    why:
+      'Mid-morning, once. A chase that lands at 3am reads as automated and one that lands ' +
+      'twice reads as harassment. Daily rather than weekly because the cadence is the ' +
+      "company's to set and a weekly job could only honour multiples of seven. Does nothing " +
+      'at all unless somebody has switched chasing on — it emails their customers, not them.',
+  },
 ]
 
 /** Housekeeping that spans every tenant. */

@@ -17,6 +17,7 @@ import {
   documents,
   financialAccounts,
   journalEntries,
+  invoices as invoicesTable,
   journalLines,
   loginAttempts,
   serviceItems,
@@ -105,6 +106,7 @@ import {
   listInvoices,
   recordPayment,
 } from '@/modules/receivables/service'
+import { sendInvoice } from '@/modules/receivables/send'
 import { cashFlowStatement } from '@/modules/ledger/cash-flow'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { putRate } from '@/modules/fx/service'
@@ -3080,6 +3082,49 @@ async function main() {
     `  Revenue 2026: ${formatCentsPlain(accrualPl.revenue.totalCents)} accrual, ` +
       `${formatCentsPlain(cashPl.revenue.totalCents)} cash — the difference is what has been invoiced and not paid.`,
   )
+
+  // --- Phase 43: invoices that have actually been sent ---------------------
+  //
+  // Phase 42 built sending and the seed never sent anything, so every screen
+  // that reads "has this customer been asked for the money" showed *no* for
+  // every invoice on the demo — including the chase preview, whose entire
+  // content was "never sent to the customer", eleven times.
+  //
+  // Chasing itself is left **off**. That is the product's default and the
+  // demo should show the default; what it now shows is a populated preview
+  // under a switch nobody has touched, which is the decision a business
+  // actually faces.
+  console.log('Sending the invoices that were raised…')
+  {
+    const openInvoices = await listInvoices(ctx)
+    // The ones a business would have emailed: overdue, still owed, and to a
+    // customer with an address. Backdated to the issue date, because an
+    // invoice sent today is not one anybody could be chased about yet.
+    const toSend = openInvoices
+      .filter((invoice) => invoice.status === 'open' && invoice.balanceCents > 0)
+      .filter((invoice) => invoice.dueDate < '2026-07-01')
+      .slice(0, 6)
+
+    let sent = 0
+    for (const invoice of toSend) {
+      try {
+        await sendInvoice(ctx, invoice.id)
+        await db
+          .update(invoicesTable)
+          .set({ sentAt: new Date(`${invoice.issueDate}T09:00:00Z`) })
+          .where(eq(invoicesTable.id, invoice.id))
+        sent++
+      } catch {
+        // No email address on the customer. Left unsent on purpose — the
+        // chase preview says so by name, which is the more useful demo.
+      }
+    }
+
+    console.log(
+      `  ${sent} sent, and chasing left switched off. /settings/chasing shows what would go ` +
+        `out if it were on, and why the rest would not.`,
+    )
+  }
 
   console.log('\nDone. Sign in with:')
   console.log(`  Email:    ${DEMO_EMAIL}`)

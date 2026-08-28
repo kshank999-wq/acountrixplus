@@ -238,6 +238,26 @@ Neither blocks a deployment, and both are behind provider interfaces:
   mock, an account whose password is forgotten cannot be recovered through any
   screen.
 
+  It also means **chasing sends nothing** (Settings → Chasing). Everything
+  around it is real — the invoices are picked, the send count moves, the run is
+  recorded — but no customer receives anything until a provider is configured.
+  That is the safer direction to fail in, and it is worth switching a company's
+  chasing on only *after* email is live, so the first run is the one you can
+  see land.
+
+## A word about chasing
+
+**Settings → Chasing** emails a company's customers, over that company's name,
+on a schedule, with nobody watching. It is off for every company until somebody
+switches it on, and there is no backfill — an upgrade never turns it on for
+anybody.
+
+Before switching it on for a company with a long history of unpaid invoices,
+open the screen and read the list. It shows exactly what the first run would
+send, oldest debt first, and holds back anything over the daily cap (50 by
+default). The run is capped rather than unlimited precisely because the first
+one is the dangerous one.
+
 ## Turning on real email
 
 Two adapters ship. Both talk JSON over HTTPS rather than SMTP, which is what a

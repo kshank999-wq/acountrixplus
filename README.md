@@ -1866,6 +1866,68 @@ $1,000.00** with *"$200.00 received, thank you"*. Revoked, and the link 404s.
 Then a second customer with an address: **sent**, and **reminded**, both
 recorded on the row.
 
+### A business that has to remember to chase does not chase (Phase 43)
+
+The aging report has known who owes what since Phase 2. Phase 42 built the
+send — wording, reminder flag, count, delivery record. Phase 10 built a worker
+with schedules. `engagement.chase_overdue` already existed and chases *internal
+tasks to staff*. Nothing chased an invoice to the person holding the money. So
+every part was there and the only hard question was unanswered: **when**.
+
+- **Two expensive wrong answers set every rule.** Chasing something already
+  settled is the worst by a distance — a customer who paid last week and gets a
+  demand this week does not think the software is confused, they think these
+  people do not know what they are owed, and every figure after that is
+  doubted. So it is not *chase what is overdue*: it is chase only what is open,
+  unsettled, not written off, actually sent, not just part-paid, and worth an
+  email. Chasing too often is how a sender gets blocked, so there is a cadence,
+  a ceiling of three, and a per-run cap — and after the ceiling the debt becomes
+  a person's problem, which is where something that survived three polite emails
+  belongs.
+- **Off by default, with no backfill.** This is the only automatic behaviour in
+  the system that emails somebody who is *not a user of it*, over a company's
+  own name, with nobody present. Absence of a settings row means off, and the
+  migration creates none — the column defaults describe what a company gets
+  when a person switches it on, not what happens tonight.
+- **The anchor decides which chase; the gap decides whether any.** The cadence
+  runs from the due date, so a worker that misses Tuesday catches up on
+  Wednesday instead of sliding for ever. That alone is wrong, and the proving
+  case is the one that matters most: switch chasing on with a year of unpaid
+  invoices behind you and every anchored date for every stage is already past,
+  so the first run sends chase one and the next sends chase two — a six-week
+  sequence arriving in three minutes. The minimum silence since the last send
+  is what stops it, and it is also what makes the job idempotent: there is no
+  "already chased today" flag, `sendInvoice` stamps `sent_at` and the second run
+  reads it and declines. The state that prevents the repeat is the state that
+  records the first send.
+- **A chase is an ordinary send.** It goes through Phase 42's `sendInvoice` —
+  the same call the button makes — so it is counted, rate limited, logged and
+  audited identically. A separate chase path would have meant a second answer to
+  *how many times have we asked*.
+- **The preview is the screen.** Nobody switches on something that emails their
+  customers on the strength of a description, so `/settings/chasing` leads with
+  what would go out today and, under it, every invoice that would not, with the
+  reason by name and the date it next falls due one. Same `planChases` the
+  worker runs.
+
+**Three defects caught.** The whole sequence firing at once, above — found by
+the integration test on a second identical run, invisible to the pure tests
+because each asked about a single day. Then, in the browser: the preview was
+**blank at exactly the moment it mattered**, because planning against the stored
+policy made every row read *"chasing is switched off"* under a heading promising
+to show what would go out if it were on. And **nothing in the demo had ever been
+sent**, so the preview's whole content was "never sent to the customer" eleven
+times — Phase 42's Sent column had been dead on the demo since the day it was
+built.
+
+Verified on the demo: eleven open invoices, five of them emailed. With the
+switch untouched, the preview listed **five going out** — oldest debt first, 149
+days down to 74, each *first of 3*, each with its next date — and seven held,
+one *not an open invoice* and six *never sent to the customer*. Switched on,
+pressed **Send today's now**: *"5 sent"*, and the five moved to **chased
+recently** with **2026-09-11** beside them. Pressed it again: *"Nothing was due
+today."*
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

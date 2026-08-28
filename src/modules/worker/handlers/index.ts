@@ -16,6 +16,7 @@ import './housekeeping'
 import './integrity'
 import './marketing'
 import './notifications'
+import './receivables'
 import './retention'
 import './billing'
 
