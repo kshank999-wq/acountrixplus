@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { checkouts, invoices, journalEntries, payouts } from '@/db/schema'
+import { checkouts, customers, invoices, journalEntries, payouts } from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
 import { createCustomer, createInvoice, recordPayment } from '@/modules/receivables/service'
 import { createFinancialAccount } from '@/modules/banking/accounts'
@@ -40,11 +40,29 @@ beforeEach(async () => {
   mockPaymentProvider.reset()
 })
 
+/**
+ * One customer, several invoices — which is what a business actually has.
+ *
+ * It made a fresh customer per invoice until Phase 47 added the namesake
+ * check, and three tests here failed on the second call. The check was right:
+ * two records called Harborview LLC split their balance and their aging in
+ * two. Reusing the one that exists is both the fix and the more faithful
+ * fixture.
+ */
 async function anInvoice(cents = 100_000) {
-  const customer = await createCustomer(fixture.ctx, {
-    name: 'Harborview LLC',
-    email: 'ap@harborview.test',
-  })
+  const [existing] = await db
+    .select()
+    .from(customers)
+    .where(and(eq(customers.companyId, fixture.companyId), eq(customers.name, 'Harborview LLC')))
+    .limit(1)
+
+  const customer =
+    existing ??
+    (await createCustomer(fixture.ctx, {
+      name: 'Harborview LLC',
+      email: 'ap@harborview.test',
+    }))
+
   const sales = await fixture.account('4000')
 
   const invoice = await createInvoice(fixture.ctx, {

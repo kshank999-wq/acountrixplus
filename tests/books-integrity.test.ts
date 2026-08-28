@@ -117,6 +117,10 @@ describe('the register names every check there is (Phase 33)', () => {
       // rows still in the inbox have not posted (Phase 40).
       'banking.cash_tie_out',
       'funds.untagged_contributions',
+      // Two bills for the same amount a week apart is how a weekly delivery
+      // looks. Nothing here is provably wrong, and reporting a suspicion as a
+      // broken book is how a check gets ignored (Phase 47).
+      'payables.duplicate_bills',
       'pos.tips',
     ])
   })
@@ -182,6 +186,9 @@ describe('running the checks (Phase 33)', () => {
       'fx.conversions',
       'ledger.payables',
       'ledger.receivables',
+      // Ungated: every company that enters a bill can enter it twice, and the
+      // check finds nothing until one does (Phase 47).
+      'payables.duplicate_bills',
       // Ungated: any company can be switched on to take cards, and the check
       // is zero against zero until one is (Phase 44).
       'payments.in_transit',

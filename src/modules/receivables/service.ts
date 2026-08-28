@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   billLines,
@@ -28,7 +28,117 @@ import { formatCents } from '@/lib/money'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { CUSTOMER_FIELDS, VENDOR_FIELDS, diffParty } from '@/modules/parties/changes'
+import {
+  describeDuplicate,
+  duplicateVerdict,
+  mayProceed,
+  normaliseReference,
+  type ComparableBill,
+  type DuplicateVerdict,
+} from '@/modules/payables/references'
+import { describeNamesake, namesakeOf } from '@/modules/payables/namesakes'
 import { DomainError } from '@/modules/errors'
+
+/**
+ * A refusal somebody can act on (Phase 47).
+ *
+ * Every refusal in this module threw plain `Error` until now, and `messageFor`
+ * returns its caller's fallback for anything that is not a `DomainError` — so
+ * all thirty-three sentences carefully written for a person ("Record one
+ * payment per currency", "Accounts Payable account is missing from the chart",
+ * "Retainage must be less than the bill total") reached them as *"Something
+ * went wrong."* The messages were always here; nothing could read them.
+ *
+ * Covers invoices, bills and payments, because they are one domain and a
+ * caller catching a refusal from this module should not have to know which of
+ * the three it came from.
+ */
+export class DocumentError extends DomainError {
+  readonly status = 400
+
+  /**
+   * Whether a person may go ahead having read this.
+   *
+   * True only for a *resemblance* — a bill that looks like one already
+   * entered, a supplier whose name is already on the books. False for
+   * everything else, including a repeated supplier reference, which is not a
+   * question: the supplier's own numbering has already answered it.
+   *
+   * Carried on the error rather than worked out from the sentence, so the
+   * screen and the rule cannot drift apart.
+   */
+  readonly overridable: boolean
+
+  /** Present when the refusal was about a resemblance, so a screen can list it. */
+  readonly duplicate?: DuplicateVerdict
+
+  constructor(
+    message: string,
+    options: { overridable?: boolean; duplicate?: DuplicateVerdict } = {},
+  ) {
+    super(message)
+    this.name = 'DocumentError'
+    this.overridable = options.overridable ?? false
+    this.duplicate = options.duplicate
+  }
+}
+
+/**
+ * This supplier's bills, as the duplicate check needs to compare them.
+ *
+ * Voided ones are excluded: a bill that was voided is a bill that should never
+ * have existed, so re-entering it correctly is the fix rather than the error.
+ */
+async function comparableBillsFor(
+  ctx: ActorContext,
+  vendorId: string,
+): Promise<ComparableBill[]> {
+  const rows = await db
+    .select({
+      id: bills.id,
+      number: bills.number,
+      vendorId: bills.vendorId,
+      referenceKey: bills.referenceKey,
+      issueDate: bills.issueDate,
+      totalCents: bills.totalCents,
+    })
+    .from(bills)
+    .where(
+      scoped(ctx, bills, and(eq(bills.vendorId, vendorId), ne(bills.status, 'void'))),
+    )
+
+  return rows
+}
+
+/**
+ * Refuses a second record for a party already on the books (Phase 47).
+ *
+ * Overridable, because two businesses can genuinely share a name — but not
+ * silent, because two records for one supplier split their balance and their
+ * aging in two *and* blind the duplicate-bill rule, which is keyed on the
+ * vendor. Browser verification found the demo offering Delta Electrical twice.
+ *
+ * Only active parties are compared. An archived one is deliberately hidden,
+ * and refusing a new record because of it would be refusing on grounds nobody
+ * can see.
+ */
+async function refuseNamesake(
+  ctx: ActorContext,
+  name: string,
+  kind: 'customer' | 'supplier',
+  allowNamesake: boolean | undefined,
+): Promise<void> {
+  if (allowNamesake) return
+
+  const table = kind === 'customer' ? customers : vendors
+  const rows = await db
+    .select({ id: table.id, name: table.name })
+    .from(table)
+    .where(scoped(ctx, table, eq(table.isActive, true)))
+
+  const match = namesakeOf(name, rows)
+  if (match) throw new DocumentError(describeNamesake(match, kind), { overridable: true })
+}
 
 /**
  * Accounts receivable and payable (spec §13, §20 "AR/AP basics").
@@ -122,9 +232,19 @@ export async function createCustomer(
     region?: string
     postalCode?: string
     notes?: string
+    /**
+     * Enter a second record under a name already on the books (Phase 47).
+     *
+     * Two businesses can genuinely share a name. The seed and any bulk import
+     * pass it because they are not a person typing into a form and have their
+     * own reasons for what they create.
+     */
+    allowNamesake?: boolean
   },
 ) {
   requirePermission(ctx, 'crm:manage')
+
+  await refuseNamesake(ctx, input.name, 'customer', input.allowNamesake)
 
   return db.transaction(async (tx) => {
     const [customer] = await tx
@@ -166,9 +286,13 @@ export async function createVendor(
     region?: string
     postalCode?: string
     notes?: string
+    /** As on the customer side. See `createCustomer` (Phase 47). */
+    allowNamesake?: boolean
   },
 ) {
   requirePermission(ctx, 'accounting:view')
+
+  await refuseNamesake(ctx, input.name, 'supplier', input.allowNamesake)
 
   return db.transaction(async (tx) => {
     const [vendor] = await tx
@@ -441,7 +565,7 @@ export async function createInvoice(
   requirePermission(ctx, 'accounting:journal')
 
   if (input.lines.length === 0) {
-    throw new Error('An invoice needs at least one line.')
+    throw new DocumentError('An invoice needs at least one line.')
   }
 
   // Read through the caller's executor, not through `db`.
@@ -460,10 +584,10 @@ export async function createInvoice(
     .where(scoped(ctx, customers, eq(customers.id, input.customerId)))
     .limit(1)
 
-  if (!customer) throw new Error('Customer not found')
+  if (!customer) throw new DocumentError('Customer not found')
 
   const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable)
-  if (!arAccount) throw new Error('Accounts Receivable account is missing from the chart.')
+  if (!arAccount) throw new DocumentError('Accounts Receivable account is missing from the chart.')
 
   const lines = input.lines.map((line, index) => {
     const quantityMilli = line.quantityMilli ?? 1000
@@ -489,15 +613,15 @@ export async function createInvoice(
   const totalCents = subtotalCents + taxCents
 
   if (totalCents <= 0) {
-    throw new Error('An invoice total must be greater than zero.')
+    throw new DocumentError('An invoice total must be greater than zero.')
   }
 
   const retainageCents = input.retainageCents ?? 0
   if (retainageCents < 0) {
-    throw new Error('Retainage cannot be negative.')
+    throw new DocumentError('Retainage cannot be negative.')
   }
   if (retainageCents >= totalCents) {
-    throw new Error('Retainage must be less than the invoice total.')
+    throw new DocumentError('Retainage must be less than the invoice total.')
   }
 
   // Resolved before the transaction opens so a company without the
@@ -509,7 +633,7 @@ export async function createInvoice(
       : null
 
   if (retainageCents > 0 && !retainageAccount) {
-    throw new Error(
+    throw new DocumentError(
       'Retainage needs a Retainage Receivable account (1170), which this chart of accounts does not have.',
     )
   }
@@ -609,7 +733,7 @@ export async function createInvoice(
 
     if (taxCents > 0) {
       const taxAccount = await accountByNumber(ctx.companyId, '2200', tx)
-      if (!taxAccount) throw new Error('Sales Tax Payable account is missing from the chart.')
+      if (!taxAccount) throw new DocumentError('Sales Tax Payable account is missing from the chart.')
       journalLineInputs.push({ chartAccountId: taxAccount.id, creditCents: functionalTaxCents })
     }
 
@@ -686,7 +810,27 @@ export async function createBill(
   ctx: ActorContext,
   input: {
     vendorId: string
+    /**
+     * **Ours.** Almost always omitted; the import wizard supplies one so a
+     * migrated bill keeps the number it had in the old system.
+     */
     number?: string
+    /**
+     * **Theirs** — the number printed on the supplier's invoice (Phase 47).
+     *
+     * The thing a person quotes on the phone, and the thing that says whether
+     * this bill is already in the books. Unique per vendor, not per company.
+     */
+    vendorReference?: string | null
+    /**
+     * Enter it anyway, having seen what it resembles (Phase 47).
+     *
+     * Only ever overrides a *warning*. A shared reference from the same
+     * supplier is the same document and is not overridable, because there is
+     * nothing for a person to know that the supplier's own numbering does not
+     * already say.
+     */
+    acknowledgeDuplicate?: boolean
     issueDate: string
     dueDate?: string
     lines: DocumentLineInput[]
@@ -703,7 +847,7 @@ export async function createBill(
   requirePermission(ctx, 'accounting:journal')
 
   if (input.lines.length === 0) {
-    throw new Error('A bill needs at least one line.')
+    throw new DocumentError('A bill needs at least one line.')
   }
 
   const [vendor] = await db
@@ -712,10 +856,10 @@ export async function createBill(
     .where(scoped(ctx, vendors, eq(vendors.id, input.vendorId)))
     .limit(1)
 
-  if (!vendor) throw new Error('Vendor not found')
+  if (!vendor) throw new DocumentError('Vendor not found')
 
   const apAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable)
-  if (!apAccount) throw new Error('Accounts Payable account is missing from the chart.')
+  if (!apAccount) throw new DocumentError('Accounts Payable account is missing from the chart.')
 
   const lines = input.lines.map((line, index) => {
     const quantityMilli = line.quantityMilli ?? 1000
@@ -734,15 +878,38 @@ export async function createBill(
   const totalCents = subtotalCents + taxCents
 
   if (totalCents <= 0) {
-    throw new Error('A bill total must be greater than zero.')
+    throw new DocumentError('A bill total must be greater than zero.')
   }
 
   const retainageCents = input.retainageCents ?? 0
   if (retainageCents < 0) {
-    throw new Error('Retainage cannot be negative.')
+    throw new DocumentError('Retainage cannot be negative.')
   }
   if (retainageCents >= totalCents) {
-    throw new Error('Retainage must be less than the bill total.')
+    throw new DocumentError('Retainage must be less than the bill total.')
+  }
+
+  // Is this already in the books (Phase 47)? Asked before anything is written,
+  // and answered against this supplier's bills only — a different supplier
+  // using the same number is how invoice numbering works, not a collision.
+  const referenceKey = normaliseReference(input.vendorReference)
+
+  const verdict = duplicateVerdict({
+    candidate: {
+      vendorId: input.vendorId,
+      referenceKey,
+      issueDate: input.issueDate,
+      totalCents,
+    },
+    existing: await comparableBillsFor(ctx, input.vendorId),
+  })
+
+  if (!mayProceed(verdict, input.acknowledgeDuplicate ?? false)) {
+    throw new DocumentError(
+      describeDuplicate(verdict) ?? 'This bill looks like one already entered.',
+      // A resemblance is a question; a repeated reference is not.
+      { overridable: verdict.action === 'warn', duplicate: verdict },
+    )
   }
 
   const retainageAccount =
@@ -751,7 +918,7 @@ export async function createBill(
       : null
 
   if (retainageCents > 0 && !retainageAccount) {
-    throw new Error(
+    throw new DocumentError(
       'Retainage needs a Retainage Payable account (2570), which this chart of accounts does not have.',
     )
   }
@@ -781,6 +948,10 @@ export async function createBill(
         companyId: ctx.companyId,
         vendorId: input.vendorId,
         number,
+        // Verbatim, punctuation and all, because it is a quotation from
+        // somebody else's paperwork. The key beside it is what gets compared.
+        vendorReference: input.vendorReference?.trim() || null,
+        referenceKey,
         issueDate: input.issueDate,
         dueDate,
         status: 'open',
@@ -934,18 +1105,18 @@ export async function recordPayment(
   requirePermission(ctx, 'accounting:journal')
 
   if (input.amountCents <= 0) {
-    throw new Error('A payment amount must be greater than zero.')
+    throw new DocumentError('A payment amount must be greater than zero.')
   }
 
   const applied = input.applications.reduce((sum, a) => sum + a.amountCents, 0)
   if (applied !== input.amountCents) {
-    throw new Error(
+    throw new DocumentError(
       `Applications total ${applied} but the payment is ${input.amountCents}. They must match exactly.`,
     )
   }
 
   if (!input.financialAccountId && input.kind !== 'receipt') {
-    throw new Error('A disbursement has to say which account the money left.')
+    throw new DocumentError('A disbursement has to say which account the money left.')
   }
 
   // Undeposited receipts debit Undeposited Funds instead of a bank account.
@@ -959,12 +1130,12 @@ export async function recordPayment(
       .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
       .limit(1)
 
-    if (!account) throw new Error('Financial account not found')
+    if (!account) throw new DocumentError('Financial account not found')
     debitAccountId = account.chartAccountId
   } else if (input.viaPaymentsInTransit) {
     const inTransit = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.paymentsInTransit)
     if (!inTransit) {
-      throw new Error('The Payments in Transit account is missing from the chart.')
+      throw new DocumentError('The Payments in Transit account is missing from the chart.')
     }
     debitAccountId = inTransit.id
   } else if (input.drawerShiftId) {
@@ -972,13 +1143,13 @@ export async function recordPayment(
     // which would make receivables depend on a module that depends on it.
     const drawerCash = await accountByNumber(ctx.companyId, '1060')
     if (!drawerCash) {
-      throw new Error('The Cash Drawers account is missing from the chart.')
+      throw new DocumentError('The Cash Drawers account is missing from the chart.')
     }
     debitAccountId = drawerCash.id
   } else {
     const undeposited = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.undepositedFunds)
     if (!undeposited) {
-      throw new Error('The Undeposited Funds account is missing from the chart.')
+      throw new DocumentError('The Undeposited Funds account is missing from the chart.')
     }
     debitAccountId = undeposited.id
   }
@@ -988,7 +1159,7 @@ export async function recordPayment(
       ? SYSTEM_ACCOUNTS.accountsReceivable
       : SYSTEM_ACCOUNTS.accountsPayable
   const controlAccount = await accountByNumber(ctx.companyId, controlNumber)
-  if (!controlAccount) throw new Error('The AR/AP control account is missing from the chart.')
+  if (!controlAccount) throw new DocumentError('The AR/AP control account is missing from the chart.')
 
   // Read before the transaction opens: the notification wants a name, and
   // fetching it inside would add a query to the hot path of every payment for
@@ -1162,7 +1333,7 @@ async function documentCurrency(
     .where(and(eq(table.companyId, ctx.companyId), inArray(table.id, ids)))
 
   if (rows.length > 1) {
-    throw new Error(
+    throw new DocumentError(
       `That payment settles documents in ${rows.map((row) => row.currency).join(' and ')}. ` +
         'Record one payment per currency — there is no single amount of money that arrived.',
     )
@@ -1192,13 +1363,13 @@ async function applyToDocument(
   functionalCents: number
 }> {
   if (application.amountCents <= 0) {
-    throw new Error('Each application amount must be greater than zero.')
+    throw new DocumentError('Each application amount must be greater than zero.')
   }
 
   const isInvoice = kind === 'receipt'
   const documentId = isInvoice ? application.invoiceId : application.billId
   if (!documentId) {
-    throw new Error(
+    throw new DocumentError(
       isInvoice
         ? 'A receipt must be applied to an invoice.'
         : 'A disbursement must be applied to a bill.',
@@ -1212,7 +1383,7 @@ async function applyToDocument(
     .where(and(eq(table.id, documentId), eq(table.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!document) throw new Error(isInvoice ? 'Invoice not found' : 'Bill not found')
+  if (!document) throw new DocumentError(isInvoice ? 'Invoice not found' : 'Bill not found')
 
   const reduced = await reduceDocumentBalance(
     ctx,
@@ -1261,11 +1432,11 @@ async function reduceDocumentBalance(
   tx: Executor,
 ): Promise<{ settled: boolean; balanceCents: number; functionalCents: number }> {
   if (document.status === 'void') {
-    throw new Error('That document is voided.')
+    throw new DocumentError('That document is voided.')
   }
 
   if (amountCents > document.balanceCents) {
-    throw new Error(
+    throw new DocumentError(
       `Cannot apply ${amountCents} to a document with a balance of ${document.balanceCents}.`,
     )
   }
@@ -1305,7 +1476,7 @@ export async function settleInvoiceWithoutCash(
   tx: Executor,
 ): Promise<{ settled: boolean; balanceCents: number; number: string }> {
   if (input.amountCents <= 0) {
-    throw new Error('A settlement amount must be greater than zero.')
+    throw new DocumentError('A settlement amount must be greater than zero.')
   }
 
   const [invoice] = await tx
@@ -1314,7 +1485,7 @@ export async function settleInvoiceWithoutCash(
     .where(and(eq(invoices.id, input.invoiceId), eq(invoices.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!invoice) throw new Error('Invoice not found')
+  if (!invoice) throw new DocumentError('Invoice not found')
 
   const reduced = await reduceDocumentBalance(ctx, invoices, invoice, input.amountCents, tx)
   return { ...reduced, number: invoice.number }
@@ -1342,13 +1513,13 @@ export async function voidDocument(
       .where(and(eq(table.id, documentId), eq(table.companyId, ctx.companyId)))
       .limit(1)
 
-    if (!document) throw new Error('Document not found')
+    if (!document) throw new DocumentError('Document not found')
     if (document.status === 'void') return
 
     // Retainage is billed but not in the balance, so "untouched" means the
     // balance still equals total minus retainage, not total.
     if (document.balanceCents !== document.totalCents - document.retainageCents) {
-      throw new Error(
+      throw new DocumentError(
         'This document has payments applied. Reverse the payments before voiding it.',
       )
     }
@@ -1425,6 +1596,9 @@ export async function listBills(ctx: ActorContext, opts: { limit?: number } = {}
       // without a second lookup per bill.
       vendorId: bills.vendorId,
       vendorName: vendors.name,
+      // Theirs, so the list can be searched by the number on the paperwork —
+      // which is the number anybody actually has to hand (Phase 47).
+      vendorReference: bills.vendorReference,
       issueDate: bills.issueDate,
       dueDate: bills.dueDate,
       status: bills.status,
@@ -1438,7 +1612,23 @@ export async function listBills(ctx: ActorContext, opts: { limit?: number } = {}
     .limit(opts.limit ?? 100)
 }
 
-/** Next sequential document number, e.g. INV-1004 or BILL-1002. */
+/**
+ * Next sequential document number, e.g. INV-1004 or BILL-1002.
+ *
+ * ## Why the highest number rather than the count (Phase 47)
+ *
+ * It counted rows until this phase, which is the same answer only while every
+ * document was generated by this function. It never was: the composer let
+ * somebody type a number, so a company with four typed documents got its next
+ * generated one at 1005 — and if any of those four had been typed as
+ * `BILL-1005`, the insert failed on a unique violation reported as *"Something
+ * went wrong."*
+ *
+ * Reading the highest number we have actually issued is right whatever else is
+ * in the table. Two concurrent inserts still read the same maximum; the unique
+ * constraint arbitrates and the loser is told to try again, which is the rule
+ * everywhere in this system that two people can act at once.
+ */
 async function nextDocumentNumber(
   ctx: ActorContext,
   kind: 'invoice' | 'bill',
@@ -1447,12 +1637,27 @@ async function nextDocumentNumber(
   const table = kind === 'invoice' ? invoices : bills
   const prefix = kind === 'invoice' ? 'INV-' : 'BILL-'
 
+  // The prefix is one of two constants in this function, never anything a
+  // caller supplies, so it is written into the statement rather than bound.
+  // Bound, Postgres cannot resolve the types of `~` and `substring(… from …)`
+  // against an unknown parameter and the whole expression quietly returns
+  // null — which is how this first went out returning BILL-1001 every time.
+  const pattern = `^${prefix}[0-9]+$`
+  const from = prefix.length + 1
+
   const [row] = await tx
-    .select({ count: sql<string>`count(*)` })
+    .select({
+      highest: sql<string | null>`max(
+        case when ${table.number} ~ ${sql.raw(`'${pattern}'`)}
+        then substring(${table.number} from ${sql.raw(String(from))})::bigint
+        end
+      )`,
+    })
     .from(table)
     .where(eq(table.companyId, ctx.companyId))
 
-  return `${prefix}${1001 + Number(row?.count ?? 0)}`
+  const highest = row?.highest ? Number(row.highest) : 1000
+  return `${prefix}${highest + 1}`
 }
 
 /** ISO date `days` after `isoDate`. */

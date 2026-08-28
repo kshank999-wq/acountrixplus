@@ -309,6 +309,13 @@
       "when": 1788000000000,
       "tag": "0043_phase46_checkout_sweep",
       "breakpoints": true
+    },
+    {
+      "idx": 44,
+      "version": "7",
+      "when": 1788020000000,
+      "tag": "0044_phase47_supplier_references",
+      "breakpoints": true
     }
   ]
 }

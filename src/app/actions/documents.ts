@@ -10,6 +10,7 @@ import {
   createVendor,
   recordPayment,
   voidDocument,
+  DocumentError,
 } from '@/modules/receivables/service'
 import { openDocumentsFor, type PaymentSide } from '@/modules/receivables/open-documents'
 import { revokeShareLink, sendInvoice, shareLinkFor } from '@/modules/receivables/send'
@@ -36,7 +37,13 @@ import { formatCents, parseAmountToCents } from '@/lib/money'
 
 export type ActionResult<T = undefined> =
   | { ok: true; message?: string; data?: T }
-  | { ok: false; error: string }
+  /**
+   * `overridable` is set when the refusal was a *resemblance* rather than a
+   * certainty (Phase 47) — a bill that looks like one already entered, which
+   * only the person holding the invoice can settle. Absent everywhere else,
+   * including on a repeated supplier reference, which is not overridable.
+   */
+  | { ok: false; error: string; overridable?: true }
 
 const PATHS = [
   '/accounting',
@@ -53,7 +60,17 @@ async function run<T>(fn: () => Promise<{ message?: string; data?: T }>): Promis
     for (const path of PATHS) revalidatePath(path)
     return { ok: true, message, data }
   } catch (error) {
-    return { ok: false, error: messageFor(error, 'Something went wrong.') }
+    const message = messageFor(error, 'Something went wrong.')
+
+    // A resemblance is a question for a person; everything else is an answer
+    // (Phase 47). The flag comes off the error rather than out of the sentence,
+    // so a screen offering "do it anyway" and the rule deciding what may be
+    // done anyway cannot drift apart.
+    if (error instanceof DocumentError && error.overridable) {
+      return { ok: false, error: message, overridable: true }
+    }
+
+    return { ok: false, error: message }
   }
 }
 
@@ -108,6 +125,15 @@ const partySchema = z.object({
   name: z.string().trim().min(1, 'Give them a name.'),
   email: z.string().trim().email('That is not an email address.').optional().or(z.literal('')),
   paymentTermsDays: z.coerce.number().int().min(0).max(365).optional(),
+  /**
+   * Add them under a name already on the books (Phase 47).
+   *
+   * There is more than one "Smith & Sons", so this is a question rather than a
+   * rule — but a second record for one supplier splits their balance and their
+   * aging in two, and blinds the duplicate-bill check, which is keyed on the
+   * vendor. Browser verification found the demo offering one supplier twice.
+   */
+  allowNamesake: z.boolean().optional(),
 })
 
 export async function createCustomerAction(
@@ -121,6 +147,7 @@ export async function createCustomerAction(
       name: parsed.name,
       email: parsed.email || undefined,
       paymentTermsDays: parsed.paymentTermsDays,
+      allowNamesake: parsed.allowNamesake,
     })
 
     return {
@@ -143,6 +170,7 @@ export async function createVendorAction(
       name: parsed.name,
       email: parsed.email || undefined,
       paymentTermsDays: parsed.paymentTermsDays,
+      allowNamesake: parsed.allowNamesake,
     })
 
     return {
@@ -164,6 +192,21 @@ const documentSchema = z.object({
   memo: z.string().trim().optional(),
   tax: money.optional().or(z.literal('').transform(() => 0)),
   lines: z.array(lineSchema).min(1, 'An invoice needs at least one line.'),
+})
+
+const billSchema = documentSchema.extend({
+  /**
+   * The number printed on the supplier's invoice (Phase 47).
+   *
+   * A separate field from `number`, which is ours. They were the same field
+   * until this phase: the composer wrote the supplier's reference into a column
+   * unique per *company*, so two suppliers both using INV-4471 could not both
+   * be entered — and the same supplier's invoice keyed twice was only caught
+   * when somebody happened to type the reference both times.
+   */
+  vendorReference: z.string().trim().optional(),
+  /** Enter it anyway, having read what it resembles. Never overrides a refusal. */
+  acknowledgeDuplicate: z.boolean().optional(),
 })
 
 export async function createInvoiceAction(input: unknown): Promise<ActionResult> {
@@ -197,11 +240,14 @@ export async function createInvoiceAction(input: unknown): Promise<ActionResult>
 export async function createBillAction(input: unknown): Promise<ActionResult> {
   return run(async () => {
     const actor = await requireActor()
-    const parsed = documentSchema.parse(input)
+    const parsed = billSchema.parse(input)
 
     const bill = await createBill(actor, {
       vendorId: parsed.partyId,
-      number: parsed.number || undefined,
+      // Deliberately not `parsed.number`. Our number is ours and is always
+      // generated; what the composer collects is the supplier's.
+      vendorReference: parsed.vendorReference || undefined,
+      acknowledgeDuplicate: parsed.acknowledgeDuplicate,
       issueDate: parsed.issueDate,
       dueDate: parsed.dueDate || undefined,
       memo: parsed.memo || undefined,
@@ -214,9 +260,12 @@ export async function createBillAction(input: unknown): Promise<ActionResult> {
       })),
     })
 
+    const theirs = bill.vendorReference ? ` (their ${bill.vendorReference})` : ''
+
     return {
       message:
-        `Bill ${bill.number} entered for ${formatCents(bill.totalCents)}, due ${bill.dueDate}.`,
+        `Bill ${bill.number}${theirs} entered for ${formatCents(bill.totalCents)}, ` +
+        `due ${bill.dueDate}.`,
     }
   })
 }

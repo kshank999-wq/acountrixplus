@@ -9,6 +9,7 @@ import {
   boolean,
   index,
   unique,
+  uniqueIndex,
   pgEnum,
   check,
   foreignKey,
@@ -269,7 +270,36 @@ export const bills = pgTable(
     vendorId: uuid('vendor_id')
       .notNull()
       .references(() => vendors.id, { onDelete: 'restrict' }),
+    /**
+     * **Ours**, always generated. Never the supplier's (Phase 47).
+     *
+     * It appears in journal memos, payment references and the audit trail, so
+     * it has to be stable and unique in this company's own namespace — which is
+     * exactly what it could not be while the composer wrote the supplier's
+     * number into it.
+     */
     number: text('number').notNull(),
+
+    /**
+     * **Theirs**, as they wrote it (Phase 47).
+     *
+     * What a person quotes on the phone and what the remittance advice has to
+     * say. Kept verbatim, punctuation and all, because it is a quotation.
+     */
+    vendorReference: text('vendor_reference'),
+
+    /**
+     * `vendorReference` reduced to letters and digits, for comparison.
+     *
+     * Stored rather than computed, because it is the key of a unique index and
+     * an index on an expression the application also has to reproduce is two
+     * definitions of the same rule waiting to disagree. Unique per **vendor**,
+     * not per company: a reference identifies a document within the supplier
+     * who issued it, and two suppliers using INV-4471 is how invoice numbering
+     * works rather than a collision.
+     */
+    referenceKey: text('reference_key'),
+
     issueDate: date('issue_date').notNull(),
     dueDate: date('due_date').notNull(),
     status: documentStatusEnum('status').notNull().default('draft'),
@@ -321,6 +351,18 @@ export const bills = pgTable(
     numberUnique: unique('bills_company_number_unique').on(t.companyId, t.number),
     agingIdx: index('bills_aging_idx').on(t.companyId, t.status, t.dueDate),
     vendorIdx: index('bills_vendor_idx').on(t.companyId, t.vendorId),
+    // A reference is unique within the supplier who issued it, and only where
+    // there is one — most bills carry none, and nulls must not collide.
+    vendorReferenceUnique: uniqueIndex('bills_vendor_reference_unique')
+      .on(t.companyId, t.vendorId, t.referenceKey)
+      .where(sql`${t.referenceKey} is not null`),
+    // Same supplier, same amount, near date — the resemblance scan.
+    duplicateScanIdx: index('bills_duplicate_scan_idx').on(
+      t.companyId,
+      t.vendorId,
+      t.totalCents,
+      t.issueDate,
+    ),
   }),
 )
 

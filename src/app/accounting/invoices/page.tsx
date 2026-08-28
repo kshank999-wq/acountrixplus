@@ -12,6 +12,7 @@ import {
   partiesWithOpenDocuments,
 } from '@/modules/receivables/open-documents'
 import { listFinancialAccounts } from '@/modules/banking/accounts'
+import { suspectedDuplicateBills } from '@/modules/payables/duplicates'
 import { ACCOUNTING_NAV } from '../nav'
 import { InvoicesBoard } from './board'
 
@@ -57,6 +58,7 @@ export default async function InvoicesPage() {
     owedByCustomers,
     owedToVendors,
     banks,
+    duplicates,
   ] = await Promise.all([
     listInvoices(actor, { limit: 60 }),
     listBills(actor, { limit: 60 }),
@@ -67,6 +69,7 @@ export default async function InvoicesPage() {
     partiesWithOpenDocuments(actor, 'customer'),
     partiesWithOpenDocuments(actor, 'vendor'),
     listFinancialAccounts(actor, { activeOnly: true }),
+    suspectedDuplicateBills(actor, { limit: 25 }),
   ])
 
   return (
@@ -95,6 +98,7 @@ export default async function InvoicesPage() {
         bills={bills.map((row) => ({
           id: row.id,
           number: row.number,
+          vendorReference: row.vendorReference,
           partyName: row.vendorName,
           issueDate: row.issueDate,
           dueDate: row.dueDate,
@@ -111,6 +115,18 @@ export default async function InvoicesPage() {
         costAccounts={costAccounts.map((row) => ({
           id: row.id,
           label: `${row.number} · ${row.name}`,
+        }))}
+        duplicates={duplicates.map((pair) => ({
+          vendorName: pair.vendorName,
+          keptNumber: pair.keptNumber,
+          keptReference: pair.keptReference,
+          keptIssueDate: pair.keptIssueDate,
+          suspectNumber: pair.suspectNumber,
+          suspectReference: pair.suspectReference,
+          suspectIssueDate: pair.suspectIssueDate,
+          totalCents: pair.totalCents,
+          suspectBalanceCents: pair.suspectBalanceCents,
+          why: pair.why,
         }))}
         owedByCustomers={owedByCustomers}
         owedToVendors={owedToVendors}

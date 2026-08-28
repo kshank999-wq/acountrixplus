@@ -22,6 +22,7 @@ import {
   loginAttempts,
   serviceItems,
   transactionalMessages,
+  vendors,
 } from '@/db/schema'
 import { registerCompany, registerUser } from '@/modules/tenancy/onboarding'
 import {
@@ -1410,7 +1411,21 @@ async function main() {
   // A contractor paid over the threshold with no identifier on file. This is
   // the exception the workpaper pack exists to surface, and clearing it in the
   // UI is the most instructive thing in this workspace.
-  const delta = await createVendor(ctx, { name: 'Delta Electrical' })
+  //
+  // Reuses the electrician the construction section already created rather
+  // than making a second one. Browser verification for Phase 47 found the
+  // supplier dropdown offering **Delta Electrical twice** — which is not
+  // cosmetic: the duplicate-bill rule is keyed on the vendor, so a supplier
+  // split across two records is invisible to it, and their balance, aging and
+  // 1099 total are each half right.
+  const [existingDelta] = await db
+    .select({ id: vendors.id })
+    .from(vendors)
+    .where(and(eq(vendors.companyId, company.id), eq(vendors.name, 'Delta Electrical')))
+    .limit(1)
+
+  const delta =
+    existingDelta ?? (await createVendor(ctx, { name: 'Delta Electrical' }))
   const contractExpense = await accountByNumber(company.id, '5130')
 
   if (contractExpense && checkingId) {

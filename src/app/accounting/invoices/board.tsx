@@ -33,9 +33,25 @@ type Document = {
   sentTo?: string | null
   viewCount?: number
   shareToken?: string | null
+  /** Bills only (Phase 47). The number printed on the supplier's invoice. */
+  vendorReference?: string | null
 }
 
 type Owed = { id: string; name: string; outstandingCents: number; documentCount: number }
+
+/** Two bills from one supplier that look like the same invoice (Phase 47). */
+type Duplicate = {
+  vendorName: string
+  keptNumber: string
+  keptReference: string | null
+  keptIssueDate: string
+  suspectNumber: string
+  suspectReference: string | null
+  suspectIssueDate: string
+  totalCents: number
+  suspectBalanceCents: number
+  why: string
+}
 
 type Line = { description: string; quantity: string; unitPrice: string; chartAccountId: string }
 
@@ -60,6 +76,7 @@ export function InvoicesBoard({
   costAccounts,
   owedByCustomers,
   owedToVendors,
+  duplicates,
   banks,
   today,
   canManage,
@@ -73,6 +90,7 @@ export function InvoicesBoard({
   costAccounts: Account[]
   owedByCustomers: Owed[]
   owedToVendors: Owed[]
+  duplicates: Duplicate[]
   banks: Party[]
   today: string
   canManage: boolean
@@ -83,7 +101,19 @@ export function InvoicesBoard({
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
-  function act(fn: () => Promise<ActionResult<unknown>>, onOk?: () => void) {
+  /**
+   * `onRefused` gets the failure as well as the message (Phase 47).
+   *
+   * A bill that resembles one already entered is refused with `overridable`
+   * set, and the composer has to know that in order to offer "enter it
+   * anyway". Passing the whole result rather than a flag keeps the screen from
+   * having to read the sentence to work out what happened.
+   */
+  function act(
+    fn: () => Promise<ActionResult<unknown>>,
+    onOk?: () => void,
+    onRefused?: (result: { error: string; overridable?: true }) => void,
+  ) {
     startTransition(async () => {
       const result = await fn()
       setNotice(
@@ -94,6 +124,8 @@ export function InvoicesBoard({
       if (result.ok) {
         onOk?.()
         router.refresh()
+      } else {
+        onRefused?.(result)
       }
     })
   }
@@ -169,6 +201,71 @@ export function InvoicesBoard({
         </>
       )}
 
+      {/* Only on the supplier side, and only when there is something to say.
+          The rule at the composer protects a business from today onwards; this
+          is the six months already in the books, which is where the bill that
+          gets paid twice actually is (Phase 47). */}
+      {!isCustomer && duplicates.length > 0 && (
+        <section className="space-y-3">
+          <h3 className="text-sm font-semibold text-danger">
+            Bills that look like the same invoice twice
+          </h3>
+          <p className="text-sm text-muted">
+            Same supplier, same amount, within a fortnight.{' '}
+            <span className="text-faint">
+              Nothing here is proof — a weekly delivery looks exactly like this. But the same
+              invoice entered twice gets paid twice, and getting the second payment back is a
+              favour rather than a right, so these are worth a minute each. Void the one that
+              should not exist; the other keeps its number.
+            </span>
+          </p>
+          <div className="card overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="px-4 py-2">Supplier</th>
+                  <th className="px-4 py-2">Entered first</th>
+                  <th className="px-4 py-2">And again as</th>
+                  <th className="px-4 py-2 text-right">Each</th>
+                  <th className="px-4 py-2 text-right">Still owed</th>
+                </tr>
+              </thead>
+              <tbody>
+                {duplicates.map((pair) => (
+                  <tr key={`${pair.keptNumber}-${pair.suspectNumber}`} className="border-t border-line">
+                    <td className="px-4 py-2">{pair.vendorName}</td>
+                    <td className="px-4 py-2">
+                      <span className="font-medium">{pair.keptNumber}</span>
+                      <span className="block text-xs text-faint">
+                        {pair.keptReference ? `their ${pair.keptReference} · ` : ''}
+                        {pair.keptIssueDate}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2">
+                      <span className="font-medium">{pair.suspectNumber}</span>
+                      <span className="block text-xs text-faint">
+                        {pair.suspectReference ? `their ${pair.suspectReference} · ` : ''}
+                        {pair.suspectIssueDate}
+                      </span>
+                    </td>
+                    <td className="tnum px-4 py-2 text-right">{formatCents(pair.totalCents)}</td>
+                    <td className="tnum px-4 py-2 text-right">
+                      {pair.suspectBalanceCents > 0 ? (
+                        <span className="text-danger">
+                          {formatCents(pair.suspectBalanceCents)}
+                        </span>
+                      ) : (
+                        <span className="text-faint">paid</span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
       <DocumentList
         side={side}
         documents={documents}
@@ -195,7 +292,11 @@ function Composer({
   today: string
   pending: boolean
   canAddParty: boolean
-  act: (fn: () => Promise<ActionResult<unknown>>, onOk?: () => void) => void
+  act: (
+    fn: () => Promise<ActionResult<unknown>>,
+    onOk?: () => void,
+    onRefused?: (result: { error: string; overridable?: true }) => void,
+  ) => void
 }) {
   const isCustomer = side === 'customer'
   const [open, setOpen] = useState(false)
@@ -205,12 +306,21 @@ function Composer({
   const [number, setNumber] = useState('')
   const [memo, setMemo] = useState('')
   const [tax, setTax] = useState('')
+  /**
+   * Set when the bill was refused for resembling one already entered
+   * (Phase 47). Holding it here rather than reading the notice means the
+   * "enter it anyway" button appears for exactly the refusals it may override,
+   * and never for a repeated supplier reference, which is not a question.
+   */
+  const [resemblance, setResemblance] = useState<string | null>(null)
   // Deliberately no default account. Coding a sale to whichever revenue
   // account happens to be first is a quiet mistake that surfaces a quarter
   // later on a profit and loss nobody can explain.
   const [lines, setLines] = useState<Line[]>([{ ...BLANK_LINE }])
   const [newParty, setNewParty] = useState('')
   const [newPartyEmail, setNewPartyEmail] = useState('')
+  /** Set when a party of that name is already on the books (Phase 47). */
+  const [namesake, setNamesake] = useState<string | null>(null)
 
   /**
    * The chosen party, or the first one there is.
@@ -248,15 +358,34 @@ function Composer({
     setMemo('')
     setTax('')
     setDueDate('')
+    setResemblance(null)
     setOpen(false)
   }
 
-  function submit() {
+  function addParty(allowNamesake: boolean) {
+    const payload = { name: newParty, email: newPartyEmail, allowNamesake }
+
+    act(
+      () => (isCustomer ? createCustomerAction(payload) : createVendorAction(payload)),
+      () => {
+        setNewParty('')
+        setNewPartyEmail('')
+        setNamesake(null)
+      },
+      (result) => setNamesake(result.error),
+    )
+  }
+
+  function submit(acknowledgeDuplicate = false) {
     const payload = {
       partyId,
       issueDate,
       dueDate,
-      number,
+      // Ours for an invoice, theirs for a bill — two different things, and
+      // they shared this field until Phase 47.
+      number: isCustomer ? number : '',
+      vendorReference: isCustomer ? undefined : number,
+      acknowledgeDuplicate,
       memo,
       tax,
       lines: lines
@@ -269,7 +398,16 @@ function Composer({
         })),
     }
 
-    act(() => (isCustomer ? createInvoiceAction(payload) : createBillAction(payload)), reset)
+    if (isCustomer) {
+      act(() => createInvoiceAction(payload), reset)
+      return
+    }
+
+    act(
+      () => createBillAction(payload),
+      reset,
+      (result) => setResemblance(result.overridable ? result.error : null),
+    )
   }
 
   const noun = isCustomer ? 'invoice' : 'bill'
@@ -341,14 +479,26 @@ function Composer({
 
               <label className="text-xs text-muted">
                 <span className="mb-1 block">
-                  {isCustomer ? 'Number' : 'Their reference'}
+                  {isCustomer ? 'Number' : "Supplier's invoice number"}
                 </span>
                 <input
                   value={number}
-                  onChange={(event) => setNumber(event.target.value)}
+                  onChange={(event) => {
+                    setNumber(event.target.value)
+                    // Changing the reference changes the answer, so the
+                    // question a person was being asked is no longer the one
+                    // this button would be answering.
+                    setResemblance(null)
+                  }}
                   placeholder={isCustomer ? 'Automatic' : 'INV-4471'}
-                  className="field w-32 py-1.5 text-sm"
+                  className="field w-40 py-1.5 text-sm"
                 />
+                {!isCustomer && (
+                  <span className="mt-0.5 block text-faint">
+                    Theirs, not ours. It is what stops this bill being entered — and paid —
+                    twice.
+                  </span>
+                )}
               </label>
             </div>
           )}
@@ -502,8 +652,35 @@ function Composer({
                 />
               </label>
 
+              {/* Only ever shown for a *resemblance*. A supplier repeating
+                  their own reference is refused outright and this never
+                  appears, because there is nothing for a person to decide
+                  that the supplier's own numbering has not already said. */}
+              {resemblance && (
+                <div className="rounded-lg border border-danger/40 bg-raised/60 px-3 py-3 text-sm">
+                  <p className="font-medium text-danger">This looks like a bill already entered.</p>
+                  <p className="mt-1 text-muted">{resemblance}</p>
+                  <div className="mt-3 flex flex-wrap items-center gap-2">
+                    <button
+                      className="btn btn-ghost text-sm"
+                      disabled={pending}
+                      onClick={() => submit(true)}
+                    >
+                      It is a different bill — enter it
+                    </button>
+                    <button className="btn btn-ghost text-sm" disabled={pending} onClick={reset}>
+                      Leave it
+                    </button>
+                  </div>
+                </div>
+              )}
+
               <div className="flex items-center gap-2">
-                <button className="btn btn-primary" disabled={pending || !ready} onClick={submit}>
+                <button
+                  className="btn btn-primary"
+                  disabled={pending || !ready}
+                  onClick={() => submit()}
+                >
                   {isCustomer ? 'Raise it' : 'Enter it'}
                 </button>
                 <button className="btn btn-ghost" disabled={pending} onClick={reset}>
@@ -547,21 +724,41 @@ function Composer({
               <button
                 className="btn btn-ghost text-sm"
                 disabled={pending || !newParty.trim()}
-                onClick={() =>
-                  act(
-                    () =>
-                      isCustomer
-                        ? createCustomerAction({ name: newParty, email: newPartyEmail })
-                        : createVendorAction({ name: newParty, email: newPartyEmail }),
-                    () => {
-                      setNewParty('')
-                      setNewPartyEmail('')
-                    },
-                  )
-                }
+                onClick={() => addParty(false)}
               >
                 Add {partyNoun}
               </button>
+            </div>
+          )}
+
+          {/* A second record for one supplier splits their balance and their
+              aging in two, and blinds the duplicate-bill rule, which is keyed
+              on the vendor. Not a refusal, because two businesses can share a
+              name — a question, which the person typing it answers. */}
+          {canAddParty && namesake && (
+            <div className="rounded-lg border border-danger/40 bg-raised/60 px-3 py-3 text-sm">
+              <p className="font-medium text-danger">That name is already here.</p>
+              <p className="mt-1 text-muted">{namesake}</p>
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  className="btn btn-ghost text-sm"
+                  disabled={pending}
+                  onClick={() => addParty(true)}
+                >
+                  It is a different business — add it
+                </button>
+                <button
+                  className="btn btn-ghost text-sm"
+                  disabled={pending}
+                  onClick={() => {
+                    setNamesake(null)
+                    setNewParty('')
+                    setNewPartyEmail('')
+                  }}
+                >
+                  Use the one that is here
+                </button>
+              </div>
             </div>
           )}
         </div>
@@ -583,7 +780,11 @@ function PaymentPanel({
   banks: Party[]
   today: string
   pending: boolean
-  act: (fn: () => Promise<ActionResult<unknown>>, onOk?: () => void) => void
+  act: (
+    fn: () => Promise<ActionResult<unknown>>,
+    onOk?: () => void,
+    onRefused?: (result: { error: string; overridable?: true }) => void,
+  ) => void
 }) {
   const isCustomer = side === 'customer'
   const [partyId, setPartyId] = useState('')
@@ -736,7 +937,11 @@ function DocumentList({
   documents: Document[]
   canManage: boolean
   pending: boolean
-  act: (fn: () => Promise<ActionResult<unknown>>, onOk?: () => void) => void
+  act: (
+    fn: () => Promise<ActionResult<unknown>>,
+    onOk?: () => void,
+    onRefused?: (result: { error: string; overridable?: true }) => void,
+  ) => void
 }) {
   const isCustomer = side === 'customer'
 
@@ -758,6 +963,7 @@ function DocumentList({
             <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
               <tr>
                 <th className="px-4 py-2 font-medium">Number</th>
+                {!isCustomer && <th className="px-4 py-2 font-medium">Their reference</th>}
                 <th className="px-4 py-2 font-medium">{isCustomer ? 'Customer' : 'Supplier'}</th>
                 <th className="px-4 py-2 font-medium">Dated</th>
                 <th className="px-4 py-2 font-medium">Due</th>
@@ -772,6 +978,11 @@ function DocumentList({
               {documents.map((document) => (
                 <tr key={document.id} className="border-t border-line">
                   <td className="px-4 py-1.5 font-medium">{document.number}</td>
+                  {!isCustomer && (
+                    <td className="px-4 py-1.5 text-muted">
+                      {document.vendorReference ?? <span className="text-faint">—</span>}
+                    </td>
+                  )}
                   <td className="px-4 py-1.5">{document.partyName}</td>
                   <td className="px-4 py-1.5 text-muted">{document.issueDate}</td>
                   <td className="px-4 py-1.5 text-muted">{document.dueDate}</td>

@@ -2093,6 +2093,64 @@ unable to account for a payment, *"1 the processor cannot account for"* — the
 row left open, not written off, listed with its reference and the date it was
 last asked.
 
+### The supplier's reference is not our number (Phase 47)
+
+The bill composer has a field labelled **"Their reference"**, placeholder
+`INV-4471`. It wrote into `bills.number` — which is also where this system puts
+its own `BILL-1002`, and which is unique **per company**. One column, two
+meanings, and the constraint was wrong in both directions at once.
+
+**It refused what it should allow.** Two suppliers both numbering an invoice
+`INV-4471` is not a coincidence; it is how invoice numbering works. The second
+bill hit a raw Postgres unique violation — and because `createBill` threw a
+plain `Error`, the person holding a real supplier invoice was told *"Something
+went wrong."* and left with no way to enter it.
+
+**It allowed what it should refuse.** The same supplier's invoice entered twice
+— once from the emailed PDF, once from the posted copy — was caught only if
+somebody typed the reference both times. The field is optional, so the safe path
+was the one nobody took, and both copies got paid.
+
+- **A reference identifies a document within a supplier.** Everything follows.
+  `vendor_reference` is theirs, kept verbatim because it is a quotation;
+  `reference_key` is it normalised, unique **per vendor** on a partial index —
+  partial because most bills carry no reference and null is not "the same as"
+  another null.
+- **Refuse only what is certain.** A supplier does not issue two invoices under
+  one number, so a repeated reference is the same document and is not
+  overridable. Everything else warns and hands the decision back: same amount
+  the same day, or within a fortnight. Same amount a *month* later is silent —
+  that is rent, and a warning that fires every month is one nobody reads by the
+  third. Two references that differ are silent too: the supplier has already
+  said these are two documents.
+- **The messages were always there.** `createBill` and `recordPayment` threw
+  plain `Error` — **thirty-three** of them, every one written for a person
+  (*"Record one payment per currency"*, *"Retainage must be less than the bill
+  total"*) — and `messageFor` collapsed all of them to *"Something went wrong."*
+- **The highest number, not the count.** `nextDocumentNumber` counted rows,
+  which is only the same answer while nothing was ever numbered by hand.
+- **Find the ones already in there.** A rule at the door does nothing for the
+  six months already in the books, which is where the bill that gets paid twice
+  actually is. `payables.duplicate_bills` pairs them with the same pure verdict
+  the composer uses — reported as a *position*, because two bills a week apart
+  is how a weekly delivery looks and alarming on a suspicion is how a check gets
+  ignored.
+
+**The defect browser verification turned up cut underneath all of it.** The
+supplier dropdown offered **Delta Electrical twice**. The duplicate rule is
+keyed on the vendor, so a supplier split across two records is invisible to it —
+the same invoice entered against each reads as "two suppliers using the same
+number", the case this phase deliberately allows. Adding a party under a name
+already on the books is now a question rather than a silent second record, and
+the seed that caused it reuses the vendor it had already created.
+
+Verified on the demo: entered `INV-4471` for two different suppliers and both
+landed; tried `inv 4471` again for the first and got *"This supplier's reference
+is already on BILL-1004, dated 2026-08-10"* with **no** way to override; entered
+two unreferenced bills for the same amount a day apart and was asked, then let
+through on *"It is a different bill"*; and the pair then appeared under **Bills
+that look like the same invoice twice** with $4,000.00 still owed.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

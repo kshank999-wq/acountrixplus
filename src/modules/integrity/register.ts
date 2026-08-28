@@ -15,6 +15,7 @@ import { conversionsAgree } from '@/modules/fx/reporting'
 import { depositsHeld } from '@/modules/properties/deposits'
 import { authorisationsAgree } from '@/modules/vehicles/reporting'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
+import { duplicateExposure } from '@/modules/payables/duplicates'
 
 /**
  * Every reconciliation this application has, as named data (spec §19).
@@ -274,6 +275,41 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
         leftCents: position.owedCents,
         rightCents: position.ledgerCents,
         detail: parts.length > 0 ? parts.join(' ') : undefined,
+      }
+    },
+  },
+  {
+    key: 'payables.duplicate_bills',
+    label: 'Bills that look like the same supplier invoice twice',
+    compares: 'Σ suspected duplicate bills against nothing',
+    module: null,
+    // A position, not a fault. Nothing here is provably wrong — two bills for
+    // the same amount a week apart is how a weekly delivery looks — and
+    // reporting a suspicion as a broken book is how a check gets ignored. What
+    // it says is "somebody should look at these two", which is true.
+    severity: 'position',
+    meaning:
+      'The same supplier invoice entered twice is the most expensive routine mistake in ' +
+      'payables, because both copies get paid and getting the second one back is a favour ' +
+      'rather than a right. Phase 47 stopped it at the door; this finds the ones already in ' +
+      'the books, which is where the one that gets paid twice actually is. Nothing here is ' +
+      'proof — it is two documents worth a minute of somebody\'s attention.',
+    run: async (ctx) => {
+      const exposure = await duplicateExposure(ctx)
+
+      return {
+        agrees: exposure.pairs === 0,
+        // Left is the subledger side, as everywhere in this register. There is
+        // no ledger figure to compare against — the whole point is that the
+        // books balance perfectly with a duplicate in them.
+        leftCents: exposure.totalCents,
+        rightCents: 0,
+        detail:
+          exposure.pairs === 0
+            ? undefined
+            : `${exposure.pairs} pair${exposure.pairs === 1 ? '' : 's'} worth a look, ` +
+              `${formatCents(exposure.totalCents)} in total — ` +
+              `${formatCents(exposure.unpaidCents)} of it not yet paid.`,
       }
     },
   },
