@@ -144,6 +144,11 @@ describe('the register names every check there is (Phase 33)', () => {
       'banking.shared_ledger_accounts',
       'cash_drawer.open_tills',
       'fx.conversions',
+      // Receiving stock credits 2050 and the bill debits it — the same event
+      // from either end, so a difference is never a timing artefact. Nothing
+      // watched this account until Phase 48, which is how it grew a balance
+      // nothing could clear.
+      'inventory.goods_received',
       'inventory.lots',
       'ledger.payables',
       'ledger.receivables',

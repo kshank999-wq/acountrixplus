@@ -316,6 +316,13 @@
       "when": 1788020000000,
       "tag": "0044_phase47_supplier_references",
       "breakpoints": true
+    },
+    {
+      "idx": 45,
+      "version": "7",
+      "when": 1788040000000,
+      "tag": "0045_phase48_purchase_price_variance",
+      "breakpoints": true
     }
   ]
 }

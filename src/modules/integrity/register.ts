@@ -16,6 +16,10 @@ import { depositsHeld } from '@/modules/properties/deposits'
 import { authorisationsAgree } from '@/modules/vehicles/reporting'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
 import { duplicateExposure } from '@/modules/payables/duplicates'
+import { unbilledReceiptValue } from '@/modules/payables/receipt-billing'
+import { balanceForAccount } from '@/modules/ledger/balances'
+import { accountByNumber } from '@/modules/coa/service'
+import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 
 /**
  * Every reconciliation this application has, as named data (spec §19).
@@ -467,6 +471,43 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
         agrees: result.agrees,
         leftCents: result.subledgerCents,
         rightCents: result.ledgerCents,
+      }
+    },
+  },
+  {
+    key: 'inventory.goods_received',
+    label: 'Deliveries nobody has billed, against the clearing account',
+    compares: 'Σ unbilled goods receipts against 2050',
+    module: 'inventory',
+    // A fault. Nothing legitimately posts to 2050 except a receipt taking
+    // goods in and a bill clearing them out, so a difference is not a timing
+    // artefact — the two are the same event seen from either end.
+    severity: 'fault',
+    meaning:
+      'Receiving stock credits 2050 and the supplier\'s bill debits it, so the account should ' +
+      'hold exactly the deliveries nobody has billed yet — and an accountant asking "what is in ' +
+      'it" should get a list of deliveries rather than a number. Phase 48 found no check here ' +
+      'at all, and a balance of $28,700 that nothing in the application could clear: a bill ' +
+      'line could not name 2050, so every delivery was billed to inventory or an expense ' +
+      'instead, counting the cost twice.',
+    run: async (ctx) => {
+      const unbilled = await unbilledReceiptValue(ctx)
+      const account = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.goodsReceivedNotInvoiced)
+
+      // `balanceForAccount` signs in the account's *normal* direction, so a
+      // liability holding a credit balance comes back positive — which is
+      // already what somebody asking "what do we owe for goods" means.
+      const ledgerCents = account ? await balanceForAccount(ctx, account.id) : 0
+
+      return {
+        agrees: unbilled.totalCents === ledgerCents,
+        leftCents: unbilled.totalCents,
+        rightCents: ledgerCents,
+        detail:
+          unbilled.totalCents === ledgerCents
+            ? undefined
+            : `${unbilled.count} deliver${unbilled.count === 1 ? 'y is' : 'ies are'} unbilled, ` +
+              `worth ${formatCents(unbilled.totalCents)}; the account carries ${formatCents(ledgerCents)}.`,
       }
     },
   },

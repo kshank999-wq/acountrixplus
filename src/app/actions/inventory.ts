@@ -10,14 +10,23 @@ import { requirePermission, scoped } from '@/modules/tenancy/context'
 import { recordAudit } from '@/modules/audit'
 import { adjustStock } from '@/modules/inventory/service'
 import { createPurchaseOrder, receiveGoods } from '@/modules/inventory/purchasing'
+import { billReceipts } from '@/modules/payables/receipt-billing'
 import { requireModule } from '@/modules/industry/modules'
 import { messageFor } from '@/modules/errors'
+import { formatCents } from '@/lib/money'
 
 /** Server actions for the inventory workspace (spec §5, Phase 14). */
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
-const PATHS = ['/inventory', '/inventory/purchasing', '/accounting/reports']
+const PATHS = [
+  '/inventory',
+  '/inventory/purchasing',
+  '/accounting/reports',
+  // Phase 48: billing a delivery raises a real bill, which the payables
+  // screens are showing.
+  '/accounting/invoices',
+]
 
 async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
   try {
@@ -202,5 +211,45 @@ export async function receiveGoodsAction(input: unknown): Promise<ActionResult> 
     })
 
     return `${receipt.number} received. The stock is on the books and sits in Goods Received Not Invoiced until the supplier bills you.`
+  })
+}
+
+const billReceiptsSchema = z.object({
+  vendorId: uuid,
+  receiptIds: z.array(uuid).min(1, 'Choose at least one delivery.'),
+  /** What the supplier is asking for, net of tax. */
+  billedCents: z.number().int().positive('A bill has to be for more than nothing.'),
+  issueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use a date like 2026-03-31.'),
+  dueDate: z.string().optional().or(z.literal('')),
+  vendorReference: z.string().trim().optional(),
+})
+
+/**
+ * Raising the supplier's bill for goods already received (Phase 48).
+ *
+ * The one thing the inventory screen could not do. It showed the Goods
+ * Received Not Invoiced balance, itemised, next to no control at all — and the
+ * bill that would clear it could not be entered anywhere, because a bill line
+ * may not name a liability account.
+ */
+export async function billReceiptsAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = billReceiptsSchema.parse(input)
+
+    const result = await billReceipts(actor, {
+      vendorId: parsed.vendorId,
+      receiptIds: parsed.receiptIds,
+      billedCents: parsed.billedCents,
+      issueDate: parsed.issueDate,
+      dueDate: parsed.dueDate || undefined,
+      vendorReference: parsed.vendorReference || undefined,
+    })
+
+    const cleared = `${result.billNumber} entered. ${formatCents(result.clearedCents)} of deliveries cleared out of Goods Received Not Invoiced.`
+
+    // The variance is posted either way; this only decides whether anybody is
+    // told. A notice on every rounded freight charge is one nobody reads.
+    return result.notice ? `${cleared} ${result.notice}` : cleared
   })
 }

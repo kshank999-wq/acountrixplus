@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   adjustStockAction,
+  billReceiptsAction,
   createPurchaseOrderAction,
   receiveGoodsAction,
   saveItemAction,
@@ -36,6 +37,7 @@ type Unbilled = {
   id: string
   number: string
   receivedOn: string
+  vendorId: string
   vendorName: string
   totalCents: number
 }
@@ -109,6 +111,53 @@ export function InventoryBoard({
   const totalValueCents = positions.reduce((sum, position) => sum + position.valueCents, 0)
   const lowCount = positions.filter((position) => position.belowReorderPoint).length
 
+  /**
+   * The deliveries a supplier's invoice covers (Phase 48).
+   *
+   * Held here rather than derived, because it is a selection somebody is
+   * making. The vendor is derived from it: one bill settles one supplier's
+   * deliveries, and there is no sensible answer to "which supplier" once two
+   * are ticked.
+   */
+  const [chosen, setChosen] = useState<string[]>([])
+  const [billReference, setBillReference] = useState('')
+  const [billDate, setBillDate] = useState(today)
+  const [billAmount, setBillAmount] = useState('')
+
+  const chosenReceipts = unbilled.filter((row) => chosen.includes(row.id))
+  const billVendorId = chosenReceipts[0]?.vendorId ?? null
+  const chosenVendorName = chosenReceipts[0]?.vendorName ?? ''
+  const chosenCents = chosenReceipts.reduce((sum, row) => sum + row.totalCents, 0)
+
+  function toggleReceipt(row: Unbilled) {
+    setChosen((current) =>
+      current.includes(row.id)
+        ? current.filter((id) => id !== row.id)
+        : [...current, row.id],
+    )
+  }
+
+  function enterSupplierBill() {
+    // Blank means "it agrees with the delivery", which is the common case and
+    // the one somebody should not have to retype a figure for.
+    const asked = billAmount.trim() ? parseAmountToCents(billAmount) : chosenCents
+
+    if (asked === null) {
+      setMessage({ ok: false, text: `“${billAmount}” is not an amount.` })
+      return
+    }
+
+    act(() =>
+      billReceiptsAction({
+        vendorId: billVendorId,
+        receiptIds: chosen,
+        billedCents: asked,
+        issueDate: billDate,
+        vendorReference: billReference,
+      }),
+    )
+  }
+
   function act(fn: () => Promise<{ ok: boolean; message?: string; error?: string }>) {
     startTransition(async () => {
       const result = await fn()
@@ -123,6 +172,9 @@ export function InventoryBoard({
         setShowItem(false)
         setShowReceive(false)
         setShowOrder(false)
+        setChosen([])
+        setBillReference('')
+        setBillAmount('')
         router.refresh()
       }
     })
@@ -452,6 +504,21 @@ export function InventoryBoard({
             <tbody>
               {unbilled.map((row) => (
                 <tr key={row.id} className="border-t border-line first:border-t-0">
+                  {canManage && (
+                    <td className="px-4 py-1.5">
+                      <input
+                        type="checkbox"
+                        aria-label={`Bill ${row.number}`}
+                        checked={chosen.includes(row.id)}
+                        onChange={() => toggleReceipt(row)}
+                        // One bill settles one supplier's deliveries, so
+                        // choosing one supplier puts the others out of reach
+                        // rather than letting somebody build a selection the
+                        // service will refuse.
+                        disabled={billVendorId !== null && row.vendorId !== billVendorId}
+                      />
+                    </td>
+                  )}
                   <td className="px-4 py-1.5">{row.number}</td>
                   <td className="px-4 py-1.5">{row.vendorName}</td>
                   <td className="px-4 py-1.5 text-muted">{row.receivedOn}</td>
@@ -460,6 +527,71 @@ export function InventoryBoard({
               ))}
             </tbody>
           </table>
+
+          {canManage && (
+            <div className="border-t border-line px-4 py-3">
+              {chosen.length === 0 ? (
+                <p className="text-xs text-faint">
+                  Tick the deliveries a supplier&rsquo;s invoice covers. Entering it here posts the
+                  bill against this account rather than against stock — which is what stops the
+                  cost being counted twice, once when the goods arrived and once when the
+                  paperwork did.
+                </p>
+              ) : (
+                <div className="flex flex-wrap items-end gap-2">
+                  <p className="w-full text-xs text-muted">
+                    {chosen.length} deliver{chosen.length === 1 ? 'y' : 'ies'} from{' '}
+                    <strong>{chosenVendorName}</strong>, worth{' '}
+                    <span className="tnum">{formatCents(chosenCents)}</span>.
+                  </p>
+                  <label className="text-xs text-muted">
+                    <span className="mb-1 block">Their invoice number</span>
+                    <input
+                      value={billReference}
+                      onChange={(event) => setBillReference(event.target.value)}
+                      placeholder="INV-4471"
+                      className="field w-36 py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="text-xs text-muted">
+                    <span className="mb-1 block">Dated</span>
+                    <input
+                      type="date"
+                      value={billDate}
+                      onChange={(event) => setBillDate(event.target.value)}
+                      className="field py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="text-xs text-muted">
+                    <span className="mb-1 block">They are asking for</span>
+                    <input
+                      value={billAmount}
+                      onChange={(event) => setBillAmount(event.target.value)}
+                      placeholder={(chosenCents / 100).toFixed(2)}
+                      className="field w-28 py-1.5 text-right text-sm tnum"
+                    />
+                    <span className="mt-0.5 block text-faint">
+                      Blank means it agrees with the delivery.
+                    </span>
+                  </label>
+                  <button
+                    className="btn btn-primary text-sm"
+                    disabled={pending}
+                    onClick={enterSupplierBill}
+                  >
+                    Enter the bill
+                  </button>
+                  <button
+                    className="btn btn-ghost text-sm"
+                    disabled={pending}
+                    onClick={() => setChosen([])}
+                  >
+                    Clear
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
         </Card>
       )}
 

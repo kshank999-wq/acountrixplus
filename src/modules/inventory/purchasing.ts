@@ -417,6 +417,9 @@ export async function unbilledReceipts(ctx: ActorContext) {
       id: goodsReceipts.id,
       number: goodsReceipts.number,
       receivedOn: goodsReceipts.receivedOn,
+      // Carried since Phase 48: one bill settles one supplier's deliveries, so
+      // the screen has to be able to tell which is which.
+      vendorId: goodsReceipts.vendorId,
       vendorName: vendors.name,
       totalCents: goodsReceipts.totalCents,
       reference: goodsReceipts.reference,

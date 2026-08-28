@@ -95,6 +95,7 @@ export default async function InventoryPage() {
           id: row.id,
           number: row.number,
           receivedOn: row.receivedOn,
+          vendorId: row.vendorId,
           vendorName: row.vendorName,
           totalCents: row.totalCents,
         }))}

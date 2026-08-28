@@ -2151,6 +2151,62 @@ two unreferenced bills for the same amount a day apart and was asked, then let
 through on *"It is a different bill"*; and the pair then appeared under **Bills
 that look like the same invoice twice** with $4,000.00 still owed.
 
+### The bill for goods you already have (Phase 48)
+
+Receiving stock posts `Dr Inventory / Cr Goods Received Not Invoiced` — the
+goods are on the shelf, the money is owed, but not yet to a named supplier on a
+named invoice, so `2050` holds it. That has worked since Phase 14.
+
+Then the supplier's invoice arrives, and **the bill that clears `2050` could not
+be entered.** A bill line may name an expense, COGS or asset account; `2050` is
+a liability. `attachBillToReceipts` — written in Phase 14 for exactly this, with
+a doc comment describing the posting — had **no caller anywhere**.
+
+So every delivery was billed to inventory or an expense instead, **recognising
+the cost twice**, and `2050` grew for ever with nothing able to debit it. On the
+demo: `1400 Inventory` at $28,559.20 and `2050` at **$28,700.00** — a clearing
+account holding almost the whole value of the stock, which nothing could clear.
+The inventory screen displayed that balance, itemised, beside no control at all.
+And no integrity check watched the account, so nothing ever said so.
+
+- **A caller that may name the account, because it derived it.** The rule that
+  keeps `2050` off a hand-typed bill is right and stays. `billReceipts` takes
+  *deliveries*, not accounts: it derives the amount from the receipts, names
+  `2050` because that is the only account it may name, and marks them in the
+  same breath.
+- **What comes out is what went in.** `2050` was credited with what the goods
+  were taken in at, so that is what comes back out — not what the invoice says.
+  This **corrects Phase 14's stated decision** that the difference should stay
+  in the account "as a visible residue": it is not visible, because a residue
+  there is indistinguishable from a delivery nobody has billed. That is exactly
+  how the balance reached $28,700 unseen. The difference posts to `5450
+  Purchase Price Variance` instead, where it is on the profit and loss.
+- **The difference is its own entry.** An undercharge needs a *credit* to
+  variance and a bill line is always a debit — `journal_lines_single_side`
+  refuses a negative one, correctly.
+- **Posted always, mentioned at half a percent.** Below that it is a rounded
+  freight charge, and a notice on every delivery is one nobody reads.
+- **`inventory.goods_received`**, the check that was missing: unbilled receipts
+  against `2050`, as a fault. The left side is summed from the deliveries rather
+  than from the ledger — a check that reads the ledger twice agrees with itself
+  and proves nothing. Had it existed in Phase 14, this would have shown on the
+  first delivery instead of the twenty-eight-thousandth dollar.
+
+**The defect this turned up was between the last phase and this one.** A
+supplier delivering the same order twice in a week sends two invoices for the
+same amount, and Phase 47 refuses the second unless somebody says "it is a
+different bill" — which `billReceipts` had no way to say. The second delivery
+could be received and never billed, putting back the exact balance this phase
+clears. Choosing a *different delivery* is now the answer to that question: two
+bills because two deliveries, named on both. The same delivery still cannot be
+billed twice.
+
+Verified on the demo: billed both outstanding deliveries from the inventory
+screen, one agreeing exactly and one where the supplier asked $40 more. After
+it, `2050` reads **$0.00**, `1400` is unchanged at $28,559.20 — the cost was not
+counted twice — `5450` carries the $40, and both bills are on the payables
+screen against Cascade Building Supply.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

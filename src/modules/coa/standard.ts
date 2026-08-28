@@ -138,6 +138,12 @@ export const STANDARD_ACCOUNTS: AccountTemplate[] = [
   // stock that went missing and stock that was sold are different facts, and a
   // margin that quietly includes theft explains nothing.
   { number: '5400', name: 'Inventory Shrinkage', type: 'cogs' },
+  // Phase 48. Where the difference goes when a supplier's invoice does not
+  // agree with what the goods were taken into stock at. Its own account
+  // because it is a cost of *buying* rather than of selling, and because the
+  // alternative — leaving the difference in 2050 — makes a clearing account
+  // impossible to reconcile against the deliveries it is supposed to hold.
+  { number: '5450', name: 'Purchase Price Variance', type: 'cogs' },
 
   // --- Operating expenses -------------------------------------------------
   { number: '6000', name: 'Advertising and Marketing', type: 'expense' },
@@ -201,6 +207,7 @@ export const SYSTEM_ACCOUNTS = {
   inventory: '1400',
   costOfGoodsSold: '5000',
   inventoryShrinkage: '5400',
+  purchasePriceVariance: '5450',
   undepositedFunds: '1200',
   // Phase 44. Deliberately *not* Undeposited Funds: that is cash in hand
   // waiting to be walked to the bank, and a deposit slip offers to bank it.
