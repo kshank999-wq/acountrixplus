@@ -1,16 +1,32 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { payRunAction, spendVendorCreditAction, type ActionResult } from '@/app/actions/payables'
+import {
+  approveBillAction,
+  payRunAction,
+  spendVendorCreditAction,
+  updatePayablesPolicyAction,
+  withdrawApprovalAction,
+  type ActionResult,
+} from '@/app/actions/payables'
 import { bucketTotals, planRun, type AgeBucket, type PayableBill } from '@/modules/payables/run'
+import {
+  approvalState,
+  type ApprovableBill,
+  type ApprovalPolicy,
+} from '@/modules/payables/approval'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 
-type Bill = PayableBill & {
-  vendorReference: string | null
-  bucket: AgeBucket
-  vendorCreditCents: number
-}
+type Bill = PayableBill &
+  ApprovableBill & {
+    vendorReference: string | null
+    bucket: AgeBucket
+    vendorCreditCents: number
+    enteredByName: string | null
+    /** Whether the person looking at this screen is the one who entered it. */
+    enteredByMe: boolean
+  }
 
 type Account = {
   id: string
@@ -49,22 +65,51 @@ export function PayablesBoard({
   bills,
   accounts,
   credits,
+  policy,
   canPay,
+  canApprove,
 }: {
   today: string
   bills: Bill[]
   accounts: Account[]
   credits: Credit[]
+  policy: ApprovalPolicy
   canPay: boolean
+  canApprove: boolean
 }) {
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
   const [chosenIds, setChosenIds] = useState<string[]>([])
+  const [showPolicy, setShowPolicy] = useState(false)
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
   const [payDate, setPayDate] = useState(today)
   const [reference, setReference] = useState('')
+
+  const [thresholdText, setThresholdText] = useState(
+    (policy.thresholdCents / 100).toFixed(2),
+  )
+  /**
+   * The switches, held locally as well (found in the browser).
+   *
+   * Bound to the server value alone they visibly snap back for the second or
+   * so between the action returning and `router.refresh()` landing — the
+   * checkbox reads as not having worked, so somebody clicks it again and turns
+   * the control straight back off. Playwright failed on it outright:
+   * *"clicking the checkbox did not change its state"*. Held here it moves
+   * when pressed, and the effect below re-syncs it to whatever the server
+   * actually saved, so a refused save still corrects itself.
+   */
+  const [switches, setSwitches] = useState({
+    enabled: policy.enabled,
+    twoPersonRule: policy.twoPersonRule,
+  })
+
+  useEffect(() => {
+    setSwitches({ enabled: policy.enabled, twoPersonRule: policy.twoPersonRule })
+    setThresholdText((policy.thresholdCents / 100).toFixed(2))
+  }, [policy.enabled, policy.twoPersonRule, policy.thresholdCents])
 
   const [creditId, setCreditId] = useState('')
   const [creditBillId, setCreditBillId] = useState('')
@@ -72,6 +117,18 @@ export function PayablesBoard({
 
   const totals = useMemo(() => bucketTotals(bills, today), [bills, today])
   const owed = bills.reduce((sum, bill) => sum + bill.balanceCents, 0)
+
+  /**
+   * What the screen says about approval, decided by the same function the pay
+   * run uses. The run holds an unapproved bill back whatever this screen shows
+   * — but showing one as tickable and then quietly not paying it is the kind of
+   * disagreement that teaches people not to trust the total.
+   */
+  const states = useMemo(
+    () => new Map(bills.map((bill) => [bill.id, approvalState(bill, policy)] as const)),
+    [bills, policy],
+  )
+  const awaiting = bills.filter((bill) => states.get(bill.id) === 'awaiting')
 
   const chosen = bills.filter((bill) => chosenIds.includes(bill.id))
   const account = accounts.find((row) => row.id === accountId) ?? null
@@ -108,7 +165,10 @@ export function PayablesBoard({
   function chooseOverdue() {
     setNotice(null)
     setChosenIds(
-      bills.filter((bill) => bill.bucket === 'overdue' || bill.bucket === 'due_now').map((b) => b.id),
+      bills
+        .filter((bill) => bill.bucket === 'overdue' || bill.bucket === 'due_now')
+        .filter((bill) => states.get(bill.id) !== 'awaiting')
+        .map((b) => b.id),
     )
   }
 
@@ -138,6 +198,24 @@ export function PayablesBoard({
           role="status"
         >
           {notice.text}
+        </p>
+      )}
+
+      {/* Named at the top rather than left to be discovered. A bill nobody
+          has approved is not late by anybody's fault — it is waiting on a
+          person, and the person it is waiting on is reading this screen. */}
+      {policy.enabled && awaiting.length > 0 && (
+        <p className="card border-danger/40 px-4 py-3 text-sm">
+          <strong>{awaiting.length}</strong> bill{awaiting.length === 1 ? '' : 's'} worth{' '}
+          <span className="tnum">
+            {formatCents(awaiting.reduce((sum, bill) => sum + bill.totalCents, 0))}
+          </span>{' '}
+          {awaiting.length === 1 ? 'is' : 'are'} waiting on an approval and cannot be paid.{' '}
+          <span className="text-faint">
+            {canApprove
+              ? 'Approve below, or turn approvals off in the settings.'
+              : 'Somebody with approval rights has to agree to them.'}
+          </span>
         </p>
       )}
 
@@ -184,6 +262,7 @@ export function PayablesBoard({
                     <th className="px-4 py-2 font-medium">Due</th>
                     <th className="px-4 py-2 font-medium">State</th>
                     <th className="px-4 py-2 text-right font-medium">Outstanding</th>
+                    {canApprove && policy.enabled && <th className="px-4 py-2" />}
                   </tr>
                 </thead>
                 <tbody>
@@ -195,6 +274,12 @@ export function PayablesBoard({
                             type="checkbox"
                             aria-label={`Pay ${bill.number}`}
                             checked={chosenIds.includes(bill.id)}
+                            disabled={states.get(bill.id) === 'awaiting'}
+                            title={
+                              states.get(bill.id) === 'awaiting'
+                                ? `${bill.number} needs approving before it can be paid.`
+                                : undefined
+                            }
                             onChange={() => toggle(bill.id)}
                           />
                         </td>
@@ -204,6 +289,14 @@ export function PayablesBoard({
                         {bill.vendorReference && (
                           <span className="block text-xs text-faint">
                             their {bill.vendorReference}
+                          </span>
+                        )}
+                        {/* Whose work an approver is agreeing to. That is the
+                            whole substance of the two-person rule, so it
+                            belongs on the row rather than a screen away. */}
+                        {policy.enabled && bill.enteredByName && (
+                          <span className="block text-xs text-faint">
+                            entered by {bill.enteredByMe ? 'you' : bill.enteredByName}
                           </span>
                         )}
                       </td>
@@ -231,10 +324,55 @@ export function PayablesBoard({
                         >
                           {BUCKET_LABELS[bill.bucket]}
                         </span>
+                        {states.get(bill.id) === 'awaiting' && (
+                          <span className="mt-0.5 block text-xs text-danger">
+                            Needs approving
+                          </span>
+                        )}
+                        {states.get(bill.id) === 'approved' && policy.enabled && (
+                          <span className="mt-0.5 block text-xs text-success">Approved</span>
+                        )}
                       </td>
                       <td className="tnum px-4 py-1.5 text-right">
                         {formatCents(bill.balanceCents)}
                       </td>
+                      {canApprove && policy.enabled && (
+                        <td className="px-4 py-1.5 text-right">
+                          {states.get(bill.id) === 'awaiting' &&
+                            /* The two-person rule shown rather than enforced
+                               only on the server: a button that fails when
+                               pressed teaches nothing. The server refuses it
+                               too — this is the explanation, not the guard. */
+                            (policy.twoPersonRule && bill.enteredByMe ? (
+                              <span
+                                className="text-xs text-faint"
+                                title="You entered this one, so somebody else has to approve it."
+                              >
+                                Yours to enter, theirs to approve
+                              </span>
+                            ) : (
+                              <button
+                                className="btn btn-ghost text-xs"
+                                disabled={pending}
+                                onClick={() => act(() => approveBillAction({ billId: bill.id }))}
+                              >
+                                Approve
+                              </button>
+                            ))}
+                          {states.get(bill.id) === 'approved' &&
+                            bill.balanceCents === bill.totalCents && (
+                              <button
+                                className="btn btn-ghost text-xs text-muted"
+                                disabled={pending}
+                                onClick={() =>
+                                  act(() => withdrawApprovalAction({ billId: bill.id }))
+                                }
+                              >
+                                Take it back
+                              </button>
+                            )}
+                        </td>
+                      )}
                     </tr>
                   ))}
                 </tbody>
@@ -469,6 +607,100 @@ export function PayablesBoard({
             </section>
           )}
         </>
+      )}
+
+      {/* Off by default, and switching it off is as available as switching it
+          on. A control a business cannot turn off is a control it works
+          around, and working around this one means paying from the bank
+          directly and telling the books afterwards. */}
+      {canApprove && (
+        <section className="card px-4 py-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="text-sm font-semibold">Who has to agree before money leaves</h3>
+            <button
+              className="btn btn-ghost text-xs"
+              onClick={() => setShowPolicy((current) => !current)}
+            >
+              {showPolicy ? 'Hide' : 'Change'}
+            </button>
+          </div>
+
+          <p className="mt-1 text-sm text-muted">
+            {policy.enabled ? (
+              <>
+                Bills of <span className="tnum">{formatCents(policy.thresholdCents)}</span> and up
+                need approving
+                {policy.twoPersonRule ? ', and not by the person who entered them.' : '.'}
+              </>
+            ) : (
+              <>
+                Anybody who may pay can pay anything.{' '}
+                <span className="text-faint">
+                  One person can create a supplier, bill it and pay it — which is fine for a sole
+                  trader and worth a second look for anybody else.
+                </span>
+              </>
+            )}
+          </p>
+
+          {showPolicy && (
+            <div className="mt-3 flex flex-wrap items-end gap-3 border-t border-line pt-3">
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={switches.enabled}
+                  disabled={pending}
+                  onChange={(event) => {
+                    const enabled = event.target.checked
+                    setSwitches((current) => ({ ...current, enabled }))
+                    act(() => updatePayablesPolicyAction({ enabled }))
+                  }}
+                />
+                Require approval
+              </label>
+
+              <label className="text-xs text-muted">
+                <span className="mb-1 block">On bills of</span>
+                <input
+                  value={thresholdText}
+                  onChange={(event) => setThresholdText(event.target.value)}
+                  disabled={!switches.enabled || pending}
+                  className="field w-28 py-1.5 text-right text-sm tnum"
+                />
+                <span className="mt-0.5 block text-faint">and up. Zero means every bill.</span>
+              </label>
+
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  checked={switches.twoPersonRule}
+                  disabled={!switches.enabled || pending}
+                  onChange={(event) => {
+                    const twoPersonRule = event.target.checked
+                    setSwitches((current) => ({ ...current, twoPersonRule }))
+                    act(() => updatePayablesPolicyAction({ twoPersonRule }))
+                  }}
+                />
+                Not by whoever entered it
+              </label>
+
+              <button
+                className="btn btn-ghost text-sm"
+                disabled={!switches.enabled || pending}
+                onClick={() => {
+                  const cents = parseAmountToCents(thresholdText)
+                  if (cents === null) {
+                    setNotice({ ok: false, text: `“${thresholdText}” is not an amount.` })
+                    return
+                  }
+                  act(() => updatePayablesPolicyAction({ thresholdCents: cents }))
+                }}
+              >
+                Save the threshold
+              </button>
+            </div>
+          )}
+        </section>
       )}
     </div>
   )

@@ -2260,6 +2260,63 @@ part-paid bill stranded **$142** with nowhere to go — now offered against
 another of that supplier's bills and reported as *"$142.00 of credit applied.
 That credit is used up."*
 
+### The payment nobody approved (Phase 50)
+
+Three phases each added a step, and together they closed a loop nobody had
+looked at whole. With **one** permission — `accounting:journal` — a person could
+create a supplier (Phase 45), enter a bill to it (Phase 41) and pay it (Phase
+49). Nothing recorded who entered the bill, and Phase 49 had just turned the
+last step into a single click across a whole batch. That is the
+fictitious-supplier fraud, and it is the control most small-business theft
+actually exploits — not a clever exploit, just nobody looking.
+
+The obvious fix does not work here. Splitting it by role — a bookkeeper enters,
+an accountant approves — fails because **a bookkeeper cannot enter a bill at
+all**: `createBill` wants `accounting:journal`, which that role has not got. So
+everybody who *can* enter a bill is already senior enough to approve one, and a
+role split alone would have shipped a control that constrains nobody.
+
+- **The rule that bites is "not the bill you entered yourself."** `createBill`
+  now stamps `entered_by`, and `mayApprove` refuses when it matches the person
+  pressing the button. `accounting:approve` exists as its own permission so
+  entering and approving stay separately grantable, but the code says plainly
+  that it is a seam rather than today's enforcement.
+- **Off by default.** A sole trader is their own bookkeeper and their own
+  approver. The costly wrong answer is not a bill waiting a day — it is making a
+  business that does not want this unable to pay anybody.
+- **A threshold, not all-or-nothing.** The point is attention, and attention is
+  finite: a rule that stops the week for a $4 parking receipt is a rule somebody
+  approves without reading, which is worse than no rule at all.
+- **A pay run holds back rather than refusing.** Tick eight bills of which one
+  needs approving and seven get paid, with a sentence about the eighth.
+  Refusing the lot teaches people to switch approvals off.
+- **Nothing is backfilled.** A bill entered before this phase has no honest
+  answer to "who entered it", and inventing one puts a name against a decision
+  that person may never have made. Null means *we do not know*, and the
+  two-person rule stands aside rather than leaving those unapprovable for ever.
+- **An approval cannot be withdrawn once the money has gone.** That would leave
+  a paid bill reading as though it was never authorised — void the payment
+  instead.
+
+**Browser verification found two defects, both in the first three clicks.**
+Ticking "Require approval" and nothing else saved a threshold of **zero**,
+because the service seeded its first write from `APPROVAL_OFF` — whose threshold
+is zero precisely because nothing reads it while the control is off. So turning
+approvals on made every bill need a second person and silently overrode the
+$1,000 the schema had chosen. And both switches, bound to the server value
+alone, visibly snapped back when pressed; Playwright failed outright with
+*"clicking the checkbox did not change its state"*, and a person does the
+obvious thing — clicks again, turning the control back off.
+
+Verified on the demo: entered a $2,400 bill as Dana, switched approvals on
+(threshold now correctly *"$1,000.00 and up"*), and the screen held back four
+bills worth $11,650.00. The one Dana had just entered offered no Approve button
+at all, only *"Yours to enter, theirs to approve"*; the $718 bill below the
+threshold stayed freely payable. Approving one and paying gave *"$1,968.00 paid
+— 2 payments, one per supplier, settling 2 bills"* with the three unapproved
+ones untouched, and an approval taken back returned its bill to *"Needs
+approving"*.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

@@ -6,6 +6,7 @@ import {
   openVendorCredits,
   payableQueue,
 } from '@/modules/payables/queue'
+import { payablesPolicy } from '@/modules/payables/approvals-service'
 import { ACCOUNTING_NAV } from '../nav'
 import { PayablesBoard } from './board'
 
@@ -36,10 +37,11 @@ export default async function PayablesPage() {
 
   const today = new Date().toISOString().slice(0, 10)
 
-  const [queue, accounts, credits] = await Promise.all([
+  const [queue, accounts, credits, policy] = await Promise.all([
     payableQueue(actor, { asOf: today }),
     accountsWithBalances(actor),
     openVendorCredits(actor),
+    payablesPolicy(actor.companyId),
   ])
 
   return (
@@ -61,6 +63,12 @@ export default async function PayablesPage() {
           balanceCents: row.balanceCents,
           bucket: row.bucket,
           vendorCreditCents: row.vendorCreditCents,
+          totalCents: row.totalCents,
+          enteredBy: row.enteredBy,
+          enteredByName: row.enteredByName,
+          approvedBy: row.approvedBy,
+          /** Whether this bill entered by me is one I may approve. */
+          enteredByMe: row.enteredBy === actor.userId,
         }))}
         accounts={accounts.map((row) => ({
           id: row.id,
@@ -76,7 +84,9 @@ export default async function PayablesPage() {
           vendorName: row.vendorName,
           remainingCents: row.remainingCents,
         }))}
+        policy={policy}
         canPay={can(actor, 'accounting:journal')}
+        canApprove={can(actor, 'accounting:approve')}
       />
     </AppShell>
   )

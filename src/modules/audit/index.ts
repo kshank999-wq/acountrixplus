@@ -56,6 +56,10 @@ export type AuditAction =
   // an answer somebody can find.
   | 'chase.settings_update'
   | 'bill.create'
+  /** A second pair of eyes agreed the money may leave (Phase 50). */
+  | 'bill.approve'
+  /** The company changed what it requires before a bill can be paid. */
+  | 'payables.policy'
   | 'bill.void'
   | 'payment.record'
   // Phase 44. A card payment is initiated by somebody who is not a user of

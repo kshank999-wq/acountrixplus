@@ -344,11 +344,30 @@ export const bills = pgTable(
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),
+
+    /**
+     * Who entered it, and who agreed to pay it (Phase 50).
+     *
+     * `enteredBy` is null on every bill raised before this phase and on every
+     * bill the recurring-billing worker raises, and that is deliberate: there
+     * is no honest answer for those, and putting a name against a decision
+     * somebody may never have made is worse than admitting we do not know.
+     * The two-person rule stands aside where it has nothing to compare.
+     *
+     * Not foreign keys to `users`. A person can leave the company and their
+     * row can go; the fact that they approved a payment in March must not.
+     */
+    enteredBy: uuid('entered_by'),
+    approvedBy: uuid('approved_by'),
+    approvedAt: timestamp('approved_at', { withTimezone: true }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     numberUnique: unique('bills_company_number_unique').on(t.companyId, t.number),
+    // What the payables screen asks for: everything open, waiting on somebody.
+    awaitingIdx: index('bills_awaiting_approval_idx').on(t.companyId, t.approvedBy, t.status),
     agingIdx: index('bills_aging_idx').on(t.companyId, t.status, t.dueDate),
     vendorIdx: index('bills_vendor_idx').on(t.companyId, t.vendorId),
     // A reference is unique within the supplier who issued it, and only where
@@ -556,6 +575,58 @@ export const chaseSettings = pgTable('chase_settings', {
    * it, and every customer they have ever had is emailed within a minute.
    */
   maxPerRun: integer('max_per_run').notNull().default(50),
+
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
+ * What a company has decided about approving bills before paying them
+ * (spec §13, §14, Phase 50).
+ *
+ * ## Why a row rather than a constant
+ *
+ * A sole trader is their own bookkeeper and their own approver; a firm with a
+ * finance team wants nothing paid without a second signature. Those are not the
+ * same business and no default serves both, so it is a decision the company
+ * makes and this table is where it lives.
+ *
+ * Absent means off, like `payment_settings` and `chase_settings` before it: a
+ * company that has never opened the screen has never agreed to anything.
+ */
+export const payablesSettings = pgTable('payables_settings', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id, { onDelete: 'cascade' }),
+
+  /**
+   * Off unless somebody turns it on.
+   *
+   * Shipping this on would ship a feature most users must immediately switch
+   * off, and a control people learn to switch off is worse than no control.
+   */
+  approvalEnabled: boolean('approval_enabled').notNull().default(false),
+
+  /**
+   * Bills at or above this need an approval. Zero means every bill.
+   *
+   * A threshold rather than all-or-nothing because the point is attention and
+   * attention is finite: a rule that stops the week for a small parking receipt
+   * is a rule somebody approves without reading.
+   */
+  approvalThresholdCents: bigint('approval_threshold_cents', { mode: 'number' })
+    .notNull()
+    .default(100_000),
+
+  /**
+   * Whether the approver may be the person who entered it.
+   *
+   * Separate from the threshold on purpose. "Somebody must approve the big
+   * ones" and "it may not be the same somebody" are two decisions, and a
+   * two-person business may want the first without being able to honour the
+   * second.
+   */
+  twoPersonRule: boolean('two_person_rule').notNull().default(true),
 
   updatedBy: uuid('updated_by'),
   updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),

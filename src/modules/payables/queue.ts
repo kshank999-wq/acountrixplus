@@ -1,11 +1,12 @@
 import { and, asc, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { bills, creditNotes, vendors } from '@/db/schema'
+import { bills, creditNotes, users, vendors } from '@/db/schema'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { listFinancialAccounts } from '@/modules/banking/accounts'
 import { bandFor } from '@/modules/banking/numbering'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { bucketFor, type PayableBill } from './run'
+import type { ApprovableBill } from './approval'
 
 /**
  * The work queue for money going out (spec §13).
@@ -26,14 +27,21 @@ import { bucketFor, type PayableBill } from './run'
  * about relationships and cash, and no amount of arithmetic replaces it.**
  */
 
-export type QueuedBill = PayableBill & {
-  vendorReference: string | null
-  issueDate: string
-  totalCents: number
-  bucket: ReturnType<typeof bucketFor>
-  /** Credit sitting with this supplier that could reduce what is paid. */
-  vendorCreditCents: number
-}
+export type QueuedBill = PayableBill &
+  ApprovableBill & {
+    vendorReference: string | null
+    issueDate: string
+    bucket: ReturnType<typeof bucketFor>
+    /** Credit sitting with this supplier that could reduce what is paid. */
+    vendorCreditCents: number
+    /**
+     * Who entered it, by name. Null on bills raised before Phase 50.
+     *
+     * Carried so an approver can see whose work they are agreeing to without
+     * leaving the screen — which is the whole substance of the two-person rule.
+     */
+    enteredByName: string | null
+  }
 
 /**
  * Everything open, oldest due first.
@@ -61,9 +69,17 @@ export async function payableQueue(
       dueDate: bills.dueDate,
       totalCents: bills.totalCents,
       balanceCents: bills.balanceCents,
+      // Who entered it and who agreed to it (Phase 50). Carried on the queue
+      // because the pay run decides from these and the screen shows them.
+      enteredBy: bills.enteredBy,
+      enteredByName: users.name,
+      approvedBy: bills.approvedBy,
     })
     .from(bills)
     .innerJoin(vendors, eq(vendors.id, bills.vendorId))
+    // Left, not inner: a bill entered before Phase 50 has no `entered_by`, and
+    // dropping those from the payables queue would hide real money.
+    .leftJoin(users, eq(users.id, bills.enteredBy))
     .where(
       scoped(
         ctx,

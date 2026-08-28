@@ -7,6 +7,13 @@ import { recordPayment, DocumentError } from '@/modules/receivables/service'
 import { applyVendorCredit } from '@/modules/receivables/vendor-credits'
 import { billsByIds } from '@/modules/payables/queue'
 import { applicationOrder, planRun } from '@/modules/payables/run'
+import { describeHeld, splitByApproval } from '@/modules/payables/approval'
+import {
+  approveBill,
+  payablesPolicy,
+  updatePayablesPolicy,
+  withdrawApproval,
+} from '@/modules/payables/approvals-service'
 import { messageFor } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
 
@@ -73,7 +80,25 @@ export async function payRunAction(input: unknown): Promise<ActionResult> {
       return { ok: false, error: 'None of those bills is still outstanding.' }
     }
 
-    const plan = planRun({ chosen, availableCents: null })
+    /**
+     * What nobody has approved is left where it is (Phase 50).
+     *
+     * Held back rather than refusing the whole run: somebody ticking eight
+     * bills of which one needs approving should get the seven paid and be told
+     * about the eighth. Refusing the lot teaches them to switch approvals off,
+     * which is the opposite of what the control is for.
+     */
+    const policy = await payablesPolicy(actor.companyId)
+    const split = splitByApproval(chosen, policy)
+
+    if (split.payable.length === 0) {
+      return {
+        ok: false,
+        error: describeHeld(split.held) ?? 'Nothing in that run can be paid yet.',
+      }
+    }
+
+    const plan = planRun({ chosen: split.payable, availableCents: null })
 
     const paid: string[] = []
     let paidCents = 0
@@ -83,7 +108,9 @@ export async function payRunAction(input: unknown): Promise<ActionResult> {
       // absolutely — a bill nobody ticked is never touched — but among the
       // ones they did tick, settling the oldest first is what a supplier
       // expects and what keeps an aging report sensible.
-      const ordered = applicationOrder(chosen.filter((bill) => bill.vendorId === supplier.vendorId))
+      const ordered = applicationOrder(
+        split.payable.filter((bill) => bill.vendorId === supplier.vendorId),
+      )
 
       await recordPayment(actor, {
         kind: 'disbursement',
@@ -104,11 +131,15 @@ export async function payRunAction(input: unknown): Promise<ActionResult> {
 
     for (const path of PATHS) revalidatePath(path)
 
+    const heldNote = describeHeld(split.held)
+
     return {
       ok: true,
       message:
         `${formatCents(paidCents)} paid — ${paid.length} payment${paid.length === 1 ? '' : 's'}, ` +
-        `one per supplier, settling ${chosen.length} bill${chosen.length === 1 ? '' : 's'}.`,
+        `one per supplier, settling ${split.payable.length} bill` +
+        `${split.payable.length === 1 ? '' : 's'}.` +
+        (heldNote ? ` ${heldNote}` : ''),
     }
   } catch (error) {
     return { ok: false, error: messageFor(error, 'That pay run could not be completed.') }
@@ -158,5 +189,64 @@ export async function spendVendorCreditAction(input: unknown): Promise<ActionRes
         error instanceof DocumentError ? error.message : 'That credit could not be applied.',
       ),
     }
+  }
+}
+
+const approveSchema = z.object({ billId: uuid })
+
+/** Agrees that a bill may be paid. Never by the person who entered it. */
+export async function approveBillAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const { billId } = approveSchema.parse(input)
+
+    const result = await approveBill(actor, billId)
+    for (const path of PATHS) revalidatePath(path)
+
+    return { ok: true, message: `${result.number} approved. It can be paid now.` }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That bill could not be approved.') }
+  }
+}
+
+export async function withdrawApprovalAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const { billId } = approveSchema.parse(input)
+
+    const number = await withdrawApproval(actor, billId)
+    for (const path of PATHS) revalidatePath(path)
+
+    return { ok: true, message: `${number} is waiting on an approval again.` }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That approval could not be taken back.') }
+  }
+}
+
+const policySchema = z.object({
+  enabled: z.boolean().optional(),
+  thresholdCents: z.number().int().nonnegative().optional(),
+  twoPersonRule: z.boolean().optional(),
+})
+
+export async function updatePayablesPolicyAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const policy = await updatePayablesPolicy(actor, policySchema.parse(input))
+
+    for (const path of PATHS) revalidatePath(path)
+
+    if (!policy.enabled) {
+      return { ok: true, message: 'Approvals are off. Any bill can be paid by anybody who may pay.' }
+    }
+
+    return {
+      ok: true,
+      message:
+        `Bills of ${formatCents(policy.thresholdCents)} and up need approving` +
+        (policy.twoPersonRule ? ', and not by the person who entered them.' : '.'),
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'That could not be saved.') }
   }
 }

@@ -952,6 +952,10 @@ export async function createBill(
         // somebody else's paperwork. The key beside it is what gets compared.
         vendorReference: input.vendorReference?.trim() || null,
         referenceKey,
+        // Who entered it (Phase 50). The two-person rule compares against this,
+        // and until this phase nothing recorded it at all — so one person could
+        // create a supplier, bill it and pay it with nobody able to tell.
+        enteredBy: ctx.userId,
         issueDate: input.issueDate,
         dueDate,
         status: 'open',

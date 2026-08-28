@@ -28,6 +28,18 @@ export const PERMISSIONS = [
   // Professional accounting (spec §13)
   'accounting:view',
   'accounting:journal',
+  /**
+   * Agreeing that a bill may be paid (Phase 50).
+   *
+   * Deliberately its own permission rather than a fold into
+   * `accounting:journal`, so that entering a bill and agreeing it may be paid
+   * are separately grantable. The default roster gives both to the same roles
+   * — an owner or accountant does all of it — and there the two-person rule
+   * does the separating. The seam is for the company that widens things: a
+   * colleague granted `accounting:journal` as a per-membership override to
+   * enter supplier bills does not thereby gain the power to clear them.
+   */
+  'accounting:approve',
   'accounting:close',
 
   // Reporting
@@ -152,6 +164,10 @@ export const ROLE_PERMISSIONS: Record<Role, readonly Permission[]> = {
     'reconciliation:reopen',
     'accounting:view',
     'accounting:journal',
+    // The second pair of eyes on money going out (Phase 50). An accountant
+    // both enters and approves, so what actually separates the two is the
+    // two-person rule: not the bill you entered yourself.
+    'accounting:approve',
     'accounting:close',
     'reports:view',
     'reports:financial',
