@@ -159,8 +159,15 @@ export function Sidebar({
             <p className="mt-1 text-xs text-brand">acting for a client via {viaPractice}</p>
           )}
 
-          <div className="mt-3 flex flex-wrap items-center gap-1.5">
-            <CompanySwitcher companies={companies} currentName={companyName} />
+          {/* One size and one border for all three, on a dark ground. They
+              were three different sizes with light-workspace borders before,
+              which on this card read as one control sitting on another. */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5 [&_button]:whitespace-nowrap">
+            <CompanySwitcher
+              companies={companies}
+              currentName={companyName}
+              className="rounded-lg border border-white/15 px-2.5 py-1.5 text-xs font-medium text-chrome-ink transition hover:bg-white/10"
+            />
             {showPractice && (
               <Link
                 href="/practice"

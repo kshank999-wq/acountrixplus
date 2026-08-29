@@ -23,9 +23,18 @@ type Company = {
 export function CompanySwitcher({
   companies,
   currentName,
+  /**
+   * The trigger's styling, because this now lives on the dark rail (Phase 72's
+   * shell). `.btn` is a light-workspace class — its border and hover both come
+   * from tokens that are nearly invisible against `--chrome` — so the rail
+   * hands in its own rather than this component guessing which surface it is
+   * standing on.
+   */
+  className = 'btn text-xs',
 }: {
   companies: Company[]
   currentName: string
+  className?: string
 }) {
   const router = useRouter()
   const [open, setOpen] = useState(false)
@@ -54,7 +63,7 @@ export function CompanySwitcher({
   return (
     <div className="relative">
       <button
-        className="btn text-xs"
+        className={className}
         onClick={() => setOpen((was) => !was)}
         aria-expanded={open}
         aria-haspopup="listbox"
