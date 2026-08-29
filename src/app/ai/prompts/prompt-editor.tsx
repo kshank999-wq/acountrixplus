@@ -128,7 +128,7 @@ export function PromptEditor({
                     {version.notes || 'no note'} · {version.createdAt}
                   </span>
                   {version.isActive ? (
-                    <span className="chip bg-brand/15 text-brand">active</span>
+                    <span className="chip bg-action/10 text-action">active</span>
                   ) : (
                     <button
                       onClick={() =>

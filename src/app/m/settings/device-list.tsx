@@ -57,7 +57,7 @@ export function DeviceList({ devices }: { devices: Device[] }) {
                 <p className="text-sm font-medium">
                   {device.label}
                   {device.isCurrent && (
-                    <span className="ml-2 chip bg-brand/10 text-brand">This device</span>
+                    <span className="ml-2 chip bg-action/10 text-action">This device</span>
                   )}
                   {device.isInstalled && (
                     <span className="ml-2 chip bg-raised text-muted">Installed</span>

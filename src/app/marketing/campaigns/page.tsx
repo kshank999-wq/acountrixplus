@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 const STATUS_STYLES: Record<string, string> = {
   draft: 'bg-raised text-muted',
-  scheduled: 'bg-brand/15 text-brand',
+  scheduled: 'bg-action/10 text-action',
   sending: 'bg-warning/15 text-warning',
   sent: 'bg-positive/15 text-positive',
   paused: 'bg-raised text-muted',
@@ -49,7 +49,7 @@ export default async function CampaignsPage() {
                   <div className="min-w-0 flex-1">
                     <Link
                       href={`/marketing/campaigns/${campaign.id}`}
-                      className="text-sm font-medium text-brand hover:underline"
+                      className="text-sm font-medium text-action hover:underline"
                     >
                       {campaign.name}
                     </Link>

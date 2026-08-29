@@ -155,25 +155,46 @@ export async function AppShell({
 
   return (
     <div className="min-h-screen">
-      <header className="sticky top-0 z-20 border-b border-line bg-surface/90 backdrop-blur">
+      {/*
+        Dark chrome over a light workspace, from the design canvas (Phase 70).
+        It keeps its own colours in both themes — `chrome-*` rather than `ink`
+        — because the nav is a different surface from the page, and following
+        the workspace into dark mode would erase the contrast the design is
+        built on.
+      */}
+      <header className="sticky top-0 z-20 bg-chrome text-chrome-ink">
         <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="min-w-0">
-            <h1 className="truncate text-base font-semibold tracking-tight">{companyName}</h1>
-            <p className="truncate text-xs text-muted">
-              {actor.userName} ({actor.role})
-              {actor.viaPractice && (
-                // Shown to the accountant, not to the client. Somebody working
-                // across forty sets of books should never have to wonder which
-                // ones they are in, or on whose authority.
-                <span className="text-faint"> · acting for a client via {actor.viaPractice}</span>
-              )}
-            </p>
+          <div className="flex min-w-0 items-center gap-4">
+            <Link href="/" className="flex shrink-0 items-baseline gap-1.5">
+              <span className="text-[17px] font-bold tracking-tight">Accountrix</span>
+              {/* The one place lime is type: on the dark chrome, where the
+                  design puts it. Everywhere else the accent-as-text is blue. */}
+              <span className="rounded border border-chrome-line px-1 py-0.5 text-[9.5px] font-bold tracking-widest text-brand">
+                PLUS
+              </span>
+            </Link>
+
+            <div className="min-w-0 border-l border-white/10 pl-4">
+              <h1 className="truncate text-sm font-semibold tracking-tight">{companyName}</h1>
+              <p className="truncate text-xs text-chrome-muted">
+                {actor.userName} ({actor.role})
+                {actor.viaPractice && (
+                  // Shown to the accountant, not to the client. Somebody working
+                  // across forty sets of books should never have to wonder which
+                  // ones they are in, or on whose authority.
+                  <span> · acting for a client via {actor.viaPractice}</span>
+                )}
+              </p>
+            </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
             {actions}
             {practices.length > 0 && (
-              <Link href="/practice" className="btn text-xs">
+              <Link
+                href="/practice"
+                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-chrome-ink transition hover:bg-white/10"
+              >
                 Practice
               </Link>
             )}
@@ -188,7 +209,9 @@ export async function AppShell({
               currentName={companyName}
             />
             <form action={logoutAction}>
-              <button className="btn text-xs">Sign out</button>
+              <button className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-chrome-ink transition hover:bg-white/10">
+                Sign out
+              </button>
             </form>
           </div>
         </div>
@@ -204,10 +227,10 @@ export async function AppShell({
               <Link
                 key={link.key}
                 href={link.href}
-                className={`chip whitespace-nowrap px-3 py-1.5 ${
+                className={`chip whitespace-nowrap px-3 py-1.5 transition ${
                   active === link.key
                     ? 'bg-brand text-brand-ink'
-                    : 'bg-raised text-muted hover:text-ink'
+                    : 'text-chrome-muted hover:bg-white/10 hover:text-chrome-ink'
                 }`}
               >
                 {link.label}
@@ -236,9 +259,11 @@ export function SubNav({
         <Link
           key={item.href}
           href={item.href}
-          className={`chip whitespace-nowrap px-3 py-1.5 ${
+          // On the light workspace, so the selected tab is ink rather than the
+          // lime — which only reads on the dark chrome above.
+          className={`chip whitespace-nowrap px-3 py-1.5 transition ${
             active === item.href
-              ? 'bg-brand text-brand-ink'
+              ? 'bg-ink text-surface'
               : 'bg-raised text-muted hover:text-ink'
           }`}
         >

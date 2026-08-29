@@ -43,7 +43,7 @@ export default async function VerifyPage({
         Lost your phone? Enter one of your recovery codes above instead.
       </p>
       <p className="mt-2 text-center text-sm">
-        <Link href="/login" className="font-medium text-brand hover:underline">
+        <Link href="/login" className="font-medium text-action hover:underline">
           Start again
         </Link>
       </p>

@@ -42,7 +42,7 @@ export default async function ManufacturingPage() {
           <h2 className="text-lg font-semibold">Manufacturing is switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn it on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to keep bills of materials and move cost from raw materials into finished goods.

@@ -709,7 +709,7 @@ function Deposits(props: Props & Acting) {
                 {props.canManage && (
                   <div className="mt-1.5">
                     <button
-                      className="text-xs text-brand hover:underline"
+                      className="text-xs text-action hover:underline"
                       onClick={() =>
                         setMovingFor(movingFor === row.leaseId ? null : row.leaseId)
                       }

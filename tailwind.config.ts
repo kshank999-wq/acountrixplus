@@ -18,6 +18,17 @@ export default {
         faint: 'rgb(var(--faint) / <alpha-value>)',
         brand: 'rgb(var(--brand) / <alpha-value>)',
         'brand-ink': 'rgb(var(--brand-ink) / <alpha-value>)',
+        // The workspace's primary action (Phase 70). `brand` is the design's
+        // lime, which only ever appears on the dark chrome; a button on white
+        // uses this instead.
+        action: 'rgb(var(--action) / <alpha-value>)',
+        'action-ink': 'rgb(var(--action-ink) / <alpha-value>)',
+        // The nav shell, which stays dark in both themes as the design has it.
+        chrome: 'rgb(var(--chrome) / <alpha-value>)',
+        'chrome-raised': 'rgb(var(--chrome-raised) / <alpha-value>)',
+        'chrome-line': 'rgb(var(--chrome-line) / <alpha-value>)',
+        'chrome-ink': 'rgb(var(--chrome-ink) / <alpha-value>)',
+        'chrome-muted': 'rgb(var(--chrome-muted) / <alpha-value>)',
         positive: 'rgb(var(--positive) / <alpha-value>)',
         negative: 'rgb(var(--negative) / <alpha-value>)',
         warning: 'rgb(var(--warning) / <alpha-value>)',

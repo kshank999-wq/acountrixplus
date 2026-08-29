@@ -62,9 +62,9 @@ const STATE_STYLES: Record<string, string> = {
   suggested: 'bg-warning/15 text-warning',
   needs_review: 'bg-warning/15 text-warning',
   categorized: 'bg-positive/15 text-positive',
-  matched: 'bg-brand/15 text-brand',
+  matched: 'bg-action/10 text-action',
   excluded: 'bg-raised text-faint',
-  reconciled: 'bg-brand/15 text-brand',
+  reconciled: 'bg-action/10 text-action',
 }
 
 export function Inbox(props: Props) {
@@ -395,7 +395,7 @@ function SummaryCard({
   return (
     <div className="card p-3">
       <p className="text-xs text-muted">{label}</p>
-      <p className={`tnum mt-0.5 text-2xl font-semibold ${accent ? 'text-brand' : ''}`}>{value}</p>
+      <p className={`tnum mt-0.5 text-2xl font-semibold ${accent ? 'text-action' : ''}`}>{value}</p>
     </div>
   )
 }
@@ -489,7 +489,7 @@ function RowGroup(props: RowProps) {
             <div className="flex items-center gap-2">
               <span className="font-medium">{row.merchantName ?? row.description}</span>
               {row.pending && <span className="chip bg-raised text-faint">pending</span>}
-              {row.isTransfer && <span className="chip bg-brand/15 text-brand">transfer</span>}
+              {row.isTransfer && <span className="chip bg-action/10 text-action">transfer</span>}
             </div>
             <p className="truncate text-xs text-faint">
               {row.description} · {row.financialAccountName}

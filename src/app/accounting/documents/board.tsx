@@ -123,7 +123,7 @@ export function DocumentsBoard({
                         {' · '}
                         <Link
                           href={EVIDENCE_SUBJECT_PATHS[question.subjectType] as string}
-                          className="text-brand hover:underline"
+                          className="text-action hover:underline"
                         >
                           go there
                         </Link>
@@ -188,7 +188,7 @@ export function DocumentsBoard({
                       href={`/api/documents/${document.id}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-brand hover:underline"
+                      className="text-action hover:underline"
                     >
                       {document.filename}
                     </a>

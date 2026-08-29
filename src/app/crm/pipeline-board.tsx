@@ -307,7 +307,7 @@ function Stat({ label, value, accent }: { label: string; value: string; accent?:
   return (
     <div className="card px-3 py-2">
       <p className="text-xs text-muted">{label}</p>
-      <p className={`tnum text-lg font-semibold ${accent ? 'text-brand' : ''}`}>{value}</p>
+      <p className={`tnum text-lg font-semibold ${accent ? 'text-action' : ''}`}>{value}</p>
     </div>
   )
 }

@@ -26,7 +26,7 @@ const STAGE_STYLES: Record<string, string> = {
   active_client: 'bg-positive/15 text-positive',
   former_client: 'bg-raised text-faint',
   vendor: 'bg-raised text-muted',
-  strategic_target: 'bg-brand/15 text-brand',
+  strategic_target: 'bg-action/10 text-action',
 }
 
 export default async function OrganizationsPage() {
@@ -107,7 +107,7 @@ export default async function OrganizationsPage() {
 
                     <div className="flex shrink-0 items-center gap-1.5">
                       {organization.isStrategicAccount && (
-                        <span className="chip bg-brand/15 text-brand">Strategic</span>
+                        <span className="chip bg-action/10 text-action">Strategic</span>
                       )}
                       <span
                         className={`chip ${STAGE_STYLES[organization.lifecycleStage] ?? 'bg-raised text-muted'}`}

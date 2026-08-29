@@ -11,7 +11,7 @@ import {
 } from '@/app/actions/engagement'
 
 const TONE_STYLES: Record<string, string> = {
-  inbound: 'text-brand',
+  inbound: 'text-action',
   outbound: 'text-fg',
   internal: 'text-muted',
   system: 'text-faint',
@@ -76,7 +76,7 @@ export function ClientTimeline({
   return (
     <div className="mt-2">
       <button
-        className="text-xs text-brand hover:underline"
+        className="text-xs text-action hover:underline"
         onClick={() => {
           const next = !open
           setOpen(next)

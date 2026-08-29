@@ -41,7 +41,7 @@ export default async function AppointmentsPage() {
           <h2 className="text-lg font-semibold">Appointments is switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn it on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to keep a diary, split what each visit earns, and sell gift cards.

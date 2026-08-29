@@ -42,7 +42,7 @@ export default async function LoginPage({
 
       <p className="mt-2 text-center text-sm text-muted">
         New here?{' '}
-        <Link href="/register" className="font-medium text-brand hover:underline">
+        <Link href="/register" className="font-medium text-action hover:underline">
           Set up a company
         </Link>
       </p>

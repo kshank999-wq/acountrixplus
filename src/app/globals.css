@@ -3,38 +3,75 @@
 @tailwind utilities;
 
 /**
- * Design tokens. Light is the default; dark redefines only the values, so
- * every component picks up both themes without duplicated utilities.
+ * Design tokens, from the Accountrix Plus design canvas (Phase 70).
+ *
+ * Every value here is lifted from the artboards rather than invented, which is
+ * what lets a retheme reach forty screens without any of them being rewritten:
+ * the primitives below and every page already speak in these names.
+ *
+ * The canvas is a **light workspace inside dark chrome** — near-black nav
+ * (`#0D1117`), white cards on a barely-grey ground, hairline `#E4E7EC` rules,
+ * and one loud accent. Those are two different jobs, so `--chrome-*` is its own
+ * small scale rather than a reuse of `--ink`: the sidebar stays dark when the
+ * workspace goes dark, exactly as it does in the design.
  */
 :root {
-  --canvas: 248 250 252;
+  --canvas: 250 251 252; /* #FAFBFC */
   --surface: 255 255 255;
-  --raised: 241 245 249;
-  --line: 226 232 240;
-  --ink: 15 23 42;
-  --muted: 71 85 105;
-  --faint: 148 163 184;
-  --brand: 13 110 96;
-  --brand-ink: 255 255 255;
-  --positive: 4 120 87;
-  --negative: 190 18 60;
+  --raised: 241 243 246; /* #F1F3F6 */
+  --line: 228 231 236; /* #E4E7EC */
+  --ink: 13 17 23; /* #0D1117 */
+  --muted: 91 102 114; /* #5B6672 */
+  --faint: 138 148 161; /* #8A94A1 */
+
+  /**
+   * The lime is the design's one loud colour and it is used on dark, never on
+   * white — so `--brand-ink` is near-black. Buttons on the light workspace use
+   * `--action` instead, which is the design's blue: lime type on white fails
+   * contrast at every weight the artboards use.
+   */
+  --brand: 214 242 78; /* #D6F24E */
+  --brand-ink: 13 17 23;
+  --action: 31 95 217; /* #1F5FD9 */
+  --action-ink: 255 255 255;
+
+  --positive: 15 123 87; /* #0F7B57 */
+  --negative: 209 73 11; /* #D1490B */
   --warning: 180 83 9;
+
+  /* The nav shell, which does not follow the workspace theme. */
+  --chrome: 13 17 23; /* #0D1117 */
+  --chrome-raised: 27 34 44; /* #1B222C */
+  --chrome-line: 58 68 50; /* #3A4432 — the badge hairline */
+  --chrome-ink: 255 255 255;
+  --chrome-muted: 152 162 176; /* #98A2B0 */
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --canvas: 9 12 20;
-    --surface: 17 22 33;
-    --raised: 27 34 48;
-    --line: 42 52 70;
-    --ink: 226 232 240;
-    --muted: 148 163 184;
-    --faint: 100 116 139;
-    --brand: 45 191 165;
-    --brand-ink: 6 20 18;
-    --positive: 52 211 153;
-    --negative: 251 113 133;
+    --canvas: 13 17 23;
+    --surface: 20 24 31; /* #14181F */
+    --raised: 27 34 44;
+    --line: 42 50 62;
+    --ink: 244 246 248;
+    --muted: 168 177 189; /* #A8B1BD */
+    --faint: 122 132 145;
+
+    --brand: 214 242 78;
+    --brand-ink: 13 17 23;
+    /* Lifted so it carries on a dark ground, where #1F5FD9 goes muddy. */
+    --action: 96 150 255;
+    --action-ink: 8 14 26;
+
+    --positive: 52 199 145;
+    --negative: 251 146 96;
     --warning: 251 191 36;
+
+    --chrome: 9 12 17;
+    --chrome-raised: 20 24 31;
+    --chrome-line: 58 68 50;
+    --chrome-ink: 255 255 255;
+    --chrome-muted: 152 162 176;
   }
 }
 
@@ -50,20 +87,31 @@ body {
 }
 
 @layer components {
+  /* 8px is the design's default corner; 6px on small controls, 999px on chips. */
   .btn {
     @apply inline-flex items-center justify-center gap-1.5 rounded-lg border border-line
            px-3 py-2 text-sm font-medium transition
-           hover:bg-raised focus:outline-none focus:ring-2 focus:ring-brand/40
+           hover:bg-raised focus:outline-none focus:ring-2 focus:ring-action/40
            disabled:cursor-not-allowed disabled:opacity-50;
   }
 
+  /**
+   * Blue, not lime. The accent is a dark-ground colour in every artboard that
+   * uses it — on white it is unreadable at button weight, and a primary action
+   * nobody can read is worse than a less striking one.
+   */
   .btn-primary {
+    @apply border-transparent bg-action text-action-ink hover:opacity-90;
+  }
+
+  /** The lime, for the one place the design shouts: on the dark chrome. */
+  .btn-accent {
     @apply border-transparent bg-brand text-brand-ink hover:opacity-90;
   }
 
   .field {
     @apply w-full rounded-lg border border-line bg-surface px-3 py-2 text-sm text-ink
-           placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-brand/40;
+           placeholder:text-faint focus:outline-none focus:ring-2 focus:ring-action/40;
   }
 
   .card {

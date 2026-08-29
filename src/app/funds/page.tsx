@@ -49,7 +49,7 @@ export default async function FundsPage({
           <h2 className="text-lg font-semibold">Fund accounting is switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn it on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to track what money was given for, and release restriction as it is spent.

@@ -138,7 +138,7 @@ export default async function PayrollPage() {
                   <p className="font-medium">
                     {entry.key}
                     {entry.key === provider.key && (
-                      <span className="ml-2 chip bg-brand/15 px-2 py-0.5 text-[11px] text-brand">
+                      <span className="ml-2 chip bg-brand/15 px-2 py-0.5 text-[11px] text-action">
                         in use
                       </span>
                     )}

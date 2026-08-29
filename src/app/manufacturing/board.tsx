@@ -297,7 +297,7 @@ function Runs({
                 </td>
                 <td className="px-4 py-2 text-right">
                   <button
-                    className="text-xs text-brand hover:underline"
+                    className="text-xs text-action hover:underline"
                     onClick={() => setOpen(open === order.id ? null : order.id)}
                   >
                     {open === order.id ? 'Hide' : 'Open'}

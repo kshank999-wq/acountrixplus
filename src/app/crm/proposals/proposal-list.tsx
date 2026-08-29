@@ -27,7 +27,7 @@ type Proposal = {
 const STATUS_STYLES: Record<string, string> = {
   draft: 'bg-raised text-muted',
   sent: 'bg-warning/15 text-warning',
-  viewed: 'bg-brand/15 text-brand',
+  viewed: 'bg-action/10 text-action',
   won: 'bg-positive/15 text-positive',
   lost: 'bg-negative/15 text-negative',
   expired: 'bg-raised text-faint',
@@ -167,7 +167,7 @@ export function ProposalList({
                             href={`/api/pdf/version/${version.id}`}
                             target="_blank"
                             rel="noreferrer"
-                            className="text-brand hover:underline"
+                            className="text-action hover:underline"
                             title={`Exactly what the client received on ${version.sentAt}`}
                           >
                             v{version.versionNumber}

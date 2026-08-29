@@ -101,7 +101,7 @@ export function ContractorTable({
                   <td className="px-4 py-2">
                     <span className="font-medium">{row.vendorName}</span>
                     {row.meetsThreshold && (
-                      <span className="ml-2 chip bg-brand/15 px-2 py-0.5 text-[11px] text-brand">
+                      <span className="ml-2 chip bg-brand/15 px-2 py-0.5 text-[11px] text-action">
                         reportable
                       </span>
                     )}

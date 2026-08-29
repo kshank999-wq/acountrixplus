@@ -41,7 +41,7 @@ export default async function TakingsPage() {
           <h2 className="text-lg font-semibold">Daily takings is switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn it on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to import a day from a till, a marketplace or a payment processor.

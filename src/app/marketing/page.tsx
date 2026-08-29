@@ -151,7 +151,7 @@ export default async function MarketingOverviewPage() {
                 <Link
                   key={row.id}
                   href={`/marketing/campaigns/${row.id}`}
-                  className="text-brand hover:underline"
+                  className="text-action hover:underline"
                 >
                   {row.name}
                 </Link>,

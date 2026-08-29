@@ -67,7 +67,7 @@ export function Staffing({
   return (
     <div className="mt-2">
       <button
-        className="text-xs text-brand hover:underline"
+        className="text-xs text-action hover:underline"
         onClick={() => {
           const next = !open
           setOpen(next)

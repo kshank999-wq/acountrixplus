@@ -14,7 +14,7 @@ export function Stat({
   tone?: 'good' | 'bad'
 }) {
   const toneClass =
-    tone === 'good' ? 'text-positive' : tone === 'bad' ? 'text-negative' : accent ? 'text-brand' : ''
+    tone === 'good' ? 'text-positive' : tone === 'bad' ? 'text-negative' : accent ? 'text-action' : ''
 
   return (
     <div className="card p-3">

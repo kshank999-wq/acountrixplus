@@ -222,7 +222,7 @@ function Ramp({ orders, today, canBill, act, pending }: Props & Helpers) {
           {orders.map((row) => (
             <tr key={row.id}>
               <td className="px-4 py-2">
-                <Link className="text-brand hover:underline" href={`/shop?order=${row.id}`}>
+                <Link className="text-action hover:underline" href={`/shop?order=${row.id}`}>
                   {row.number}
                 </Link>
                 <span className="block text-xs text-faint">{row.openedOn}</span>
@@ -387,7 +387,7 @@ function OrderPanel({
                   <span
                     className={
                       line.kind === 'labour'
-                        ? 'text-brand'
+                        ? 'text-action'
                         : line.kind === 'part'
                           ? 'text-success'
                           : 'text-warning'
@@ -635,7 +635,7 @@ function Vehicles({ cars, history, historyVehicleId, today, canManage, act, pend
                 <td className="px-4 py-2 tabular-nums">{car.visits}</td>
                 <td className="px-4 py-2 tabular-nums">{formatCents(car.spentCents)}</td>
                 <td className="px-4 py-2 text-right">
-                  <Link className="text-xs text-brand hover:underline" href={`/shop?vehicle=${car.id}`}>
+                  <Link className="text-xs text-action hover:underline" href={`/shop?vehicle=${car.id}`}>
                     History
                   </Link>
                   {canManage && (

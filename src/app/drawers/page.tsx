@@ -50,7 +50,7 @@ export default async function DrawersPage() {
           <h2 className="text-lg font-semibold">Cash drawers are switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn them on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to open a till with a float, take notes into it, and count it at the end of a shift.

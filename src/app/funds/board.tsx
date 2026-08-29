@@ -322,7 +322,7 @@ function Balances({ balances, netAssets, canManage, act, pending }: Props & Help
         What each fund spent comes from the ledger, not from this screen — a bill coded to a fund
         by somebody who has never opened this page counts, and earns its release. For the detail,
         see{' '}
-        <a className="text-brand hover:underline" href="/accounting/dimensions">
+        <a className="text-action hover:underline" href="/accounting/dimensions">
           profit and loss by Fund
         </a>
         .

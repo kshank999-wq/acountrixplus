@@ -230,7 +230,7 @@ export function Designer({
                   <p className="text-sm font-medium">
                     {template.name}
                     {template.source === 'company' && (
-                      <span className="ml-1.5 chip bg-brand/15 text-brand">yours</span>
+                      <span className="ml-1.5 chip bg-action/10 text-action">yours</span>
                     )}
                   </p>
                   <p className="mt-0.5 text-xs text-muted">{template.description}</p>

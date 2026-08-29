@@ -28,7 +28,7 @@ export function InsightsPanel({ enabled }: { enabled: boolean }) {
         <p className="mt-2 text-sm text-muted">
           The AI module is switched off. Every figure these insights are drawn from is already on
           the{' '}
-          <Link href="/accounting/reports" className="text-brand hover:underline">
+          <Link href="/accounting/reports" className="text-action hover:underline">
             reports page
           </Link>{' '}
           — this only explains them in plain language.

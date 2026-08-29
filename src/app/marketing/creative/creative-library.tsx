@@ -62,7 +62,7 @@ export function CreativeLibrary({
                 <div className="min-w-0 flex-1">
                   <Link
                     href={`/marketing/creative/${document.id}`}
-                    className="text-sm font-medium text-brand hover:underline"
+                    className="text-sm font-medium text-action hover:underline"
                   >
                     {document.name}
                   </Link>

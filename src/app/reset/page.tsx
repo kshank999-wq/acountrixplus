@@ -47,7 +47,7 @@ export default async function ResetPage({
       </div>
 
       <p className="mt-6 text-center text-sm text-muted">
-        <Link href="/login" className="font-medium text-brand hover:underline">
+        <Link href="/login" className="font-medium text-action hover:underline">
           Back to sign in
         </Link>
       </p>

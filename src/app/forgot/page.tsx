@@ -26,7 +26,7 @@ export default function ForgotPage() {
 
       <p className="mt-6 text-center text-sm text-muted">
         Remembered it?{' '}
-        <Link href="/login" className="font-medium text-brand hover:underline">
+        <Link href="/login" className="font-medium text-action hover:underline">
           Sign in
         </Link>
       </p>

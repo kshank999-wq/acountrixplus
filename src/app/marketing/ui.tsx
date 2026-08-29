@@ -14,7 +14,7 @@ export function Stat({
   return (
     <div className="card p-3">
       <p className="text-xs text-muted">{label}</p>
-      <p className={`tnum mt-0.5 text-xl font-semibold ${accent ? 'text-brand' : ''}`}>{value}</p>
+      <p className={`tnum mt-0.5 text-xl font-semibold ${accent ? 'text-action' : ''}`}>{value}</p>
       {hint && <p className="mt-0.5 text-xs text-faint">{hint}</p>}
     </div>
   )

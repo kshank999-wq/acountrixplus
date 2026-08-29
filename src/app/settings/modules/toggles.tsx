@@ -84,7 +84,7 @@ export function ModuleToggles({ modules }: { modules: ModuleRow[] }) {
                   <span className="ml-2 chip bg-raised text-muted">on by default for your industry</span>
                 )}
                 {entry.overridden && (
-                  <span className="ml-2 chip bg-brand/10 text-brand">changed from the default</span>
+                  <span className="ml-2 chip bg-action/10 text-action">changed from the default</span>
                 )}
                 <span className="mt-0.5 block text-xs text-muted">{entry.description}</span>
               </label>

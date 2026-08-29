@@ -118,7 +118,7 @@ export function EvidencePanel({
               href={`/api/documents/${document.documentId}`}
               target="_blank"
               rel="noreferrer"
-              className="min-w-0 flex-1 truncate text-brand hover:underline"
+              className="min-w-0 flex-1 truncate text-action hover:underline"
             >
               {document.filename}
             </a>
@@ -193,7 +193,7 @@ export function EvidencePanel({
                     <>
                       {' · '}
                       <button
-                        className="text-brand hover:underline"
+                        className="text-action hover:underline"
                         disabled={pending}
                         onClick={() => act(() => resolveNoteAction(note.id))}
                       >

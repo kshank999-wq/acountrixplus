@@ -86,12 +86,12 @@ export default async function Home() {
         <section className="mx-auto max-w-6xl px-6 pb-20 pt-16 sm:pt-24">
           <div className="grid items-center gap-12 lg:grid-cols-[1.05fr_1fr]">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-action">
                 Double-entry accounting
               </p>
               <h1 className="mt-4 text-4xl font-semibold leading-[1.08] tracking-tight sm:text-5xl">
                 The books argue back
-                <span className="text-brand"> when you are wrong.</span>
+                <span className="text-action"> when you are wrong.</span>
               </h1>
               <p className="mt-6 max-w-xl text-lg leading-relaxed text-muted">
                 Most accounting software will happily record something that is not true. This one
@@ -252,7 +252,7 @@ export default async function Home() {
         <section className="mx-auto max-w-6xl px-6 py-20">
           <div className="grid gap-12 lg:grid-cols-[1fr_1fr] lg:items-start">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-brand">
+              <p className="text-xs font-semibold uppercase tracking-[0.14em] text-action">
                 For the firm
               </p>
               <h2 className="mt-4 text-2xl font-semibold tracking-tight">

@@ -339,7 +339,7 @@ export function SegmentWorkspace({
             <p className="mt-3 text-sm text-muted">Counting…</p>
           ) : (
             <>
-              <p className="tnum mt-2 text-3xl font-semibold text-brand">
+              <p className="tnum mt-2 text-3xl font-semibold text-action">
                 {preview.contactable}
               </p>
               <p className="text-xs text-muted">

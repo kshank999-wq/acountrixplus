@@ -49,7 +49,7 @@ export default async function PropertiesPage({
           <h2 className="text-lg font-semibold">Properties is switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn it on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to keep units and tenancies, run the rent, and hold deposits as a liability.

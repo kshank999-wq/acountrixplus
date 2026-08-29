@@ -48,7 +48,7 @@ export default async function ShopPage({
           <h2 className="text-lg font-semibold">Vehicles is switched off</h2>
           <p className="mt-2 text-sm text-muted">
             Turn it on in{' '}
-            <a className="text-brand hover:underline" href="/settings/modules">
+            <a className="text-action hover:underline" href="/settings/modules">
               company settings
             </a>{' '}
             to keep customer vehicles, write repair orders, and hold an estimate to what was agreed.

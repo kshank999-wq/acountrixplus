@@ -449,7 +449,7 @@ export function PeriodsBoard({
                     <span
                       className={`ml-2 chip px-2 py-0.5 text-[11px] ${
                         template.autoPost
-                          ? 'bg-brand/15 text-brand'
+                          ? 'bg-action/10 text-action'
                           : 'bg-raised text-muted'
                       }`}
                     >
@@ -604,7 +604,7 @@ function Figure({ label, value, accent }: { label: string; value: string; accent
   return (
     <div>
       <p className="text-xs text-muted">{label}</p>
-      <p className={`tnum mt-0.5 text-xl font-semibold ${accent ? 'text-brand' : ''}`}>{value}</p>
+      <p className={`tnum mt-0.5 text-xl font-semibold ${accent ? 'text-action' : ''}`}>{value}</p>
     </div>
   )
 }
