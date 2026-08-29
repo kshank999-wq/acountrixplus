@@ -109,6 +109,7 @@ export type AuditAction =
   | 'expense.mark_billable'
   | 'retainer.receive'
   | 'retainer.apply'
+  | 'retainer.refund'
   // Attachments and accountant notes (spec §13, §18, Phase 20)
   | 'document.store'
   | 'document.attach'

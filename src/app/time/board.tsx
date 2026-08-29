@@ -7,6 +7,7 @@ import {
   billWorkAction,
   logTimeAction,
   receiveRetainerAction,
+  refundRetainerAction,
   submitTimeAction,
   writeOffTimeAction,
 } from '@/app/actions/timebilling'
@@ -524,6 +525,7 @@ export function TimeBoard({
       {canApprove && customers.length > 0 && banks.length > 0 && (
         <RetainerForm
           customers={customers}
+          retainers={retainers}
           banks={banks}
           homeCurrency={homeCurrency}
           currencies={currencies}
@@ -538,6 +540,7 @@ export function TimeBoard({
 
 function RetainerForm({
   customers,
+  retainers,
   banks,
   homeCurrency,
   currencies,
@@ -546,6 +549,7 @@ function RetainerForm({
   pending,
 }: {
   customers: Named[]
+  retainers: Retainer[]
   banks: Named[]
   homeCurrency: string
   currencies: string[]
@@ -559,6 +563,11 @@ function RetainerForm({
   const [amount, setAmount] = useState('')
   /** What the client actually sent (Phase 66). Home unless somebody says otherwise. */
   const [currency, setCurrency] = useState(homeCurrency)
+  /** Which retainer is being given back, and how much (Phase 67). */
+  const [refunding, setRefunding] = useState<string | null>(null)
+  const [refundAmount, setRefundAmount] = useState('')
+
+  const open_ = retainers.filter((retainer) => retainer.remainingCents > 0)
 
   return (
     <section className="card p-4">
@@ -651,6 +660,86 @@ function RetainerForm({
             Record retainer
           </button>
         </div>
+      )}
+
+      {/* Money still held. Phase 67: until now there was no way to give any of
+          it back, so an engagement that ended early left a liability nobody
+          could clear — Phase 49's lesson, that a balance with no way out
+          becomes wrong and stays wrong. */}
+      {open_.length > 0 && (
+        <ul className="mt-3 divide-y divide-line border-t border-line text-sm">
+          {open_.map((retainer) => (
+            <li key={retainer.id} className="py-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <div className="font-medium">{retainer.customerName}</div>
+                  <div className="text-xs text-muted">
+                    {formatCents(retainer.remainingCents, retainer.currency)} still held
+                  </div>
+                </div>
+                <button
+                  className="btn btn-ghost text-xs"
+                  onClick={() => {
+                    setRefunding((current) => (current === retainer.id ? null : retainer.id))
+                    setRefundAmount('')
+                  }}
+                >
+                  {refunding === retainer.id ? 'Never mind' : 'Give it back'}
+                </button>
+              </div>
+
+              {refunding === retainer.id && (
+                <div className="mt-2 flex flex-wrap items-end gap-3">
+                  <label className="text-xs text-muted">
+                    <span className="mb-1 block">Amount ({retainer.currency})</span>
+                    <input
+                      value={refundAmount}
+                      onChange={(event) => setRefundAmount(event.target.value)}
+                      placeholder="0.00"
+                      className="field py-1.5 text-sm"
+                    />
+                  </label>
+                  <label className="text-xs text-muted">
+                    <span className="mb-1 block">Out of</span>
+                    <select
+                      value={bankId}
+                      onChange={(event) => setBankId(event.target.value)}
+                      className="field py-1.5 text-sm"
+                    >
+                      {banks.map((bank) => (
+                        <option key={bank.id} value={bank.id}>
+                          {bank.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <button
+                    className="btn btn-primary"
+                    disabled={pending || !bankId || !refundAmount.trim()}
+                    onClick={() =>
+                      act(() =>
+                        refundRetainerAction({
+                          retainerId: retainer.id,
+                          amountCents: parseAmountToCents(refundAmount) ?? 0,
+                          financialAccountId: bankId,
+                          refundedOn: today,
+                        }),
+                      )
+                    }
+                  >
+                    Refund it
+                  </button>
+                  {/* The bank gives up today's worth; the liability leaves at
+                      what it was carried at. The gap is realised, not hidden. */}
+                  <p className="w-full text-xs text-muted">
+                    Paid at today’s rate. What is left of the liability goes at the rate it
+                    arrived at, and the difference is realised.
+                  </p>
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   )

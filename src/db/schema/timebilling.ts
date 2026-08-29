@@ -14,7 +14,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
-import { chartAccounts } from './accounting'
+import { chartAccounts, financialAccounts } from './accounting'
 import { journalEntries } from './ledger'
 import { projects } from './crm'
 import { serviceItems } from './studio'
@@ -363,5 +363,57 @@ export const retainerApplications = pgTable(
     retainerIdx: index('retainer_applications_retainer_idx').on(t.retainerId),
     invoiceIdx: index('retainer_applications_invoice_idx').on(t.invoiceId),
     amountPositive: check('retainer_applications_amount_positive', sql`${t.amountCents} > 0`),
+  }),
+)
+
+/**
+ * A retainer given back (Phase 67).
+ *
+ * The other end of a retainer, and the one that did not exist: money taken for
+ * work that is now not going to be done has to be returnable, or the liability
+ * on `2550 Client Retainers Held` is a number nobody can ever clear.
+ *
+ * Three amounts rather than one, because a foreign refund is three different
+ * facts: what the client got back in their money, what left the liability at
+ * the rate it has been carried at since it arrived, and what actually left the
+ * bank at the rate on the day. The difference between the last two is a
+ * realised exchange gain or loss and is posted as one.
+ */
+export const retainerRefunds = pgTable(
+  'retainer_refunds',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    retainerId: uuid('retainer_id')
+      .notNull()
+      .references(() => retainers.id, { onDelete: 'cascade' }),
+
+    /** What the client was given back, in the currency they gave it in. */
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /** What left the liability, at the rate the retainer is carried at. */
+    releasedCents: bigint('released_cents', { mode: 'number' }).notNull(),
+    /** What left the bank, at the rate on the day — what the statement will say. */
+    paidCents: bigint('paid_cents', { mode: 'number' }).notNull(),
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' })
+      .notNull()
+      .default(1_000_000),
+
+    refundedOn: date('refunded_on').notNull(),
+    reference: text('reference'),
+    financialAccountId: uuid('financial_account_id').references(() => financialAccounts.id, {
+      onDelete: 'set null',
+    }),
+    journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
+      onDelete: 'set null',
+    }),
+    createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    retainerIdx: index('retainer_refunds_retainer_idx').on(t.retainerId),
+    companyDateIdx: index('retainer_refunds_company_date_idx').on(t.companyId, t.refundedOn),
+    amountPositive: check('retainer_refunds_amount_positive', sql`${t.amountCents} > 0`),
   }),
 )

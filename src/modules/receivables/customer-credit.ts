@@ -5,6 +5,8 @@ import { recordAudit } from '@/modules/audit'
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { convert } from '@/modules/fx/rates'
+import { settleHeld } from '@/modules/fx/settlement'
+import { ensureFxAccount, rateFor } from '@/modules/fx/service'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -276,22 +278,48 @@ export async function refundCredit(
       use: 'refund',
       amountCents: input.amountCents,
       availableCents: payment.unappliedCents,
+      // In the money the customer sent, so a euro overpayment is refused in
+      // euro rather than as a bare number (Phase 67).
+      currency: payment.currency,
     })
     if (!permitted.ok) throw new DocumentError(permitted.why)
+
+    /**
+     * The three amounts a refund actually is (Phase 67).
+     *
+     * This posted `Dr held / Cr bank` at the **face amount** from Phase 53 until
+     * now, which was right while every holding was in the company's own money.
+     * Phase 62 let a receipt arrive in euro; Phase 65 taught the column below to
+     * carry what it was worth and left this entry alone. Refunding €500 posted
+     * 50000 to a dollar ledger and released 50000 of a liability carried at
+     * 54175 — leaving $41.75 of somebody else's money on the balance sheet for
+     * ever.
+     *
+     * `paidCents` uses the rate on the day the money leaves, because that is
+     * what the bank actually gives up and what the statement will say.
+     */
+    const { rateMillionths } = await rateFor(ctx, payment.currency, input.refundedOn, tx)
+    const paidCents = convert(input.amountCents, rateMillionths)
+
+    const release = relieveFunctional(
+      {
+        balanceCents: payment.unappliedCents,
+        exchangeRateMillionths: payment.exchangeRateMillionths,
+        functionalBalanceCents: payment.functionalUnappliedCents,
+      },
+      input.amountCents,
+    )
+    const settlement = settleHeld({
+      releasedCents: release.functionalCents,
+      relievedCents: paidCents,
+    })
 
     const claimed = await tx
       .update(payments)
       .set({
         unappliedCents: payment.unappliedCents - input.amountCents,
         // Refunding it releases the same functional share (Phase 65).
-        functionalUnappliedCents: relieveFunctional(
-          {
-            balanceCents: payment.unappliedCents,
-            exchangeRateMillionths: payment.exchangeRateMillionths,
-            functionalBalanceCents: payment.functionalUnappliedCents,
-          },
-          input.amountCents,
-        ).functionalBalanceCents,
+        functionalUnappliedCents: release.functionalBalanceCents,
       })
       .where(
         and(
@@ -334,9 +362,26 @@ export async function refundCredit(
         source: 'payment',
         sourceType: 'payment',
         sourceId: payment.id,
+        // The liability at what it was carried at, the bank at what actually
+        // left it, and the gap named where a gap belongs (Phase 67).
         lines: [
-          { chartAccountId: held.id, debitCents: input.amountCents },
-          { chartAccountId: account.chartAccountId, creditCents: input.amountCents },
+          { chartAccountId: held.id, debitCents: settlement.releasedCents },
+          { chartAccountId: account.chartAccountId, creditCents: paidCents },
+          ...(settlement.realisedCents === 0
+            ? []
+            : [
+                settlement.realisedCents > 0
+                  ? {
+                      chartAccountId: await ensureFxAccount(ctx, tx),
+                      creditCents: settlement.realisedCents,
+                      memo: 'Exchange gain',
+                    }
+                  : {
+                      chartAccountId: await ensureFxAccount(ctx, tx),
+                      debitCents: -settlement.realisedCents,
+                      memo: 'Exchange loss',
+                    },
+              ]),
         ],
       },
       tx,

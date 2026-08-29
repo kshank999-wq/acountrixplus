@@ -1,3 +1,5 @@
+import { formatCents } from '@/lib/money'
+
 /**
  * Money the customer sent that nothing was owed for (spec §13, §16).
  *
@@ -145,8 +147,19 @@ export function mayUse(input: {
   availableCents: number
   /** For an application: what the document still owes. */
   dueCents?: number
+  /**
+   * What money these amounts are (Phase 67).
+   *
+   * Optional, and omitting it prints the bare figures this refused with from
+   * Phase 53 until Phase 67 — "Only 8515.00 is held" — which was fine while
+   * every holding was in the company's own currency and became an unlabelled
+   * number the moment Phase 62 let a receipt arrive in euro.
+   */
+  currency?: string
 }): UseVerdict {
-  const { use, amountCents, availableCents, dueCents } = input
+  const { use, amountCents, availableCents, dueCents, currency } = input
+  const money = (cents: number) =>
+    currency ? formatCents(cents, currency) : (cents / 100).toFixed(2)
 
   if (!Number.isInteger(amountCents) || amountCents <= 0) {
     return { ok: false, why: 'That has to be for more than nothing.' }
@@ -155,9 +168,7 @@ export function mayUse(input: {
   if (amountCents > availableCents) {
     return {
       ok: false,
-      why:
-        `Only ${(availableCents / 100).toFixed(2)} is held for this customer, and that is ` +
-        `${(amountCents / 100).toFixed(2)}.`,
+      why: `Only ${money(availableCents)} is held for this customer, and that is ${money(amountCents)}.`,
     }
   }
 
@@ -170,7 +181,7 @@ export function mayUse(input: {
       return {
         ok: false,
         why:
-          `That document only owes ${(dueCents / 100).toFixed(2)}. Applying more would take it ` +
+          `That document only owes ${money(dueCents)}. Applying more would take it ` +
           'past settled and hide the difference.',
       }
     }

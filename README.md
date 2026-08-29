@@ -3060,6 +3060,55 @@ Cr Accounts Receivable                     $330.00
 the same $4.95 the unit test predicted. The picker reads **€8,515.00 left**,
 where before this phase it would have said `$8,515.00`.
 
+### The money you gave back at the wrong rate (Phase 67)
+
+Two halves of one rule, and ADR 0066 named both of them.
+
+**The operation that was missing.** A retainer could not be refunded — not in
+euro, not at all. Money taken before the work is done sits on `2550 Client
+Retainers Held` as somebody else's, and an engagement that ends with some of it
+unearned left a liability nobody could clear and a client owed money the product
+could not record returning. That is Phase 49's lesson again: a balance with no
+way out is not merely inconvenient, it is a number that becomes wrong and stays
+wrong.
+
+**The operation that was wrong.** `refundCredit`, built in Phase 53 for a
+customer's overpayment, posted the **face amount** on both legs with no
+conversion. That was right while every holding was in the company's own money.
+Phase 62 let a receipt arrive in euro and Phase 65 taught the column to carry
+what it was worth, and this entry was left behind — refunding a €500 overpayment
+put 50000 on a dollar ledger and released 50000 of a liability carried at 54175,
+stranding $41.75 of somebody else's money on the balance sheet for ever.
+
+Both are the same decision, and Phase 66 already made it. `settleHeld` takes the
+liability out at what it has been carried at, pays the bank what actually left,
+and realises the difference:
+
+- `releasedCents` from `relieveFunctional` on the holding, so the last refund
+  takes the whole remaining functional balance and the liability lands on zero;
+- `paidCents` from the rate on the day the money left, because that is what the
+  bank statement will say;
+- `realisedCents` the gap, so `released === relieved + realised` by construction.
+
+`retainer_refunds` keeps all three amounts and the rate. Storing only the face
+amount would be Phase 65's defect over again — a fact the code has and does not
+keep — and the reconciliation would have no way to tell $10,835.00 of liability
+from $11,000.00 of cash.
+
+`mayUse` has said *"Only 8515.00 is held"* since Phase 53. It now takes an
+optional currency, so callers that know the answer say it and every caller
+written before this phase keeps the sentence it had.
+
+Verified in the browser: the time screen listed **€8,215.00 still held** for
+Bremen Hafenbau GmbH, refused €99,000 with *"Only €8,215.00 is held for this
+customer"*, and returned €1,000 with
+
+> €1,000.00 returned to the client. €7,215.00 of the retainer is left. The rate
+> moved since it arrived, so $16.50 is a realised exchange loss.
+
+— the euro taken in at 1.0835 and given back at 1.10. `7100 Foreign Exchange Gain
+or Loss` moved by exactly that $16.50.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

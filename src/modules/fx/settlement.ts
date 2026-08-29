@@ -36,9 +36,11 @@
  * - **released** — what leaves the liability. The held money at the rate it was
  *   taken in at, because that is what the books have been carrying it at since
  *   the day it arrived.
- * - **relieved** — what leaves the control account. What the *document* was
- *   carried at, which `relieveFunctional` decides and this composes rather than
- *   re-deriving.
+ * - **relieved** — what leaves the other side. For a draw that is the control
+ *   account at what the *document* was carried at, which `relieveFunctional`
+ *   decides and this composes rather than re-deriving. For a refund (Phase 67)
+ *   it is the bank, at the rate on the day the money left — because that is
+ *   what the statement will say.
  * - **realised** — the difference. A real profit-and-loss event: between the
  *   day the money came in and the day it settled something, the rate moved.
  *   Not revenue, because nothing more was sold.

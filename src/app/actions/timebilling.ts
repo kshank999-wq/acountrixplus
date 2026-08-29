@@ -11,9 +11,10 @@ import {
   submitTime,
   writeOffTime,
 } from '@/modules/timebilling/service'
-import { billWork, receiveRetainer } from '@/modules/timebilling/billing'
+import { billWork, receiveRetainer, refundRetainer } from '@/modules/timebilling/billing'
 import { parseDuration } from '@/modules/timebilling/rates'
 import { messageFor } from '@/modules/errors'
+import { formatCents } from '@/lib/money'
 
 /** Server actions for the time and billing workspace (spec §5, Phase 15). */
 
@@ -177,6 +178,46 @@ const retainerSchema = z.object({
   financialAccountId: uuid,
   reference: z.string().trim().optional(),
 })
+
+const refundSchema = z.object({
+  retainerId: uuid,
+  amountCents: z.number().int().positive(),
+  financialAccountId: uuid,
+  refundedOn: isoDate,
+  reference: z.string().trim().optional(),
+})
+
+/**
+ * Gives a retainer back (Phase 67).
+ *
+ * The other end of `receiveRetainerAction`, and the one that did not exist —
+ * so a liability on `2550 Client Retainers Held` had no way to be cleared.
+ */
+export async function refundRetainerAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = refundSchema.parse(input)
+
+    const result = await refundRetainer(actor, {
+      retainerId: parsed.retainerId,
+      amountCents: parsed.amountCents,
+      financialAccountId: parsed.financialAccountId,
+      refundedOn: parsed.refundedOn,
+      reference: parsed.reference || undefined,
+    })
+
+    const realised =
+      result.realisedCents === 0
+        ? ''
+        : ` The rate moved since it arrived, so ${formatCents(Math.abs(result.realisedCents))} ` +
+          `is a realised exchange ${result.realisedCents > 0 ? 'gain' : 'loss'}.`
+
+    return (
+      `${formatCents(result.refundedCents, result.currency)} returned to the client. ` +
+      `${formatCents(result.remainingCents, result.currency)} of the retainer is left.${realised}`
+    )
+  })
+}
 
 export async function receiveRetainerAction(input: unknown): Promise<ActionResult> {
   return run(async () => {

@@ -6,6 +6,7 @@ import {
   invoices,
   projects,
   retainerApplications,
+  retainerRefunds,
   retainers,
   timeEntries,
   users,
@@ -22,6 +23,7 @@ import { rateForEntry } from './service'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { settleHeld } from '@/modules/fx/settlement'
 import { drawableAgainst } from '@/modules/fx/denomination'
+import { mayUse } from '@/modules/receivables/overpayment'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { DomainError } from '@/modules/errors'
 
@@ -818,4 +820,207 @@ export async function listRetainers(
       ),
     )
     .orderBy(desc(retainers.receivedOn))
+}
+
+/**
+ * Gives a retainer back (spec §5, Phase 67).
+ *
+ * ## Why this did not exist
+ *
+ * ADR 0066 recorded it: *"a retainer cannot be refunded in its own currency,
+ * because it cannot be refunded at all — there has never been a way to give one
+ * back."* An engagement that ends with money unearned left a balance on
+ * `2550 Client Retainers Held` that nothing could clear, and a client owed money
+ * the product could not record returning.
+ *
+ * That is Phase 49's lesson exactly, which found `applyVendorCredit` written
+ * since Phase 12 with no caller: **a balance with no way out becomes a wrong
+ * number and stays one.**
+ *
+ * ## The three amounts
+ *
+ * A refund of a foreign retainer is three different facts, and collapsing them
+ * is what Phase 53's `refundCredit` did wrong:
+ *
+ * - what the client gets back, in the money they sent — they are owed in theirs;
+ * - what leaves the liability, at the rate it has been carried at since it
+ *   arrived, because that is what the books have been saying it is worth;
+ * - what leaves the bank, at the rate on the day the money moves, because that
+ *   is what the statement will say and what the reconciliation needs.
+ *
+ * The difference between the last two is a realised exchange gain or loss —
+ * `settleHeld`'s rule, a third caller after the payment and the retainer draw.
+ */
+export async function refundRetainer(
+  ctx: ActorContext,
+  input: {
+    retainerId: string
+    /** In the retainer's own currency. */
+    amountCents: number
+    financialAccountId: string
+    refundedOn: string
+    reference?: string
+  },
+) {
+  requirePermission(ctx, 'accounting:journal')
+  await requireModule(ctx, 'time_billing')
+
+  return db.transaction(async (tx) => {
+    const [retainer] = await tx
+      .select()
+      .from(retainers)
+      .where(scoped(ctx, retainers, eq(retainers.id, input.retainerId)))
+      .limit(1)
+
+    if (!retainer) throw new DomainError('That retainer is not on these books.')
+
+    // Phase 53's verdict, borrowed rather than restated: held money has two
+    // ends, and neither may exceed what is held or be for nothing. It names the
+    // currency now (Phase 67), so a euro retainer is refused in euro.
+    const permitted = mayUse({
+      use: 'refund',
+      amountCents: input.amountCents,
+      availableCents: retainer.remainingCents,
+      currency: retainer.currency,
+    })
+    if (!permitted.ok) throw new DomainError(permitted.why)
+
+    const { financialAccounts } = await import('@/db/schema')
+    const [account] = await tx
+      .select()
+      .from(financialAccounts)
+      .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
+      .limit(1)
+
+    if (!account) throw new DomainError('That account is not on these books.')
+
+    /**
+     * What actually leaves the bank, at the rate on the day it leaves.
+     *
+     * Not the retainer's rate. The bank gives up today's dollars for today's
+     * euro, and a refund booked at the rate the money arrived at would put a
+     * figure on the cash account that the statement disagrees with — which is
+     * the reconciliation error Phase 53 built the whole overpayment split to
+     * avoid, in the other direction.
+     */
+    const { rateMillionths } = await rateFor(ctx, retainer.currency, input.refundedOn, tx)
+    const paidCents = convert(input.amountCents, rateMillionths)
+
+    // What leaves the liability, at what it has been carried at — and the last
+    // refund takes the whole functional remainder, so neither column strands a
+    // cent (Phase 66's rule, one operation over).
+    const release = relieveFunctional(
+      {
+        balanceCents: retainer.remainingCents,
+        exchangeRateMillionths: retainer.exchangeRateMillionths,
+        functionalBalanceCents: retainer.functionalRemainingCents,
+      },
+      input.amountCents,
+    )
+    const settlement = settleHeld({
+      releasedCents: release.functionalCents,
+      relievedCents: paidCents,
+    })
+
+    const heldAccount = await retainerAccount(ctx.companyId, tx)
+    const fxAccount =
+      settlement.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
+
+    const entry = await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.refundedOn,
+        memo: input.reference
+          ? `Retainer refunded — ${input.reference}`
+          : 'Retainer refunded',
+        source: 'manual',
+        sourceType: 'retainer_refund',
+        sourceId: retainer.id,
+        lines: [
+          { chartAccountId: heldAccount.id, debitCents: settlement.releasedCents },
+          { chartAccountId: account.chartAccountId, creditCents: paidCents },
+          ...(fxAccount
+            ? [
+                settlement.realisedCents > 0
+                  ? {
+                      chartAccountId: fxAccount,
+                      creditCents: settlement.realisedCents,
+                      memo: 'Exchange gain',
+                    }
+                  : {
+                      chartAccountId: fxAccount,
+                      debitCents: -settlement.realisedCents,
+                      memo: 'Exchange loss',
+                    },
+              ]
+            : []),
+        ],
+      },
+      tx,
+    )
+
+    await tx.insert(retainerRefunds).values({
+      companyId: ctx.companyId,
+      retainerId: retainer.id,
+      amountCents: input.amountCents,
+      releasedCents: settlement.releasedCents,
+      paidCents,
+      exchangeRateMillionths: rateMillionths,
+      refundedOn: input.refundedOn,
+      reference: input.reference ?? null,
+      financialAccountId: account.id,
+      journalEntryId: entry.id,
+      createdBy: ctx.userId,
+    })
+
+    /**
+     * Conditional on what was there when it was read, so two people refunding
+     * the same retainer at once produce one refund and the second finds
+     * nothing — the database arbitrates, as it does everywhere in this system
+     * two people can act at once.
+     */
+    const claimed = await tx
+      .update(retainers)
+      .set({
+        remainingCents: retainer.remainingCents - input.amountCents,
+        functionalRemainingCents: release.functionalBalanceCents,
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(retainers.id, retainer.id),
+          eq(retainers.remainingCents, retainer.remainingCents),
+        ),
+      )
+      .returning({ id: retainers.id })
+
+    if (claimed.length === 0) {
+      throw new DomainError('That retainer was drawn on by somebody else a moment ago.')
+    }
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'retainer.refund',
+        entityType: 'retainer',
+        entityId: retainer.id,
+        after: {
+          amountCents: input.amountCents,
+          currency: retainer.currency,
+          paidCents,
+          releasedCents: settlement.releasedCents,
+          realisedCents: settlement.realisedCents,
+        },
+      },
+      tx,
+    )
+
+    return {
+      refundedCents: input.amountCents,
+      currency: retainer.currency,
+      paidCents,
+      realisedCents: settlement.realisedCents,
+      remainingCents: retainer.remainingCents - input.amountCents,
+    }
+  })
 }
