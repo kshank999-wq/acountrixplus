@@ -2820,6 +2820,55 @@ And the nominated one: the chase floor is set in the company's currency, so
 comparing an invoice's face value against it chased or spared foreign invoices on
 the wrong number.
 
+### The money that did not know its own currency (Phase 62)
+
+ADR 0061 hit a wall it could not get past, and said so: *"nothing on the payment
+records which currency that receipt was in."*
+
+That was true, and it was not inevitable. `recordPayment` has done this on every
+payment since Phase 35:
+
+```ts
+const paymentCurrency = await documentCurrency(ctx, input.kind, input.applications)
+const paymentRateMillionths = (await rateFor(ctx, paymentCurrency, ...)).rateMillionths
+```
+
+— known at the moment the row was written, used once, and **thrown away**. It is
+the third time this project has found the same shape: Phase 55's `sent_at`
+written by nothing, Phase 59's `paid` list discarded by a `catch`, and now this.
+A fact the code has and does not keep.
+
+The cost lands on `unapplied_cents` — money a customer overpaid — which five
+queries sum across a party's receipts and read as the company's own money. A
+customer who overpaid a €4,000 invoice by €500 was recorded as holding **$500**,
+and told so on a statement.
+
+So the payment keeps its currency now, backfilled from the documents each one
+settled. **Netting follows**: `netByCurrency` composes Phase 54's `netPosition`
+once per currency, so a euro credit meets a euro invoice and a dollar credit does
+not — which is what the customer has already done in their own ledger.
+
+Verified through the real path in the browser: recorded €3,000 against Bremen's
+€2,500 euro invoice, confirmed the payment stored `EUR`, and opened the
+customer's own statement link, which now reads
+
+> Held for you **−€500.00** · Amount due **€0.00**
+
+where it said `−$500.00`. The positions are frozen into the saved statement
+alongside the held total, because the total alone cannot say which currency it
+was in and Phase 55's rule is that a statement keeps saying what it said.
+
+It also removes a second answer: `remittance-send.ts` derived a payment's
+currency again as `bills[0]?.currency ?? company.currency`, agreeing with
+`documentCurrency` by luck rather than by construction. Both go through one
+function now, and the advice reads the stored fact.
+
+**Two of the five, honestly.** Knowing the currency fixes the places that net a
+credit against a *particular* balance. The customers screen, the statement run's
+floor and the statements picker want one comparable figure across every currency
+a party holds — that needs the payment's rate as well, and half-doing it would
+put a converted number beside an unconverted one.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

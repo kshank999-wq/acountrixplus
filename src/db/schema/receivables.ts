@@ -509,6 +509,21 @@ export const payments = pgTable(
     paymentDate: date('payment_date').notNull(),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     /**
+     * The currency `amountCents` is in (Phase 62).
+     *
+     * The currency of the documents this payment settled — which is what
+     * `recordPayment` has worked out on every payment since Phase 35, used to
+     * fetch the rate, and then **thrown away**. The company's own currency for
+     * a payment on account, which settles nothing and so has no document to
+     * read one from.
+     *
+     * Kept because `unappliedCents` is money held for somebody, and five
+     * separate queries sum it across a party's receipts. Without this, a
+     * customer who overpaid a €4,000 invoice by €500 was recorded as holding
+     * $500.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /**
      * The bank account the money moved through.
      *
      * Null since Phase 12 means the receipt is **undeposited**: the money has

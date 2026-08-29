@@ -20,6 +20,11 @@ import {
   homeCurrencyOwed,
   type CurrencyBalance,
 } from './statement-currency'
+import {
+  heldByCurrency,
+  netByCurrency,
+  type CurrencyPosition,
+} from './settlement-currency'
 import { agingBucket } from '@/modules/ledger/reports'
 
 /**
@@ -109,6 +114,15 @@ export type CustomerStatement = {
    * they owed "$5,200.00".
    */
   currencyBalances: CurrencyBalance[]
+  /**
+   * What is due in each currency, once the credit held **in that currency** is
+   * set against it (Phase 62).
+   *
+   * ADR 0061 could only net against the home-currency balance, because a
+   * receipt carried no currency. It does now, so a euro credit meets a euro
+   * invoice and a dollar credit does not.
+   */
+  positions: CurrencyPosition[]
   /**
    * What to say about a balance the net-position sentence did not cover, or
    * null when there is none.
@@ -229,8 +243,14 @@ export async function buildStatement(
    * in August did not reduce what was due on the June statement, and counting
    * it would net a credit against invoices it had not yet met.
    */
-  const [heldRow] = await db
-    .select({ total: sql<string>`coalesce(sum(${payments.unappliedCents}), 0)` })
+  const heldRows = await db
+    .select({
+      // Grouped by the currency the receipt was actually in (Phase 62). This
+      // used to be one `sum()` read as the company's own money, so a customer
+      // who overpaid a €4,000 invoice by €500 was holding "$500".
+      currency: payments.currency,
+      total: sql<string>`coalesce(sum(${payments.unappliedCents}), 0)`,
+    })
     .from(payments)
     .where(
       scoped(
@@ -241,8 +261,11 @@ export async function buildStatement(
         lte(payments.paymentDate, input.asOfDate),
       ),
     )
+    .groupBy(payments.currency)
 
-  const heldCreditCents = Number(heldRow?.total ?? 0)
+  const held = heldByCurrency(
+    heldRows.map((row) => ({ currency: row.currency, unappliedCents: Number(row.total) })),
+  )
 
   const [company] = await db
     .select({ currency: companies.currency })
@@ -278,18 +301,31 @@ export async function buildStatement(
   const currencyBalances = balancesByCurrency(open)
 
   /**
-   * Phase 54's netting, against the home-currency balance alone.
+   * Phase 54's netting, now done once per currency (Phase 62).
    *
-   * `payments.unapplied_cents` is what a receipt had left over, and nothing on
-   * the payment records which currency that receipt was in — so the only
-   * currency it can safely be read as is the company's own. Setting a dollar
-   * credit against a euro invoice would be this phase's own defect committed
-   * one level up: it would tell a customer that money held in one currency has
-   * discharged a demand in another. It has not.
+   * ADR 0061 could only net against the home-currency balance, because a
+   * receipt carried no currency and the credit's was genuinely unknowable. It
+   * is known now, so a euro credit is set against the euro balance and a
+   * dollar credit is not — which is what a customer would do with their own
+   * ledger, and what they will expect the statement to have done.
    */
+  const positions = netByCurrency(
+    currencyBalances.map((row) => ({
+      currency: row.currency,
+      balanceCents: row.balanceCents,
+    })),
+    held,
+  )
+
+  /**
+   * The headline figures stay in the company's currency, because they are sums
+   * across currencies and can be in no other. What to actually pay, per
+   * currency, is `positions`.
+   */
+  const heldCreditCents = held.reduce((sum, row) => sum + row.heldCents, 0)
   const position = netPosition({
     owedCents: homeCurrencyOwed(currencyBalances, homeCurrency),
-    heldCents: heldCreditCents,
+    heldCents: held.find((row) => row.currency === homeCurrency)?.heldCents ?? 0,
   })
 
   const foreignNote = foreignBalanceNote(currencyBalances, homeCurrency)
@@ -308,6 +344,7 @@ export async function buildStatement(
     ourDebtCents: position.ourDebtCents,
     currency: homeCurrency,
     currencyBalances,
+    positions,
     positionNote: describeNet(position, homeCurrency),
     /**
      * Said beneath the sentence above, because Phase 54's sentence covers the
@@ -529,6 +566,14 @@ export async function saveStatement(
           dueCents: statement.dueCents,
           ourDebtCents: statement.ourDebtCents,
           positionNote: statement.positionNote,
+          /**
+           * Frozen too (Phase 62), for the reason the figures above are: a
+           * statement that told a customer €500 was being held has to keep
+           * saying €500, and the held total alone cannot say which currency.
+           * Absent on every statement frozen before this phase, which read as
+           * the company's own currency and still does.
+           */
+          positions: statement.positions,
         },
         // `sentTo` and `sentAt` are deliberately not set here — see above.
         createdBy: ctx.userId,

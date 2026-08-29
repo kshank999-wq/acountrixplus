@@ -372,6 +372,13 @@
       "when": 1788180000000,
       "tag": "0052_phase59_pay_runs",
       "breakpoints": true
+    },
+    {
+      "idx": 53,
+      "version": "7",
+      "when": 1788200000000,
+      "tag": "0053_phase62_payment_currency",
+      "breakpoints": true
     }
   ]
 }

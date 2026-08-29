@@ -73,6 +73,16 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
   const heldCredit = db
     .select({
       customerId: payments.customerId,
+      /**
+       * Grouped by the currency the receipt was in (Phase 62).
+       *
+       * A credit only stops a chase if it could actually settle the invoice
+       * being chased, and money held in dollars settles nothing denominated in
+       * euro. Before the payment kept its currency this was one sum read as
+       * the company's own money, so a euro overpayment silenced a dollar chase
+       * and a dollar overpayment silenced a euro one.
+       */
+      currency: payments.currency,
       heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
     })
     .from(payments)
@@ -83,7 +93,7 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
         gt(payments.unappliedCents, 0),
       ),
     )
-    .groupBy(payments.customerId)
+    .groupBy(payments.customerId, payments.currency)
     .as('held_credit')
 
   const rows = await db
@@ -107,7 +117,15 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
     .from(invoices)
     .innerJoin(customers, eq(customers.id, invoices.customerId))
     .leftJoin(lastPayment, eq(lastPayment.invoiceId, invoices.id))
-    .leftJoin(heldCredit, eq(heldCredit.customerId, invoices.customerId))
+    // Joined on the currency too: only credit that could settle *this* invoice
+    // is a reason not to chase it (Phase 62).
+    .leftJoin(
+      heldCredit,
+      and(
+        eq(heldCredit.customerId, invoices.customerId),
+        eq(heldCredit.currency, invoices.currency),
+      ),
+    )
     .where(
       and(
         eq(invoices.companyId, companyId),

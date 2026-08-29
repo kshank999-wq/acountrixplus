@@ -72,6 +72,8 @@ export type StatementSendResult = {
   error: string | null
 }
 
+import type { CurrencyPosition } from './settlement-currency'
+
 /** The shape `figures` is written in by `saveStatement`. */
 type FrozenFigures = {
   lines?: StatementLineFacts[]
@@ -79,6 +81,8 @@ type FrozenFigures = {
   dueCents?: number
   ourDebtCents?: number
   positionNote?: string | null
+  /** Per currency, since Phase 62. Absent on anything frozen before it. */
+  positions?: CurrencyPosition[]
 }
 
 async function loadStatement(ctx: ActorContext, statementId: string) {
@@ -114,6 +118,7 @@ function viewOf(row: Awaited<ReturnType<typeof loadStatement>>): CustomerFacingS
       heldCreditCents: figures.heldCreditCents,
       dueCents: figures.dueCents,
       positionNote: figures.positionNote,
+      positions: figures.positions,
       sentAt: row.statement.sentAt,
       sendCount: row.statement.sendCount,
     },

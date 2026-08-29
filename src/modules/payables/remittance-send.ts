@@ -119,14 +119,15 @@ function viewOf(
       paymentDate: row.payment.paymentDate,
       amountCents: row.payment.amountCents,
       /**
-       * A payment carries no currency of its own: the amount is in the currency
-       * of the documents it settles, which is what the *supplier* invoiced in
-       * and therefore what they need to read. One payment settles bills of one
-       * currency, because allocation works in document amounts (Phase 41). With
-       * nothing applied — a payment on account — the company's own currency is
-       * the only answer available.
+       * Read from the payment, since Phase 62 (it kept the currency it had
+       * always known).
+       *
+       * This used to derive it again here as `bills[0]?.currency ?? company`,
+       * which is the same rule `documentCurrency` applies when the payment is
+       * recorded — two answers to one question, agreeing today with nothing
+       * making them keep agreeing.
        */
-      currency: bills[0]?.currency ?? row.company.currency,
+      currency: row.payment.currency,
       reference: row.payment.reference,
       voidedAt: row.payment.voidedAt,
       voidReason: row.payment.voidReason,

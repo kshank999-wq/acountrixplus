@@ -27,6 +27,7 @@ import { recordEvent } from '@/modules/worker/outbox'
 import { formatCents } from '@/lib/money'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { splitReceipt } from './overpayment'
+import { settlementCurrency } from './settlement-currency'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { CUSTOMER_FIELDS, VENDOR_FIELDS, diffParty } from '@/modules/parties/changes'
 import {
@@ -1231,6 +1232,15 @@ export async function recordPayment(
         reference: input.reference ?? null,
         memo: input.memo ?? null,
         payRunId: input.payRunId ?? null,
+        /**
+         * Kept, at last (Phase 62).
+         *
+         * This has been computed on every payment since Phase 35 to fetch the
+         * rate, and thrown away. Five queries then summed `unappliedCents`
+         * across a party's receipts as though every one of them were in the
+         * company's own money.
+         */
+        currency: paymentCurrency,
       })
       .returning()
 
@@ -1409,14 +1419,16 @@ async function documentCurrency(
     .from(table)
     .where(and(eq(table.companyId, ctx.companyId), inArray(table.id, ids)))
 
-  if (rows.length > 1) {
-    throw new DocumentError(
-      `That payment settles documents in ${rows.map((row) => row.currency).join(' and ')}. ` +
-        'Record one payment per currency — there is no single amount of money that arrived.',
-    )
-  }
+  // One rule, shared with `remittance-send.ts`, which decided this again as
+  // `bills[0]?.currency ?? company.currency` (Phase 62).
+  const verdict = settlementCurrency({
+    documentCurrencies: rows.map((row) => row.currency),
+    homeCurrency: await functionalCurrency(ctx.companyId),
+  })
 
-  return rows[0]?.currency ?? (await functionalCurrency(ctx.companyId))
+  if (!verdict.ok) throw new DocumentError(verdict.reason)
+
+  return verdict.currency
 }
 
 async function applyToDocument(

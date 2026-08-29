@@ -181,26 +181,47 @@ export default async function PublicStatementPage({
             (Phase 54). Showing only the net would leave them unable to tie the
             document to their own records.
           */}
-          {view.heldCreditCents > 0 && (
-            <>
-              <tr>
-                <td colSpan={4} className="py-1.5 pr-3 text-right text-muted">
-                  Held for you
-                </td>
-                <td className="tnum py-1.5 text-right text-success">
-                  −{formatCents(view.heldCreditCents, view.currency)}
-                </td>
-              </tr>
-              <tr className="border-t border-line">
+          {/*
+            Per currency since Phase 62, because a receipt now keeps the
+            currency it was in. This used to print "−$500.00" against a €500
+            overpayment: the right number with the wrong money on it.
+          */}
+          {(view.positions.length > 0
+            ? view.positions.filter((row) => row.heldCents > 0)
+            : view.heldCreditCents > 0
+              ? [{ currency: view.currency, heldCents: view.heldCreditCents, dueCents: view.dueCents }]
+              : []
+          ).map((position) => (
+            <tr key={`held-${position.currency}`}>
+              <td colSpan={4} className="py-1.5 pr-3 text-right text-muted">
+                Held for you
+                {view.positions.length > 1 && (
+                  <span className="text-faint"> in {position.currency}</span>
+                )}
+              </td>
+              <td className="tnum py-1.5 text-right text-success">
+                −{formatCents(position.heldCents, position.currency)}
+              </td>
+            </tr>
+          ))}
+          {/* What to actually send, per currency, once credit is set off. */}
+          {view.heldCreditCents > 0 &&
+            (view.positions.length > 0
+              ? view.positions
+              : [{ currency: view.currency, dueCents: view.dueCents }]
+            ).map((position) => (
+              <tr key={`due-${position.currency}`} className="border-t border-line">
                 <td colSpan={4} className="py-2 pr-3 text-right font-medium">
                   Amount due
+                  {view.positions.length > 1 && (
+                    <span className="text-muted"> in {position.currency}</span>
+                  )}
                 </td>
                 <td className="tnum py-2 text-right font-semibold">
-                  {formatCents(view.dueCents, view.currency)}
+                  {formatCents(position.dueCents, position.currency)}
                 </td>
               </tr>
-            </>
-          )}
+            ))}
         </tfoot>
       </table>
 

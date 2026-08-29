@@ -51,6 +51,7 @@ import {
   foreignBalanceNote,
   type CurrencyBalance,
 } from './statement-currency'
+import type { CurrencyPosition } from './settlement-currency'
 
 /** A statement row, as much of it as this module is willing to look at. */
 export type StatementFacts = {
@@ -63,6 +64,12 @@ export type StatementFacts = {
   heldCreditCents?: number
   dueCents?: number
   positionNote?: string | null
+  /**
+   * What was due in each currency, frozen (Phase 62). Absent on a statement
+   * saved before it, which claimed one figure in the company's own currency
+   * and still does.
+   */
+  positions?: CurrencyPosition[]
   sentAt: Date | null
   sendCount: number
 }
@@ -123,6 +130,11 @@ export type CustomerFacingStatement = {
    * `closingBalanceCents` above is a company-currency sum rather than a demand.
    */
   currencyBalances: CurrencyBalance[]
+  /**
+   * What is due in each currency once the credit held **in that currency** is
+   * set against it (Phase 62). Empty on a statement frozen before then.
+   */
+  positions: CurrencyPosition[]
   /** What to say about a balance Phase 54's sentence did not cover. */
   foreignNote: string | null
   customerName: string
@@ -182,6 +194,7 @@ export function customerFacingStatement(input: {
     dueCents: statement.dueCents ?? Math.max(0, statement.closingBalanceCents),
     positionNote: statement.positionNote ?? null,
     currencyBalances,
+    positions: statement.positions ?? [],
     foreignNote: foreignBalanceNote(currencyBalances, input.currency),
     customerName: input.customer.name,
     company: input.company,
