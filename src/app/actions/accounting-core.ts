@@ -27,6 +27,7 @@ import {
   createVendorCredit,
   refundVendorCredit,
 } from '@/modules/receivables/vendor-credits'
+import { voidRefund } from '@/modules/receivables/refund-voiding'
 import { formatCents } from '@/lib/money'
 import { DomainError, messageFor } from '@/modules/errors'
 
@@ -394,6 +395,28 @@ export async function applyVendorCreditAction(input: unknown): Promise<ActionRes
 
     const result = await applyVendorCredit(actor, parsed)
     return `Applied. ${result.creditRemainingCents === 0 ? 'The credit is used up.' : 'Some credit is still available.'}`
+  })
+}
+
+/**
+ * Takes any of the three refunds back (Phase 69).
+ *
+ * One action, because there is one operation — the payoff of Phase 68
+ * collapsing three records into one table.
+ */
+export async function voidRefundAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({ refundId: uuid, reason: z.string().trim().optional() })
+      .parse(input)
+
+    const result = await voidRefund(actor, {
+      refundId: parsed.refundId,
+      reason: parsed.reason || undefined,
+    })
+
+    return result.message
   })
 }
 

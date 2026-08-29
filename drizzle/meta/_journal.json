@@ -414,6 +414,13 @@
       "when": 1788300000000,
       "tag": "0058_phase68_refunds",
       "breakpoints": true
+    },
+    {
+      "idx": 59,
+      "version": "7",
+      "when": 1788320000000,
+      "tag": "0059_phase69_refund_void",
+      "breakpoints": true
     }
   ]
 }

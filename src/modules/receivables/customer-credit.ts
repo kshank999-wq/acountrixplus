@@ -408,6 +408,7 @@ export async function refundCredit(
       subjectId: payment.id,
       direction: 'out',
       amountCents: input.amountCents,
+      currency: payment.currency,
       carriedCents: settlement.releasedCents,
       cashCents: paidCents,
       realisedCents: settlement.realisedCents,

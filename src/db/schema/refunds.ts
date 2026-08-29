@@ -60,6 +60,15 @@ export const refunds = pgTable(
 
     /** In the other party's currency. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /**
+     * What money `amountCents` is (Phase 69).
+     *
+     * Phase 68 wrote "in the other party's currency" and did not keep it, so
+     * every reader had to join back to the subject to find out — Phase 65's
+     * defect a fifth time, noticed the moment a reversal had to print the
+     * figure back to somebody.
+     */
+    currency: text('currency').notNull().default('USD'),
     /** Functional, off the balance being cleared, at its carried rate. */
     carriedCents: bigint('carried_cents', { mode: 'number' }).notNull(),
     /** Functional, through the bank, at the rate on the day. */
@@ -80,10 +89,25 @@ export const refunds = pgTable(
     }),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+
+    /**
+     * Taken back (Phase 69).
+     *
+     * Marked rather than deleted, for the reason Phase 52 gave when it voided
+     * payments: the row is the record of what somebody did, and readers exclude
+     * it instead of losing the history.
+     *
+     * No reversing-entry column: `voidJournalEntry` marks the original entry
+     * void and balance queries filter on posted, which is the ledger's way
+     * since Phase 2. `journalEntryId` above already names it.
+     */
+    voidedAt: timestamp('voided_at', { withTimezone: true }),
+    voidedBy: uuid('voided_by').references(() => users.id, { onDelete: 'set null' }),
   },
   (t) => ({
     subjectIdx: index('refunds_subject_idx').on(t.subjectType, t.subjectId),
     companyDateIdx: index('refunds_company_date_idx').on(t.companyId, t.refundedOn),
+    openIdx: index('refunds_open_idx').on(t.companyId, t.voidedAt),
     amountPositive: check('refunds_amount_positive', sql`${t.amountCents} > 0`),
     subjectKnown: check(
       'refunds_subject_known',

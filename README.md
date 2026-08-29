@@ -3163,6 +3163,52 @@ for this supplier"*, and recovered €500 with
 `refunds` now holds both directions side by side — the retainer at `-1650` and
 the recoveries at `+825`, on the same rate movement.
 
+### The refund you could not take back (Phase 69)
+
+ADR 0068 named it: Phase 52 taught payments to unwind, and none of the three
+refunds could. A refund is the easiest thing in this system to key wrongly — it
+is entered from a bank line, in somebody else's currency, on a day somebody
+chooses — and €500 typed as €5,000 was **permanent**. The balance showed spent,
+the ledger showed the money gone, and the only move left was a hand-posted
+journal that fixed the ledger and left `refunds` still claiming it happened.
+
+**A reversal looks nothing up.** This is the decision, and it is a refusal. A
+reversal is not a new economic event: it does not say "the money came back today
+at today's rate", it says *the refund did not happen*. So `reversalOf` puts back
+exactly the three amounts the row already carries and takes no rate argument at
+all.
+
+That is only possible because Phase 68 **stored** `carried`, `cash` and
+`realised` rather than deriving them. A reversal that had to re-derive would need
+the rate on the original day, would round independently, and would leave a few
+cents of permanent noise in `7100` every time somebody corrected a typo. The
+column that looked like redundancy one phase ago is what makes the correction
+exact.
+
+**One function for three refunds**, which is the payoff of Phase 68 collapsing
+three records into one table. A retainer given back, an overpayment returned and
+a supplier's credit recovered are three operations to *record* and one to *undo*
+— put the balance back, put the functional half back, void the entry, unwind the
+gap. Written three times it would be three places for the sign to drift.
+
+**The ledger half is a void, not a mirror.** The first draft of the schema had a
+`void_entry_id` for a reversing entry; that would have given the books two
+answers to whether the refund happened. `voidJournalEntry` marks the original
+entry void and balance queries filter on posted — the ledger's way since Phase 2.
+
+`refunds` also gains the `currency` it always knew and threw away: Phase 65's
+defect a fifth time, noticed the moment a reversal had to print the figure back
+to somebody.
+
+Verified in the browser: the credits screen listed the €500.00 recovery against
+Vendor credit VC-1004 with its $8.25 gain, and undoing it said
+
+> Refund taken back. €500.00 is available again. The $8.25 exchange gain it
+> realised is unwound.
+
+`7100` went from $132.00 credit to $123.75 — that $8.25 and nothing else — and
+the credit went back to €1,000.00 face / $1,083.50 functional, open again.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

@@ -968,6 +968,7 @@ export async function refundRetainer(
       subjectId: retainer.id,
       direction: 'out',
       amountCents: input.amountCents,
+      currency: retainer.currency,
       carriedCents: settlement.releasedCents,
       cashCents: paidCents,
       realisedCents: settlement.realisedCents,

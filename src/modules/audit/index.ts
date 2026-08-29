@@ -234,6 +234,8 @@ export type AuditAction =
   | 'vendor_credit.create'
   | 'vendor_credit.apply'
   | 'vendor_credit.refund'
+  // Taking any of the three refunds back (Phase 69)
+  | 'refund.void'
   // CRM and proposals (spec §6, §9)
   | 'organization.create'
   | 'organization.update'

@@ -589,6 +589,7 @@ export async function refundVendorCredit(
       // the whole reason the column exists.
       direction: 'in',
       amountCents: input.amountCents,
+      currency: note.currency,
       carriedCents: recovery.relievedCents,
       cashCents: recovery.receivedCents,
       realisedCents: recovery.realisedCents,

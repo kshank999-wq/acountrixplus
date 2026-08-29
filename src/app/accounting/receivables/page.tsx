@@ -4,6 +4,7 @@ import { AppShell, SubNav } from '@/components/app-shell'
 import { badDebtSummary, listCreditNotes, listWriteOffs } from '@/modules/receivables/credits'
 import { customersWithBalances, listStatements } from '@/modules/receivables/statements'
 import { listVendorCredits } from '@/modules/receivables/vendor-credits'
+import { listRefunds } from '@/modules/receivables/refund-voiding'
 import { listBills, listInvoices, listVendors } from '@/modules/receivables/service'
 import { remittanceAccounts } from '@/modules/payroll/remittance'
 import { ACCOUNTING_NAV } from '../nav'
@@ -48,6 +49,7 @@ export default async function ReceivablesPage() {
     vendorCredits,
     vendors,
     openBills,
+    refunds,
   ] = await Promise.all([
     listCreditNotes(actor, { limit: 25 }),
     listWriteOffs(actor, { limit: 25 }),
@@ -68,6 +70,9 @@ export default async function ReceivablesPage() {
     listVendorCredits(actor, { limit: 25 }),
     listVendors(actor),
     listBills(actor, { limit: 100 }),
+    // Money handed back, either way (Phase 69). Recorded from three screens
+    // and, until now, visible from none — the gap Phase 52 closed for payments.
+    listRefunds(actor, { limit: 25 }),
   ])
 
   return (
@@ -163,6 +168,18 @@ export default async function ReceivablesPage() {
             balanceCents: row.balanceCents,
             dueDate: row.dueDate,
           }))}
+        refunds={refunds.map((row) => ({
+          id: row.id,
+          subjectType: row.subjectType,
+          subjectLabel: row.subjectLabel,
+          direction: row.direction,
+          refundedOn: row.refundedOn,
+          amountCents: row.amountCents,
+          currency: row.currency,
+          realisedCents: row.realisedCents,
+          voidedAt: row.voidedAt,
+          reference: row.reference,
+        }))}
         canManage={can(actor, 'accounting:journal')}
       />
     </AppShell>

@@ -7,6 +7,7 @@ import {
   createCreditNoteAction,
   createVendorCreditAction,
   refundVendorCreditAction,
+  voidRefundAction,
   recoverWriteOffAction,
   saveStatementAction,
   sendStatementAction,
@@ -100,6 +101,20 @@ type VendorCredit = {
   reason: string | null
 }
 
+type RefundRow = {
+  id: string
+  subjectType: 'retainer' | 'payment' | 'credit_note'
+  /** What the money went back into — a credit's number, or a plain phrase. */
+  subjectLabel: string
+  direction: 'out' | 'in'
+  refundedOn: string
+  amountCents: number
+  currency: string
+  realisedCents: number
+  voidedAt: string | null
+  reference: string | null
+}
+
 type OpenBill = {
   id: string
   number: string
@@ -130,6 +145,7 @@ export function ReceivablesBoard({
   vendorCredits,
   vendors,
   openBills,
+  refunds,
   canManage,
 }: {
   badDebt: { count: number; writtenOffCents: number; recoveredCents: number; netCents: number }
@@ -142,6 +158,7 @@ export function ReceivablesBoard({
   vendorCredits: VendorCredit[]
   vendors: Array<{ id: string; name: string }>
   openBills: OpenBill[]
+  refunds: RefundRow[]
   canManage: boolean
 }) {
   const router = useRouter()
@@ -162,6 +179,9 @@ export function ReceivablesBoard({
   const [vendorCreditDate, setVendorCreditDate] = useState(new Date().toISOString().slice(0, 10))
   const [vendorReason, setVendorReason] = useState('')
 
+  /** Which refund is being taken back (Phase 69). */
+  const [unwinding, setUnwinding] = useState<string | null>(null)
+
   const [recovering, setRecovering] = useState<string | null>(null)
   const [recoveryAmount, setRecoveryAmount] = useState('')
   const [recoveryBank, setRecoveryBank] = useState(banks[0]?.id ?? '')
@@ -178,6 +198,7 @@ export function ReceivablesBoard({
         setInvoiceId('')
         setReason('')
         setRecovering(null)
+        setUnwinding(null)
         router.refresh()
       }
     })
@@ -823,6 +844,103 @@ export function ReceivablesBoard({
           chasing is a judgement about whether the obligation is really gone, not a bookkeeping
           operation — so it stays a manual journal entry.
         </p>
+      </Card>
+
+      {/* Phase 69. Refunds were recorded from three screens and visible from
+          none, so "did that €500 go back twice?" was a question with nothing
+          behind it — the gap Phase 52 closed for payments. */}
+      <Card
+        title="Money handed back"
+        subtitle="Refunds and recoveries, either direction. Taking one back puts the balance and its exchange movement exactly where they were — nothing is recomputed."
+      >
+        {refunds.length === 0 ? (
+          <Empty>Nothing has been refunded or recovered.</Empty>
+        ) : (
+          <table className="w-full text-sm">
+            <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="px-4 py-2 font-medium">Date</th>
+                <th className="px-4 py-2 font-medium">Against</th>
+                <th className="px-4 py-2 font-medium">Which way</th>
+                <th className="px-4 py-2 text-right font-medium">Amount</th>
+                <th className="px-4 py-2 text-right font-medium">Realised</th>
+                {canManage && <th className="px-4 py-2" />}
+              </tr>
+            </thead>
+            <tbody>
+              {refunds.map((row) => (
+                <Fragment key={row.id}>
+                  <tr className={`border-t border-line ${row.voidedAt ? 'text-faint' : ''}`}>
+                    <td className="px-4 py-1.5 text-muted">{row.refundedOn}</td>
+                    <td className="px-4 py-1.5 font-medium">{row.subjectLabel}</td>
+                    <td className="px-4 py-1.5 text-muted">
+                      {row.direction === 'out' ? 'We paid it back' : 'We got it back'}
+                      {row.voidedAt && ' · taken back'}
+                    </td>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(row.amountCents, row.currency)}
+                    </td>
+                    <td
+                      className={`tnum px-4 py-1.5 text-right ${
+                        row.voidedAt || row.realisedCents === 0
+                          ? ''
+                          : row.realisedCents > 0
+                            ? 'text-positive'
+                            : 'text-negative'
+                      }`}
+                    >
+                      {row.realisedCents === 0 ? '—' : formatCents(row.realisedCents)}
+                    </td>
+                    {canManage && (
+                      <td className="px-4 py-1.5 text-right">
+                        {!row.voidedAt && (
+                          <button
+                            className="btn btn-ghost text-xs"
+                            onClick={() =>
+                              setUnwinding((current) => (current === row.id ? null : row.id))
+                            }
+                          >
+                            {unwinding === row.id ? 'Never mind' : 'Undo it'}
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+
+                  {unwinding === row.id && (
+                    <tr className="border-t border-line bg-raised/40">
+                      <td colSpan={6} className="px-4 py-3">
+                        <div className="sticky left-0 flex max-w-[calc(100vw-3rem)] flex-wrap items-center gap-3">
+                          {/* The label is a document number as often as a
+                              phrase, so it leads the sentence rather than being
+                              lower-cased into "vc-1004". */}
+                          <p className="text-xs text-muted">
+                            {row.subjectLabel} gets{' '}
+                            {formatCents(row.amountCents, row.currency)} back, the entry is
+                            voided, and the{' '}
+                            {row.realisedCents === 0
+                              ? 'books return to where they were'
+                              : `${formatCents(Math.abs(row.realisedCents))} exchange ${
+                                  row.realisedCents > 0 ? 'gain' : 'loss'
+                                } unwinds`}
+                            .
+                          </p>
+                          <button
+                            className="btn btn-primary"
+                            disabled={pending}
+                            onClick={() => act(() => voidRefundAction({ refundId: row.id }))}
+                          >
+                            Take it back
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        )}
       </Card>
 
       {vendors.length === 0 && null}
