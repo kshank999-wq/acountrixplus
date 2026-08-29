@@ -182,7 +182,17 @@ export async function approveBill(
  * and would leave a paid bill reading as though it was never authorised — which
  * is a worse record than the truth.
  */
-export async function withdrawApproval(ctx: ActorContext, billId: string): Promise<string> {
+export async function withdrawApproval(
+  ctx: ActorContext,
+  billId: string,
+  /**
+   * Optional (Phase 70). Withdrawing an approval posts nothing and the bill can
+   * be approved again a minute later, so `corrections/vocabulary` puts this on
+   * the "need not say why" side of the rule — but a reason given anyway is
+   * worth keeping.
+   */
+  reason?: string | null,
+): Promise<string> {
   requirePermission(ctx, 'accounting:approve')
 
   const [row] = await db
@@ -207,11 +217,11 @@ export async function withdrawApproval(ctx: ActorContext, billId: string): Promi
     .where(eq(bills.id, row.id))
 
   await recordAudit(ctx, {
-    action: 'bill.approve',
+    action: 'bill.approval_withdraw',
     entityType: 'bill',
     entityId: row.id,
     before: { approvedBy: row.approvedBy },
-    after: { approvedBy: null, withdrawn: true },
+    after: { approvedBy: null, reason: reason ?? null },
   })
 
   return row.number

@@ -2,8 +2,10 @@
 
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { correction, reasonFor } from '@/modules/corrections/vocabulary'
 import { requireActor } from '@/lib/current-user'
 import { DocumentError } from '@/modules/receivables/service'
+import { DomainError } from '@/modules/errors'
 import { applyVendorCredit } from '@/modules/receivables/vendor-credits'
 import { voidPayment } from '@/modules/receivables/payment-voiding'
 import { applyCredit, refundCredit } from '@/modules/receivables/customer-credit'
@@ -192,11 +194,26 @@ export async function withdrawApprovalAction(input: unknown): Promise<ActionResu
   try {
     const actor = await requireActor()
     const { billId } = approveSchema.parse(input)
+    const { reason } = z
+      .object({ reason: z.string().trim().nullish() })
+      .parse(input ?? {})
 
-    const number = await withdrawApproval(actor, billId)
+    /**
+     * Not required (Phase 70). Nothing was posted and the same person can
+     * approve it again a minute later, so this is on the "need not say why"
+     * side of the rule — demanding one here would train people to type "x",
+     * which produces an audit trail that looks complete and says nothing.
+     */
+    const why = reasonFor({ kind: 'approval.withdraw', reason })
+    if (!why.ok) throw new DomainError(why.why)
+
+    const number = await withdrawApproval(actor, billId, why.reason)
     for (const path of PATHS) revalidatePath(path)
 
-    return { ok: true, message: `${number} is waiting on an approval again.` }
+    return {
+      ok: true,
+      message: `${correction('approval.withdraw').done}: ${number} is waiting on an approval again.`,
+    }
   } catch (error) {
     return { ok: false, error: messageFor(error, 'That approval could not be taken back.') }
   }
@@ -232,7 +249,10 @@ export async function updatePayablesPolicyAction(input: unknown): Promise<Action
 
 const voidSchema = z.object({
   paymentId: uuid,
-  reason: z.string().trim().min(1, 'Say why this payment is being taken back.').max(500),
+  // Presence and length are `corrections/vocabulary`'s call (Phase 70), not
+  // this schema's. Phase 52 wrote the rule here and it stayed here alone for
+  // eighteen phases while four other corrections quietly took none.
+  reason: z.string().trim().nullish(),
 })
 
 /**
@@ -250,7 +270,13 @@ export async function voidPaymentAction(input: unknown): Promise<ActionResult> {
     const actor = await requireActor()
     const parsed = voidSchema.parse(input)
 
-    const result = await voidPayment(actor, parsed)
+    const why = reasonFor({ kind: 'payment.void', reason: parsed.reason })
+    if (!why.ok) throw new DomainError(why.why)
+
+    const result = await voidPayment(actor, {
+      paymentId: parsed.paymentId,
+      reason: why.reason ?? '',
+    })
 
     for (const path of PATHS) revalidatePath(path)
 

@@ -28,6 +28,7 @@ import {
   refundVendorCredit,
 } from '@/modules/receivables/vendor-credits'
 import { voidRefund } from '@/modules/receivables/refund-voiding'
+import { correction, reasonFor } from '@/modules/corrections/vocabulary'
 import { formatCents } from '@/lib/money'
 import { DomainError, messageFor } from '@/modules/errors'
 
@@ -348,11 +349,23 @@ export async function createDepositAction(input: unknown): Promise<ActionResult>
 export async function voidDepositAction(
   depositId: string,
   reversalDate: string,
+  reason?: string | null,
 ): Promise<ActionResult> {
   return run(async () => {
     const actor = await requireActor()
-    const deposit = await voidDeposit(actor, uuid.parse(depositId), isoDate.parse(reversalDate))
-    return `${deposit.number} reversed. Its receipts are waiting to be deposited again.`
+
+    // Internal: the receipts go back to waiting and nothing left the business,
+    // so this validates the reason without demanding one (Phase 70).
+    const why = reasonFor({ kind: 'deposit.void', reason })
+    if (!why.ok) throw new DomainError(why.why)
+
+    const deposit = await voidDeposit(
+      actor,
+      uuid.parse(depositId),
+      isoDate.parse(reversalDate),
+      why.reason,
+    )
+    return `${correction('deposit.void').done}: ${deposit.number}. Its receipts are waiting to be deposited again.`
   })
 }
 
@@ -408,15 +421,24 @@ export async function voidRefundAction(input: unknown): Promise<ActionResult> {
   return run(async () => {
     const actor = await requireActor()
     const parsed = z
-      .object({ refundId: uuid, reason: z.string().trim().optional() })
+      .object({ refundId: uuid, reason: z.string().trim().nullish() })
       .parse(input)
+
+    /**
+     * Required, because undoing a refund is a correction that **moved money**
+     * (Phase 70). The rule lives in `corrections/vocabulary` rather than in
+     * this schema, so the five corrections cannot drift apart the way they had
+     * by Phase 69 — only `voidPayment` insisted, and the other four did not.
+     */
+    const why = reasonFor({ kind: 'refund.void', reason: parsed.reason })
+    if (!why.ok) throw new DomainError(why.why)
 
     const result = await voidRefund(actor, {
       refundId: parsed.refundId,
-      reason: parsed.reason || undefined,
+      reason: why.reason ?? undefined,
     })
 
-    return result.message
+    return `${correction('refund.void').done}. ${result.message}`
   })
 }
 

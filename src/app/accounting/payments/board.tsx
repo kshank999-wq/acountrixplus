@@ -11,6 +11,7 @@ import {
 import { sendRemittanceAction, shareRemittanceAction } from '@/app/actions/remittance'
 import type { VoidVerdict } from '@/modules/receivables/payment-void'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
 
 type Row = {
   id: string
@@ -64,8 +65,10 @@ export function PaymentsBoard({
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
+  // Which row's confirmation is open. The reason inside it belongs to the
+  // panel, which is unmounted with the row — so closing one and opening another
+  // cannot carry a half-typed reason across to a different payment.
   const [openId, setOpenId] = useState<string | null>(null)
-  const [reason, setReason] = useState('')
 
   // Held credit (Phase 53).
   const [creditId, setCreditId] = useState('')
@@ -97,7 +100,6 @@ export function PaymentsBoard({
       )
       if (result.ok) {
         setOpenId(null)
-        setReason('')
         setCreditId('')
         setCreditInvoiceId('')
         setRefundAmount('')
@@ -421,16 +423,14 @@ export function PaymentsBoard({
                               </>
                             )}
                             {row.verdict.ok ? (
-                              <button
-                                className="btn btn-ghost text-xs"
+                              <CorrectionButton
+                                kind="payment.void"
+                                open={open}
                                 onClick={() => {
                                   setNotice(null)
                                   setOpenId(open ? null : row.id)
-                                  setReason('')
                                 }}
-                              >
-                                {open ? 'Cancel' : 'Take it back'}
-                              </button>
+                              />
                             ) : (
                               /* The refusal is on the row rather than behind a
                                  button that fails when pressed — Phase 47's
@@ -440,7 +440,7 @@ export function PaymentsBoard({
                                 className="text-xs text-faint"
                                 title={row.verdict.why}
                               >
-                                {voided ? 'taken back' : 'cannot be undone'}
+                                {voided ? 'voided' : 'cannot be undone'}
                               </span>
                             )}
                           </td>
@@ -450,42 +450,28 @@ export function PaymentsBoard({
                       {open && row.verdict.ok && (
                         <tr className="border-t border-line bg-raised/40">
                           <td colSpan={canVoid ? 7 : 6} className="px-4 py-3">
-                            <p className="text-sm">{row.verdict.why}</p>
+                            <CorrectionPanel
+                              kind="payment.void"
+                              pending={pending}
+                              confirmSuffix={formatCents(row.amountCents)}
+                              onConfirm={(reason) =>
+                                act(() => voidPaymentAction({ paymentId: row.id, reason }))
+                              }
+                            >
+                              <span className="text-ink">{row.verdict.why}</span>
 
-                            {row.restorations.length > 0 && (
-                              <ul className="mt-2 space-y-0.5 text-xs text-muted">
-                                {row.restorations.map((r) => (
-                                  <li key={r.number}>
-                                    <strong>{r.number}</strong> goes back to{' '}
-                                    <span className="tnum">{formatCents(r.amountCents)}</span> owed
-                                    <span className="text-faint"> — {r.status}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            )}
-
-                            <div className="mt-3 flex flex-wrap items-end gap-2">
-                              <label className="flex-1 text-xs text-muted">
-                                <span className="mb-1 block">Why</span>
-                                <input
-                                  value={reason}
-                                  onChange={(event) => setReason(event.target.value)}
-                                  placeholder="Keyed at ten times the amount"
-                                  className="field w-full py-1.5 text-sm"
-                                />
-                              </label>
-                              <button
-                                className="btn btn-primary text-sm"
-                                disabled={pending || !reason.trim()}
-                                onClick={() =>
-                                  act(() =>
-                                    voidPaymentAction({ paymentId: row.id, reason }),
-                                  )
-                                }
-                              >
-                                Take back {formatCents(row.amountCents)}
-                              </button>
-                            </div>
+                              {row.restorations.length > 0 && (
+                                <ul className="mt-2 space-y-0.5">
+                                  {row.restorations.map((r) => (
+                                    <li key={r.number}>
+                                      <strong>{r.number}</strong> goes back to{' '}
+                                      <span className="tnum">{formatCents(r.amountCents)}</span> owed
+                                      <span className="text-faint"> — {r.status}</span>
+                                    </li>
+                                  ))}
+                                </ul>
+                              )}
+                            </CorrectionPanel>
                           </td>
                         </tr>
                       )}

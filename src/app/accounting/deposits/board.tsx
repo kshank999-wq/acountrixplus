@@ -1,8 +1,9 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { Fragment, useMemo, useState, useTransition } from 'react'
 import { createDepositAction, voidDepositAction } from '@/app/actions/accounting-core'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
 
 type Receipt = {
   id: string
@@ -56,6 +57,9 @@ export function DepositBoard({
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
+  /** Which deposit has its unbank confirmation open (Phase 70). */
+  const [unbanking, setUnbanking] = useState<string | null>(null)
+
   const grossCents = useMemo(
     () => waiting.filter((r) => selected.has(r.id)).reduce((sum, r) => sum + r.amountCents, 0),
     [waiting, selected],
@@ -91,10 +95,11 @@ export function DepositBoard({
     })
   }
 
-  function reverse(deposit: Deposit) {
+  function unbank(deposit: Deposit, reason: string | null) {
     startTransition(async () => {
-      const result = await voidDepositAction(deposit.id, today)
-      setNotice({ ok: result.ok, text: result.ok ? (result.message ?? 'Reversed.') : result.error })
+      const result = await voidDepositAction(deposit.id, today, reason)
+      setNotice({ ok: result.ok, text: result.ok ? (result.message ?? 'Unbanked.') : result.error })
+      if (result.ok) setUnbanking(null)
     })
   }
 
@@ -279,33 +284,61 @@ export function DepositBoard({
             </thead>
             <tbody>
               {deposits.map((deposit) => (
-                <tr key={deposit.id} className="border-t border-line">
-                  <td className="px-4 py-1.5">
-                    {deposit.number}
-                    {deposit.voided && (
-                      <span className="ml-2 chip bg-raised px-2 py-0.5 text-xs text-muted">
-                        reversed
-                      </span>
-                    )}
-                  </td>
-                  <td className="tnum px-4 py-1.5 text-muted">{deposit.depositDate}</td>
-                  <td className="px-4 py-1.5">{deposit.accountName}</td>
-                  <td className="tnum px-4 py-1.5 text-right text-muted">
-                    {formatCents(deposit.receiptsCents)}
-                  </td>
-                  <td className="tnum px-4 py-1.5 text-right">{formatCents(deposit.totalCents)}</td>
-                  <td className="px-4 py-1.5 text-right">
-                    {canRecord && !deposit.voided && (
-                      <button
-                        onClick={() => reverse(deposit)}
-                        disabled={pending}
-                        className="btn btn-ghost text-xs"
-                      >
-                        Reverse
-                      </button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={deposit.id}>
+                  <tr className="border-t border-line">
+                    <td className="px-4 py-1.5">
+                      {deposit.number}
+                      {deposit.voided && (
+                        /* "unbanked", the vocabulary's word — the receipts on
+                           it went back to waiting, which is what "reversed"
+                           never quite said (Phase 70). */
+                        <span className="ml-2 chip bg-raised px-2 py-0.5 text-xs text-muted">
+                          unbanked
+                        </span>
+                      )}
+                    </td>
+                    <td className="tnum px-4 py-1.5 text-muted">{deposit.depositDate}</td>
+                    <td className="px-4 py-1.5">{deposit.accountName}</td>
+                    <td className="tnum px-4 py-1.5 text-right text-muted">
+                      {formatCents(deposit.receiptsCents)}
+                    </td>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(deposit.totalCents)}
+                    </td>
+                    <td className="px-4 py-1.5 text-right">
+                      {canRecord && !deposit.voided && (
+                        <CorrectionButton
+                          kind="deposit.void"
+                          open={unbanking === deposit.id}
+                          disabled={pending}
+                          onClick={() =>
+                            setUnbanking((current) =>
+                              current === deposit.id ? null : deposit.id,
+                            )
+                          }
+                        />
+                      )}
+                    </td>
+                  </tr>
+
+                  {unbanking === deposit.id && (
+                    <tr className="border-t border-line bg-raised/40">
+                      <td colSpan={6} className="px-4 py-3">
+                        <CorrectionPanel
+                          kind="deposit.void"
+                          pending={pending}
+                          confirmSuffix={deposit.number}
+                          onConfirm={(reason) => unbank(deposit, reason)}
+                        >
+                          The {formatCents(deposit.totalCents)} comes back out of{' '}
+                          {deposit.accountName}, and the receipts that made it go back to waiting
+                          to be deposited. Nothing left the business, so a reason is welcome rather
+                          than required.
+                        </CorrectionPanel>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

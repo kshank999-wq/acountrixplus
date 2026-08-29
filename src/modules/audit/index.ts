@@ -70,6 +70,17 @@ export type AuditAction =
   | 'bill.create'
   /** A second pair of eyes agreed the money may leave (Phase 50). */
   | 'bill.approve'
+  /**
+   * That agreement taken back (Phase 70).
+   *
+   * Its own action rather than a second `bill.approve` carrying a `withdrawn`
+   * flag, which is what it was until this phase. Two opposite events under one
+   * name is this phase's own defect wearing an audit trail: "when was this bill
+   * approved" could not be answered by asking for `bill.approve` — you got the
+   * withdrawal too, and had to read a flag inside the payload to tell which one
+   * you were holding.
+   */
+  | 'bill.approval_withdraw'
   /** The company changed what it requires before a bill can be paid. */
   | 'payables.policy'
   | 'bill.void'

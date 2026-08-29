@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { Fragment, useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   createBillAction,
@@ -17,6 +17,7 @@ import {
   type Quoted,
 } from '@/app/actions/documents'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
 
 type Party = { id: string; name: string }
 type Account = { id: string; label: string }
@@ -1070,6 +1071,16 @@ function DocumentList({
 }) {
   const isCustomer = side === 'customer'
 
+  // Which row has its cancellation panel open. One at a time: two open panels
+  // on one table is two half-typed reasons somebody has to keep straight.
+  const [cancelling, setCancelling] = useState<string | null>(null)
+
+  /**
+   * Nine either way: the two sides each add one column the other does not —
+   * a supplier's own reference on bills, and whether it was sent on invoices.
+   */
+  const COLUMNS = 9
+
   return (
     <section className="card overflow-hidden">
       <header className="border-b border-line px-4 py-3">
@@ -1101,99 +1112,128 @@ function DocumentList({
             </thead>
             <tbody>
               {documents.map((document) => (
-                <tr key={document.id} className="border-t border-line">
-                  <td className="px-4 py-1.5 font-medium">{document.number}</td>
-                  {!isCustomer && (
-                    <td className="px-4 py-1.5 text-muted">
-                      {document.vendorReference ?? <span className="text-faint">—</span>}
+                <Fragment key={document.id}>
+                  <tr className="border-t border-line">
+                    <td className="px-4 py-1.5 font-medium">{document.number}</td>
+                    {!isCustomer && (
+                      <td className="px-4 py-1.5 text-muted">
+                        {document.vendorReference ?? <span className="text-faint">—</span>}
+                      </td>
+                    )}
+                    <td className="px-4 py-1.5">{document.partyName}</td>
+                    <td className="px-4 py-1.5 text-muted">{document.issueDate}</td>
+                    <td className="px-4 py-1.5 text-muted">{document.dueDate}</td>
+                    <td className="px-4 py-1.5 text-muted">{document.status.replace('_', ' ')}</td>
+                    {isCustomer && (
+                      <td className="px-4 py-1.5 text-xs text-muted">
+                        {/* Three states, not two. An invoice shared by link has
+                            never been emailed and is still out there — saying
+                            "not sent" about it hides the fact that somebody can
+                            read it, and hid the view count with it. */}
+                        {document.sentAt ? (
+                          <>
+                            {document.sentAt}
+                            <span className="block text-faint">{document.sentTo}</span>
+                          </>
+                        ) : document.shareToken ? (
+                          <span className="text-faint">link shared</span>
+                        ) : (
+                          <span className="text-faint">not sent</span>
+                        )}
+                        {(document.viewCount ?? 0) > 0 && (
+                          <span className="block">
+                            opened {document.viewCount}
+                            {document.viewCount === 1 ? ' time' : ' times'}
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    {/* In the document's own currency (Phase 64). The list is
+                        where a euro invoice raised above is first seen again,
+                        and showing it in dollars would undo the whole point. */}
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(document.totalCents, document.currency)}
                     </td>
-                  )}
-                  <td className="px-4 py-1.5">{document.partyName}</td>
-                  <td className="px-4 py-1.5 text-muted">{document.issueDate}</td>
-                  <td className="px-4 py-1.5 text-muted">{document.dueDate}</td>
-                  <td className="px-4 py-1.5 text-muted">{document.status.replace('_', ' ')}</td>
-                  {isCustomer && (
-                    <td className="px-4 py-1.5 text-xs text-muted">
-                      {/* Three states, not two. An invoice shared by link has
-                          never been emailed and is still out there — saying
-                          "not sent" about it hides the fact that somebody can
-                          read it, and hid the view count with it. */}
-                      {document.sentAt ? (
-                        <>
-                          {document.sentAt}
-                          <span className="block text-faint">{document.sentTo}</span>
-                        </>
-                      ) : document.shareToken ? (
-                        <span className="text-faint">link shared</span>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {document.balanceCents === 0 ? (
+                        <span className="text-success">settled</span>
                       ) : (
-                        <span className="text-faint">not sent</span>
-                      )}
-                      {(document.viewCount ?? 0) > 0 && (
-                        <span className="block">
-                          opened {document.viewCount}
-                          {document.viewCount === 1 ? ' time' : ' times'}
-                        </span>
+                        formatCents(document.balanceCents, document.currency)
                       )}
                     </td>
-                  )}
-                  {/* In the document's own currency (Phase 64). The list is
-                      where a euro invoice raised above is first seen again,
-                      and showing it in dollars would undo the whole point. */}
-                  <td className="tnum px-4 py-1.5 text-right">
-                    {formatCents(document.totalCents, document.currency)}
-                  </td>
-                  <td className="tnum px-4 py-1.5 text-right">
-                    {document.balanceCents === 0 ? (
-                      <span className="text-success">settled</span>
-                    ) : (
-                      formatCents(document.balanceCents, document.currency)
-                    )}
-                  </td>
-                  <td className="whitespace-nowrap px-4 py-1.5 text-right">
-                    {canManage && isCustomer && document.status !== 'void' && (
-                      <>
-                        <button
-                          className="btn btn-ghost text-xs"
-                          disabled={pending}
-                          onClick={() => act(() => sendInvoiceAction({ invoiceId: document.id }))}
-                        >
-                          {document.sentAt ? 'Remind' : 'Send'}
-                        </button>
-                        <button
-                          className="btn btn-ghost text-xs"
-                          disabled={pending}
-                          onClick={() =>
-                            act(() =>
-                              document.shareToken
-                                ? revokeInvoiceLinkAction({ invoiceId: document.id })
-                                : shareInvoiceAction({ invoiceId: document.id }),
-                            )
-                          }
-                        >
-                          {document.shareToken ? 'Revoke link' : 'Get link'}
-                        </button>
-                      </>
-                    )}
-                    {canManage &&
-                      document.status !== 'void' &&
-                      document.balanceCents === document.totalCents && (
-                        <button
-                          className="btn btn-ghost text-xs text-danger"
-                          disabled={pending}
-                          onClick={() =>
-                            act(() =>
-                              voidDocumentAction({
-                                kind: isCustomer ? 'invoice' : 'bill',
-                                id: document.id,
-                              }),
-                            )
-                          }
-                        >
-                          Void
-                        </button>
+                    <td className="whitespace-nowrap px-4 py-1.5 text-right">
+                      {canManage && isCustomer && document.status !== 'void' && (
+                        <>
+                          <button
+                            className="btn btn-ghost text-xs"
+                            disabled={pending}
+                            onClick={() => act(() => sendInvoiceAction({ invoiceId: document.id }))}
+                          >
+                            {document.sentAt ? 'Remind' : 'Send'}
+                          </button>
+                          <button
+                            className="btn btn-ghost text-xs"
+                            disabled={pending}
+                            onClick={() =>
+                              act(() =>
+                                document.shareToken
+                                  ? revokeInvoiceLinkAction({ invoiceId: document.id })
+                                  : shareInvoiceAction({ invoiceId: document.id }),
+                              )
+                            }
+                          >
+                            {document.shareToken ? 'Revoke link' : 'Get link'}
+                          </button>
+                        </>
                       )}
-                  </td>
-                </tr>
+                      {canManage &&
+                        document.status !== 'void' &&
+                        document.balanceCents === document.totalCents && (
+                          /* "Cancel the document", not "Void" — the vocabulary
+                             owns the word, and it is the one the confirmation
+                             and the notice afterwards both use (Phase 70). */
+                          <CorrectionButton
+                            kind="document.void"
+                            open={cancelling === document.id}
+                            disabled={pending}
+                            onClick={() =>
+                              setCancelling((current) =>
+                                current === document.id ? null : document.id,
+                              )
+                            }
+                          />
+                        )}
+                    </td>
+                  </tr>
+
+                  {cancelling === document.id && (
+                    <tr className="border-t border-line bg-raised/40">
+                      <td colSpan={COLUMNS} className="px-4 py-3">
+                        <CorrectionPanel
+                          kind="document.void"
+                          pending={pending}
+                          confirmSuffix={document.number}
+                          onConfirm={(reason) =>
+                            act(
+                              () =>
+                                voidDocumentAction({
+                                  kind: isCustomer ? 'invoice' : 'bill',
+                                  id: document.id,
+                                  reason,
+                                }),
+                              () => setCancelling(null),
+                            )
+                          }
+                        >
+                          {document.number} comes off the ledger and off the aging report.{' '}
+                          {isCustomer
+                            ? 'The customer may already be holding it, so what you type here is what explains the gap to them and to whoever reads the books later.'
+                            : 'The supplier still thinks it is owed, so say why it is not.'}
+                        </CorrectionPanel>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

@@ -1612,6 +1612,12 @@ export async function voidDocument(
   ctx: ActorContext,
   kind: 'invoice' | 'bill',
   documentId: string,
+  /**
+   * Why (Phase 70). Required by `corrections/vocabulary`, because cancelling a
+   * document is a correction that **reached somebody outside the business** —
+   * they have been sent it, and may be looking at it while you cancel.
+   */
+  reason?: string | null,
 ) {
   requirePermission(ctx, 'accounting:journal')
 
@@ -1660,7 +1666,7 @@ export async function voidDocument(
         entityType: kind,
         entityId: documentId,
         before: { status: document.status, balanceCents: document.balanceCents },
-        after: { status: 'void', balanceCents: 0 },
+        after: { status: 'void', balanceCents: 0, reason: reason ?? null },
       },
       tx,
     )

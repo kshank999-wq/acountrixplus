@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { Fragment, useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   adviseRunAction,
@@ -18,6 +18,7 @@ import {
   type ApprovalPolicy,
 } from '@/modules/payables/approval'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
 
 type Bill = PayableBill &
   ApprovableBill & {
@@ -115,6 +116,16 @@ export function PayablesBoard({
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
+
+  /** Which bill has its withdraw-approval confirmation open (Phase 70). */
+  const [withdrawing, setWithdrawing] = useState<string | null>(null)
+
+  /**
+   * Bill, Supplier, Due, State, Outstanding — plus the tick column when this
+   * person may pay and the action column when they may approve. The
+   * confirmation row spans whatever is actually rendered.
+   */
+  const billColumns = 5 + (canPay ? 1 : 0) + (canApprove && policy.enabled ? 1 : 0)
 
   const [chosenIds, setChosenIds] = useState<string[]>([])
   const [showPolicy, setShowPolicy] = useState(false)
@@ -304,121 +315,149 @@ export function PayablesBoard({
                 </thead>
                 <tbody>
                   {bills.map((bill) => (
-                    <tr key={bill.id} className="border-t border-line">
-                      {canPay && (
+                    <Fragment key={bill.id}>
+                      <tr className="border-t border-line">
+                        {canPay && (
+                          <td className="px-4 py-1.5">
+                            <input
+                              type="checkbox"
+                              aria-label={`Pay ${bill.number}`}
+                              checked={chosenIds.includes(bill.id)}
+                              disabled={states.get(bill.id) === 'awaiting'}
+                              title={
+                                states.get(bill.id) === 'awaiting'
+                                  ? `${bill.number} needs approving before it can be paid.`
+                                  : undefined
+                              }
+                              onChange={() => toggle(bill.id)}
+                            />
+                          </td>
+                        )}
+                        <td className="px-4 py-1.5 font-medium">
+                          {bill.number}
+                          {bill.vendorReference && (
+                            <span className="block text-xs text-faint">
+                              their {bill.vendorReference}
+                            </span>
+                          )}
+                          {/* Whose work an approver is agreeing to. That is the
+                              whole substance of the two-person rule, so it
+                              belongs on the row rather than a screen away. */}
+                          {policy.enabled && bill.enteredByName && (
+                            <span className="block text-xs text-faint">
+                              entered by {bill.enteredByMe ? 'you' : bill.enteredByName}
+                            </span>
+                          )}
+                        </td>
                         <td className="px-4 py-1.5">
-                          <input
-                            type="checkbox"
-                            aria-label={`Pay ${bill.number}`}
-                            checked={chosenIds.includes(bill.id)}
-                            disabled={states.get(bill.id) === 'awaiting'}
-                            title={
-                              states.get(bill.id) === 'awaiting'
-                                ? `${bill.number} needs approving before it can be paid.`
-                                : undefined
+                          {bill.vendorName}
+                          {/* The same money seen from the other side. Paying in
+                              full while holding an unused credit is paying twice
+                              for something already sent back. */}
+                          {bill.vendorCreditCents > 0 && (
+                            <span className="block text-xs text-success">
+                              {formatCents(bill.vendorCreditCents)} credit with them
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-1.5 text-muted">{bill.dueDate}</td>
+                        <td className="px-4 py-1.5">
+                          <span
+                            className={
+                              bill.bucket === 'overdue'
+                                ? 'text-danger'
+                                : bill.bucket === 'due_now'
+                                  ? 'text-ink'
+                                  : 'text-faint'
                             }
-                            onChange={() => toggle(bill.id)}
-                          />
+                          >
+                            {BUCKET_LABELS[bill.bucket]}
+                          </span>
+                          {states.get(bill.id) === 'awaiting' && (
+                            <span className="mt-0.5 block text-xs text-danger">
+                              Needs approving
+                            </span>
+                          )}
+                          {states.get(bill.id) === 'approved' && policy.enabled && (
+                            <span className="mt-0.5 block text-xs text-success">Approved</span>
+                          )}
                         </td>
-                      )}
-                      <td className="px-4 py-1.5 font-medium">
-                        {bill.number}
-                        {bill.vendorReference && (
-                          <span className="block text-xs text-faint">
-                            their {bill.vendorReference}
-                          </span>
-                        )}
-                        {/* Whose work an approver is agreeing to. That is the
-                            whole substance of the two-person rule, so it
-                            belongs on the row rather than a screen away. */}
-                        {policy.enabled && bill.enteredByName && (
-                          <span className="block text-xs text-faint">
-                            entered by {bill.enteredByMe ? 'you' : bill.enteredByName}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-1.5">
-                        {bill.vendorName}
-                        {/* The same money seen from the other side. Paying in
-                            full while holding an unused credit is paying twice
-                            for something already sent back. */}
-                        {bill.vendorCreditCents > 0 && (
-                          <span className="block text-xs text-success">
-                            {formatCents(bill.vendorCreditCents)} credit with them
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-4 py-1.5 text-muted">{bill.dueDate}</td>
-                      <td className="px-4 py-1.5">
-                        <span
-                          className={
-                            bill.bucket === 'overdue'
-                              ? 'text-danger'
-                              : bill.bucket === 'due_now'
-                                ? 'text-ink'
-                                : 'text-faint'
-                          }
-                        >
-                          {BUCKET_LABELS[bill.bucket]}
-                        </span>
-                        {states.get(bill.id) === 'awaiting' && (
-                          <span className="mt-0.5 block text-xs text-danger">
-                            Needs approving
-                          </span>
-                        )}
-                        {states.get(bill.id) === 'approved' && policy.enabled && (
-                          <span className="mt-0.5 block text-xs text-success">Approved</span>
-                        )}
-                      </td>
-                      <td className="tnum px-4 py-1.5 text-right">
-                        {formatCents(bill.balanceCents, bill.currency)}
-                        {bill.currency !== homeCurrency && (
-                          /* What it is worth to us, beside what they invoiced.
-                             Both, because the supplier is owed the first and
-                             every total on this screen is made of the second. */
-                          <span className="block text-xs text-faint">
-                            {formatCents(bill.functionalBalanceCents, homeCurrency)}
-                          </span>
-                        )}
-                      </td>
-                      {canApprove && policy.enabled && (
-                        <td className="px-4 py-1.5 text-right">
-                          {states.get(bill.id) === 'awaiting' &&
-                            /* The two-person rule shown rather than enforced
-                               only on the server: a button that fails when
-                               pressed teaches nothing. The server refuses it
-                               too — this is the explanation, not the guard. */
-                            (policy.twoPersonRule && bill.enteredByMe ? (
-                              <span
-                                className="text-xs text-faint"
-                                title="You entered this one, so somebody else has to approve it."
-                              >
-                                Yours to enter, theirs to approve
-                              </span>
-                            ) : (
-                              <button
-                                className="btn btn-ghost text-xs"
-                                disabled={pending}
-                                onClick={() => act(() => approveBillAction({ billId: bill.id }))}
-                              >
-                                Approve
-                              </button>
-                            ))}
-                          {states.get(bill.id) === 'approved' &&
-                            bill.balanceCents === bill.totalCents && (
-                              <button
-                                className="btn btn-ghost text-xs text-muted"
-                                disabled={pending}
-                                onClick={() =>
-                                  act(() => withdrawApprovalAction({ billId: bill.id }))
-                                }
-                              >
-                                Take it back
-                              </button>
-                            )}
+                        <td className="tnum px-4 py-1.5 text-right">
+                          {formatCents(bill.balanceCents, bill.currency)}
+                          {bill.currency !== homeCurrency && (
+                            /* What it is worth to us, beside what they invoiced.
+                               Both, because the supplier is owed the first and
+                               every total on this screen is made of the second. */
+                            <span className="block text-xs text-faint">
+                              {formatCents(bill.functionalBalanceCents, homeCurrency)}
+                            </span>
+                          )}
                         </td>
+                        {canApprove && policy.enabled && (
+                          <td className="px-4 py-1.5 text-right">
+                            {states.get(bill.id) === 'awaiting' &&
+                              /* The two-person rule shown rather than enforced
+                                 only on the server: a button that fails when
+                                 pressed teaches nothing. The server refuses it
+                                 too — this is the explanation, not the guard. */
+                              (policy.twoPersonRule && bill.enteredByMe ? (
+                                <span
+                                  className="text-xs text-faint"
+                                  title="You entered this one, so somebody else has to approve it."
+                                >
+                                  Yours to enter, theirs to approve
+                                </span>
+                              ) : (
+                                <button
+                                  className="btn btn-ghost text-xs"
+                                  disabled={pending}
+                                  onClick={() => act(() => approveBillAction({ billId: bill.id }))}
+                                >
+                                  Approve
+                                </button>
+                              ))}
+                            {states.get(bill.id) === 'approved' &&
+                              bill.balanceCents === bill.totalCents && (
+                                /* "Withdraw approval", not "Take it back" — which
+                                   by Phase 69 also meant voiding a payment and
+                                   undoing a refund, on screens one click apart. */
+                                <CorrectionButton
+                                  kind="approval.withdraw"
+                                  open={withdrawing === bill.id}
+                                  disabled={pending}
+                                  className="btn btn-ghost text-xs text-muted"
+                                  onClick={() =>
+                                    setWithdrawing((current) =>
+                                      current === bill.id ? null : bill.id,
+                                    )
+                                  }
+                                />
+                              )}
+                          </td>
+                        )}
+                      </tr>
+
+                      {withdrawing === bill.id && (
+                        <tr className="border-t border-line bg-raised/40">
+                          <td colSpan={billColumns} className="px-4 py-3">
+                            <CorrectionPanel
+                              kind="approval.withdraw"
+                              pending={pending}
+                              confirmSuffix={bill.number}
+                              onConfirm={(reason) =>
+                                act(
+                                  () => withdrawApprovalAction({ billId: bill.id, reason }),
+                                  () => setWithdrawing(null),
+                                )
+                              }
+                            >
+                              {bill.number} goes back to waiting on an approval, and cannot be paid
+                              until somebody agrees to it again. Nothing is posted or unposted.
+                            </CorrectionPanel>
+                          </td>
+                        </tr>
                       )}
-                    </tr>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>

@@ -3209,6 +3209,79 @@ Vendor credit VC-1004 with its $8.25 gain, and undoing it said
 `7100` went from $132.00 credit to $123.75 — that $8.25 and nothing else — and
 the credit went back to €1,000.00 face / $1,083.50 functional, open again.
 
+### One answer to four questions (Phase 70)
+
+This codebase keeps refactoring out the same fault — **two answers to one
+question**. Phase 70 is that fault upside down.
+
+By the end of Phase 69 the words **"Take it back"** appeared on three screens
+meaning three different things: withdraw a bill's approval (nothing posted, redo
+it in a minute), void a payment (money comes back onto the books), and confirm
+undoing a refund (money the other party already had). "Undo it" opened the third
+of those, so one act had two words on one screen. Cancelling a document said
+"Void"; unbanking a deposit said "Reverse". That is worse for the person holding
+the mouse than the usual defect, because the four differ in exactly the way that
+matters: **what they move.**
+
+**One vocabulary, in one file.** `corrections/vocabulary` names all five
+corrections once — the verb its button uses, what the confirmation is headed,
+what the notice says afterwards, the prompt above the reason box. Nothing else
+writes those words. The point is not tidiness: a screen *cannot* reuse a verb
+that already means something else, because a test asserts the list has no
+duplicates.
+
+| Correction | Reach | The button |
+| --- | --- | --- |
+| Payment | moved money | Void the payment |
+| Refund | moved money | Undo the refund |
+| Invoice or bill | reached somebody | Cancel the document |
+| Deposit | internal | Unbank the deposit |
+| Approval | internal | Withdraw approval |
+
+**Which corrections must say why.** `voidPayment` has insisted on a reason since
+Phase 52 — *a void with no reason is a hole somebody has to reconstruct from
+dates months later* — and for eighteen phases it was the **only** one that did.
+The other four took none, so the same reasoning produced opposite behaviour
+depending on which screen somebody was on. The rule, stated once:
+
+> A correction that moved money, or that reached somebody outside the business,
+> must say why. One that only rearranges what is on our own screens need not.
+
+`reach` is its own field rather than a bare `reasonRequired` flag, so the next
+correction has to answer the question that matters instead of copying a boolean
+from the row above. Demanding a reason for the two internal ones would train
+people to type "x", which is worse than not asking — an audit trail that looks
+complete and says nothing. One given anyway is still kept.
+
+The rule lives at the **action layer**, not in five Zod schemas. Phase 52 wrote
+it into `voidSchema` and that is exactly why it never spread; the schema is now
+back to `.optional()` and every action runs `reasonFor` and throws a
+`DomainError`, so the refusal reaches the browser and the sentence somebody reads
+when stopped is the sentence that asked them in the first place.
+
+**One confirmation panel.** `components/correction-panel` is what all five
+screens open, reading the verb and the rule from the vocabulary — so a screen
+cannot ask for less than the action will insist on. "Never mind" closes every one
+of them; it was "Cancel" on payments, which on a screen full of things that can
+be cancelled is a fifth meaning nobody needed.
+
+**Found by this phase's own test:** withdrawing an approval recorded itself under
+the *same* audit action as granting one, `bill.approve`, distinguished only by a
+`withdrawn: true` flag inside the payload. So "when was this bill approved" could
+not be answered by asking for `bill.approve` — you got the withdrawal too. That
+is this phase's defect sitting in the audit trail, where no amount of vocabulary
+on the buttons would have found it. `bill.approval_withdraw` is now its own
+action.
+
+The workspace also moved onto the design canvas's palette in this phase: dark
+chrome over a light workspace, blue for actions on white, and the lime kept for
+the one place the design shouts. Lime at button weight on white is unreadable,
+and a primary action nobody can read is worse than a less striking one.
+
+Nothing in the ledger changed and there is no migration. What changed is what the
+five corrections are called, what they ask for, and what the audit trail can be
+asked.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

@@ -15,6 +15,7 @@ import {
   writeOffInvoiceAction,
 } from '@/app/actions/accounting-core'
 import { formatCents, parseAmountToCents } from '@/lib/money'
+import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
 
 type Credit = {
   id: string
@@ -894,14 +895,13 @@ export function ReceivablesBoard({
                     {canManage && (
                       <td className="px-4 py-1.5 text-right">
                         {!row.voidedAt && (
-                          <button
-                            className="btn btn-ghost text-xs"
+                          <CorrectionButton
+                            kind="refund.void"
+                            open={unwinding === row.id}
                             onClick={() =>
                               setUnwinding((current) => (current === row.id ? null : row.id))
                             }
-                          >
-                            {unwinding === row.id ? 'Never mind' : 'Undo it'}
-                          </button>
+                          />
                         )}
                       </td>
                     )}
@@ -910,29 +910,26 @@ export function ReceivablesBoard({
                   {unwinding === row.id && (
                     <tr className="border-t border-line bg-raised/40">
                       <td colSpan={6} className="px-4 py-3">
-                        <div className="sticky left-0 flex max-w-[calc(100vw-3rem)] flex-wrap items-center gap-3">
+                        <CorrectionPanel
+                          kind="refund.void"
+                          pending={pending}
+                          confirmSuffix={formatCents(row.amountCents, row.currency)}
+                          onConfirm={(reason) =>
+                            act(() => voidRefundAction({ refundId: row.id, reason }))
+                          }
+                        >
                           {/* The label is a document number as often as a
                               phrase, so it leads the sentence rather than being
                               lower-cased into "vc-1004". */}
-                          <p className="text-xs text-muted">
-                            {row.subjectLabel} gets{' '}
-                            {formatCents(row.amountCents, row.currency)} back, the entry is
-                            voided, and the{' '}
-                            {row.realisedCents === 0
-                              ? 'books return to where they were'
-                              : `${formatCents(Math.abs(row.realisedCents))} exchange ${
-                                  row.realisedCents > 0 ? 'gain' : 'loss'
-                                } unwinds`}
-                            .
-                          </p>
-                          <button
-                            className="btn btn-primary"
-                            disabled={pending}
-                            onClick={() => act(() => voidRefundAction({ refundId: row.id }))}
-                          >
-                            Take it back
-                          </button>
-                        </div>
+                          {row.subjectLabel} gets {formatCents(row.amountCents, row.currency)} back,
+                          the entry is voided, and the{' '}
+                          {row.realisedCents === 0
+                            ? 'books return to where they were'
+                            : `${formatCents(Math.abs(row.realisedCents))} exchange ${
+                                row.realisedCents > 0 ? 'gain' : 'loss'
+                              } unwinds`}
+                          .
+                        </CorrectionPanel>
                       </td>
                     </tr>
                   )}

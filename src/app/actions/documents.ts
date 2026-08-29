@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import { correction, reasonFor } from '@/modules/corrections/vocabulary'
 import { requireActor } from '@/lib/current-user'
 import {
   createBill,
@@ -345,14 +346,32 @@ export async function createBillAction(input: unknown): Promise<ActionResult> {
 export async function voidDocumentAction(input: unknown): Promise<ActionResult> {
   return run(async () => {
     const actor = await requireActor()
-    const parsed = z.object({ kind: z.enum(['invoice', 'bill']), id: uuid }).parse(input)
+    const parsed = z
+      .object({
+        kind: z.enum(['invoice', 'bill']),
+        id: uuid,
+        // `nullish`, not `optional`: the shared confirmation panel sends a
+        // null for an empty box rather than dropping the key, so that "no
+        // reason was given" arrives as a value the vocabulary can judge.
+        reason: z.string().trim().nullish(),
+      })
+      .parse(input)
 
-    await voidDocument(actor, parsed.kind, parsed.id)
+    /**
+     * Required (Phase 70): cancelling a document is a correction that **reached
+     * somebody outside the business**. They have been sent it, and may be
+     * looking at it while you cancel — so "why" is the first thing they will
+     * ask, and the books should already know.
+     */
+    const why = reasonFor({ kind: 'document.void', reason: parsed.reason })
+    if (!why.ok) throw new DomainError(why.why)
+
+    await voidDocument(actor, parsed.kind, parsed.id, why.reason)
 
     return {
       message:
-        'Voided. The entry it posted was reversed rather than deleted — the number stays, ' +
-        'so an auditor is never looking at a gap.',
+        `${correction('document.void').done}. The entry it posted was reversed rather than ` +
+        'deleted — the number stays, so an auditor is never looking at a gap.',
     }
   })
 }

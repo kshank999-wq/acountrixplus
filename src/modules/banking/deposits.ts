@@ -298,7 +298,18 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
  * receipts have to become depositable again, and the deposit row stays as the
  * history of a trip to the bank that was undone.
  */
-export async function voidDeposit(ctx: ActorContext, depositId: string, reversalDate: string) {
+export async function voidDeposit(
+  ctx: ActorContext,
+  depositId: string,
+  reversalDate: string,
+  /**
+   * Optional (Phase 70). Unbanking a deposit is on the "need not say why" side
+   * of `corrections/vocabulary`'s rule: the receipts on it were recorded
+   * individually and go back to waiting, so nothing left the business. A reason
+   * given anyway is kept.
+   */
+  reason?: string | null,
+) {
   requirePermission(ctx, 'accounting:journal')
 
   const [deposit] = await db
@@ -330,6 +341,7 @@ export async function voidDeposit(ctx: ActorContext, depositId: string, reversal
         entityType: 'deposit',
         entityId: depositId,
         before: { number: deposit.number, totalCents: deposit.totalCents },
+        after: { reason: reason ?? null },
       },
       tx,
     )
