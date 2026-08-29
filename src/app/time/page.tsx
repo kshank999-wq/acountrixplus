@@ -12,6 +12,7 @@ import { listRetainers } from '@/modules/timebilling/billing'
 import { listProjects } from '@/modules/crm/conversion'
 import { listCustomers } from '@/modules/receivables/service'
 import { depositableAccounts } from '@/modules/banking/deposits'
+import { currencyChoices } from '@/modules/fx/service'
 import { TimeBoard } from './board'
 
 export const dynamic = 'force-dynamic'
@@ -57,7 +58,17 @@ export default async function TimePage() {
   const today = new Date().toISOString().slice(0, 10)
   const monthStart = `${today.slice(0, 7)}-01`
 
-  const [rows, unbilled, people, projectList, customers, retainers, utilization, banks] =
+  const [
+    rows,
+    unbilled,
+    people,
+    projectList,
+    customers,
+    retainers,
+    utilization,
+    banks,
+    currencies,
+  ] =
     await Promise.all([
       timesheet(actor, { limit: 60 }),
       unbilledWork(actor),
@@ -67,6 +78,8 @@ export default async function TimePage() {
       listRetainers(actor, { openOnly: true }),
       utilizationReport(actor, { from: monthStart, to: today }),
       depositableAccounts(actor),
+      // What a retainer may be taken in (Phase 66).
+      currencyChoices(actor),
     ])
 
   return (
@@ -106,8 +119,11 @@ export default async function TimePage() {
           customerId: retainer.customerId,
           customerName: retainer.customerName,
           remainingCents: retainer.remainingCents,
+          currency: retainer.currency,
         }))}
         banks={banks.map((bank) => ({ id: bank.id, name: bank.name }))}
+        homeCurrency={currencies.homeCurrency}
+        currencies={currencies.offerable}
         peopleCount={people.length}
         canApprove={can(actor, 'accounting:journal')}
       />

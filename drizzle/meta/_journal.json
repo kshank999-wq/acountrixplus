@@ -393,6 +393,13 @@
       "when": 1788240000000,
       "tag": "0055_phase65_payment_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 56,
+      "version": "7",
+      "when": 1788260000000,
+      "tag": "0056_phase66_retainer_currency",
+      "breakpoints": true
     }
   ]
 }

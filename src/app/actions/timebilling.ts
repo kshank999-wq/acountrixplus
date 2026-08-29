@@ -138,6 +138,8 @@ const billSchema = z.object({
   issueDate: isoDate,
   throughDate: isoDate.optional(),
   grouping: z.enum(['person', 'day', 'service', 'single']).optional(),
+  /** What to bill in (Phase 66). Blank is the company's own. */
+  currency: z.string().trim().toUpperCase().optional().or(z.literal('')),
   applyRetainerId: uuid.optional(),
 })
 
@@ -152,6 +154,7 @@ export async function billWorkAction(input: unknown): Promise<ActionResult> {
       issueDate: parsed.issueDate,
       throughDate: parsed.throughDate,
       grouping: parsed.grouping,
+      currency: parsed.currency || undefined,
       applyRetainerId: parsed.applyRetainerId,
     })
 
@@ -169,6 +172,8 @@ const retainerSchema = z.object({
   projectId: uuid.optional(),
   receivedOn: isoDate,
   amountCents: z.number().int().positive(),
+  /** What the client actually sent (Phase 66). Blank is the company's own. */
+  currency: z.string().trim().toUpperCase().optional().or(z.literal('')),
   financialAccountId: uuid,
   reference: z.string().trim().optional(),
 })
@@ -183,6 +188,7 @@ export async function receiveRetainerAction(input: unknown): Promise<ActionResul
       projectId: parsed.projectId ?? null,
       receivedOn: parsed.receivedOn,
       amountCents: parsed.amountCents,
+      currency: parsed.currency || undefined,
       financialAccountId: parsed.financialAccountId,
       reference: parsed.reference || undefined,
     })

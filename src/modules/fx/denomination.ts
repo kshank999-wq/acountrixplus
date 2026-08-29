@@ -95,14 +95,74 @@ export function creditableAgainst(input: {
   documentNumber: string
   documentCurrency: string
 }): CreditVerdict {
-  if (input.creditCurrency === input.documentCurrency) return { ok: true }
+  return matchingCurrency({
+    heldLabel: input.creditNumber,
+    heldCurrency: input.creditCurrency,
+    documentNumber: input.documentNumber,
+    documentCurrency: input.documentCurrency,
+    because:
+      'A credit reduces what a document says is owed, and it can only do that in the currency ' +
+      'the document is in',
+    remedy:
+      `raise the credit against a document in ${input.creditCurrency}, or a new one in ` +
+      `${input.documentCurrency}.`,
+  })
+}
+
+/**
+ * Whether a retainer may be drawn against this invoice (Phase 66).
+ *
+ * The same rule a third time, which is why the shape below is shared. A
+ * retainer is cash the client sent in a particular currency; drawing it against
+ * an invoice in another would tell them their euro had settled a dollar demand.
+ *
+ * The *remedy* is not shared, because it genuinely differs: a credit is raised
+ * against a document, and a retainer is taken from a client before any document
+ * exists. Telling somebody to "raise the retainer against a document" would be
+ * advice they cannot follow.
+ */
+export function drawableAgainst(input: {
+  retainerLabel: string
+  retainerCurrency: string
+  documentNumber: string
+  documentCurrency: string
+}): CreditVerdict {
+  return matchingCurrency({
+    heldLabel: input.retainerLabel,
+    heldCurrency: input.retainerCurrency,
+    documentNumber: input.documentNumber,
+    documentCurrency: input.documentCurrency,
+    because:
+      'Money held in one currency has not discharged a demand in another, whatever the rate ' +
+      'happens to be today',
+    remedy:
+      `draw it against an invoice in ${input.retainerCurrency}, or take a retainer in ` +
+      `${input.documentCurrency}.`,
+  })
+}
+
+/**
+ * Phase 62's rule, in the one place all three callers can have it: money in one
+ * currency has not discharged a demand in another.
+ *
+ * What is shared is the comparison and the discipline of naming both sides —
+ * Phase 47's rule, that a refusal must say what is wrong with *this* row. The
+ * sentence after it belongs to the caller, because the fix does.
+ */
+function matchingCurrency(input: {
+  heldLabel: string
+  heldCurrency: string
+  documentNumber: string
+  documentCurrency: string
+  because: string
+  remedy: string
+}): CreditVerdict {
+  if (input.heldCurrency === input.documentCurrency) return { ok: true }
 
   return {
     ok: false,
     reason:
-      `${input.creditNumber} is in ${input.creditCurrency} and ${input.documentNumber} is in ` +
-      `${input.documentCurrency}. A credit reduces what a document says is owed, and it can ` +
-      'only do that in the currency the document is in — raise the credit against a document ' +
-      `in ${input.creditCurrency}, or a new one in ${input.documentCurrency}.`,
+      `${input.heldLabel} is in ${input.heldCurrency} and ${input.documentNumber} is in ` +
+      `${input.documentCurrency}. ${input.because} — ${input.remedy}`,
   }
 }

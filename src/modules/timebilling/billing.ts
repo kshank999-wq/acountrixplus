@@ -19,8 +19,10 @@ import { createInvoice, type DocumentLineInput } from '@/modules/receivables/ser
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { amountForMinutes, minutesToQuantityMilli } from './rates'
 import { rateForEntry } from './service'
-import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
-import { functionalCurrency } from '@/modules/fx/service'
+import { relieveFunctional } from '@/modules/fx/documents'
+import { settleHeld } from '@/modules/fx/settlement'
+import { drawableAgainst } from '@/modules/fx/denomination'
+import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { DomainError } from '@/modules/errors'
 
 /**
@@ -207,6 +209,8 @@ export type BillWorkInput = {
   dueDate?: string
   throughDate?: string
   grouping?: BillingGrouping
+  /** What to bill the client in (Phase 66). Blank is the company's own. */
+  currency?: string
   /** Draw a retainer down against the invoice, up to what is left of it. */
   applyRetainerId?: string | null
   memo?: string
@@ -277,6 +281,10 @@ export async function billWork(ctx: ActorContext, input: BillWorkInput) {
         customerId: input.customerId,
         issueDate: input.issueDate,
         dueDate: input.dueDate,
+        // Phase 66: a client billed in euro is invoiced in euro. Without this a
+        // euro retainer had nothing it could ever be drawn against, since a
+        // draw across currencies is refused.
+        currency: input.currency,
         lines,
         memo: input.memo,
         projectId: input.projectId,
@@ -449,6 +457,13 @@ export async function receiveRetainer(
     projectId?: string | null
     receivedOn: string
     amountCents: number
+    /**
+     * What the client actually sent (Phase 66). Blank is the company's own.
+     *
+     * Chosen rather than inherited, unlike a credit note's: a retainer arrives
+     * before there is any document to inherit a currency from.
+     */
+    currency?: string
     financialAccountId: string
     reference?: string
     memo?: string
@@ -479,6 +494,19 @@ export async function receiveRetainer(
 
   if (!customer) throw new Error('Client not found')
 
+  /**
+   * What the money is worth in the books, fixed on the day it arrived
+   * (Phase 66).
+   *
+   * The liability is carried at this rate until every cent of it is drawn, so
+   * this is the number a later draw settles against. `rateFor` refuses when
+   * there is no rate on file, which is the right moment to stop: a retainer
+   * taken at a guessed rate is a wrong liability from its first day.
+   */
+  const currency = normalise(input.currency ?? (await functionalCurrency(ctx.companyId)))
+  const { rateMillionths } = await rateFor(ctx, currency, input.receivedOn)
+  const functionalCents = convert(input.amountCents, rateMillionths)
+
   return db.transaction(async (tx) => {
     const [retainer] = await tx
       .insert(retainers)
@@ -489,6 +517,9 @@ export async function receiveRetainer(
         receivedOn: input.receivedOn,
         amountCents: input.amountCents,
         remainingCents: input.amountCents,
+        currency,
+        exchangeRateMillionths: rateMillionths,
+        functionalRemainingCents: functionalCents,
         reference: input.reference ?? null,
         memo: input.memo ?? null,
         createdBy: ctx.userId,
@@ -508,9 +539,12 @@ export async function receiveRetainer(
         source: 'manual',
         sourceType: 'retainer',
         sourceId: retainer.id,
+        // In the company's own money, at the rate on the day it arrived
+        // (Phase 66). The ledger is never in the client's currency; posting the
+        // face amount would put €10,000 on a dollar balance sheet.
         lines: [
-          { chartAccountId: account.chartAccountId, debitCents: input.amountCents },
-          { chartAccountId: heldAccount.id, creditCents: input.amountCents },
+          { chartAccountId: account.chartAccountId, debitCents: functionalCents },
+          { chartAccountId: heldAccount.id, creditCents: functionalCents },
         ],
       },
       tx,
@@ -527,7 +561,12 @@ export async function receiveRetainer(
         action: 'retainer.receive',
         entityType: 'retainer',
         entityId: retainer.id,
-        after: { customer: customer.name, amountCents: input.amountCents },
+        after: {
+          customer: customer.name,
+          amountCents: input.amountCents,
+          currency,
+          functionalCents,
+        },
       },
       tx,
     )
@@ -580,14 +619,28 @@ async function applyRetainerWithin(
     throw new Error('A retainer can only be drawn against the same client’s invoice.')
   }
 
-  // A retainer is cash already received in the company's own currency; drawing
-  // it against a euro invoice is a settlement at a rate somebody has to choose
-  // (Phase 35).
-  refuseForeign(
-    invoice,
-    await functionalCurrency(ctx.companyId, tx),
-    'Drawing a retainer against an invoice',
-  )
+  /**
+   * The rate somebody had to choose turned out to be two rates already on file
+   * (Phase 66).
+   *
+   * `refuseForeign` stopped this from Phase 35 because a draw is a settlement,
+   * not a reversal, and settling at a guessed rate is an accounting decision
+   * made by accident. But neither rate needs guessing: the retainer has been
+   * carried at the rate the money arrived at, and the invoice at the rate it
+   * was raised at. The difference between them is exactly the realised gain or
+   * loss `recordPayment` has posted since Phase 35.
+   *
+   * What is still refused is a draw *across* currencies. Phase 62's rule, a
+   * third time: money held in one currency has not discharged a demand in
+   * another.
+   */
+  const verdict = drawableAgainst({
+    retainerLabel: `The retainer received on ${retainer.receivedOn}`,
+    retainerCurrency: retainer.currency,
+    documentNumber: invoice.number,
+    documentCurrency: invoice.currency,
+  })
+  if (!verdict.ok) throw new DomainError(verdict.reason)
 
   // Never more than is left, and never more than is owed. Both caps matter:
   // over-drawing invents money the client never paid, and over-applying leaves
@@ -604,6 +657,31 @@ async function applyRetainerWithin(
   const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable, tx)
   if (!arAccount) throw new Error('Accounts Receivable is missing from the chart.')
 
+  /**
+   * The settlement, in the company's own money.
+   *
+   * `relieveFunctional` decides what the invoice gives up — including its rule
+   * that the final relief takes the whole remaining functional balance, so an
+   * invoice cannot be left with a stranded cent — and `settleHeld` takes that
+   * as given rather than re-deriving it.
+   */
+  const relief = relieveFunctional(invoice, amountCents)
+  const release = relieveFunctional(
+    {
+      balanceCents: retainer.remainingCents,
+      exchangeRateMillionths: retainer.exchangeRateMillionths,
+      functionalBalanceCents: retainer.functionalRemainingCents,
+    },
+    amountCents,
+  )
+  const settlement = settleHeld({
+    releasedCents: release.functionalCents,
+    relievedCents: relief.functionalCents,
+  })
+
+  const fxAccount =
+    settlement.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
+
   const entry = await createJournalEntry(
     ctx,
     {
@@ -613,8 +691,27 @@ async function applyRetainerWithin(
       sourceType: 'retainer_application',
       sourceId: retainer.id,
       lines: [
-        { chartAccountId: heldAccount.id, debitCents: amountCents },
-        { chartAccountId: arAccount.id, creditCents: amountCents },
+        // The liability at what it has been carried at since the money came in,
+        // the receivable at what the invoice was raised at, and the difference
+        // where a difference belongs: it is a rate movement between two dates,
+        // not revenue, because nothing more was sold (Phase 66).
+        { chartAccountId: heldAccount.id, debitCents: settlement.releasedCents },
+        { chartAccountId: arAccount.id, creditCents: settlement.relievedCents },
+        ...(fxAccount
+          ? [
+              settlement.realisedCents > 0
+                ? {
+                    chartAccountId: fxAccount,
+                    creditCents: settlement.realisedCents,
+                    memo: 'Exchange gain',
+                  }
+                : {
+                    chartAccountId: fxAccount,
+                    debitCents: -settlement.realisedCents,
+                    memo: 'Exchange loss',
+                  },
+            ]
+          : []),
       ],
     },
     tx,
@@ -631,7 +728,14 @@ async function applyRetainerWithin(
 
   await tx
     .update(retainers)
-    .set({ remainingCents: retainer.remainingCents - amountCents, updatedAt: new Date() })
+    .set({
+      remainingCents: retainer.remainingCents - amountCents,
+      // Both halves together (Phase 66), by what actually left the liability —
+      // which is the same number the entry debited, so the column and the
+      // ledger cannot drift apart.
+      functionalRemainingCents: release.functionalBalanceCents,
+      updatedAt: new Date(),
+    })
     .where(eq(retainers.id, retainer.id))
 
   const newBalance = invoice.balanceCents - amountCents
@@ -639,7 +743,9 @@ async function applyRetainerWithin(
     .update(invoices)
     .set({
       balanceCents: newBalance,
-      functionalBalanceCents: relieveFunctional(invoice, amountCents).functionalBalanceCents,
+      // The relief worked out above, not a second call: computing it twice
+      // would be two answers to what this invoice gives up.
+      functionalBalanceCents: relief.functionalBalanceCents,
       status: newBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })
@@ -695,6 +801,10 @@ export async function listRetainers(
       receivedOn: retainers.receivedOn,
       amountCents: retainers.amountCents,
       remainingCents: retainers.remainingCents,
+      // Phase 66: the picker showed a EUR 10,000 retainer as $10,000, and a
+      // draw only ever happens against an invoice in this currency.
+      currency: retainers.currency,
+      functionalRemainingCents: retainers.functionalRemainingCents,
       reference: retainers.reference,
     })
     .from(retainers)

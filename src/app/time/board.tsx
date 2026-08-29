@@ -49,6 +49,8 @@ type Retainer = {
   customerId: string
   customerName: string
   remainingCents: number
+  /** What the client sent, and the only currency it can be drawn in (Phase 66). */
+  currency: string
 }
 
 /** How old the oldest unbilled item is, in days. */
@@ -66,6 +68,8 @@ export function TimeBoard({
   customers,
   retainers,
   banks,
+  homeCurrency,
+  currencies,
   peopleCount,
   canApprove,
 }: {
@@ -77,6 +81,9 @@ export function TimeBoard({
   customers: Named[]
   retainers: Retainer[]
   banks: Named[]
+  /** The company's own currency, and what a retainer may be taken in (Phase 66). */
+  homeCurrency: string
+  currencies: string[]
   peopleCount: number
   canApprove: boolean
 }) {
@@ -353,7 +360,7 @@ export function TimeBoard({
                         .filter((retainer) => retainer.customerId === billCustomer)
                         .map((retainer) => (
                           <option key={retainer.id} value={retainer.id}>
-                            {formatCents(retainer.remainingCents)} left
+                            {formatCents(retainer.remainingCents, retainer.currency)} left
                           </option>
                         ))}
                     </select>
@@ -370,6 +377,11 @@ export function TimeBoard({
                         issueDate: today,
                         throughDate,
                         grouping,
+                        // Billed in the retainer's currency when one is being
+                        // drawn (Phase 66): a draw across currencies is refused,
+                        // so offering the two as independent choices would be
+                        // offering a combination that cannot work.
+                        currency: retainers.find((r) => r.id === retainerId)?.currency,
                         applyRetainerId: retainerId || undefined,
                       }),
                     )
@@ -513,6 +525,8 @@ export function TimeBoard({
         <RetainerForm
           customers={customers}
           banks={banks}
+          homeCurrency={homeCurrency}
+          currencies={currencies}
           today={today}
           act={act}
           pending={pending}
@@ -525,12 +539,16 @@ export function TimeBoard({
 function RetainerForm({
   customers,
   banks,
+  homeCurrency,
+  currencies,
   today,
   act,
   pending,
 }: {
   customers: Named[]
   banks: Named[]
+  homeCurrency: string
+  currencies: string[]
   today: string
   act: (fn: () => Promise<{ ok: boolean; message?: string; error?: string }>) => void
   pending: boolean
@@ -539,6 +557,8 @@ function RetainerForm({
   const [customerId, setCustomerId] = useState(customers[0]?.id ?? '')
   const [bankId, setBankId] = useState(banks[0]?.id ?? '')
   const [amount, setAmount] = useState('')
+  /** What the client actually sent (Phase 66). Home unless somebody says otherwise. */
+  const [currency, setCurrency] = useState(homeCurrency)
 
   return (
     <section className="card p-4">
@@ -594,6 +614,25 @@ function RetainerForm({
               className="field py-1.5 text-sm"
             />
           </label>
+          {/* Only where there is a choice — a company with one currency is not
+              being asked a question (Phase 64's rule, Phase 66's form). */}
+          {currencies.length > 1 && (
+            <label className="text-xs text-muted">
+              <span className="mb-1 block">In</span>
+              <select
+                value={currency}
+                onChange={(event) => setCurrency(event.target.value)}
+                className="field py-1.5 text-sm"
+              >
+                {currencies.map((code) => (
+                  <option key={code} value={code}>
+                    {code}
+                    {code === homeCurrency ? ' — your books' : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
           <button
             className="btn btn-primary"
             disabled={pending || !customerId || !bankId || !amount.trim()}
@@ -603,6 +642,7 @@ function RetainerForm({
                   customerId,
                   receivedOn: today,
                   amountCents: parseAmountToCents(amount) ?? 0,
+                  currency,
                   financialAccountId: bankId,
                 }),
               )

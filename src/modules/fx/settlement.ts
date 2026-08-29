@@ -1,4 +1,4 @@
-import { convert } from './rates'
+
 
 /**
  * Money already received, discharging a demand carried at a different rate
@@ -65,25 +65,36 @@ export type Settlement = {
 /**
  * What to post when held money settles a document.
  *
- * `relievedCents` is passed in rather than computed, because what a document
- * gives up is `relieveFunctional`'s decision — including its rule that the
- * final relief takes the whole remaining functional balance, so a document
- * cannot be left with a stranded cent. Recomputing it here would be a second
- * answer to a question that already has one.
+ * ## Why both amounts come in rather than a rate
+ *
+ * The first draft of this took the held money's *rate* and converted the draw.
+ * A database check caught it: a retainer drawn in three parts would have had
+ * its face amount reach zero while its functional amount did not, because the
+ * sum of three conversions is not the conversion of the sum.
+ *
+ * Both sides are therefore `relieveFunctional`'s decision, applied to each —
+ * including its rule that the final relief takes the whole remaining functional
+ * balance, so neither the liability nor the document can be left holding a
+ * stranded cent. What is left for this function is the part that is genuinely
+ * its own: the difference between the two, and which way round it posts.
+ *
+ * Which is the whole point. The two sides were never in question — each has
+ * been carried at its own rate since the day it was recorded. The only thing
+ * anybody had to decide was what to do with the gap, and the answer is the one
+ * `recordPayment` has used since Phase 35.
  */
 export function settleHeld(input: {
-  /** The amount being drawn, in the currency the money is held in. */
-  amountCents: number
-  /** Millionths, held currency → functional. What the liability is carried at. */
-  heldRateMillionths: number
-  /** From `relieveFunctional(document, amountCents).functionalCents`. */
+  /**
+   * What leaves the liability, from `relieveFunctional` on the held money.
+   * The rate it came in at, which is what the books have carried it at since.
+   */
+  releasedCents: number
+  /** What leaves the control account, from `relieveFunctional` on the document. */
   relievedCents: number
 }): Settlement {
-  const releasedCents = convert(input.amountCents, input.heldRateMillionths)
-
   return {
-    releasedCents,
+    releasedCents: input.releasedCents,
     relievedCents: input.relievedCents,
-    realisedCents: releasedCents - input.relievedCents,
+    realisedCents: input.releasedCents - input.relievedCents,
   }
 }

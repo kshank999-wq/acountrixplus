@@ -22,8 +22,7 @@ const LATER = 1_100_000
 describe('held money settling a document', () => {
   it('releases the liability at the rate the money came in at', () => {
     const settlement = settleHeld({
-      amountCents: 400_000,
-      heldRateMillionths: ARRIVED,
+      releasedCents: convert(400_000, ARRIVED),
       relievedCents: convert(400_000, LATER),
     })
 
@@ -34,8 +33,7 @@ describe('held money settling a document', () => {
     const relievedCents = convert(400_000, LATER)
 
     const settlement = settleHeld({
-      amountCents: 400_000,
-      heldRateMillionths: ARRIVED,
+      releasedCents: convert(400_000, ARRIVED),
       relievedCents,
     })
 
@@ -50,8 +48,7 @@ describe('held money settling a document', () => {
    */
   it('realises the difference when the rate has moved', () => {
     const settlement = settleHeld({
-      amountCents: 400_000,
-      heldRateMillionths: ARRIVED,
+      releasedCents: convert(400_000, ARRIVED),
       relievedCents: convert(400_000, LATER),
     })
 
@@ -62,8 +59,7 @@ describe('held money settling a document', () => {
 
   it('realises a gain when the rate moved the other way', () => {
     const settlement = settleHeld({
-      amountCents: 400_000,
-      heldRateMillionths: LATER,
+      releasedCents: convert(400_000, LATER),
       relievedCents: convert(400_000, ARRIVED),
     })
 
@@ -83,8 +79,7 @@ describe('held money settling a document', () => {
       [999_999, 1_000_000, 1_000_000],
     ] as const) {
       const settlement = settleHeld({
-        amountCents: amount,
-        heldRateMillionths: held,
+        releasedCents: convert(amount, held),
         relievedCents: convert(amount, carried),
       })
 
@@ -97,8 +92,7 @@ describe('held money settling a document', () => {
   /** A domestic draw is not a conversion, and realises nothing. */
   it('realises nothing when both sides are the company’s own money', () => {
     const settlement = settleHeld({
-      amountCents: 400_000,
-      heldRateMillionths: 1_000_000,
+      releasedCents: convert(400_000, 1_000_000),
       relievedCents: 400_000,
     })
 
@@ -108,8 +102,7 @@ describe('held money settling a document', () => {
 
   it('realises nothing when the rate has not moved', () => {
     const settlement = settleHeld({
-      amountCents: 400_000,
-      heldRateMillionths: ARRIVED,
+      releasedCents: convert(400_000, ARRIVED),
       relievedCents: convert(400_000, ARRIVED),
     })
 
@@ -131,8 +124,7 @@ describe('held money settling a document', () => {
 
     const relief = relieveFunctional(invoice, 33_333)
     const settlement = settleHeld({
-      amountCents: 33_333,
-      heldRateMillionths: ARRIVED,
+      releasedCents: convert(33_333, ARRIVED),
       relievedCents: relief.functionalCents,
     })
 
@@ -144,5 +136,36 @@ describe('held money settling a document', () => {
     expect(settlement.releasedCents).toBe(
       settlement.relievedCents + settlement.realisedCents,
     )
+  })
+
+  /**
+   * The held side needs the same treatment, and the first draft of this phase
+   * did not give it: it converted each draw at the retainer's rate. A database
+   * check caught it. Drawing a €10,000 retainer in three parts takes the face
+   * amount to zero while the sum of three conversions misses the functional
+   * amount by a cent — leaving a liability that says money is held for a client
+   * who has spent all of it.
+   */
+  it('empties the held money’s two columns on the same draw', () => {
+    let remaining = 1_000_000
+    let functionalRemaining = 1_083_500
+
+    for (const draw of [333_333, 333_333, 333_334]) {
+      const release = relieveFunctional(
+        {
+          balanceCents: remaining,
+          exchangeRateMillionths: ARRIVED,
+          functionalBalanceCents: functionalRemaining,
+        },
+        draw,
+      )
+
+      settleHeld({ releasedCents: release.functionalCents, relievedCents: 0 })
+      remaining -= draw
+      functionalRemaining = release.functionalBalanceCents
+    }
+
+    expect(remaining).toBe(0)
+    expect(functionalRemaining).toBe(0)
   })
 })

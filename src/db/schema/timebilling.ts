@@ -292,6 +292,31 @@ export const retainers = pgTable(
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     /** What is left to draw against. */
     remainingCents: bigint('remaining_cents', { mode: 'number' }).notNull(),
+    /**
+     * The currency the money arrived in (Phase 66).
+     *
+     * Chosen when the retainer is taken rather than inherited, because unlike a
+     * credit note — which reverses a document that already exists — a retainer
+     * comes before there is anything to inherit from. It is cash on account.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /**
+     * Millionths, retainer currency → functional. What the liability has been
+     * carried at since the day the money came in, and never recomputed.
+     */
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' })
+      .notNull()
+      .default(1_000_000),
+    /**
+     * What is left to draw, in the company's own money.
+     *
+     * Moves with `remainingCents` on every draw. A database check keeps the two
+     * reaching zero together, because a retainer still showing functional money
+     * after its face amount is spent is credit the business does not have.
+     */
+    functionalRemainingCents: bigint('functional_remaining_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
     reference: text('reference'),
     memo: text('memo'),
 

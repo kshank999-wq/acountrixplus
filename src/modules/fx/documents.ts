@@ -1,4 +1,4 @@
-import { RateError, convert, isForeign } from './rates'
+import { convert } from './rates'
 
 /**
  * What comes off a document's home-currency balance (spec §19).
@@ -52,44 +52,29 @@ export function relieveFunctional(
 }
 
 /**
- * Refuses an operation that has no defined answer in a foreign currency yet.
+ * `refuseForeign` lived here from Phase 35 until Phase 66, and is gone.
  *
- * ## One caller left, and it is the one that was always different
+ * It stopped four operations that had no defined answer in a foreign currency:
+ * crediting an invoice, crediting a bill, applying a credit, and drawing a
+ * retainer. It was right to, and it was right for thirty-one phases — a refusal
+ * somebody reads beats a number nobody can reconcile.
  *
- * This stopped four operations until Phase 63: crediting an invoice, crediting
- * a bill, applying a credit, and drawing a retainer. Three of them were held up
- * by a question that turned out to be already answered —
+ * Phase 63 lifted three of them, having found their question was already
+ * answered by the document engine: a credit note reverses a document, and
+ * reversing it by different arithmetic than raised it *is* the drift the
+ * refusal was guarding against. Those three share one rule with the documents
+ * they reverse, in `fx/denomination.ts`.
  *
- * > for a multi-line document […] that amount is the *sum of the converted
- * > lines*, not the conversion of the sum
+ * Phase 66 lifted the last. The retainer draw genuinely was a different
+ * question — a settlement, at a rate somebody had to choose, with a real effect
+ * on reported profit — and it was deferred twice on purpose, by ADR 0063 and
+ * again by ADR 0065. The answer, when it was finally looked at, was that
+ * neither rate needed choosing: the retainer has been carried at the rate the
+ * money arrived at and the invoice at the rate it was raised at, and the gap
+ * between them is the realised gain or loss `recordPayment` has posted all
+ * along. `fx/settlement.ts` holds it.
  *
- * — because `createInvoice` answered it when it raised the document, and a
- * credit note that reverses a document by different arithmetic than raised it
- * *is* the drift this was guarding against. Those three now share one rule with
- * the documents they reverse (`fx/denomination.ts`).
- *
- * **The retainer is not that question.** It is cash already received in the
- * company's own currency, and drawing it against a euro invoice is a
- * *settlement* at some rate — not a document being converted at its own. Which
- * rate applies, the day the retainer arrived or the day it is drawn, is an
- * accounting decision with a real effect on reported profit, and the two
- * answers differ by more than rounding. It should be made by somebody,
- * deliberately, not defaulted to whichever was easier here.
- *
- * So it goes on refusing, and says what to do instead. A refusal somebody reads
- * beats a number nobody can reconcile.
+ * This note stays because the shape of the thing is worth keeping: a refusal is
+ * not a permanent verdict, it is a question nobody has answered yet, and the
+ * cost of removing one is a phase of work rather than a wrong number for years.
  */
-export function refuseForeign(
-  document: { number: string; currency: string },
-  functionalCurrency: string,
-  operation: string,
-): void {
-  if (!isForeign(document.currency, functionalCurrency)) return
-
-  throw new RateError(
-    `${document.number} is in ${document.currency} and these books are in ` +
-      `${functionalCurrency}. ${operation} in a foreign currency is not supported yet — ` +
-      'record it as a payment at the rate on the day, or post the journal entry directly, ' +
-      'so the rate it happens at is one somebody chose.',
-  )
-}

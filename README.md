@@ -3013,6 +3013,53 @@ billed − $541.75 held = $3,792.25 due**, every term in one currency, with the
 euro truth beneath it; Harborview's domestic $460.00 holding carries no note,
 because there is nothing to explain.
 
+### The retainer you could not draw (Phase 66)
+
+`refuseForeign` stopped four operations from Phase 35. Phase 63 lifted three and
+kept this one on purpose; ADR 0065 left it standing for the same reason. Both
+were right — a retainer draw is a **settlement**, deciding at what rate money
+already held discharges a new demand, with a real effect on reported profit.
+
+**It is the receipt's rule.** A retainer is cash received and held, so drawing it
+against an invoice is a receipt that arrived early — and `recordPayment` has
+decided what happens then since Phase 35: `fxCents = applied − carried`. Neither
+rate needed choosing. The retainer has been carried at the rate the money arrived
+at and the invoice at the rate it was raised at, and the gap is a realised gain
+or loss. What this phase decides is that it *is* the same rule, written once in
+`settleHeld` rather than a third hand-rolled subtraction.
+
+**A database check caught the first draft.** `settleHeld` originally took the
+held money's rate and converted each draw; a €10,000 retainer drawn in three
+parts would have taken its face amount to zero while the sum of three conversions
+missed the functional amount by a cent — a liability saying money is held for a
+client who has spent all of it. Both sides now come from `relieveFunctional`,
+whose rule that the final relief takes the whole remainder is what stops either
+side stranding a cent.
+
+`retainers` gains `currency`, `exchange_rate_millionths` and
+`functional_remaining_cents`. The currency is **chosen** rather than inherited,
+unlike a credit note's — a retainer arrives before there is any document to
+inherit from. A draw *across* currencies is still refused, sharing one function
+with Phase 63's credit refusal for the comparison and for naming both sides.
+
+**`refuseForeign` is gone**, with no callers left. A comment stays where it was,
+because the shape is worth keeping: a refusal is not a permanent verdict, it is a
+question nobody has answered yet, and the cost of removing one is a phase of work
+rather than a wrong number for years.
+
+Verified in the browser: took a €10,000 retainer (stored at 1.0835, posted as
+$10,835.00), billed €1,485 of work against it, then — after moving the rate to
+1.10 — billed €300 more and watched the entry come out as
+
+```
+Dr Unearned Revenue              $325.05
+Dr Foreign Exchange Gain or Loss   $4.95   Exchange loss
+Cr Accounts Receivable                     $330.00
+```
+
+the same $4.95 the unit test predicted. The picker reads **€8,515.00 left**,
+where before this phase it would have said `$8,515.00`.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
