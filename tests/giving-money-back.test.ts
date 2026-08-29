@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { retainerRefunds, retainers } from '@/db/schema'
+import { refunds, retainers } from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
 import { createCustomer, createInvoice, recordPayment } from '@/modules/receivables/service'
 import { refundCredit } from '@/modules/receivables/customer-credit'
@@ -157,12 +157,16 @@ describe('giving a retainer back', () => {
 
     const [row] = await db
       .select()
-      .from(retainerRefunds)
-      .where(eq(retainerRefunds.retainerId, retainer.id))
+      .from(refunds)
+      .where(eq(refunds.subjectId, retainer.id))
 
+    expect(row.subjectType).toBe('retainer')
+    expect(row.direction).toBe('out')
     expect(row.amountCents).toBe(400_000)
-    expect(row.releasedCents).toBe(convert(400_000, ARRIVED))
-    expect(row.paidCents).toBe(convert(400_000, RETURNED))
+    expect(row.carriedCents).toBe(convert(400_000, ARRIVED))
+    expect(row.cashCents).toBe(convert(400_000, RETURNED))
+    // Going out, the balance debited covers the cash plus the gap (Phase 68).
+    expect(row.carriedCents).toBe(row.cashCents + row.realisedCents)
     expect(row.exchangeRateMillionths).toBe(RETURNED)
     expect(row.reference).toBe('Wire 8841')
   })

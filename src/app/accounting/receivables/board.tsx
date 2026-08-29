@@ -1,11 +1,12 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   applyCreditAction,
   createCreditNoteAction,
   createVendorCreditAction,
+  refundVendorCreditAction,
   recoverWriteOffAction,
   saveStatementAction,
   sendStatementAction,
@@ -720,22 +721,98 @@ export function ReceivablesBoard({
                 <th className="px-4 py-2 font-medium">Reason</th>
                 <th className="px-4 py-2 text-right font-medium">Total</th>
                 <th className="px-4 py-2 text-right font-medium">Left</th>
+                {canManage && banks.length > 0 && <th className="px-4 py-2" />}
               </tr>
             </thead>
             <tbody>
               {vendorCredits.map((row) => (
-                <tr key={row.id} className="border-t border-line">
-                  <td className="px-4 py-1.5">{row.number}</td>
-                  <td className="px-4 py-1.5 font-medium">{row.vendorName}</td>
-                  <td className="px-4 py-1.5 text-muted">{row.issueDate}</td>
-                  <td className="px-4 py-1.5 text-muted">{row.reason ?? '—'}</td>
-                  <td className="tnum px-4 py-1.5 text-right">
-                    {formatCents(row.totalCents, row.currency)}
-                  </td>
-                  <td className="tnum px-4 py-1.5 text-right">
-                    {formatCents(row.remainingCents, row.currency)}
-                  </td>
-                </tr>
+                <Fragment key={row.id}>
+                  <tr className="border-t border-line">
+                    <td className="px-4 py-1.5">{row.number}</td>
+                    <td className="px-4 py-1.5 font-medium">{row.vendorName}</td>
+                    <td className="px-4 py-1.5 text-muted">{row.issueDate}</td>
+                    <td className="px-4 py-1.5 text-muted">{row.reason ?? '—'}</td>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(row.totalCents, row.currency)}
+                    </td>
+                    <td className="tnum px-4 py-1.5 text-right">
+                      {formatCents(row.remainingCents, row.currency)}
+                    </td>
+                    {canManage && banks.length > 0 && (
+                      <td className="px-4 py-1.5 text-right">
+                        {row.remainingCents > 0 && (
+                          <button
+                            className="btn btn-ghost text-xs"
+                            onClick={() => {
+                              setRecovering((current) => (current === row.id ? null : row.id))
+                              setRecoveryAmount('')
+                            }}
+                          >
+                            {recovering === row.id ? 'Never mind' : 'Recover in cash'}
+                          </button>
+                        )}
+                      </td>
+                    )}
+                  </tr>
+
+                  {/* Phase 68: a credit with no bill left to spend it on had no
+                      way out, so it sat in payables understating what is owed
+                      to everybody else. */}
+                  {recovering === row.id && (
+                    <tr className="border-t border-line bg-raised/40">
+                      <td colSpan={7} className="px-4 py-3">
+                        {/* Pinned to the viewport's left edge: the table scrolls
+                            sideways on a narrow screen, and a form you have to
+                            scroll to reach is a form nobody finishes. */}
+                        <div className="sticky left-0 flex max-w-[calc(100vw-3rem)] flex-wrap items-end gap-3">
+                          <label className="text-xs text-muted">
+                            <span className="mb-1 block">Amount ({row.currency})</span>
+                            <input
+                              value={recoveryAmount}
+                              onChange={(event) => setRecoveryAmount(event.target.value)}
+                              placeholder="0.00"
+                              className="field py-1.5 text-sm"
+                            />
+                          </label>
+                          <label className="text-xs text-muted">
+                            <span className="mb-1 block">Into</span>
+                            <select
+                              value={recoveryBank}
+                              onChange={(event) => setRecoveryBank(event.target.value)}
+                              className="field py-1.5 text-sm"
+                            >
+                              {banks.map((bank) => (
+                                <option key={bank.id} value={bank.id}>
+                                  {bank.name}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          <button
+                            className="btn btn-primary"
+                            disabled={pending || !recoveryBank || !recoveryAmount.trim()}
+                            onClick={() =>
+                              act(() =>
+                                refundVendorCreditAction({
+                                  creditNoteId: row.id,
+                                  amountCents: parseAmountToCents(recoveryAmount) ?? 0,
+                                  financialAccountId: recoveryBank,
+                                  refundedOn: new Date().toISOString().slice(0, 10),
+                                }),
+                              )
+                            }
+                          >
+                            Recover it
+                          </button>
+                          <p className="w-full text-xs text-muted">
+                            Banked at today’s rate. The payable goes back up by what the credit
+                            has been carried at, and the difference is realised.
+                          </p>
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

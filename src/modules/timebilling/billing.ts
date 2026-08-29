@@ -5,8 +5,8 @@ import {
   customers,
   invoices,
   projects,
+  refunds,
   retainerApplications,
-  retainerRefunds,
   retainers,
   timeEntries,
   users,
@@ -959,12 +959,18 @@ export async function refundRetainer(
       tx,
     )
 
-    await tx.insert(retainerRefunds).values({
+    // One table for every refund since Phase 68 — this had `retainer_refunds`
+    // to itself for exactly one phase, and a second table beside it would have
+    // made the split permanent.
+    await tx.insert(refunds).values({
       companyId: ctx.companyId,
-      retainerId: retainer.id,
+      subjectType: 'retainer',
+      subjectId: retainer.id,
+      direction: 'out',
       amountCents: input.amountCents,
-      releasedCents: settlement.releasedCents,
-      paidCents,
+      carriedCents: settlement.releasedCents,
+      cashCents: paidCents,
+      realisedCents: settlement.realisedCents,
       exchangeRateMillionths: rateMillionths,
       refundedOn: input.refundedOn,
       reference: input.reference ?? null,

@@ -7,6 +7,8 @@ import {
   creditApplications,
   creditNoteLines,
   creditNotes,
+  financialAccounts,
+  refunds,
   vendors,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
@@ -17,7 +19,11 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
-import { functionalCurrency, rateFor } from '@/modules/fx/service'
+import { recoverHeld } from '@/modules/fx/settlement'
+import { convert } from '@/modules/fx/rates'
+import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
+import { mayUse } from './overpayment'
+import { DomainError } from '@/modules/errors'
 
 /**
  * Vendor credits (spec §13: "vendors, bills, **credits**, payments, aging").
@@ -81,7 +87,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
     .where(scoped(ctx, vendors, eq(vendors.id, input.vendorId)))
     .limit(1)
 
-  if (!vendor) throw new Error('Vendor not found')
+  if (!vendor) throw new DomainError('Vendor not found')
 
   const apAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable)
   if (!apAccount) throw new Error('Accounts Payable is missing from the chart.')
@@ -95,11 +101,11 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
       .where(scoped(ctx, bills, eq(bills.id, input.billId)))
       .limit(1)
 
-    if (!row) throw new Error('Bill not found')
+    if (!row) throw new DomainError('Bill not found')
     if (row.vendorId !== input.vendorId) {
-      throw new Error('That bill belongs to a different vendor.')
+      throw new DomainError('That bill belongs to a different vendor.')
     }
-    if (row.status === 'void') throw new Error('That bill is voided.')
+    if (row.status === 'void') throw new DomainError('That bill is voided.')
     bill = row
   }
 
@@ -116,12 +122,12 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
     : await defaultLinesFromBill(ctx, bill)
 
   if (lines.length === 0) {
-    throw new Error('A vendor credit needs at least one line, or a bill to credit.')
+    throw new DomainError('A vendor credit needs at least one line, or a bill to credit.')
   }
 
   for (const line of lines) {
     if (line.amountCents <= 0) {
-      throw new Error('Vendor credit amounts are positive; the direction is what makes it a credit.')
+      throw new DomainError('Vendor credit amounts are positive; the direction is what makes it a credit.')
     }
   }
 
@@ -147,7 +153,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
   })
 
   if (bill && totalCents > bill.totalCents) {
-    throw new Error(
+    throw new DomainError(
       `A credit of ${formatCents(totalCents)} is more than bill ${bill.number} was for ` +
         `(${formatCents(bill.totalCents)}).`,
     )
@@ -320,7 +326,7 @@ async function applyVendorCreditWithin(
   tx: Executor,
   input: { creditNoteId: string; billId: string; amountCents: number; appliedOn: string },
 ) {
-  if (input.amountCents <= 0) throw new Error('An application must be greater than zero.')
+  if (input.amountCents <= 0) throw new DomainError('An application must be greater than zero.')
 
   const [note] = await tx
     .select()
@@ -328,11 +334,11 @@ async function applyVendorCreditWithin(
     .where(and(eq(creditNotes.id, input.creditNoteId), eq(creditNotes.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!note) throw new Error('Vendor credit not found')
+  if (!note) throw new DomainError('Vendor credit not found')
   if (note.party !== 'vendor') {
-    throw new Error('That is a customer credit note. It cannot be applied to a bill.')
+    throw new DomainError('That is a customer credit note. It cannot be applied to a bill.')
   }
-  if (note.status === 'void') throw new Error('That vendor credit is voided.')
+  if (note.status === 'void') throw new DomainError('That vendor credit is voided.')
 
   const [bill] = await tx
     .select()
@@ -340,9 +346,9 @@ async function applyVendorCreditWithin(
     .where(and(eq(bills.id, input.billId), eq(bills.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!bill) throw new Error('Bill not found')
+  if (!bill) throw new DomainError('Bill not found')
   if (bill.vendorId !== note.vendorId) {
-    throw new Error('A credit can only be applied to the same vendor’s bill.')
+    throw new DomainError('A credit can only be applied to the same vendor’s bill.')
   }
 
   /** The two have to agree (Phase 63) — Phase 62's rule, one document over. */
@@ -352,15 +358,15 @@ async function applyVendorCreditWithin(
     documentNumber: bill.number,
     documentCurrency: bill.currency,
   })
-  if (!verdict.ok) throw new Error(verdict.reason)
+  if (!verdict.ok) throw new DomainError(verdict.reason)
 
   if (input.amountCents > note.remainingCents) {
-    throw new Error(
+    throw new DomainError(
       `Only ${formatCents(note.remainingCents)} of vendor credit ${note.number} is left to apply.`,
     )
   }
   if (input.amountCents > bill.balanceCents) {
-    throw new Error(
+    throw new DomainError(
       `Bill ${bill.number} has a balance of ${formatCents(bill.balanceCents)}, ` +
         `so ${formatCents(input.amountCents)} cannot be applied to it.`,
     )
@@ -428,6 +434,225 @@ async function applyVendorCreditWithin(
     creditFunctionalRemainingCents: noteFunctional.functionalBalanceCents,
     billBalanceCents: billBalance,
   }
+}
+
+/**
+ * Takes the money back from a supplier (spec §13, Phase 68).
+ *
+ * ## The balance nobody could spend
+ *
+ * A vendor credit posts `Dr Accounts Payable / Cr Expense` when it is issued.
+ * Applying it to a bill posts nothing — it only decides which bill the
+ * reduction belongs to. So an unapplied credit is a **debit sitting in
+ * payables**: money the supplier owes back, netted against everything else the
+ * business owes them.
+ *
+ * While there are more bills coming that is exactly right, and it is why
+ * `splitReceipt` has refused an over-payment to a supplier since Phase 53 —
+ * "raise a vendor credit for the difference instead". But when the relationship
+ * ends, no bill ever arrives to apply it to, and the remedy is advice nobody can
+ * take. The credit stays in payables for ever, quietly understating what the
+ * business owes its other suppliers.
+ *
+ * ADR 0067 named this as the mirror of the retainer it had just fixed, and it is
+ * the same lesson a third time: **a balance with no way out becomes a wrong
+ * number and stays one.**
+ *
+ * ## Why this is not `refundRetainer` with the words changed
+ *
+ * The two are the same settlement with the debit and the credit swapped. A
+ * retainer is a liability, so giving it back debits the liability and credits
+ * the bank. A vendor credit is an asset, so getting it back debits the bank and
+ * credits the payable — which flips the sign of the realised gain.
+ *
+ * A euro that got dearer is a **loss** on money held for somebody else and a
+ * **gain** on money somebody else holds for you. `recoverHeld` is the half of
+ * Phase 66's core that says so; handing these amounts to `settleHeld` would
+ * return the right magnitude with the wrong sign, in an entry that still
+ * balances.
+ */
+export async function refundVendorCredit(
+  ctx: ActorContext,
+  input: {
+    creditNoteId: string
+    /** In the credit's own currency — the supplier returns what they took. */
+    amountCents: number
+    financialAccountId: string
+    refundedOn: string
+    reference?: string
+  },
+) {
+  requirePermission(ctx, 'accounting:journal')
+
+  return db.transaction(async (tx) => {
+    const [note] = await tx
+      .select()
+      .from(creditNotes)
+      .where(scoped(ctx, creditNotes, eq(creditNotes.id, input.creditNoteId)))
+      .limit(1)
+
+    if (!note) throw new DomainError('That vendor credit is not on these books.')
+    if (note.party !== 'vendor') {
+      throw new DomainError('That is a customer credit note. A customer is refunded from their payment.')
+    }
+    if (note.status === 'void') throw new DomainError('That vendor credit is voided.')
+
+    // Phase 53's verdict, shared with both of the other refunds rather than
+    // restated, and naming the currency since Phase 67.
+    const permitted = mayUse({
+      use: 'refund',
+      amountCents: input.amountCents,
+      availableCents: note.remainingCents,
+      currency: note.currency,
+      // Reused from the customer side, so it has to be told whose money this
+      // is — otherwise it calls a supplier a customer (Phase 68).
+      holder: 'this supplier',
+    })
+    if (!permitted.ok) throw new DomainError(permitted.why)
+
+    const [account] = await tx
+      .select({ chartAccountId: financialAccounts.chartAccountId })
+      .from(financialAccounts)
+      .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
+      .limit(1)
+
+    if (!account) throw new DomainError('That account is not on these books.')
+
+    const apAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable, tx)
+    if (!apAccount) throw new Error('Accounts Payable is missing from the chart.')
+
+    /**
+     * What actually lands in the bank, at the rate on the day it lands — the
+     * figure the statement will show. Not the credit's rate, which is what the
+     * *books* have been carrying it at since it was raised.
+     */
+    const { rateMillionths } = await rateFor(ctx, note.currency, input.refundedOn, tx)
+    const receivedCents = convert(input.amountCents, rateMillionths)
+
+    // The last recovery takes the whole functional remainder, so the credit
+    // cannot reach zero on one column and not the other (Phase 66's rule).
+    const relief = relieveFunctional(
+      {
+        balanceCents: note.remainingCents,
+        exchangeRateMillionths: note.exchangeRateMillionths,
+        functionalBalanceCents: note.functionalRemainingCents,
+      },
+      input.amountCents,
+    )
+    const recovery = recoverHeld({
+      receivedCents,
+      relievedCents: relief.functionalCents,
+    })
+
+    const fxAccount = recovery.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
+
+    const entry = await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.refundedOn,
+        memo: input.reference
+          ? `Vendor credit ${note.number} refunded — ${input.reference}`
+          : `Vendor credit ${note.number} refunded`,
+        // Not `bill`: this one is cash, and the cash-basis transformation must
+        // keep it where it strips the credit that created the balance.
+        source: 'payment',
+        sourceType: 'vendor_credit_refund',
+        sourceId: note.id,
+        lines: [
+          { chartAccountId: account.chartAccountId, debitCents: recovery.receivedCents },
+          { chartAccountId: apAccount.id, creditCents: recovery.relievedCents },
+          ...(fxAccount
+            ? [
+                recovery.realisedCents > 0
+                  ? {
+                      chartAccountId: fxAccount,
+                      creditCents: recovery.realisedCents,
+                      memo: 'Exchange gain',
+                    }
+                  : {
+                      chartAccountId: fxAccount,
+                      debitCents: -recovery.realisedCents,
+                      memo: 'Exchange loss',
+                    },
+              ]
+            : []),
+        ],
+      },
+      tx,
+    )
+
+    await tx.insert(refunds).values({
+      companyId: ctx.companyId,
+      subjectType: 'credit_note',
+      subjectId: note.id,
+      // The only one of the three that comes in rather than goes out, which is
+      // the whole reason the column exists.
+      direction: 'in',
+      amountCents: input.amountCents,
+      carriedCents: recovery.relievedCents,
+      cashCents: recovery.receivedCents,
+      realisedCents: recovery.realisedCents,
+      exchangeRateMillionths: rateMillionths,
+      refundedOn: input.refundedOn,
+      reference: input.reference ?? null,
+      financialAccountId: input.financialAccountId,
+      journalEntryId: entry.id,
+      createdBy: ctx.userId,
+    })
+
+    const remainingCents = note.remainingCents - input.amountCents
+
+    // Conditional on what was read, so two people recovering the same credit at
+    // once produce one recovery and the second finds nothing.
+    const claimed = await tx
+      .update(creditNotes)
+      .set({
+        remainingCents,
+        functionalRemainingCents: relief.functionalBalanceCents,
+        // 'applied' is what a spent credit is called here whether it was spent
+        // against a bill or taken back in cash — both mean nothing is left.
+        status: remainingCents === 0 ? 'applied' : 'open',
+        updatedAt: new Date(),
+      })
+      .where(
+        and(
+          eq(creditNotes.id, note.id),
+          eq(creditNotes.remainingCents, note.remainingCents),
+        ),
+      )
+      .returning({ id: creditNotes.id })
+
+    if (claimed.length === 0) {
+      throw new DomainError('That vendor credit was used by somebody else a moment ago.')
+    }
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'vendor_credit.refund',
+        entityType: 'credit_note',
+        entityId: note.id,
+        after: {
+          number: note.number,
+          currency: note.currency,
+          amountCents: input.amountCents,
+          receivedCents: recovery.receivedCents,
+          relievedCents: recovery.relievedCents,
+          realisedCents: recovery.realisedCents,
+        },
+      },
+      tx,
+    )
+
+    return {
+      refundedCents: input.amountCents,
+      currency: note.currency,
+      receivedCents: recovery.receivedCents,
+      realisedCents: recovery.realisedCents,
+      remainingCents,
+      number: note.number,
+    }
+  })
 }
 
 export async function listVendorCredits(ctx: ActorContext, opts: { limit?: number } = {}) {

@@ -48,6 +48,29 @@
  * They satisfy `released === relieved + realised` by construction, which is
  * what makes the journal entry balance.
  *
+ * ## Which side the balance is on (Phase 68)
+ *
+ * The rule above is stated in terms of a *liability* — held money, debited as
+ * it leaves. That was every caller it had, and it hid the thing that actually
+ * decides the sign.
+ *
+ * A vendor credit is the same settlement with the balance on the other side. It
+ * posts `Dr Accounts Payable / Cr Expense` when it is issued, so an unapplied
+ * one is an **asset**: money the supplier owes back. Recovering it debits the
+ * bank and credits the payable — the mirror image of a refund, and passing it to
+ * `settleHeld` in liability order returns a gain with a loss's sign.
+ *
+ * So the invariant is not about liabilities at all:
+ *
+ * > **`realised` is the debit side less the credit side.** Positive credits the
+ * > exchange account, because `Dr A = Cr B + Cr (A − B)` is the only way a
+ * > three-line entry balances.
+ *
+ * One private function holds that, and the two exported ones differ only in
+ * naming which of their amounts is the debit. Nobody has to remember, which is
+ * the point — the sign is the part that is silently wrong when it is wrong, and
+ * a swapped gain still balances.
+ *
  * Nothing here touches the database or the clock.
  */
 
@@ -62,6 +85,27 @@ export type Settlement = {
    * foreign one where the rate has not moved.
    */
   realisedCents: number
+}
+
+export type Recovery = {
+  /** Debit the bank by this — what actually arrived. */
+  receivedCents: number
+  /** Credit the account carrying the balance by this. */
+  relievedCents: number
+  /** Same convention as `Settlement`: positive credits the exchange account. */
+  realisedCents: number
+}
+
+/**
+ * The whole of the arithmetic, and the only place the sign is decided.
+ *
+ * Trivial on purpose. Its value is that it is stated once: a caller that has
+ * worked out its two functional amounts still has to say which one it is
+ * debiting, and that is the question this file exists to stop people answering
+ * twice.
+ */
+function realise(debitCents: number, creditCents: number): number {
+  return debitCents - creditCents
 }
 
 /**
@@ -97,6 +141,40 @@ export function settleHeld(input: {
   return {
     releasedCents: input.releasedCents,
     relievedCents: input.relievedCents,
-    realisedCents: input.releasedCents - input.relievedCents,
+    // The held money is what is debited: it is a liability, and it is leaving.
+    realisedCents: realise(input.releasedCents, input.relievedCents),
+  }
+}
+
+/**
+ * What to post when a balance owed *to* the business comes back as cash
+ * (Phase 68).
+ *
+ * The mirror of `settleHeld`, and the reason this file now names its sides.
+ * A vendor credit is an asset — the supplier agreed we owe them less than we
+ * have already recognised, so `2000 Accounts Payable` carries a debit nobody
+ * can spend once there are no more bills to apply it to. Getting the money back
+ * debits the bank and credits that payable, which is `settleHeld` with the
+ * debit and the credit the other way round.
+ *
+ * Given the same two numbers, this returns the opposite sign, and that is
+ * correct rather than a quirk: a euro that got dearer is a **loss** on money you
+ * are holding for somebody else and a **gain** on money somebody else is holding
+ * for you.
+ */
+export function recoverHeld(input: {
+  /** What arrives in the bank, at the rate on the day it arrives. */
+  receivedCents: number
+  /**
+   * What leaves the account carrying the balance, from `relieveFunctional` on
+   * it — the rate it has been carried at since it was raised.
+   */
+  relievedCents: number
+}): Recovery {
+  return {
+    receivedCents: input.receivedCents,
+    relievedCents: input.relievedCents,
+    // The cash is what is debited here; the balance being recovered is credited.
+    realisedCents: realise(input.receivedCents, input.relievedCents),
   }
 }

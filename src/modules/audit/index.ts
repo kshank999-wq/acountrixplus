@@ -233,6 +233,7 @@ export type AuditAction =
   | 'deposit.void'
   | 'vendor_credit.create'
   | 'vendor_credit.apply'
+  | 'vendor_credit.refund'
   // CRM and proposals (spec §6, §9)
   | 'organization.create'
   | 'organization.update'

@@ -3109,6 +3109,60 @@ customer"*, and returned €1,000 with
 — the euro taken in at 1.0835 and given back at 1.10. `7100 Foreign Exchange Gain
 or Loss` moved by exactly that $16.50.
 
+### The money the supplier owes you back (Phase 68)
+
+The last of the no-way-out balances ADR 0067 listed. A vendor credit posts
+`Dr Accounts Payable / Cr Expense` when it is issued, and applying it to a bill
+posts nothing — so an unapplied credit is a **debit sitting in payables**: money
+the supplier owes back, netted against everything else the business owes them.
+Right while more bills are coming; wrong for ever once the relationship ends,
+because no bill arrives to apply it to and the credit quietly understates what is
+owed to everybody else.
+
+**The sign is decided by which side the balance is on.** Recovering a credit
+debits the bank and credits the payable — Phase 66's settlement with the sides
+swapped. Handing those amounts to `settleHeld` returns the right magnitude with
+the wrong sign, *in an entry that still balances*, which is what makes it
+dangerous rather than merely wrong. So the invariant is stated once, and it is
+not about liabilities at all:
+
+> `realised` is the debit side less the credit side. Positive credits the
+> exchange account, because `Dr A = Cr B + Cr (A − B)` is the only way a
+> three-line entry balances.
+
+`settleHeld` and `recoverHeld` differ only in naming which amount is the debit.
+Given the same pair they disagree, and both are right: **a euro that got dearer
+is a loss on money you hold for somebody else and a gain on money somebody else
+holds for you.** Phase 67 realised a $16.50 loss on exactly the rate movement
+this phase realises an $8.25 gain on.
+
+**One `refunds` table**, replacing the `retainer_refunds` Phase 67 created one
+phase earlier. That phase was right that a refund is three facts and wrong about
+the scope of the noun: it left three refunds with three answers to "where is it
+written down" — a table, a bare journal entry, and nothing at all. A second
+table beside the first would have made the split permanent, which the
+vendor-credits module has warned against since Phase 12 about this very shape.
+`direction` is a stored column, and a check constraint refuses a row whose three
+amounts do not add up the way its direction claims.
+
+**A refusal nobody can read is not a refusal.** Found in the browser: recovering
+too much returned *"Something went wrong."* Only `DomainError` survives the
+server-action boundary, and this module threw plain `Error` for all 25 of its
+refusals — so every one had been invisible since Phase 12. Twenty-two are now
+`DomainError`; the three that report a broken chart stay logged as unexpected.
+The integration tests passed throughout, because they call the service directly
+and never cross the boundary that ate the message.
+
+Verified in the browser: a €2,000 vendor credit from Supply Depot, raised at
+1.0835 and carried at $2,167.00, refused €9,000 with *"Only €1,000.00 is held
+for this supplier"*, and recovered €500 with
+
+> €500.00 recovered from the supplier. €500.00 of VC-1004 is left. The rate moved
+> since it was raised, so $8.25 is a realised exchange gain.
+
+`refunds` now holds both directions side by side — the retainer at `-1650` and
+the recoveries at `+825`, on the same rate movement.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

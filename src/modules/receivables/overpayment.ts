@@ -93,7 +93,8 @@ export function splitReceipt(input: {
       why:
         'That is more than is owed to this supplier. Paying more than a bill leaves the supplier ' +
         'owing you, which is not the same thing as a credit you are holding for a customer — ' +
-        'raise a vendor credit for the difference instead, or reduce the payment.',
+        'raise a vendor credit for the difference instead, or reduce the payment. A vendor ' +
+        'credit can be applied to their next bill or taken back in cash.',
     }
   }
 
@@ -156,8 +157,18 @@ export function mayUse(input: {
    * number the moment Phase 62 let a receipt arrive in euro.
    */
   currency?: string
+  /**
+   * Whose money it is (Phase 68).
+   *
+   * Held credit was a customer's from Phase 53 until a vendor credit could be
+   * recovered, and the sentence said so. Optional, so every caller written
+   * before this keeps the words it had, and the supplier side does not tell
+   * somebody their supplier is a customer.
+   */
+  holder?: string
 }): UseVerdict {
   const { use, amountCents, availableCents, dueCents, currency } = input
+  const holder = input.holder ?? 'this customer'
   const money = (cents: number) =>
     currency ? formatCents(cents, currency) : (cents / 100).toFixed(2)
 
@@ -168,7 +179,7 @@ export function mayUse(input: {
   if (amountCents > availableCents) {
     return {
       ok: false,
-      why: `Only ${money(availableCents)} is held for this customer, and that is ${money(amountCents)}.`,
+      why: `Only ${money(availableCents)} is held for ${holder}, and that is ${money(amountCents)}.`,
     }
   }
 

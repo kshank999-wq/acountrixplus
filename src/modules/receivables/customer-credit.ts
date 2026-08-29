@@ -1,6 +1,13 @@
 import { and, desc, eq, gt, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { chartAccounts, customers, invoices, paymentApplications, payments } from '@/db/schema'
+import {
+  chartAccounts,
+  customers,
+  invoices,
+  paymentApplications,
+  payments,
+  refunds,
+} from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
@@ -352,7 +359,7 @@ export async function refundCredit(
 
     const held = await overpaymentAccount(ctx.companyId)
 
-    await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,
@@ -386,6 +393,31 @@ export async function refundCredit(
       },
       tx,
     )
+
+    /**
+     * Written down, which it was not before Phase 68.
+     *
+     * This posted a journal entry and nothing else, so the only record that a
+     * refund had happened was `unapplied_cents` being smaller than it was — a
+     * figure that an application also moves. Reconciling the bank line against
+     * the reason for it meant reading the ledger backwards.
+     */
+    await tx.insert(refunds).values({
+      companyId: ctx.companyId,
+      subjectType: 'payment',
+      subjectId: payment.id,
+      direction: 'out',
+      amountCents: input.amountCents,
+      carriedCents: settlement.releasedCents,
+      cashCents: paidCents,
+      realisedCents: settlement.realisedCents,
+      exchangeRateMillionths: rateMillionths,
+      refundedOn: input.refundedOn,
+      reference: input.reference ?? null,
+      financialAccountId: input.financialAccountId,
+      journalEntryId: entry.id,
+      createdBy: ctx.userId,
+    })
 
     const [customer] = await tx
       .select({ name: customers.name })

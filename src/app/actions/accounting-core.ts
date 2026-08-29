@@ -22,7 +22,11 @@ import {
   voidDeposit,
   type DepositItemInput,
 } from '@/modules/banking/deposits'
-import { applyVendorCredit, createVendorCredit } from '@/modules/receivables/vendor-credits'
+import {
+  applyVendorCredit,
+  createVendorCredit,
+  refundVendorCredit,
+} from '@/modules/receivables/vendor-credits'
 import { formatCents } from '@/lib/money'
 import { DomainError, messageFor } from '@/modules/errors'
 
@@ -390,5 +394,45 @@ export async function applyVendorCreditAction(input: unknown): Promise<ActionRes
 
     const result = await applyVendorCredit(actor, parsed)
     return `Applied. ${result.creditRemainingCents === 0 ? 'The credit is used up.' : 'Some credit is still available.'}`
+  })
+}
+
+const refundVendorCreditSchema = z.object({
+  creditNoteId: uuid,
+  amountCents: z.number().int().positive(),
+  financialAccountId: uuid,
+  refundedOn: isoDate,
+  reference: z.string().trim().optional(),
+})
+
+/**
+ * Takes a vendor credit back in cash (Phase 68).
+ *
+ * The other end of applying one, and the end that did not exist — so a credit
+ * left over when a supplier relationship ended sat in payables for ever.
+ */
+export async function refundVendorCreditAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = refundVendorCreditSchema.parse(input)
+
+    const result = await refundVendorCredit(actor, {
+      creditNoteId: parsed.creditNoteId,
+      amountCents: parsed.amountCents,
+      financialAccountId: parsed.financialAccountId,
+      refundedOn: parsed.refundedOn,
+      reference: parsed.reference || undefined,
+    })
+
+    const realised =
+      result.realisedCents === 0
+        ? ''
+        : ` The rate moved since it was raised, so ${formatCents(Math.abs(result.realisedCents))} ` +
+          `is a realised exchange ${result.realisedCents > 0 ? 'gain' : 'loss'}.`
+
+    return (
+      `${formatCents(result.refundedCents, result.currency)} recovered from the supplier. ` +
+      `${formatCents(result.remainingCents, result.currency)} of ${result.number} is left.${realised}`
+    )
   })
 }
