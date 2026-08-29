@@ -1,4 +1,7 @@
+import { randomUUID } from 'node:crypto'
 import { beforeEach, describe, expect, it } from 'vitest'
+import { db } from '@/db'
+import { auditEvents } from '@/db/schema'
 import {
   addUserWithRole,
   createCompanyFixture,
@@ -216,5 +219,102 @@ describe('one answer to "what happened to this record"', () => {
     await expect(
       historyFor(bookkeeper, 'bank_transaction', transaction.id),
     ).resolves.toHaveLength(1)
+  })
+})
+
+describe('what the feed does not show (Phase 72)', () => {
+  /**
+   * The defect Phase 71 created. A manager holds `audit:view` and deliberately
+   * not `payroll:view` — Phase 9 says so out loud: "the decision to show one
+   * colleague another's pay is always deliberate." The activity screen showed
+   * them every payroll event on the books, gross and net included.
+   */
+  it('keeps payroll out of a manager’s activity feed', async () => {
+    const manager = await addUserWithRole(fixture, 'manager')
+
+    await db.insert(auditEvents).values([
+      {
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorName: 'The owner',
+        action: 'payroll.post',
+        entityType: 'payroll_run',
+        entityId: randomUUID(),
+        after: { grossPayCents: 4_620_000, netPayCents: 3_180_000 },
+      },
+      {
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        actorName: 'The owner',
+        action: 'transaction.categorize',
+        // A manager holds `bookkeeping:view` and not `accounting:view`, so a
+        // bank transaction is the right control here — a supplier would be
+        // withheld too, and correctly: they cannot open one.
+        entityType: 'bank_transaction',
+        entityId: randomUUID(),
+        after: { description: 'Fuel' },
+      },
+    ])
+
+    const seen = await recentActivity(manager, 100)
+
+    expect(seen.map((row) => row.entityType)).not.toContain('payroll_run')
+    // And it is a filter rather than a blanket refusal: what they may open is
+    // still there.
+    expect(seen.map((row) => row.entityType)).toContain('bank_transaction')
+  })
+
+  it('still shows payroll to somebody who may see payroll', async () => {
+    await db.insert(auditEvents).values({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      actorName: 'The owner',
+      action: 'payroll.post',
+      entityType: 'payroll_run',
+      entityId: randomUUID(),
+      after: { grossPayCents: 4_620_000 },
+    })
+
+    const seen = await recentActivity(fixture.ctx, 100)
+    expect(seen.map((row) => row.entityType)).toContain('payroll_run')
+  })
+
+  it('refuses a manager one payroll run’s history too', async () => {
+    const manager = await addUserWithRole(fixture, 'manager')
+    const runId = randomUUID()
+
+    await expect(historyFor(manager, 'payroll_run', runId)).rejects.toBeInstanceOf(
+      PermissionError,
+    )
+  })
+
+  /**
+   * `payroll/vendor-reporting` decided in Phase 68 that a tax identifier's
+   * value does not belong in the log; `receivables/service` wrote it verbatim.
+   * One question, two answers, and Phase 71 gave the careless one a screen.
+   */
+  it('does not write a tax identifier into the log', async () => {
+    const vendor = await aVendor()
+    await updateVendor(fixture.ctx, vendor.id, { taxId: '12-3456789' })
+
+    const [latest] = await historyFor(fixture.ctx, 'vendor', vendor.id)
+
+    expect(JSON.stringify(latest.after)).not.toContain('12-3456789')
+    expect((latest.after as { taxId?: string }).taxId).toBe('set')
+  })
+
+  it('shows a tax identifier as set rather than as a number', async () => {
+    const vendor = await aVendor()
+    await updateVendor(fixture.ctx, vendor.id, { taxId: '12-3456789' })
+
+    const [change] = tell((await historyFor(fixture.ctx, 'vendor', vendor.id))[0]).changes
+
+    expect(change).toEqual({
+      key: 'taxId',
+      label: 'Tax ID',
+      kind: 'secret',
+      from: null,
+      to: 'set',
+    })
   })
 })

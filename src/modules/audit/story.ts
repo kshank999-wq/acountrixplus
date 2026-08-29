@@ -1,4 +1,5 @@
 import { correction, type CorrectionKind } from '@/modules/corrections/vocabulary'
+import { isSecret, maskSecret } from './visibility'
 
 /**
  * Turning an audit row into something a person can read (spec §19).
@@ -89,7 +90,7 @@ export function nameOf(action: string): Name {
  */
 const NOT_A_CHANGE = new Set(['reason'])
 
-export type ChangeKind = 'money' | 'plain'
+export type ChangeKind = 'money' | 'plain' | 'secret'
 
 export type Change = {
   key: string
@@ -195,6 +196,24 @@ export function changedFields(
     const was = display(wasValue)
     const now = display(nowValue)
     if (was === now) continue
+
+    /**
+     * A value the log may keep and a screen may never print (Phase 72).
+     *
+     * That it changed is the auditable fact; what it changed to is not.
+     * Redacted here, at the reader, so it also covers the rows written before
+     * anybody noticed the two halves of this codebase disagreed about it.
+     */
+    if (isSecret(key)) {
+      changes.push({
+        key,
+        label: labelFor(key),
+        kind: 'secret',
+        from: maskSecret(was),
+        to: maskSecret(now),
+      })
+      continue
+    }
 
     changes.push({
       key,

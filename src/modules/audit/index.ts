@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto'
-import { desc, eq, and, isNull, inArray } from 'drizzle-orm'
+import { desc, eq, and, isNull, inArray, notInArray } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { auditEvents } from '@/db/schema'
-import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
-import type { Permission } from '@/modules/permissions'
+import { can, requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { permissionToRead, withheldEntityTypes } from './visibility'
 
 export type AuditAction =
   | 'transaction.categorize'
@@ -385,32 +385,14 @@ export function newBatchId(): string {
 }
 
 /**
- * Who may read the history of what (Phase 71).
+ * Who may read the history of what.
  *
- * The rule: **you may read the history of a record you may read.** A
- * bookkeeper who can open a bank transaction can see what was done to it
- * without holding the key to the whole company's log; somebody who cannot open
- * a supplier at all has no business reading how its details changed.
- *
- * Named data rather than a check at each call site, so adding a record type to
- * the log is a deliberate decision about who may read it — and an entity type
- * nobody has placed falls to `audit:view` below, which is the strict end.
+ * Phase 71's rule — you may read the history of a record you may read — with
+ * Phase 72's guarded domains folded in. The registry lives in `visibility`
+ * rather than here, because the whole-company feed below asks the same
+ * question and two tables answering it is the defect this codebase keeps
+ * removing.
  */
-const READABLE_BY: Record<string, Permission> = {
-  bank_transaction: 'bookkeeping:view',
-  categorization_rule: 'bookkeeping:view',
-  invoice: 'accounting:view',
-  bill: 'accounting:view',
-  credit_note: 'accounting:view',
-  payment: 'accounting:view',
-  refund: 'accounting:view',
-  deposit: 'accounting:view',
-  vendor: 'accounting:view',
-  customer: 'accounting:view',
-  journal_entry: 'accounting:view',
-  chart_account: 'accounting:view',
-  financial_account: 'accounting:view',
-}
 
 /**
  * What a history screen is given.
@@ -452,7 +434,7 @@ export async function historyFor(
   entityId: string,
   limit = 50,
 ) {
-  requirePermission(ctx, READABLE_BY[entityType] ?? 'audit:view')
+  requirePermission(ctx, permissionToRead(entityType))
 
   return db
     .select(HISTORY_COLUMNS)
@@ -481,10 +463,30 @@ export async function historyFor(
 export async function recentActivity(ctx: ActorContext, limit = 50) {
   requirePermission(ctx, 'audit:view')
 
+  /**
+   * `audit:view` opens the feed; it does not open everything in it (Phase 72).
+   *
+   * A manager holds `audit:view` and deliberately not `payroll:view` — Phase 9
+   * says so out loud — and until now this handed them every payroll event on
+   * the books, gross and net included. The permission that guards a record
+   * guards the events about it too.
+   *
+   * Filtered in SQL rather than after the fact, because a `limit` applied
+   * before the filter returns a short page of what somebody may see rather
+   * than a full one, and the shortfall looks like "nothing happened".
+   */
+  const withheld = withheldEntityTypes((permission) => can(ctx, permission))
+
   return db
     .select(HISTORY_COLUMNS)
     .from(auditEvents)
-    .where(scoped(ctx, auditEvents))
+    .where(
+      scoped(
+        ctx,
+        auditEvents,
+        ...(withheld.length > 0 ? [notInArray(auditEvents.entityType, withheld)] : []),
+      ),
+    )
     .orderBy(desc(auditEvents.createdAt))
     .limit(limit)
 }

@@ -3334,6 +3334,54 @@ screens, and an **Activity** screen for the whole company. No migration; nothing
 in the ledger moved. What changed is that what was already recorded can be read,
 and that reading it requires being allowed to.
 
+### The screen that showed what the permission withheld (Phase 72)
+
+Phase 71 gave the audit log a reader without asking what was in it.
+
+Three modules had already decided, independently, that certain values must never
+reach that table — reasoning carefully about a reader who did not exist. The
+payroll module records an employee without their rate: *"an audit log is read by
+more people than a payroll record should be."* The 1099 code records **whether**
+a tax identifier was set rather than what it was, *"because recording what it
+was would put a tax number in a table read by everyone with `audit:view`."*
+
+Other writers put exactly those kinds of value in freely, because there was
+nothing to worry about. `payroll.post` carries a run's gross, net and employer
+cost; the party editor wrote a supplier's tax identifier verbatim. Then Phase 71
+built the screen.
+
+```
+manager has audit:view  : True
+manager has payroll:view: False
+```
+
+Phase 9 wrote that gap deliberately and said why: *"the decision to show one
+colleague another's pay is always deliberate."* Phase 71's activity screen showed
+that manager every payroll event on the books. For a business with three people
+on the payroll, a run's gross is a short step from one person's pay.
+
+**The log keeps everything; a reader is shown only what they may know.**
+Redaction belongs to the reader, not the writer — scrubbing writers would lose
+facts an investigation needs and would do nothing about the rows already
+written. Phase 71's `READABLE_BY` and Phase 72's guarded domains are **one**
+registry, not two, because two tables answering "who may see this entity type"
+is the defect this codebase keeps removing. Payroll needs `payroll:view`, tax
+records need `tax:view`, and anything unplaced still needs `audit:view`.
+
+The feed filters **in SQL**. Filtering afterwards would apply the `limit` first,
+so somebody would get a short page of what they may see rather than a full one —
+and a short page reads as "not much happened", which is a lie told by omission.
+
+A secret value reads as **"set"**, not `••••`: a mask shaped like the value tells
+somebody how long it was, and a reader shown asterisks reasonably assumes the
+real thing is one click away. That it changed and by whom is the auditable fact;
+what it changed to is not.
+
+Two of the phase's own assertions turned out wrong, and both were the test
+rather than the code: a manager's feed shows no supplier events either, because
+a manager does not hold `accounting:view` — the rule working, not failing — and
+Phase 71's "field that was emptied" test had used a tax ID as its example.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

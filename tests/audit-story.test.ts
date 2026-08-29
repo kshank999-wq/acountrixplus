@@ -86,10 +86,24 @@ describe('what changed', () => {
    * detail or a tax ID that went from something to nothing.
    */
   it('keeps a field that was emptied', () => {
-    const changes = changedFields({ taxId: '12-3456789' }, { taxId: null })
+    const changes = changedFields({ email: 'accounts@harborview.test' }, { email: null })
 
     expect(changes).toEqual([
-      { key: 'taxId', label: 'Tax ID', kind: 'plain', from: '12-3456789', to: null },
+      { key: 'email', label: 'Email', kind: 'plain', from: 'accounts@harborview.test', to: null },
+    ])
+  })
+
+  /**
+   * A tax identifier is one the log may keep and a screen may never print
+   * (Phase 72). That it was cleared is the auditable fact; what it was is not.
+   */
+  it('redacts a value that must not be shown, on both sides', () => {
+    expect(changedFields({ taxId: '12-3456789' }, { taxId: null })).toEqual([
+      { key: 'taxId', label: 'Tax ID', kind: 'secret', from: 'set', to: null },
+    ])
+
+    expect(changedFields({ taxId: '12-3456789' }, { taxId: '98-7654321' })).toEqual([
+      { key: 'taxId', label: 'Tax ID', kind: 'secret', from: 'set', to: 'set' },
     ])
   })
 

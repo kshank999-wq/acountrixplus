@@ -93,6 +93,25 @@ export function permissionToRead(entityType: string): Permission {
 }
 
 /**
+ * The entity types this reader may not be shown, given what they hold.
+ *
+ * Handed to the feed as a `NOT IN`, so the filtering happens in the query
+ * rather than after it. A `limit` applied before the filter returns a short
+ * page of what somebody may see rather than a full one, and a short page reads
+ * as "not much happened" — which is a lie told by omission.
+ *
+ * Only the *named* types can be withheld. Anything falling through to
+ * `audit:view` is already covered by the gate on the feed itself, and listing
+ * every unnamed type here is impossible anyway — the log takes an entity type
+ * as a string.
+ */
+export function withheldEntityTypes(holds: (permission: Permission) => boolean): string[] {
+  return Object.entries(READABLE_BY)
+    .filter(([, permission]) => !holds(permission))
+    .map(([entityType]) => entityType)
+}
+
+/**
  * Values the log may keep and a screen may never print.
  *
  * `vendor-reporting` reached this conclusion for a tax identifier in Phase 68

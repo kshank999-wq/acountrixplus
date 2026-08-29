@@ -122,6 +122,11 @@ function Value({
   const raw = change[which]
   if (raw === null) return <span className="text-faint italic">nothing</span>
 
+  // A value the log keeps and this panel may never print (Phase 72). "set"
+  // rather than a row of asterisks: a mask shaped like the value tells
+  // somebody how long it was.
+  if (change.kind === 'secret') return <span className="italic text-muted">{raw}</span>
+
   if (change.kind === 'money') {
     const cents = Number(raw)
     // A `*Cents` key whose value is not a number is not money after all, and

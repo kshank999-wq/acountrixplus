@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { formatCents } from '@/lib/money'
-import type { Told } from '@/modules/audit/story'
+import type { ChangeKind, Told } from '@/modules/audit/story'
 
 /**
  * The activity feed (Phase 71).
@@ -148,8 +148,14 @@ export function ActivityList({
   )
 }
 
-function render(value: string | null, kind: 'money' | 'plain', currency: string) {
+function render(value: string | null, kind: ChangeKind, currency: string) {
   if (value === null) return <span className="text-faint italic">nothing</span>
+
+  // A value the log keeps and this screen may never print (Phase 72). It reads
+  // as "set" rather than as a row of asterisks: a mask shaped like the value
+  // tells somebody how long it was, and one shown `••••` reasonably assumes
+  // the real thing is a click away.
+  if (kind === 'secret') return <span className="italic text-muted">{value}</span>
 
   if (kind === 'money') {
     const cents = Number(value)

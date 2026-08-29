@@ -29,7 +29,13 @@ import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from
 import { splitReceipt } from './overpayment'
 import { settlementCurrency } from './settlement-currency'
 import { relieveFunctional } from '@/modules/fx/documents'
-import { CUSTOMER_FIELDS, VENDOR_FIELDS, diffParty } from '@/modules/parties/changes'
+import {
+  CUSTOMER_FIELDS,
+  VENDOR_FIELDS,
+  diffParty,
+  type FieldChange,
+} from '@/modules/parties/changes'
+import { isSecret, maskSecret } from '@/modules/audit/visibility'
 import {
   describeDuplicate,
   duplicateVerdict,
@@ -400,8 +406,8 @@ export async function updateCustomer(
         action: 'customer.update',
         entityType: 'customer',
         entityId: customerId,
-        before: Object.fromEntries(changes.map((change) => [change.key, change.from])),
-        after: Object.fromEntries(changes.map((change) => [change.key, change.to])),
+        before: auditable(changes, 'from'),
+        after: auditable(changes, 'to'),
       },
       tx,
     )
@@ -466,8 +472,8 @@ export async function updateVendor(
         action: 'vendor.update',
         entityType: 'vendor',
         entityId: vendorId,
-        before: Object.fromEntries(changes.map((change) => [change.key, change.from])),
-        after: Object.fromEntries(changes.map((change) => [change.key, change.to])),
+        before: auditable(changes, 'from'),
+        after: auditable(changes, 'to'),
       },
       tx,
     )
@@ -484,6 +490,31 @@ export async function updateVendor(
  * PDF's address block, the chase decision's "has an email" — reads a blank as
  * a value and behaves as though it were filled in.
  */
+/**
+ * A party's changes as an audit payload, minus the values that do not belong
+ * in one (Phase 72).
+ *
+ * `payroll/vendor-reporting` decided this in Phase 68 and said why: recording
+ * what a tax identifier *was* "would put a tax number in a table read by
+ * everyone with `audit:view`". This module never heard, and wrote it verbatim
+ * on every edit that touched the field — one question with two answers, and
+ * Phase 71 gave the careless one a screen.
+ *
+ * The auditable fact is that the identifier changed, and by whom. Somebody
+ * investigating a 1099 needs to know it was replaced on the 3rd; they do not
+ * need the number, and putting it in the log is how it ends up somewhere it
+ * should never have been. `isSecret` is the same list the reader redacts
+ * against, so the rows written before this agree with the ones written after.
+ */
+function auditable(changes: FieldChange[], side: 'from' | 'to'): Record<string, unknown> {
+  return Object.fromEntries(
+    changes.map((change) => [
+      change.key,
+      isSecret(change.key) ? maskSecret(change[side]) : change[side],
+    ]),
+  )
+}
+
 function normaliseParty<T extends Record<string, unknown>>(input: T): T {
   const out: Record<string, unknown> = {}
 
