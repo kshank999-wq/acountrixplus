@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useTransition } from 'react'
+import { Fragment, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   setCustomerActiveAction,
@@ -11,6 +11,7 @@ import {
 } from '@/app/actions/parties'
 import { formatCents } from '@/lib/money'
 import { partyStanding } from '@/modules/parties/standing'
+import { RecordHistory } from '@/components/record-history'
 
 type Party = {
   id: string
@@ -74,6 +75,9 @@ export function PeopleBoard({
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
   const [editing, setEditing] = useState<string | null>(null)
+
+  /** Which row has its history open (Phase 71). */
+  const [historyId, setHistoryId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft>({})
   const [showArchived, setShowArchived] = useState(false)
 
@@ -246,7 +250,8 @@ export function PeopleBoard({
                 })
 
                 return (
-                <tr key={row.id} className="border-t border-line align-top">
+                <Fragment key={row.id}>
+                <tr className="border-t border-line align-top">
                   {editing === row.id ? (
                     <td colSpan={7} className="px-4 py-4">
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
@@ -402,7 +407,24 @@ export function PeopleBoard({
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-2 text-right">
+                      <td className="whitespace-nowrap px-4 py-2 text-right">
+                        {/*
+                          Phase 71. Every edit here has recorded its before and
+                          after since Phase 45 — the whole reason this screen
+                          prefers an update to a delete and recreate — and
+                          nothing could display either half until now. "Who
+                          changed their email, and when" is the question the
+                          audit trail exists to answer.
+                        */}
+                        <button
+                          type="button"
+                          className="btn btn-ghost text-xs"
+                          onClick={() =>
+                            setHistoryId((current) => (current === row.id ? null : row.id))
+                          }
+                        >
+                          {historyId === row.id ? 'Hide history' : 'History'}
+                        </button>
                         {canEdit && (
                           <button
                             type="button"
@@ -416,6 +438,19 @@ export function PeopleBoard({
                     </>
                   )}
                 </tr>
+
+                {historyId === row.id && editing !== row.id && (
+                  <tr className="border-t border-line bg-raised/40">
+                    <td colSpan={7} className="px-4 py-3">
+                      <RecordHistory
+                        entityType={isVendors ? 'vendor' : 'customer'}
+                        entityId={row.id}
+                        currency={homeCurrency}
+                      />
+                    </td>
+                  </tr>
+                )}
+                </Fragment>
                 )
               })}
             </tbody>

@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto'
 import { desc, eq, and, isNull, inArray } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { auditEvents } from '@/db/schema'
-import { scoped, type ActorContext } from '@/modules/tenancy/context'
+import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import type { Permission } from '@/modules/permissions'
 
 export type AuditAction =
   | 'transaction.categorize'
@@ -383,10 +384,78 @@ export function newBatchId(): string {
   return randomUUID()
 }
 
-/** History for one record, newest first (spec §3 "undo/history"). */
-export async function historyFor(ctx: ActorContext, entityType: string, entityId: string) {
+/**
+ * Who may read the history of what (Phase 71).
+ *
+ * The rule: **you may read the history of a record you may read.** A
+ * bookkeeper who can open a bank transaction can see what was done to it
+ * without holding the key to the whole company's log; somebody who cannot open
+ * a supplier at all has no business reading how its details changed.
+ *
+ * Named data rather than a check at each call site, so adding a record type to
+ * the log is a deliberate decision about who may read it — and an entity type
+ * nobody has placed falls to `audit:view` below, which is the strict end.
+ */
+const READABLE_BY: Record<string, Permission> = {
+  bank_transaction: 'bookkeeping:view',
+  categorization_rule: 'bookkeeping:view',
+  invoice: 'accounting:view',
+  bill: 'accounting:view',
+  credit_note: 'accounting:view',
+  payment: 'accounting:view',
+  refund: 'accounting:view',
+  deposit: 'accounting:view',
+  vendor: 'accounting:view',
+  customer: 'accounting:view',
+  journal_entry: 'accounting:view',
+  chart_account: 'accounting:view',
+  financial_account: 'accounting:view',
+}
+
+/**
+ * What a history screen is given.
+ *
+ * Explicit rather than `select()`, because the row carries an IP address and a
+ * user agent that nothing displaying a history needs, and a query that hands
+ * back everything is one somebody eventually renders.
+ *
+ * `userId` stays. It is not the sensitive part — `actorName` already names the
+ * person out loud — and it is the durable identity behind that name: two
+ * colleagues can share a display name, and one who leaves keeps their id while
+ * the name on old rows is whatever it was at the time. A feed that filtered by
+ * name would quietly conflate them.
+ */
+const HISTORY_COLUMNS = {
+  id: auditEvents.id,
+  action: auditEvents.action,
+  entityType: auditEvents.entityType,
+  entityId: auditEvents.entityId,
+  userId: auditEvents.userId,
+  actorName: auditEvents.actorName,
+  before: auditEvents.before,
+  after: auditEvents.after,
+  isUndo: auditEvents.isUndo,
+  undoneByEventId: auditEvents.undoneByEventId,
+  batchId: auditEvents.batchId,
+  createdAt: auditEvents.createdAt,
+} as const
+
+/**
+ * History for one record, newest first (spec §3 "undo/history", §19).
+ *
+ * Gated since Phase 71. It was not before: every caller was in `tests/`, so
+ * eighteen months of "nobody has noticed" stood in for a permission check.
+ */
+export async function historyFor(
+  ctx: ActorContext,
+  entityType: string,
+  entityId: string,
+  limit = 50,
+) {
+  requirePermission(ctx, READABLE_BY[entityType] ?? 'audit:view')
+
   return db
-    .select()
+    .select(HISTORY_COLUMNS)
     .from(auditEvents)
     .where(
       scoped(
@@ -397,12 +466,23 @@ export async function historyFor(ctx: ActorContext, entityType: string, entityId
       ),
     )
     .orderBy(desc(auditEvents.createdAt))
+    .limit(limit)
 }
 
-/** Company-wide activity feed, newest first. */
+/**
+ * Company-wide activity feed, newest first.
+ *
+ * `audit:view` at last. The permission was declared in Phase 3 for exactly
+ * this, granted to an owner and an accountant, and reasoned about in other
+ * modules' comments as though it were the gate — `payroll/vendor-reporting`
+ * keeps a tax identifier out of the log because that table is "read by
+ * everyone with `audit:view`" — while nothing ever checked it.
+ */
 export async function recentActivity(ctx: ActorContext, limit = 50) {
+  requirePermission(ctx, 'audit:view')
+
   return db
-    .select()
+    .select(HISTORY_COLUMNS)
     .from(auditEvents)
     .where(scoped(ctx, auditEvents))
     .orderBy(desc(auditEvents.createdAt))

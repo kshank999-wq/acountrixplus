@@ -10,6 +10,7 @@ import {
 } from '@/db/schema'
 import {
   eventsInBatch,
+  historyFor,
   lastUndoableEvent,
   markUndone,
   newBatchId,
@@ -856,31 +857,21 @@ export async function undoLast(ctx: ActorContext) {
   return { undone, batchId: undoBatchId }
 }
 
-/** Full history for one transaction, newest first. */
+/**
+ * Full history for one transaction, newest first.
+ *
+ * One line since Phase 71. This used to be a second implementation of the same
+ * query — the careful one, as it happens: it gated and named its columns while
+ * `historyFor` did neither, and it was the only reason anybody noticed the
+ * other had no permission check at all. Two answers to "what happened to this
+ * record" is the defect this codebase keeps removing, so the careful one's
+ * rules moved into `historyFor` and this became a call to it.
+ *
+ * The gate is still `bookkeeping:view` — decided there now, from the entity
+ * type, rather than named here.
+ */
 export async function transactionHistory(ctx: ActorContext, transactionId: string) {
-  requirePermission(ctx, 'bookkeeping:view')
-
-  return db
-    .select({
-      id: auditEvents.id,
-      action: auditEvents.action,
-      actorName: auditEvents.actorName,
-      before: auditEvents.before,
-      after: auditEvents.after,
-      isUndo: auditEvents.isUndo,
-      undoneByEventId: auditEvents.undoneByEventId,
-      createdAt: auditEvents.createdAt,
-    })
-    .from(auditEvents)
-    .where(
-      scoped(
-        ctx,
-        auditEvents,
-        eq(auditEvents.entityType, 'bank_transaction'),
-        eq(auditEvents.entityId, transactionId),
-      ),
-    )
-    .orderBy(desc(auditEvents.createdAt))
+  return historyFor(ctx, 'bank_transaction', transactionId)
 }
 
 /**

@@ -12,6 +12,7 @@ import { sendRemittanceAction, shareRemittanceAction } from '@/app/actions/remit
 import type { VoidVerdict } from '@/modules/receivables/payment-void'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
+import { RecordHistory } from '@/components/record-history'
 
 type Row = {
   id: string
@@ -69,6 +70,9 @@ export function PaymentsBoard({
   // panel, which is unmounted with the row — so closing one and opening another
   // cannot carry a half-typed reason across to a different payment.
   const [openId, setOpenId] = useState<string | null>(null)
+
+  /** Which row has its history open (Phase 71). Never both at once. */
+  const [historyId, setHistoryId] = useState<string | null>(null)
 
   // Held credit (Phase 53).
   const [creditId, setCreditId] = useState('')
@@ -422,12 +426,27 @@ export function PaymentsBoard({
                                 </button>
                               </>
                             )}
+                            {/* Phase 71. "Why was this taken back, and by
+                                whom" is the question this screen exists to
+                                answer, and until now the answer was in a table
+                                with nothing in front of it. */}
+                            <button
+                              className="btn btn-ghost text-xs"
+                              onClick={() => {
+                                setNotice(null)
+                                setOpenId(null)
+                                setHistoryId((current) => (current === row.id ? null : row.id))
+                              }}
+                            >
+                              {historyId === row.id ? 'Hide history' : 'History'}
+                            </button>
                             {row.verdict.ok ? (
                               <CorrectionButton
                                 kind="payment.void"
                                 open={open}
                                 onClick={() => {
                                   setNotice(null)
+                                  setHistoryId(null)
                                   setOpenId(open ? null : row.id)
                                 }}
                               />
@@ -446,6 +465,18 @@ export function PaymentsBoard({
                           </td>
                         )}
                       </tr>
+
+                      {historyId === row.id && (
+                        <tr className="border-t border-line bg-raised/40">
+                          <td colSpan={canVoid ? 7 : 6} className="px-4 py-3">
+                            {/* No currency passed: every other figure on this
+                                board is formatted the same way, and a history
+                                that alone claimed a currency the row does not
+                                carry would be Phase 61's defect. */}
+                            <RecordHistory entityType="payment" entityId={row.id} />
+                          </td>
+                        </tr>
+                      )}
 
                       {open && row.verdict.ok && (
                         <tr className="border-t border-line bg-raised/40">

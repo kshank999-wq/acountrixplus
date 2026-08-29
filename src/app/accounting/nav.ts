@@ -26,4 +26,8 @@ export const ACCOUNTING_NAV = [
   { href: '/accounting/periods', label: 'Recurring & close' },
   { href: '/accounting/reconcile', label: 'Reconcile' },
   { href: '/accounting/documents', label: 'Documents' },
+  // Last, because it is the screen somebody opens when something has already
+  // gone wrong — and until Phase 71 there was none, so the audit log had been
+  // written for seventy phases and read by nothing.
+  { href: '/accounting/activity', label: 'Activity' },
 ]
