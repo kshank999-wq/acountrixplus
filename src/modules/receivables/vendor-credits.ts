@@ -15,8 +15,9 @@ import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
-import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
-import { functionalCurrency } from '@/modules/fx/service'
+import { relieveFunctional } from '@/modules/fx/documents'
+import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
+import { functionalCurrency, rateFor } from '@/modules/fx/service'
 
 /**
  * Vendor credits (spec §13: "vendors, bills, **credits**, payments, aging").
@@ -99,7 +100,6 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
       throw new Error('That bill belongs to a different vendor.')
     }
     if (row.status === 'void') throw new Error('That bill is voided.')
-    refuseForeign(row, await functionalCurrency(ctx.companyId), 'Crediting a bill')
     bill = row
   }
 
@@ -125,9 +125,26 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
     }
   }
 
+  /**
+   * Denominated in the bill it credits (Phase 63), at the rate on this
+   * credit's own issue date. The customer-side reasoning applies unchanged: a
+   * credit reverses part of a document that already exists, and the supplier's
+   * ledger will show €500 against that bill.
+   */
+  const home = await functionalCurrency(ctx.companyId)
+  const currency = bill?.currency ?? home
+  const { rateMillionths } = await rateFor(ctx, currency, input.issueDate)
+
   const subtotalCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
   const taxCents = input.taxCents ?? 0
   const totalCents = subtotalCents + taxCents
+
+  // One rule, shared with the bill this reverses (Phase 63).
+  const functional = functionalAmounts({
+    lineCents: lines.map((line) => line.amountCents),
+    taxCents,
+    rateMillionths,
+  })
 
   if (bill && totalCents > bill.totalCents) {
     throw new Error(
@@ -151,6 +168,10 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
         invoiceId: null,
         billId: bill?.id ?? null,
         status: 'open',
+        currency,
+        exchangeRateMillionths: rateMillionths,
+        functionalTotalCents: functional.functionalTotalCents,
+        functionalRemainingCents: functional.functionalTotalCents,
         subtotalCents,
         taxCents,
         totalCents,
@@ -175,11 +196,17 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
     )
 
     // The mirror of the bill entry: payable down, expense back out.
+    // In the company's currency, because that is what a ledger is in, and per
+    // line so the entry balances against `functionalTotalCents` exactly.
     const journalLineInputs = [
-      { chartAccountId: apAccount.id, debitCents: totalCents, memo: `Vendor credit ${number}` },
-      ...lines.map((line) => ({
+      {
+        chartAccountId: apAccount.id,
+        debitCents: functional.functionalTotalCents,
+        memo: `Vendor credit ${number}`,
+      },
+      ...lines.map((line, index) => ({
         chartAccountId: line.chartAccountId,
-        creditCents: line.amountCents,
+        creditCents: functional.lineCents[index],
         memo: line.description,
       })),
     ]
@@ -189,7 +216,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
       if (!taxAccount) throw new Error('Sales Tax Payable is missing from the chart.')
       journalLineInputs.push({
         chartAccountId: taxAccount.id,
-        creditCents: taxCents,
+        creditCents: functional.functionalTaxCents,
         memo: 'Tax credited',
       })
     }
@@ -244,6 +271,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
         ...note,
         journalEntryId: entry.id,
         remainingCents: applied.creditRemainingCents,
+        functionalRemainingCents: applied.creditFunctionalRemainingCents,
         status: applied.creditRemainingCents === 0 ? ('applied' as const) : note.status,
       }
     }
@@ -317,6 +345,15 @@ async function applyVendorCreditWithin(
     throw new Error('A credit can only be applied to the same vendor’s bill.')
   }
 
+  /** The two have to agree (Phase 63) — Phase 62's rule, one document over. */
+  const verdict = creditableAgainst({
+    creditNumber: note.number,
+    creditCurrency: note.currency,
+    documentNumber: bill.number,
+    documentCurrency: bill.currency,
+  })
+  if (!verdict.ok) throw new Error(verdict.reason)
+
   if (input.amountCents > note.remainingCents) {
     throw new Error(
       `Only ${formatCents(note.remainingCents)} of vendor credit ${note.number} is left to apply.`,
@@ -339,10 +376,22 @@ async function applyVendorCreditWithin(
   })
 
   const noteRemaining = note.remainingCents - input.amountCents
+  // Both halves together, for the reason the customer side does it: a note whose
+  // face amount is spent but whose functional amount is not shows credit the
+  // business does not have (Phase 63).
+  const noteFunctional = relieveFunctional(
+    {
+      balanceCents: note.remainingCents,
+      exchangeRateMillionths: note.exchangeRateMillionths,
+      functionalBalanceCents: note.functionalRemainingCents,
+    },
+    input.amountCents,
+  )
   await tx
     .update(creditNotes)
     .set({
       remainingCents: noteRemaining,
+      functionalRemainingCents: noteFunctional.functionalBalanceCents,
       status: noteRemaining === 0 ? 'applied' : 'open',
       updatedAt: new Date(),
     })
@@ -374,7 +423,11 @@ async function applyVendorCreditWithin(
     tx,
   )
 
-  return { creditRemainingCents: noteRemaining, billBalanceCents: billBalance }
+  return {
+    creditRemainingCents: noteRemaining,
+    creditFunctionalRemainingCents: noteFunctional.functionalBalanceCents,
+    billBalanceCents: billBalance,
+  }
 }
 
 export async function listVendorCredits(ctx: ActorContext, opts: { limit?: number } = {}) {
@@ -388,8 +441,10 @@ export async function listVendorCredits(ctx: ActorContext, opts: { limit?: numbe
       vendorId: creditNotes.vendorId,
       vendorName: vendors.name,
       status: creditNotes.status,
+      currency: creditNotes.currency,
       totalCents: creditNotes.totalCents,
       remainingCents: creditNotes.remainingCents,
+      functionalRemainingCents: creditNotes.functionalRemainingCents,
       reason: creditNotes.reason,
     })
     .from(creditNotes)

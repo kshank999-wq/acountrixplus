@@ -54,23 +54,30 @@ export function relieveFunctional(
 /**
  * Refuses an operation that has no defined answer in a foreign currency yet.
  *
- * ## Why a refusal rather than an approximation
+ * ## One caller left, and it is the one that was always different
  *
- * Reducing a foreign balance means posting a home-currency amount to the
- * control account, and for a multi-line document — a credit note, a vendor
- * credit — that amount is the *sum of the converted lines*, not the conversion
- * of the sum. The two differ by a cent often enough to matter, and picking
- * either without deciding which is right is how a set of books acquires a drift
- * nobody can explain (the trap Phase 26 named and Phase 31 exists to catch).
+ * This stopped four operations until Phase 63: crediting an invoice, crediting
+ * a bill, applying a credit, and drawing a retainer. Three of them were held up
+ * by a question that turned out to be already answered —
  *
- * A retainer is worse than that: it is cash already received in the company's
- * own currency, and drawing it against a euro invoice is a settlement at *some*
- * rate. Which rate — the day the retainer arrived, or the day it is drawn — is
- * an accounting decision with a real effect on reported profit. It should be
- * made by somebody, deliberately, not defaulted to whichever was easier here.
+ * > for a multi-line document […] that amount is the *sum of the converted
+ * > lines*, not the conversion of the sum
  *
- * So these four operations stop on a foreign document, and say what to do
- * instead. A refusal somebody reads beats a number nobody can reconcile.
+ * — because `createInvoice` answered it when it raised the document, and a
+ * credit note that reverses a document by different arithmetic than raised it
+ * *is* the drift this was guarding against. Those three now share one rule with
+ * the documents they reverse (`fx/denomination.ts`).
+ *
+ * **The retainer is not that question.** It is cash already received in the
+ * company's own currency, and drawing it against a euro invoice is a
+ * *settlement* at some rate — not a document being converted at its own. Which
+ * rate applies, the day the retainer arrived or the day it is drawn, is an
+ * accounting decision with a real effect on reported profit, and the two
+ * answers differ by more than rounding. It should be made by somebody,
+ * deliberately, not defaulted to whichever was easier here.
+ *
+ * So it goes on refusing, and says what to do instead. A refusal somebody reads
+ * beats a number nobody can reconcile.
  */
 export function refuseForeign(
   document: { number: string; currency: string },

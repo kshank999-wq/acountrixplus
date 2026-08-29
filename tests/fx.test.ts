@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { companies, customers, invoices, vendors } from '@/db/schema'
+import { companies, customers, invoices, vendors, creditNotes } from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
 import { PermissionError } from '@/modules/permissions'
 import { accountByNumber } from '@/modules/coa/service'
@@ -753,35 +753,51 @@ describe('every way a balance goes down (Phase 35)', () => {
     expect(check.agrees).toBe(true)
   })
 
-  it('refuses to credit a foreign invoice rather than post the wrong number', async () => {
-    // A credit note's home amount is the sum of its *converted lines*, not the
-    // conversion of its total, and the two differ by a cent often enough to
-    // matter. Picking either without deciding which is right is how a set of
-    // books acquires a drift nobody can explain — so this stops, and says so.
+  /**
+   * Phase 35 refused this outright, and this test pinned the refusal:
+   *
+   * > A credit note's home amount is the sum of its *converted lines*, not the
+   * > conversion of its total, and the two differ by a cent often enough to
+   * > matter. Picking either without deciding which is right is how a set of
+   * > books acquires a drift nobody can explain.
+   *
+   * Phase 63 lifted it, because nobody had to decide: `createInvoice` decided
+   * it when it raised the document — each line converts on its own and the
+   * total is their sum — and a credit note that reverses a document by
+   * different arithmetic than raised it *is* the drift. The rule now lives in
+   * `fx/denomination.ts`, where the invoice and the credit note share one.
+   */
+  it('credits a foreign invoice at the sum of its converted lines', async () => {
     const fixture = await withRates(await usd())
     const invoice = await aEuroInvoice(fixture)
     const revenue = await accountByNumber(fixture.companyId, '4000')
 
-    await expect(
-      createCreditNote(fixture.ctx, {
-        customerId: invoice.customerId,
-        issueDate: '2026-04-15',
-        invoiceId: invoice.id,
-        lines: [
-          {
-            description: 'One day not delivered',
-            unitPriceCents: 100_000,
-            chartAccountId: revenue!.id,
-          },
-        ],
-      }),
-    ).rejects.toThrow(RateError)
+    const note = await createCreditNote(fixture.ctx, {
+      customerId: invoice.customerId,
+      issueDate: '2026-04-15',
+      invoiceId: invoice.id,
+      lines: [
+        {
+          description: 'One day not delivered',
+          unitPriceCents: 100_000,
+          chartAccountId: revenue!.id,
+        },
+      ],
+    })
 
-    // And the invoice is untouched — a refusal that half-happened would be
-    // worse than the number it refused to write.
+    const [row] = await db.select().from(creditNotes).where(eq(creditNotes.id, note.id))
+    expect(row.currency).toBe('EUR')
+    expect(row.totalCents).toBe(100_000)
+
+    // The invoice itself is untouched until the credit is applied: raising a
+    // credit note and spending it are two acts, as they always were.
     const [after] = await db.select().from(invoices).where(eq(invoices.id, invoice.id))
     expect(after.balanceCents).toBe(400_000)
     expect(after.functionalBalanceCents).toBe(433_400)
+
+    // And the books still reconcile, which is what the refusal was protecting.
+    const check = await conversionsAgree(fixture.ctx)
+    expect(check.agrees).toBe(true)
   })
 
   it('still credits a domestic invoice, in a company that has foreign ones', async () => {

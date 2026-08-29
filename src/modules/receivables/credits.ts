@@ -16,8 +16,9 @@ import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
-import { refuseForeign, relieveFunctional } from '@/modules/fx/documents'
-import { functionalCurrency } from '@/modules/fx/service'
+import { relieveFunctional } from '@/modules/fx/documents'
+import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
+import { functionalCurrency, rateFor } from '@/modules/fx/service'
 
 /**
  * Credit notes and write-offs (spec §13).
@@ -103,7 +104,6 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
       throw new Error('That invoice belongs to a different customer.')
     }
     if (row.status === 'void') throw new Error('That invoice is voided.')
-    refuseForeign(row, await functionalCurrency(ctx.companyId), 'Crediting an invoice')
     invoice = row
   }
 
@@ -132,6 +132,33 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
   const taxCents = input.taxCents ?? (input.lines?.length ? 0 : (invoice?.taxCents ?? 0))
   const totalCents = subtotalCents + taxCents
 
+  /**
+   * A credit note is denominated in the document it credits (Phase 63).
+   *
+   * Inherited rather than chosen: it reverses part of a document that already
+   * exists, and the customer's own ledger will show €500 against that invoice.
+   * Standalone — a goodwill gesture before the next invoice exists — it is in
+   * the company's own currency, which is the only one available.
+   *
+   * The rate is the one on this note's issue date, fixed here and never
+   * recomputed, exactly as `createInvoice` fixes an invoice's. Deliberately
+   * *not* the invoice's own rate: this is a document raised today, and dating
+   * its conversion to something that happened in March would put a rate in the
+   * books that nobody chose today.
+   */
+  const home = await functionalCurrency(ctx.companyId)
+  const currency = invoice?.currency ?? home
+  const { rateMillionths } = await rateFor(ctx, currency, input.issueDate)
+
+  // One rule, shared with the invoice and the bill this reverses: each line
+  // converts on its own and the total is their sum, so the entry balances by
+  // construction (Phase 63).
+  const functional = functionalAmounts({
+    lineCents: lines.map((line) => line.amountCents),
+    taxCents,
+    rateMillionths,
+  })
+
   if (invoice && totalCents > invoice.totalCents) {
     throw new Error(
       `A credit of ${formatCents(totalCents)} is more than invoice ${invoice.number} was for ` +
@@ -158,6 +185,10 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
         taxCents,
         totalCents,
         remainingCents: totalCents,
+        currency,
+        exchangeRateMillionths: rateMillionths,
+        functionalTotalCents: functional.functionalTotalCents,
+        functionalRemainingCents: functional.functionalTotalCents,
         reason: input.reason ?? null,
         memo: input.memo ?? null,
         createdBy: ctx.userId,
@@ -178,13 +209,20 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
     )
 
     // The mirror of the invoice entry: revenue back out, receivable down.
+    // In the company's currency, because that is what a ledger is in. The
+    // per-line figures are the converted ones, so the entry balances against
+    // `functionalTotalCents` exactly rather than to within a cent (Phase 63).
     const journalLineInputs = [
-      ...lines.map((line) => ({
+      ...lines.map((line, index) => ({
         chartAccountId: line.chartAccountId,
-        debitCents: line.amountCents,
+        debitCents: functional.lineCents[index],
         memo: line.description,
       })),
-      { chartAccountId: arAccount.id, creditCents: totalCents, memo: `Credit note ${number}` },
+      {
+        chartAccountId: arAccount.id,
+        creditCents: functional.functionalTotalCents,
+        memo: `Credit note ${number}`,
+      },
     ]
 
     if (taxCents > 0) {
@@ -192,7 +230,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
       if (!taxAccount) throw new Error('Sales Tax Payable is missing from the chart.')
       journalLineInputs.splice(lines.length, 0, {
         chartAccountId: taxAccount.id,
-        debitCents: taxCents,
+        debitCents: functional.functionalTaxCents,
         memo: 'Sales tax credited',
       })
     }
@@ -247,6 +285,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
         ...note,
         journalEntryId: entry.id,
         remainingCents: applied.creditRemainingCents,
+        functionalRemainingCents: applied.creditFunctionalRemainingCents,
         status: applied.creditRemainingCents === 0 ? ('applied' as const) : note.status,
       }
     }
@@ -325,14 +364,24 @@ async function applyCreditWithin(
     throw new Error('A credit can only be applied to the same customer’s invoice.')
   }
 
-  // The note credited Accounts Receivable when it was raised, at its own face
-  // amount. Against a foreign invoice that is the wrong number in the wrong
-  // currency, and no application here can put it right (Phase 35).
-  refuseForeign(
-    invoice,
-    await functionalCurrency(ctx.companyId, tx),
-    'Applying a credit note to an invoice',
-  )
+  /**
+   * The two have to agree (Phase 63), where this used to refuse any foreign
+   * invoice outright. A credit reduces what a document says is owed, and it
+   * can only do that in the currency the document is in — Phase 62's rule, one
+   * document over.
+   *
+   * No journal entry is posted here: the credit note's own entry already moved
+   * the receivable, and this is an allocation between the two. `relieveFunctional`
+   * below takes the invoice's functional balance down at the *invoice's* rate,
+   * which is what keeps the control account agreeing with the subledger.
+   */
+  const verdict = creditableAgainst({
+    creditNumber: note.number,
+    creditCurrency: note.currency,
+    documentNumber: invoice.number,
+    documentCurrency: invoice.currency,
+  })
+  if (!verdict.ok) throw new Error(verdict.reason)
 
   if (input.amountCents > note.remainingCents) {
     throw new Error(
@@ -355,10 +404,27 @@ async function applyCreditWithin(
   })
 
   const noteRemaining = note.remainingCents - input.amountCents
+  // Both halves of what is left, moved together. A note whose face amount is
+  // spent but whose functional amount is not would put credit the business does
+  // not have on every screen that sums in the company's own currency — which is
+  // the defect this phase exists to close, one column over.
+  //
+  // `relieveFunctional` is the invoice's rule, borrowed rather than rewritten:
+  // the last application takes whatever functional remainder is left, so the two
+  // columns reach zero on the same application and no cent is stranded.
+  const noteFunctional = relieveFunctional(
+    {
+      balanceCents: note.remainingCents,
+      exchangeRateMillionths: note.exchangeRateMillionths,
+      functionalBalanceCents: note.functionalRemainingCents,
+    },
+    input.amountCents,
+  )
   await tx
     .update(creditNotes)
     .set({
       remainingCents: noteRemaining,
+      functionalRemainingCents: noteFunctional.functionalBalanceCents,
       status: noteRemaining === 0 ? 'applied' : 'open',
       updatedAt: new Date(),
     })
@@ -391,7 +457,11 @@ async function applyCreditWithin(
     tx,
   )
 
-  return { creditRemainingCents: noteRemaining, invoiceBalanceCents: invoiceBalance }
+  return {
+    creditRemainingCents: noteRemaining,
+    creditFunctionalRemainingCents: noteFunctional.functionalBalanceCents,
+    invoiceBalanceCents: invoiceBalance,
+  }
 }
 
 /**
@@ -623,8 +693,13 @@ export async function listCreditNotes(
       customerId: creditNotes.customerId,
       customerName: customers.name,
       status: creditNotes.status,
+      currency: creditNotes.currency,
       totalCents: creditNotes.totalCents,
       remainingCents: creditNotes.remainingCents,
+      // What is left, in the company's own money. The screens need both: the
+      // customer is owed the foreign figure, and only the functional one may be
+      // added to another note's.
+      functionalRemainingCents: creditNotes.functionalRemainingCents,
       reason: creditNotes.reason,
     })
     .from(creditNotes)

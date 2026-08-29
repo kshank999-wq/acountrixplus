@@ -2869,6 +2869,53 @@ floor and the statements picker want one comparable figure across every currency
 a party holds — that needs the payment's rate as well, and half-doing it would
 put a converted number beside an unconverted one.
 
+### The euro invoice you could not credit (Phase 63)
+
+ADR 0062 named this one itself: *"Credit notes still carry no currency […] it is
+the identical defect one table over and it deserves the same treatment."*
+
+The consequence was worse than a wrong symbol. Since Phase 35, `refuseForeign`
+stopped four operations **outright** — crediting an invoice, crediting a bill,
+applying a credit, drawing a retainer — so a business invoicing in euro could not
+issue a credit note to a euro customer at all. Not wrongly. The button errored.
+
+It refused for an honest reason: for a multi-line document the functional amount
+is the *sum of the converted lines*, not the conversion of the sum, and picking
+either without deciding is how books acquire a drift nobody can explain.
+
+**Nobody had to decide.** `createInvoice` decided it when it raised the document:
+each line converts on its own and the total is their sum. A credit note reverses
+a document, and reversing it by different arithmetic than raised it *is* the
+drift. So the rule moves to one place — `functionalAmounts` in
+`src/modules/fx/denomination.ts`, pure, with a test that proves the two really do
+differ at a four-decimal rate — and a credit note becomes a document like any
+other: `currency`, `exchange_rate_millionths`, `functional_total_cents`,
+`functional_remaining_cents`, the shape Phase 35 gave invoices and bills.
+
+The currency is **inherited, never chosen** — from the document being credited,
+or the company's own for a standalone goodwill note. A €4,000 invoice is reduced
+by €500, not by "$540 worth of euro"; the customer's ledger will show €500.
+
+Applying a credit *across* currencies is still refused, naming both documents:
+Phase 62's rule one document over. And `refuseForeign` keeps one caller — the
+retainer draw — because that one is a **settlement**, not a reversal. It decides
+at what rate held money discharges a new demand, which has a profit effect and is
+an accounting decision, not arithmetic already made.
+
+The backfill is trivially correct for an unusual reason: the refusal this phase
+lifts guaranteed there was nothing to get wrong.
+
+Verified through the real path in the browser — picked `INV-1021 — Bremen
+Hafenbau GmbH — €4,000.00` from the credit picker (labelled `$4,000.00` before
+this phase), issued the note, and confirmed CN-1003 stored `EUR` at 1.0835 with
+a functional total of `$4,334.00` and a journal entry balancing to the cent.
+
+**The browser found a defect the tests had not.** Applying a credit took
+`remaining_cents` to zero and left `functional_remaining_cents` untouched, so the
+screen offered $4,334.00 of credit that was already spent. Both halves now move
+together through `relieveFunctional` — the invoice's rule, borrowed rather than
+rewritten — and two tests pin it.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

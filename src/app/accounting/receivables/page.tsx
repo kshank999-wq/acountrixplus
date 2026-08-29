@@ -87,8 +87,10 @@ export default async function ReceivablesPage() {
           customerId: row.customerId,
           customerName: row.customerName,
           status: row.status,
+          currency: row.currency,
           totalCents: row.totalCents,
           remainingCents: row.remainingCents,
+          functionalRemainingCents: row.functionalRemainingCents,
           reason: row.reason,
         }))}
         writeOffs={writeOffs.map((row) => ({
@@ -131,6 +133,7 @@ export default async function ReceivablesPage() {
             number: row.number,
             customerId: row.customerId,
             customerName: row.customerName,
+            currency: row.currency,
             balanceCents: row.balanceCents,
             dueDate: row.dueDate,
           }))}
@@ -142,8 +145,10 @@ export default async function ReceivablesPage() {
           vendorId: row.vendorId,
           vendorName: row.vendorName,
           status: row.status,
+          currency: row.currency,
           totalCents: row.totalCents,
           remainingCents: row.remainingCents,
+          functionalRemainingCents: row.functionalRemainingCents,
           reason: row.reason,
         }))}
         vendors={vendors.map((row) => ({ id: row.id, name: row.name }))}
@@ -154,6 +159,7 @@ export default async function ReceivablesPage() {
             number: row.number,
             vendorId: row.vendorId,
             vendorName: row.vendorName,
+            currency: row.currency,
             balanceCents: row.balanceCents,
             dueDate: row.dueDate,
           }))}

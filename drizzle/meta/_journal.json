@@ -379,6 +379,13 @@
       "when": 1788200000000,
       "tag": "0053_phase62_payment_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 54,
+      "version": "7",
+      "when": 1788220000000,
+      "tag": "0054_phase63_credit_note_currency",
+      "breakpoints": true
     }
   ]
 }

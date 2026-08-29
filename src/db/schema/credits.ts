@@ -99,6 +99,29 @@ export const creditNotes = pgTable(
 
     status: creditNoteStatusEnum('status').notNull().default('open'),
 
+    /**
+     * What this credit is denominated in (Phase 63).
+     *
+     * Inherited from the document it credits, never chosen: a credit note
+     * reverses part of a document that already exists, and a €4,000 invoice is
+     * reduced by €500 rather than by "$540 worth of euro". The company's own
+     * currency for a standalone credit, which is what every credit note raised
+     * before this phase was — `refuseForeign` saw to that.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /** Millionths, foreign → functional. Fixed at issue, never recomputed. */
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' })
+      .notNull()
+      .default(1_000_000),
+    /** `totalCents` converted line by line. What the ledger posted. */
+    functionalTotalCents: bigint('functional_total_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+    /** `remainingCents` at this note's own rate. */
+    functionalRemainingCents: bigint('functional_remaining_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+
     subtotalCents: bigint('subtotal_cents', { mode: 'number' }).notNull().default(0),
     taxCents: bigint('tax_cents', { mode: 'number' }).notNull().default(0),
     totalCents: bigint('total_cents', { mode: 'number' }).notNull().default(0),

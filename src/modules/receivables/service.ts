@@ -1659,6 +1659,10 @@ export async function listInvoices(ctx: ActorContext, opts: { limit?: number } =
       issueDate: invoices.issueDate,
       dueDate: invoices.dueDate,
       status: invoices.status,
+      // Phase 63: a picker that says "$4,000.00" beside a euro invoice invites
+      // somebody to credit it for the wrong money. The amounts here are the
+      // document's own, so the currency has to travel with them.
+      currency: invoices.currency,
       totalCents: invoices.totalCents,
       balanceCents: invoices.balanceCents,
       // Phase 42: whether the customer has been asked, and whether they looked.
@@ -1691,6 +1695,7 @@ export async function listBills(ctx: ActorContext, opts: { limit?: number } = {}
       issueDate: bills.issueDate,
       dueDate: bills.dueDate,
       status: bills.status,
+      currency: bills.currency,
       totalCents: bills.totalCents,
       balanceCents: bills.balanceCents,
     })

@@ -24,8 +24,15 @@ type Credit = {
   customerId: string | null
   customerName: string
   status: string
+  /**
+   * Inherited from the document it credits, or the company's own for a
+   * standalone note (Phase 63). `totalCents` and `remainingCents` are in it.
+   */
+  currency: string
   totalCents: number
   remainingCents: number
+  /** What is left, in the company's own money — the only figure that may be summed. */
+  functionalRemainingCents: number
   reason: string | null
 }
 
@@ -72,6 +79,8 @@ type OpenInvoice = {
   number: string
   customerId: string
   customerName: string
+  /** The document's own, so the picker cannot label a euro invoice in dollars. */
+  currency: string
   balanceCents: number
   dueDate: string
 }
@@ -83,8 +92,10 @@ type VendorCredit = {
   vendorId: string | null
   vendorName: string
   status: string
+  currency: string
   totalCents: number
   remainingCents: number
+  functionalRemainingCents: number
   reason: string | null
 }
 
@@ -93,6 +104,7 @@ type OpenBill = {
   number: string
   vendorId: string
   vendorName: string
+  currency: string
   balanceCents: number
   dueDate: string
 }
@@ -186,8 +198,13 @@ export function ReceivablesBoard({
         <Stat label="Net bad debt" value={formatCents(badDebt.netCents)} />
         <Stat
           label="Credit available"
-          value={formatCents(credits.reduce((sum, note) => sum + note.remainingCents, 0))}
-          hint="issued and not yet applied"
+          // Summed on the functional amount, not the face value: a €500 note
+          // and a $500 note are not $1,000 of anything (Phase 63). Each note
+          // still shows its own currency in the list below.
+          value={formatCents(
+            credits.reduce((sum, note) => sum + note.functionalRemainingCents, 0),
+          )}
+          hint="issued and not yet applied, in the company’s currency"
         />
       </div>
 
@@ -248,7 +265,8 @@ export function ReceivablesBoard({
                   <option value="">Choose an invoice…</option>
                   {openInvoices.map((invoice) => (
                     <option key={invoice.id} value={invoice.id}>
-                      {invoice.number} — {invoice.customerName} — {formatCents(invoice.balanceCents)}
+                      {invoice.number} — {invoice.customerName} —{' '}
+                      {formatCents(invoice.balanceCents, invoice.currency)}
                     </option>
                   ))}
                 </select>
@@ -312,7 +330,8 @@ export function ReceivablesBoard({
 
                 {selected && (
                   <p className="text-xs text-faint">
-                    {formatCents(selected.balanceCents)} outstanding on {selected.number}.
+                    {formatCents(selected.balanceCents, selected.currency)} outstanding on{' '}
+                    {selected.number}.
                   </p>
                 )}
               </div>
@@ -340,10 +359,12 @@ export function ReceivablesBoard({
                       </p>
                     </div>
                     <div className="shrink-0 text-right">
-                      <p className="tnum text-sm">{formatCents(note.totalCents)}</p>
+                      <p className="tnum text-sm">
+                        {formatCents(note.totalCents, note.currency)}
+                      </p>
                       {note.remainingCents > 0 && (
                         <p className="text-xs text-warning">
-                          {formatCents(note.remainingCents)} unapplied
+                          {formatCents(note.remainingCents, note.currency)} unapplied
                         </p>
                       )}
                     </div>
@@ -639,7 +660,7 @@ export function ReceivablesBoard({
                 <option value="">Choose a bill…</option>
                 {openBills.map((bill) => (
                   <option key={bill.id} value={bill.id}>
-                    {bill.number} — {bill.vendorName} ({formatCents(bill.balanceCents)})
+                    {bill.number} — {bill.vendorName} ({formatCents(bill.balanceCents, bill.currency)})
                   </option>
                 ))}
               </select>
@@ -708,9 +729,11 @@ export function ReceivablesBoard({
                   <td className="px-4 py-1.5 font-medium">{row.vendorName}</td>
                   <td className="px-4 py-1.5 text-muted">{row.issueDate}</td>
                   <td className="px-4 py-1.5 text-muted">{row.reason ?? '—'}</td>
-                  <td className="tnum px-4 py-1.5 text-right">{formatCents(row.totalCents)}</td>
                   <td className="tnum px-4 py-1.5 text-right">
-                    {formatCents(row.remainingCents)}
+                    {formatCents(row.totalCents, row.currency)}
+                  </td>
+                  <td className="tnum px-4 py-1.5 text-right">
+                    {formatCents(row.remainingCents, row.currency)}
                   </td>
                 </tr>
               ))}
