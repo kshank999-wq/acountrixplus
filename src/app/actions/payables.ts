@@ -3,21 +3,19 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
-import { recordPayment, DocumentError } from '@/modules/receivables/service'
+import { DocumentError } from '@/modules/receivables/service'
 import { applyVendorCredit } from '@/modules/receivables/vendor-credits'
 import { voidPayment } from '@/modules/receivables/payment-voiding'
 import { applyCredit, refundCredit } from '@/modules/receivables/customer-credit'
-import { billsByIds } from '@/modules/payables/queue'
-import { applicationOrder, planRun } from '@/modules/payables/run'
-import { describeHeld, splitByApproval } from '@/modules/payables/approval'
 import {
   approveBill,
-  payablesPolicy,
   updatePayablesPolicy,
   withdrawApproval,
 } from '@/modules/payables/approvals-service'
 import { messageFor } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
+import { batchSucceeded } from '@/modules/payables/batch'
+import { adviseRun, executePayRun } from '@/modules/payables/pay-runs'
 
 /**
  * Paying suppliers (spec §13, Phase 49).
@@ -71,81 +69,59 @@ const runSchema = z.object({
  * its bank, and leaving it half done with an honest report is the lesser
  * failure — the aging report and the bank tie-out both show the truth either
  * way.
+ *
+ * **Phase 59 made the second half of that true.** It had never been: the loop
+ * accumulated what it had paid, and the `catch` threw the list away and
+ * returned `'That pay run could not be completed.'` — so a business paying
+ * eight bills across four suppliers, where the third failed, was told the run
+ * failed while real money had gone to the first two. Each supplier is now
+ * caught on its own, the run is recorded, and a partial run is reported as a
+ * success with a warning rather than a failure, because money left the bank.
  */
 export async function payRunAction(input: unknown): Promise<ActionResult> {
   try {
     const actor = await requireActor()
     const parsed = runSchema.parse(input)
 
-    const chosen = await billsByIds(actor, parsed.billIds)
-
-    if (chosen.length === 0) {
-      return { ok: false, error: 'None of those bills is still outstanding.' }
-    }
-
-    /**
-     * What nobody has approved is left where it is (Phase 50).
-     *
-     * Held back rather than refusing the whole run: somebody ticking eight
-     * bills of which one needs approving should get the seven paid and be told
-     * about the eighth. Refusing the lot teaches them to switch approvals off,
-     * which is the opposite of what the control is for.
-     */
-    const policy = await payablesPolicy(actor.companyId)
-    const split = splitByApproval(chosen, policy)
-
-    if (split.payable.length === 0) {
-      return {
-        ok: false,
-        error: describeHeld(split.held) ?? 'Nothing in that run can be paid yet.',
-      }
-    }
-
-    const plan = planRun({ chosen: split.payable, availableCents: null })
-
-    const paid: string[] = []
-    let paidCents = 0
-
-    for (const supplier of plan.suppliers) {
-      // Oldest first *within* what was chosen. The choice is respected
-      // absolutely — a bill nobody ticked is never touched — but among the
-      // ones they did tick, settling the oldest first is what a supplier
-      // expects and what keeps an aging report sensible.
-      const ordered = applicationOrder(
-        split.payable.filter((bill) => bill.vendorId === supplier.vendorId),
-      )
-
-      await recordPayment(actor, {
-        kind: 'disbursement',
-        vendorId: supplier.vendorId,
-        paymentDate: parsed.paymentDate,
-        amountCents: supplier.totalCents,
-        financialAccountId: parsed.financialAccountId,
-        reference: parsed.reference || undefined,
-        applications: ordered.map((bill) => ({
-          billId: bill.id,
-          amountCents: bill.balanceCents,
-        })),
-      })
-
-      paid.push(supplier.vendorName)
-      paidCents += supplier.totalCents
-    }
+    const { outcome, heldNote } = await executePayRun(actor, {
+      billIds: parsed.billIds,
+      paymentDate: parsed.paymentDate,
+      financialAccountId: parsed.financialAccountId,
+      reference: parsed.reference,
+    })
 
     for (const path of PATHS) revalidatePath(path)
 
-    const heldNote = describeHeld(split.held)
+    const message = outcome.message + (heldNote ? ` ${heldNote}` : '')
 
-    return {
-      ok: true,
-      message:
-        `${formatCents(paidCents)} paid — ${paid.length} payment${paid.length === 1 ? '' : 's'}, ` +
-        `one per supplier, settling ${split.payable.length} bill` +
-        `${split.payable.length === 1 ? '' : 's'}.` +
-        (heldNote ? ` ${heldNote}` : ''),
-    }
+    // A partial run is a success with a warning: money left the bank, and
+    // telling somebody it failed is what sends them to re-key it at the bank.
+    return batchSucceeded(outcome.status)
+      ? { ok: true, message }
+      : { ok: false, error: message }
   } catch (error) {
-    return { ok: false, error: messageFor(error, 'That pay run could not be completed.') }
+    // Reached only by a failure *outside* the loop — reading the queue, or
+    // opening the run. No money has moved at that point.
+    return { ok: false, error: messageFor(error, 'That pay run could not be started.') }
+  }
+}
+
+/** Tells every supplier in a run what their payment covered (Phase 58, 59). */
+export async function adviseRunAction(input: unknown): Promise<ActionResult> {
+  try {
+    const actor = await requireActor()
+    const { payRunId } = z.object({ payRunId: uuid }).parse(input)
+
+    const outcome = await adviseRun(actor, payRunId)
+
+    for (const path of PATHS) revalidatePath(path)
+    revalidatePath('/accounting/payments')
+
+    return batchSucceeded(outcome.status)
+      ? { ok: true, message: outcome.message }
+      : { ok: false, error: outcome.message }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'Those advices could not be sent.') }
   }
 }
 

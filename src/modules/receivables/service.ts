@@ -1105,6 +1105,14 @@ export async function recordPayment(
     applications: PaymentApplicationInput[]
     reference?: string
     memo?: string
+    /**
+     * The pay run this disbursement is part of (Phase 59).
+     *
+     * Set only by `payRunAction`'s loop, so a batch can be reopened and its
+     * suppliers advised together. A payment made one at a time carries none,
+     * and none is invented for one.
+     */
+    payRunId?: string
   },
 ) {
   requirePermission(ctx, 'accounting:journal')
@@ -1222,6 +1230,7 @@ export async function recordPayment(
         drawerShiftId: input.financialAccountId ? null : (input.drawerShiftId ?? null),
         reference: input.reference ?? null,
         memo: input.memo ?? null,
+        payRunId: input.payRunId ?? null,
       })
       .returning()
 

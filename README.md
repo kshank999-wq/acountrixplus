@@ -2686,6 +2686,52 @@ says after the fact, and it does so because the underlying fact changed.
 Sending is gated on `accounting:view` rather than the permission that moves
 money: telling somebody what they were already paid asserts nothing new.
 
+### The pay run that half-happened (Phase 59)
+
+`payRunAction` has paid suppliers one at a time since Phase 49, and the doc
+comment above its loop said *"the message says how far it got."* It never did.
+`paid` and `paidCents` were accumulated inside the loop and **thrown away by the
+`catch`**, which returned *"That pay run could not be completed."*
+
+So a business ticking eight bills across four suppliers, where the third failed,
+was told the run failed while real money had already left its bank for the first
+two — with no way to find out which. The ledger was correct throughout. The
+message was wrong about the only thing that mattered: **what the person now has
+to do.** It reads as "nothing happened, try again."
+
+Pressing again is in fact safe — `payableQueue` only returns bills with a
+balance, so a settled bill is no longer selectable — and there is a test pinning
+that. But somebody told a payment failed does not only press the button again.
+They ring the supplier, or key it into the bank by hand.
+
+**A partial run is now a success with a warning.** Verified in the browser
+against a supplier who had invoiced in both euro and dollars — one payment per
+supplier is how the money leaves, and there is no single amount of money that
+arrives:
+
+> $6,200.00 paid — 1 payment, one per supplier, settling 1 bill. 1 supplier
+> could not be paid, leaving $8,000.00 still owed: Cascade Building Supply (That
+> payment settles documents in EUR and USD. Record one payment per currency).
+> **The money above has gone — do not send it again.**
+
+A run is also a **row** now, not a transient selection. Grouping payments by
+date and reference afterwards would be a guess, and a run that paid *nobody* has
+no payments to group — which is the case most worth keeping. **Pay runs** on the
+What we owe screen shows each press of Pay, what became of it, and the failure
+verbatim, because the sentence somebody reads a week later has to be the one the
+domain wrote at the time.
+
+**Advise all** then tells every supplier in a run what their payment covered —
+the follow-up ADR 0058 nominated. It uses the same batch core as the pay run, so
+the two cannot drift on what "partly worked" means, and a supplier with no
+address on file does not stop the rest of the run being told.
+
+There is still no transaction around a run, deliberately and unchanged: rolling
+back would undo payments a business may already have sent from its bank. What
+was missing was the honest report. The loop itself moved out of `src/app` into
+`src/modules/payables/`, where a test can reach it — the one piece of behaviour
+this phase is about was sitting in the layer this project keeps no logic in.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

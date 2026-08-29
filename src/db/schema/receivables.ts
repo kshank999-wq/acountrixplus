@@ -421,6 +421,76 @@ export const billLines = pgTable(
   }),
 )
 
+/**
+ * One press of "Pay", and what became of it (Phase 59).
+ *
+ * ## Why a run is a row rather than a grouping
+ *
+ * Phase 49 pays one supplier at a time in a loop with no transaction around
+ * it, which is right — rolling back would undo real payments a business may
+ * already have sent from its bank. What was missing is the *record* that the
+ * loop happened, so a run that got three suppliers in and failed on the fourth
+ * left four payments, no payments, or something in between, with nothing
+ * anywhere saying which.
+ *
+ * Grouping payments by `(payment_date, reference)` afterwards would be a guess:
+ * two runs on the same day with no reference are indistinguishable, and a run
+ * that paid **nobody** has no payments to group. That last case is the one
+ * worth keeping — "somebody tried to send $40,000 on Friday and none of it
+ * went" is exactly the fact a business needs and the only place it can live is
+ * a row of its own.
+ */
+export const payRuns = pgTable(
+  'pay_runs',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+
+    runDate: date('run_date').notNull(),
+    reference: text('reference'),
+    /** Which account the money left. Not null: a run always names one. */
+    financialAccountId: uuid('financial_account_id').notNull(),
+
+    /** 'complete' | 'partial' | 'nothing' — the `BatchStatus` of `batch.ts`. */
+    status: text('status').notNull(),
+
+    suppliersAttempted: integer('suppliers_attempted').notNull().default(0),
+    suppliersPaid: integer('suppliers_paid').notNull().default(0),
+    billsSettled: integer('bills_settled').notNull().default(0),
+    paidCents: bigint('paid_cents', { mode: 'number' }).notNull().default(0),
+    /** What the suppliers that failed were owed, and still are. */
+    unpaidCents: bigint('unpaid_cents', { mode: 'number' }).notNull().default(0),
+
+    /**
+     * Why each failing supplier failed, kept verbatim.
+     *
+     * The sentence a person reads a week later has to be the one the domain
+     * wrote at the time; re-deriving it would mean re-running the failure.
+     */
+    failures: text('failures'),
+
+    /** When the whole run's suppliers were advised (Phase 58), and how often. */
+    advisedAt: timestamp('advised_at', { withTimezone: true }),
+    adviseCount: integer('advise_count').notNull().default(0),
+
+    createdBy: uuid('created_by'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    companyDateIdx: index('pay_runs_company_date_idx').on(t.companyId, t.runDate),
+    statusCheck: check(
+      'pay_runs_status_check',
+      sql`${t.status} IN ('complete', 'partial', 'nothing')`,
+    ),
+    countsCheck: check(
+      'pay_runs_counts_check',
+      sql`${t.suppliersPaid} >= 0 AND ${t.suppliersPaid} <= ${t.suppliersAttempted}`,
+    ),
+  }),
+)
+
 /** Money in from a customer, or money out to a vendor. */
 export const paymentKindEnum = pgEnum('payment_kind', ['receipt', 'disbursement'])
 
@@ -517,6 +587,16 @@ export const payments = pgTable(
     /** How many times. "We sent that twice" is the fact a call turns on. */
     remittanceSendCount: integer('remittance_send_count').notNull().default(0),
 
+    /**
+     * The pay run this payment came out of (Phase 59).
+     *
+     * Null for every payment made one at a time, which is most of them, and
+     * for all 58 phases of payments made before runs were recorded. Set, it is
+     * what lets a run be reopened and its suppliers advised together, and what
+     * answers "what went out on Friday?" without guessing from dates.
+     */
+    payRunId: uuid('pay_run_id').references(() => payRuns.id, { onDelete: 'set null' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -528,6 +608,8 @@ export const payments = pgTable(
       t.paymentDate,
     ),
     shareTokenIdx: uniqueIndex('payments_share_token_idx').on(t.shareToken),
+    // How a run reads back the payments it made, to advise them together.
+    payRunIdx: index('payments_pay_run_idx').on(t.payRunId),
     unappliedWithinAmount: check(
       'payments_unapplied_within_amount',
       sql`${t.unappliedCents} >= 0 AND ${t.unappliedCents} <= ${t.amountCents}`,

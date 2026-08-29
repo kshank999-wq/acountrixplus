@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  adviseRunAction,
   approveBillAction,
   payRunAction,
   spendVendorCreditAction,
@@ -45,6 +46,35 @@ type Credit = {
   remainingCents: number
 }
 
+type PayRun = {
+  id: string
+  runDate: string
+  reference: string | null
+  accountName: string | null
+  status: 'complete' | 'partial' | 'nothing'
+  suppliersAttempted: number
+  suppliersPaid: number
+  billsSettled: number
+  paidCents: number
+  unpaidCents: number
+  failures: string | null
+  liveSuppliers: number
+  advisedSuppliers: number
+}
+
+/**
+ * How a run reads at a glance.
+ *
+ * `partial` is the one that has to catch the eye. It is the state the old code
+ * could not express and reported as an outright failure, sending people to
+ * re-key payments that had already gone.
+ */
+const RUN_LABELS: Record<PayRun['status'], string> = {
+  complete: 'Paid',
+  partial: 'Partly paid',
+  nothing: 'Nothing paid',
+}
+
 const BUCKET_LABELS: Record<AgeBucket, string> = {
   overdue: 'Overdue',
   due_now: 'Due today',
@@ -66,6 +96,7 @@ export function PayablesBoard({
   accounts,
   credits,
   policy,
+  runs,
   canPay,
   canApprove,
 }: {
@@ -74,6 +105,7 @@ export function PayablesBoard({
   accounts: Account[]
   credits: Credit[]
   policy: ApprovalPolicy
+  runs: PayRun[]
   canPay: boolean
   canApprove: boolean
 }) {
@@ -700,6 +732,108 @@ export function PayablesBoard({
               </button>
             </div>
           )}
+        </section>
+      )}
+
+      {/*
+        What went out, and what did not (Phase 59).
+
+        Before this the run evaporated the moment the notice faded: nothing
+        recorded that a batch had happened, so "what did we pay on Friday?" had
+        to be answered by reading individual payments and guessing which
+        belonged together — and a run that half-failed was reported as a
+        failure with no mention of the money that had already gone.
+      */}
+      {runs.length > 0 && (
+        <section className="card p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h2 className="text-sm font-semibold">Pay runs</h2>
+            <p className="text-xs text-faint">
+              Each press of Pay, and what became of it. Advising a run tells every supplier in it
+              which of their invoices the payment covered.
+            </p>
+          </div>
+
+          <div className="mt-3 overflow-x-auto">
+            <table className="w-full min-w-[46rem] text-sm">
+              <thead className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
+                <tr>
+                  <th className="py-2 font-medium">Date</th>
+                  <th className="py-2 font-medium">Reference</th>
+                  <th className="py-2 font-medium">Out of</th>
+                  <th className="py-2 font-medium">Suppliers</th>
+                  <th className="py-2 font-medium">Advised</th>
+                  <th className="py-2 text-right font-medium">Paid</th>
+                  <th className="py-2" />
+                </tr>
+              </thead>
+              <tbody>
+                {runs.map((run) => {
+                  const advisable = run.liveSuppliers > 0
+                  return (
+                    <tr key={run.id} className="border-b border-line align-top">
+                      <td className="tnum py-2">{run.runDate}</td>
+                      <td className="py-2">
+                        <span
+                          className={`chip ${
+                            run.status === 'partial'
+                              ? 'text-danger'
+                              : run.status === 'nothing'
+                                ? 'text-muted'
+                                : 'text-success'
+                          }`}
+                        >
+                          {RUN_LABELS[run.status]}
+                        </span>
+                        {run.reference && (
+                          <span className="ml-2 text-muted">{run.reference}</span>
+                        )}
+                        {/* Verbatim, because the sentence a person reads a week
+                            later has to be the one the domain wrote at the time. */}
+                        {run.failures && (
+                          <p className="mt-1 whitespace-pre-line text-xs text-danger">
+                            {run.failures}
+                          </p>
+                        )}
+                      </td>
+                      <td className="py-2 text-muted">{run.accountName ?? '—'}</td>
+                      <td className="tnum py-2">
+                        {run.suppliersPaid} of {run.suppliersAttempted}
+                        <span className="text-faint">
+                          {' '}
+                          · {run.billsSettled} bill{run.billsSettled === 1 ? '' : 's'}
+                        </span>
+                      </td>
+                      <td className="tnum py-2 text-muted">
+                        {run.liveSuppliers === 0
+                          ? '—'
+                          : `${run.advisedSuppliers} of ${run.liveSuppliers}`}
+                      </td>
+                      <td className="tnum py-2 text-right">
+                        {formatCents(run.paidCents)}
+                        {run.unpaidCents > 0 && (
+                          <span className="block text-xs text-danger">
+                            {formatCents(run.unpaidCents)} still owed
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2 text-right">
+                        {advisable && (
+                          <button
+                            className="btn btn-ghost text-xs"
+                            disabled={pending}
+                            onClick={() => act(() => adviseRunAction({ payRunId: run.id }))}
+                          >
+                            {run.advisedSuppliers > 0 ? 'Advise again' : 'Advise all'}
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         </section>
       )}
     </div>

@@ -7,6 +7,7 @@ import {
   payableQueue,
 } from '@/modules/payables/queue'
 import { payablesPolicy } from '@/modules/payables/approvals-service'
+import { listPayRuns } from '@/modules/payables/pay-runs'
 import { ACCOUNTING_NAV } from '../nav'
 import { PayablesBoard } from './board'
 
@@ -37,11 +38,12 @@ export default async function PayablesPage() {
 
   const today = new Date().toISOString().slice(0, 10)
 
-  const [queue, accounts, credits, policy] = await Promise.all([
+  const [queue, accounts, credits, policy, runs] = await Promise.all([
     payableQueue(actor, { asOf: today }),
     accountsWithBalances(actor),
     openVendorCredits(actor),
     payablesPolicy(actor.companyId),
+    listPayRuns(actor),
   ])
 
   return (
@@ -85,6 +87,21 @@ export default async function PayablesPage() {
           remainingCents: row.remainingCents,
         }))}
         policy={policy}
+        runs={runs.map((row) => ({
+          id: row.id,
+          runDate: row.runDate,
+          reference: row.reference,
+          accountName: row.accountName,
+          status: row.status,
+          suppliersAttempted: row.suppliersAttempted,
+          suppliersPaid: row.suppliersPaid,
+          billsSettled: row.billsSettled,
+          paidCents: row.paidCents,
+          unpaidCents: row.unpaidCents,
+          failures: row.failures,
+          liveSuppliers: row.liveSuppliers,
+          advisedSuppliers: row.advisedSuppliers,
+        }))}
         canPay={can(actor, 'accounting:journal')}
         canApprove={can(actor, 'accounting:approve')}
       />
