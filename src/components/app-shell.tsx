@@ -4,13 +4,15 @@ import { can, type ActorContext } from '@/modules/tenancy/context'
 import { moduleEnabled } from '@/modules/industry/modules'
 import { reachableCompanies } from '@/modules/practice/switching'
 import { practicesFor } from '@/modules/practice/service'
-import { CompanySwitcher } from './company-switcher'
+import { Sidebar, type NavLink } from './sidebar'
 
 /**
  * Chrome shared by the workspaces (spec §2).
  *
  * Navigation is filtered by permission, so a role that cannot open a workspace
- * is not shown a link into it in the first place.
+ * is not shown a link into it in the first place — and the rail is handed the
+ * finished list rather than the actor, so a client component never holds the
+ * question of who may see what.
  */
 export async function AppShell({
   actor,
@@ -113,30 +115,68 @@ export async function AppShell({
     practicesFor(actor.userId),
   ])
 
-  const links = [
-    { key: 'bookkeeping', href: '/bookkeeping', label: 'Bookkeeping', show: can(actor, 'bookkeeping:view') },
-    { key: 'accounting', href: '/accounting', label: 'Accounting', show: can(actor, 'accounting:view') },
-    { key: 'crm', href: '/crm', label: 'Clients & Sales', show: can(actor, 'crm:view') },
-    { key: 'jobs', href: '/jobs', label: 'Jobs', show: jobsEnabled },
-    { key: 'inventory', href: '/inventory', label: 'Inventory', show: inventoryEnabled },
-    { key: 'time', href: '/time', label: 'Time', show: timeEnabled },
-    { key: 'properties', href: '/properties', label: 'Properties', show: propertiesEnabled },
-    { key: 'funds', href: '/funds', label: 'Funds', show: fundsEnabled },
+  const candidates: Array<NavLink & { show: boolean }> = [
+    {
+      key: 'bookkeeping',
+      href: '/bookkeeping',
+      label: 'Bookkeeping',
+      icon: 'bookkeeping',
+      show: can(actor, 'bookkeeping:view'),
+    },
+    {
+      key: 'accounting',
+      href: '/accounting',
+      label: 'Accounting',
+      icon: 'accounting',
+      show: can(actor, 'accounting:view'),
+    },
+    {
+      key: 'crm',
+      href: '/crm',
+      label: 'Clients & Sales',
+      icon: 'crm',
+      show: can(actor, 'crm:view'),
+    },
+    { key: 'jobs', href: '/jobs', label: 'Jobs', icon: 'jobs', show: jobsEnabled },
+    {
+      key: 'inventory',
+      href: '/inventory',
+      label: 'Inventory',
+      icon: 'inventory',
+      show: inventoryEnabled,
+    },
+    { key: 'time', href: '/time', label: 'Time', icon: 'time', show: timeEnabled },
+    {
+      key: 'properties',
+      href: '/properties',
+      label: 'Properties',
+      icon: 'properties',
+      show: propertiesEnabled,
+    },
+    { key: 'funds', href: '/funds', label: 'Funds', icon: 'funds', show: fundsEnabled },
     {
       key: 'manufacturing',
       href: '/manufacturing',
       label: 'Manufacturing',
+      icon: 'manufacturing',
       show: manufacturingEnabled,
     },
-    { key: 'takings', href: '/takings', label: 'Takings', show: takingsEnabled },
-    { key: 'drawers', href: '/drawers', label: 'Tills', show: drawersEnabled },
+    {
+      key: 'takings',
+      href: '/takings',
+      label: 'Takings',
+      icon: 'takings',
+      show: takingsEnabled,
+    },
+    { key: 'drawers', href: '/drawers', label: 'Tills', icon: 'drawers', show: drawersEnabled },
     {
       key: 'appointments',
       href: '/appointments',
       label: 'Appointments',
+      icon: 'appointments',
       show: appointmentsEnabled,
     },
-    { key: 'shop', href: '/shop', label: 'The shop', show: shopEnabled },
+    { key: 'shop', href: '/shop', label: 'The shop', icon: 'shop', show: shopEnabled },
     // Either half opens the workspace: a bookkeeper who handles sales tax but
     // not wages has `tax:view` without `payroll:view`, and the sub-navigation
     // hides what they cannot see rather than the whole workspace.
@@ -144,108 +184,79 @@ export async function AppShell({
       key: 'payroll',
       href: can(actor, 'payroll:view') ? '/payroll' : '/payroll/sales-tax',
       label: 'Payroll & Tax',
+      icon: 'payroll',
       show: can(actor, 'payroll:view') || can(actor, 'tax:view'),
     },
-    { key: 'marketing', href: '/marketing', label: 'Marketing', show: can(actor, 'marketing:view') },
-    { key: 'studio', href: '/studio', label: 'Company Studio', show: can(actor, 'crm:view') },
+    {
+      key: 'marketing',
+      href: '/marketing',
+      label: 'Marketing',
+      icon: 'marketing',
+      show: can(actor, 'marketing:view'),
+    },
+    {
+      key: 'studio',
+      href: '/studio',
+      label: 'Company Studio',
+      icon: 'studio',
+      show: can(actor, 'crm:view'),
+    },
     // Last, and only for those who administer it: the AI module is additive
     // (spec §23), so it should never be the first thing a workspace offers.
-    { key: 'ai', href: '/ai', label: 'AI', show: can(actor, 'ai:manage') },
-  ].filter((link) => link.show)
+    { key: 'ai', href: '/ai', label: 'AI', icon: 'ai', show: can(actor, 'ai:manage') },
+  ]
+
+  const links: NavLink[] = candidates
+    .filter((link) => link.show)
+    .map(({ show: _show, ...link }) => link)
 
   return (
     <div className="min-h-screen">
-      {/*
-        Dark chrome over a light workspace, from the design canvas (Phase 70).
-        It keeps its own colours in both themes — `chrome-*` rather than `ink`
-        — because the nav is a different surface from the page, and following
-        the workspace into dark mode would erase the contrast the design is
-        built on.
-      */}
-      <header className="sticky top-0 z-20 bg-chrome text-chrome-ink">
-        <div className="mx-auto flex max-w-7xl items-center justify-between gap-4 px-4 py-3 sm:px-6">
-          <div className="flex min-w-0 items-center gap-4">
-            <Link href="/" className="flex shrink-0 items-baseline gap-1.5">
-              <span className="text-[17px] font-bold tracking-tight">Accountrix</span>
-              {/* The one place lime is type: on the dark chrome, where the
-                  design puts it. Everywhere else the accent-as-text is blue. */}
-              <span className="rounded border border-chrome-line px-1 py-0.5 text-[9.5px] font-bold tracking-widest text-brand">
-                PLUS
-              </span>
-            </Link>
+      <Sidebar
+        links={links}
+        active={active}
+        companyName={companyName}
+        userName={actor.userName}
+        role={actor.role}
+        viaPractice={actor.viaPractice}
+        showPractice={practices.length > 0}
+        companies={reachable.map((company) => ({
+          id: company.id,
+          name: company.name,
+          role: company.role,
+          viaPracticeName: company.viaPracticeName,
+          isCurrent: company.isCurrent,
+        }))}
+        signOut={
+          <form action={logoutAction}>
+            <button className="rounded-lg border border-white/15 px-2.5 py-1.5 text-xs font-medium text-chrome-ink transition hover:bg-white/10">
+              Sign out
+            </button>
+          </form>
+        }
+      />
 
-            <div className="min-w-0 border-l border-white/10 pl-4">
-              <h1 className="truncate text-sm font-semibold tracking-tight">{companyName}</h1>
-              <p className="truncate text-xs text-chrome-muted">
-                {actor.userName} ({actor.role})
-                {actor.viaPractice && (
-                  // Shown to the accountant, not to the client. Somebody working
-                  // across forty sets of books should never have to wonder which
-                  // ones they are in, or on whose authority.
-                  <span> · acting for a client via {actor.viaPractice}</span>
-                )}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex shrink-0 items-center gap-2">
-            {actions}
-            {practices.length > 0 && (
-              <Link
-                href="/practice"
-                className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-chrome-ink transition hover:bg-white/10"
-              >
-                Practice
-              </Link>
-            )}
-            <CompanySwitcher
-              companies={reachable.map((company) => ({
-                id: company.id,
-                name: company.name,
-                role: company.role,
-                viaPracticeName: company.viaPracticeName,
-                isCurrent: company.isCurrent,
-              }))}
-              currentName={companyName}
-            />
-            <form action={logoutAction}>
-              <button className="rounded-lg border border-white/15 px-3 py-1.5 text-xs font-medium text-chrome-ink transition hover:bg-white/10">
-                Sign out
-              </button>
-            </form>
-          </div>
-        </div>
-
+      <div className="lg:pl-[248px]">
         {/*
-          The workspace row scrolls rather than wraps: with five workspaces it
-          no longer fits a phone, and a chip whose label breaks across two lines
-          is harder to read than one you swipe to.
+          The action bar, only where a page has actions. An empty strip on
+          every screen is a strip of nothing, and the rail already carries the
+          identity that used to justify a permanent header.
         */}
-        {links.length > 1 && (
-          <nav className="mx-auto flex max-w-7xl gap-1 overflow-x-auto px-4 pb-2 sm:px-6">
-            {links.map((link) => (
-              <Link
-                key={link.key}
-                href={link.href}
-                className={`chip whitespace-nowrap px-3 py-1.5 transition ${
-                  active === link.key
-                    ? 'bg-brand text-brand-ink'
-                    : 'text-chrome-muted hover:bg-white/10 hover:text-chrome-ink'
-                }`}
-              >
-                {link.label}
-              </Link>
-            ))}
-          </nav>
+        {actions && (
+          <header className="sticky top-0 z-20 border-b border-line bg-canvas/85 backdrop-blur">
+            <div className="mx-auto flex max-w-7xl items-center justify-end gap-2 px-4 py-3 sm:px-6">
+              {actions}
+            </div>
+          </header>
         )}
-      </header>
 
-      <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
+        <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">{children}</main>
+      </div>
     </div>
   )
 }
 
-/** Sub-navigation within the accounting workspace. */
+/** Sub-navigation within a workspace. */
 export function SubNav({
   items,
   active,
@@ -260,7 +271,7 @@ export function SubNav({
           key={item.href}
           href={item.href}
           // On the light workspace, so the selected tab is ink rather than the
-          // lime — which only reads on the dark chrome above.
+          // lime — which only reads on the dark rail.
           className={`chip whitespace-nowrap px-3 py-1.5 transition ${
             active === item.href
               ? 'bg-ink text-surface'
