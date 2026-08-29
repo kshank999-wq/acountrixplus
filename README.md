@@ -2916,6 +2916,55 @@ screen offered $4,334.00 of credit that was already spent. Both halves now move
 together through `relieveFunctional` — the invoice's rule, borrowed rather than
 rewritten — and two tests pin it.
 
+### The euro invoice you could not raise (Phase 64)
+
+ADR 0063 named this at the top of what it did not do: *"a foreign invoice still
+cannot be raised from the UI […] which makes this the next visible gap rather
+than a hidden one."*
+
+Phases 60 through 63 taught the payables queue, the statement, the chase decision
+and the credit note to handle a foreign document properly, and a business that
+invoices in euro could not create one. Same shape as Phase 41, which found
+`createInvoice` written and tested since Phase 2 and reachable from no screen.
+
+**Offer only what can be posted.** The composer's currency selector lists the
+company's own currency always — a domestic document is not a conversion and needs
+no rate — and a foreign one only where a rate exists. Offering EUR to a company
+that has never recorded a EUR rate is a choice `rateFor` refuses the moment it is
+taken, which is Phase 47's defect: a refusal behind a button. The selector is not
+rendered at all when there is nothing to choose between.
+
+**Say what it books at, before the button.** A document's rate is fixed at issue
+and never recomputed, so the composer is the *last* moment the number can be
+questioned — after that a wrong rate surfaces on a profit and loss a month later.
+So it shows, live:
+
+> €4,000.00 books as $4,334.00 at 1.083500, the rate of 2026-08-01. Fixed now and
+> never recomputed, so the books keep saying what this was worth on the day.
+
+It names the rate's own date, because `rateFor` walks backwards — an invoice
+dated the 15th is routinely raised at the 1st's rate, and this is the only place
+anybody is told which. Nothing is shown for a domestic document: "$4,000.00 books
+as $4,000.00 at 1.000000" is noise that teaches people to stop reading.
+
+The preview composes Phase 63's `functionalAmounts` rather than converting the
+total, so it *is* the posting's arithmetic. A test quotes a three-line euro
+document, raises it, and asserts the two agree.
+
+**A missing rate is an answer, not an exception.** `rateFor` throws, and should —
+a posting that cannot honestly convert must stop. But the composer is asking a
+question before anybody has committed, so `quoteDocument` catches the refusal and
+reports it, and the composer puts it on the row with a link to the rates screen
+and disables the button. The sentence is `rateFor`'s own: a second one about a
+missing rate would drift from the one a person sees when a posting is refused.
+
+Verified through the real path in the browser: chose `EUR` beside a $4,000 line
+and read the quote above; back-dated to 2020-01-15 and watched the row say *"No
+EUR/USD rate on file for 2020-01-15 or before it"* with **Raise it** disabled;
+put the date back and raised INV-1022 — `€4,000.00`, stored EUR at 1.0835, a
+journal entry of $4,334.00 balancing to the cent, and `€4,000.00` in the invoice
+list beside its dollar neighbours.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

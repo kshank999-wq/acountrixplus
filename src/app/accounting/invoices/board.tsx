@@ -1,18 +1,20 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   createBillAction,
   createCustomerAction,
   createInvoiceAction,
   createVendorAction,
+  quoteDocumentAction,
   recordPaymentAction,
   revokeInvoiceLinkAction,
   sendInvoiceAction,
   shareInvoiceAction,
   voidDocumentAction,
   type ActionResult,
+  type Quoted,
 } from '@/app/actions/documents'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 
@@ -26,6 +28,8 @@ type Document = {
   issueDate: string
   dueDate: string
   status: string
+  /** What it is owed in — the amounts below are in it (Phase 64). */
+  currency: string
   totalCents: number
   balanceCents: number
   /** Invoices only (Phase 42). Bills are received, not sent. */
@@ -78,6 +82,8 @@ export function InvoicesBoard({
   owedToVendors,
   duplicates,
   banks,
+  homeCurrency,
+  currencies,
   today,
   canManage,
   canAddCustomer,
@@ -92,6 +98,10 @@ export function InvoicesBoard({
   owedToVendors: Owed[]
   duplicates: Duplicate[]
   banks: Party[]
+  /** The company's own currency — what a document is in unless told otherwise. */
+  homeCurrency: string
+  /** What may be chosen: home, then every currency with a rate on file. */
+  currencies: string[]
   today: string
   canManage: boolean
   canAddCustomer: boolean
@@ -184,6 +194,8 @@ export function InvoicesBoard({
             side={side}
             parties={parties}
             accounts={accounts}
+            homeCurrency={homeCurrency}
+            currencies={currencies}
             today={today}
             pending={pending}
             canAddParty={isCustomer ? canAddCustomer : true}
@@ -281,6 +293,8 @@ function Composer({
   side,
   parties,
   accounts,
+  homeCurrency,
+  currencies,
   today,
   pending,
   canAddParty,
@@ -289,6 +303,8 @@ function Composer({
   side: Side
   parties: Party[]
   accounts: Account[]
+  homeCurrency: string
+  currencies: string[]
   today: string
   pending: boolean
   canAddParty: boolean
@@ -306,6 +322,8 @@ function Composer({
   const [number, setNumber] = useState('')
   const [memo, setMemo] = useState('')
   const [tax, setTax] = useState('')
+  /** Home unless somebody says otherwise — what all but a handful of documents are. */
+  const [currency, setCurrency] = useState(homeCurrency)
   /**
    * Set when the bill was refused for resembling one already entered
    * (Phase 47). Holding it here rather than reading the notice means the
@@ -337,20 +355,70 @@ function Composer({
   // Worked out as it is typed. An invoice whose total somebody only discovers
   // after posting is one they have to void and raise again.
   const totals = useMemo(() => {
-    const subtotal = lines.reduce((sum, line) => {
+    // Kept per line as well as summed, because the conversion preview has to
+    // convert line by line to match what the posting will do (Phase 64) — a
+    // preview built from the total alone would differ by a cent.
+    const lineCents = lines.map((line) => {
       const unit = parseAmountToCents(line.unitPrice || '0') ?? 0
       const quantityMilli = line.quantity.trim() ? Math.round(Number(line.quantity) * 1000) : 1000
-      if (!Number.isFinite(quantityMilli)) return sum
-      return sum + Math.round((quantityMilli * unit) / 1000)
-    }, 0)
+      if (!Number.isFinite(quantityMilli)) return 0
+      return Math.round((quantityMilli * unit) / 1000)
+    })
+    const subtotal = lineCents.reduce((sum, cents) => sum + cents, 0)
     const taxCents = parseAmountToCents(tax || '0') ?? 0
-    return { subtotal, taxCents, total: subtotal + taxCents }
+    return { lineCents, subtotal, taxCents, total: subtotal + taxCents }
   }, [lines, tax])
+
+  /**
+   * What this document will book at, or why it cannot be (Phase 64).
+   *
+   * Asked of the server rather than worked out here, because the rate lives in
+   * a table and the arithmetic has to be the posting's own. Only ever asked for
+   * a *foreign* document: a domestic one is not a conversion, so there is
+   * nothing to say and no reason to make a round trip while somebody types.
+   */
+  const foreign = currency !== homeCurrency
+  const [quote, setQuote] = useState<Quoted>({ note: null, refusal: null })
+
+  // `totals.lineCents` is a new array every render, so depending on it directly
+  // would re-ask on every keystroke that changed nothing. The amounts are what
+  // the answer depends on, so the amounts are what the effect watches.
+  const amountsKey = `${totals.lineCents.join(',')}|${totals.taxCents}`
+
+  useEffect(() => {
+    if (!foreign || totals.total <= 0) {
+      setQuote({ note: null, refusal: null })
+      return
+    }
+
+    // Guards against a slow answer for one currency landing after a fast answer
+    // for the next and overwriting it — which would show the euro conversion
+    // beside a document somebody has since switched to sterling.
+    let current = true
+
+    quoteDocumentAction({
+      currency,
+      issueDate,
+      lineCents: totals.lineCents,
+      taxCents: totals.taxCents,
+    }).then((result) => {
+      if (current) setQuote(result)
+    })
+
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- amountsKey stands
+    // in for the line amounts, which are a fresh array on every render.
+  }, [currency, foreign, issueDate, amountsKey, totals.total])
 
   const ready =
     partyId !== '' &&
     totals.total > 0 &&
-    lines.some((line) => line.description.trim() && line.chartAccountId)
+    lines.some((line) => line.description.trim() && line.chartAccountId) &&
+    // A foreign document with no rate cannot be raised, and saying so here
+    // rather than letting the button fail is Phase 47's rule.
+    quote.refusal === null
 
   function reset() {
     setLines([{ ...BLANK_LINE }])
@@ -359,6 +427,11 @@ function Composer({
     setTax('')
     setDueDate('')
     setResemblance(null)
+    // Back to home rather than staying where the last document was. A composer
+    // that silently keeps EUR selected turns one foreign invoice into a habit
+    // of raising them by accident.
+    setCurrency(homeCurrency)
+    setQuote({ note: null, refusal: null })
     setOpen(false)
   }
 
@@ -386,6 +459,7 @@ function Composer({
       number: isCustomer ? number : '',
       vendorReference: isCustomer ? undefined : number,
       acknowledgeDuplicate,
+      currency,
       memo,
       tax,
       lines: lines
@@ -476,6 +550,27 @@ function Composer({
                 />
                 <span className="mt-0.5 block text-faint">Blank uses their terms.</span>
               </label>
+
+              {/* Only where there is a choice. A company that has never
+                  recorded a rate has exactly one currency it can post in, and
+                  a select offering one option is a question with no answer. */}
+              {currencies.length > 1 && (
+                <label className="text-xs text-muted">
+                  <span className="mb-1 block">In</span>
+                  <select
+                    value={currency}
+                    onChange={(event) => setCurrency(event.target.value)}
+                    className="field py-1.5 text-sm"
+                  >
+                    {currencies.map((code) => (
+                      <option key={code} value={code}>
+                        {code}
+                        {code === homeCurrency ? ' — your books' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
 
               <label className="text-xs text-muted">
                 <span className="mb-1 block">
@@ -638,7 +733,9 @@ function Composer({
                   </label>
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-wide text-muted">Total</p>
-                    <p className="tnum text-lg font-semibold">{formatCents(totals.total)}</p>
+                    <p className="tnum text-lg font-semibold">
+                      {formatCents(totals.total, currency)}
+                    </p>
                   </div>
                 </div>
               </div>
@@ -651,6 +748,32 @@ function Composer({
                   className="field w-full py-1.5 text-sm"
                 />
               </label>
+
+              {/* What it books at, before it is raised (Phase 64). The rate is
+                  fixed at issue and never recomputed, so this is the last
+                  moment anybody can question the number. */}
+              {quote.note && (
+                <p className="rounded-lg border border-line bg-raised/60 px-3 py-2 text-xs text-muted">
+                  {quote.note}
+                </p>
+              )}
+
+              {/* The refusal on the row rather than behind the button
+                  (Phase 47). A rate that is not on file is not something the
+                  posting can invent, so there is nothing to be gained by
+                  letting somebody finish the form and press a button that
+                  fails. */}
+              {quote.refusal && (
+                <div className="rounded-lg border border-danger/40 bg-raised/60 px-3 py-3 text-sm">
+                  <p className="font-medium text-danger">
+                    No rate to raise this {currency} {isCustomer ? 'invoice' : 'bill'} at.
+                  </p>
+                  <p className="mt-1 text-muted">{quote.refusal}</p>
+                  <a href="/accounting/currencies" className="btn btn-ghost mt-3 text-sm">
+                    Enter the rate
+                  </a>
+                </div>
+              )}
 
               {/* Only ever shown for a *resemblance*. A supplier repeating
                   their own reference is refused outright and this never
@@ -1013,14 +1136,17 @@ function DocumentList({
                       )}
                     </td>
                   )}
+                  {/* In the document's own currency (Phase 64). The list is
+                      where a euro invoice raised above is first seen again,
+                      and showing it in dollars would undo the whole point. */}
                   <td className="tnum px-4 py-1.5 text-right">
-                    {formatCents(document.totalCents)}
+                    {formatCents(document.totalCents, document.currency)}
                   </td>
                   <td className="tnum px-4 py-1.5 text-right">
                     {document.balanceCents === 0 ? (
                       <span className="text-success">settled</span>
                     ) : (
-                      formatCents(document.balanceCents)
+                      formatCents(document.balanceCents, document.currency)
                     )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-1.5 text-right">

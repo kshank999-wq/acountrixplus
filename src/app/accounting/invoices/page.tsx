@@ -13,6 +13,7 @@ import {
 } from '@/modules/receivables/open-documents'
 import { listFinancialAccounts } from '@/modules/banking/accounts'
 import { suspectedDuplicateBills } from '@/modules/payables/duplicates'
+import { currencyChoices } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { InvoicesBoard } from './board'
 
@@ -59,6 +60,7 @@ export default async function InvoicesPage() {
     owedToVendors,
     banks,
     duplicates,
+    currencies,
   ] = await Promise.all([
     listInvoices(actor, { limit: 60 }),
     listBills(actor, { limit: 60 }),
@@ -70,6 +72,8 @@ export default async function InvoicesPage() {
     partiesWithOpenDocuments(actor, 'vendor'),
     listFinancialAccounts(actor, { activeOnly: true }),
     suspectedDuplicateBills(actor, { limit: 25 }),
+    // What the composer may offer, and which of them is home (Phase 64).
+    currencyChoices(actor),
   ])
 
   return (
@@ -88,6 +92,7 @@ export default async function InvoicesPage() {
           issueDate: row.issueDate,
           dueDate: row.dueDate,
           status: row.status,
+          currency: row.currency,
           totalCents: row.totalCents,
           balanceCents: row.balanceCents,
           sentAt: row.sentAt ? row.sentAt.toISOString().slice(0, 10) : null,
@@ -103,6 +108,7 @@ export default async function InvoicesPage() {
           issueDate: row.issueDate,
           dueDate: row.dueDate,
           status: row.status,
+          currency: row.currency,
           totalCents: row.totalCents,
           balanceCents: row.balanceCents,
         }))}
@@ -131,6 +137,8 @@ export default async function InvoicesPage() {
         owedByCustomers={owedByCustomers}
         owedToVendors={owedToVendors}
         banks={banks.map((row) => ({ id: row.id, name: row.name }))}
+        homeCurrency={currencies.homeCurrency}
+        currencies={currencies.offerable}
         today={new Date().toISOString().slice(0, 10)}
         canManage={can(actor, 'accounting:journal')}
         canAddCustomer={can(actor, 'crm:manage')}

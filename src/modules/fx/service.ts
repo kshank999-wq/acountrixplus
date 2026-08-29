@@ -4,6 +4,7 @@ import { chartAccounts, companies, exchangeRates } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { recordAudit } from '@/modules/audit'
 import { RATE_ONE, RateError, convert, describeRate, isForeign, normalise } from './rates'
+import { documentQuote, offerableCurrencies, type DocumentQuote } from './quoting'
 
 /**
  * Rates on file, and the conversion the ledger actually uses (spec §19).
@@ -212,6 +213,88 @@ export async function inFunctional(
     rateMillionths: rate.rateMillionths,
     currency: normalise(input.currency),
   }
+}
+
+export type QuoteResult =
+  | { ok: true; quote: DocumentQuote }
+  | { ok: false; reason: string }
+
+/**
+ * What a document about to be raised will book at — or why it cannot be
+ * (Phase 64).
+ *
+ * ## Why this does not throw
+ *
+ * `rateFor` throws, and rightly: a posting that cannot honestly convert must
+ * stop. But the composer is asking a *question* — "what would this be worth?"
+ * — before anybody has committed to anything, and a question whose answer is
+ * "no rate on file" is not an exception, it is the answer.
+ *
+ * Phase 47's rule is that a refusal belongs on the row, not behind a button
+ * that fails when pressed. So the missing rate is reported rather than raised,
+ * and the composer can say so beside the currency somebody just chose.
+ *
+ * ## Why the message is not written here
+ *
+ * The reason is `rateFor`'s own, caught and passed along. Writing a second
+ * sentence about a missing rate would give the same question two answers that
+ * agree today and drift the first time either is edited — and the one a person
+ * sees when a *posting* is refused would stop matching the one they saw when
+ * the composer warned them about it.
+ */
+export async function quoteDocument(
+  ctx: ActorContext,
+  input: {
+    lineCents: number[]
+    taxCents?: number
+    currency: string
+    issueDate: string
+  },
+  exec: Executor = db,
+): Promise<QuoteResult> {
+  requirePermission(ctx, 'accounting:view')
+
+  const homeCurrency = await functionalCurrency(ctx.companyId, exec)
+
+  try {
+    const rate = await rateFor(ctx, input.currency, input.issueDate, exec)
+
+    return {
+      ok: true,
+      quote: documentQuote({
+        lineCents: input.lineCents,
+        taxCents: input.taxCents,
+        currency: input.currency,
+        homeCurrency,
+        rateMillionths: rate.rateMillionths,
+        rateDate: rate.rateDate,
+      }),
+    }
+  } catch (error) {
+    if (error instanceof RateError) return { ok: false, reason: error.message }
+    throw error
+  }
+}
+
+/**
+ * The currencies the composer may offer, and which is home.
+ *
+ * One call rather than two so the pair cannot be fetched from different
+ * moments — a screen that read the home currency, then the rates, and had the
+ * company's currency changed in between would offer a list with home missing
+ * from it.
+ */
+export async function currencyChoices(
+  ctx: ActorContext,
+): Promise<{ homeCurrency: string; offerable: string[] }> {
+  requirePermission(ctx, 'accounting:view')
+
+  const [homeCurrency, withRates] = await Promise.all([
+    functionalCurrency(ctx.companyId),
+    currenciesInUse(ctx),
+  ])
+
+  return { homeCurrency, offerable: offerableCurrencies(homeCurrency, withRates) }
 }
 
 export type RateRow = {

@@ -15,6 +15,7 @@ import {
 import { openDocumentsFor, type PaymentSide } from '@/modules/receivables/open-documents'
 import { revokeShareLink, sendInvoice, shareLinkFor } from '@/modules/receivables/send'
 import { allocate } from '@/modules/receivables/allocation'
+import { quoteDocument } from '@/modules/fx/service'
 import { DomainError, messageFor } from '@/modules/errors'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 
@@ -191,6 +192,14 @@ const documentSchema = z.object({
   number: z.string().trim().optional(),
   memo: z.string().trim().optional(),
   tax: money.optional().or(z.literal('').transform(() => 0)),
+  /**
+   * The currency the document is raised in (Phase 64).
+   *
+   * Optional, and blank means the company's own — so every caller written
+   * before this phase keeps raising domestic documents unchanged, rather than
+   * every one of them having to learn a field to say "as before".
+   */
+  currency: z.string().trim().toUpperCase().optional().or(z.literal('')),
   lines: z.array(lineSchema).min(1, 'An invoice needs at least one line.'),
 })
 
@@ -217,6 +226,7 @@ export async function createInvoiceAction(input: unknown): Promise<ActionResult>
     const invoice = await createInvoice(actor, {
       customerId: parsed.partyId,
       number: parsed.number || undefined,
+      currency: parsed.currency || undefined,
       issueDate: parsed.issueDate,
       dueDate: parsed.dueDate || undefined,
       memo: parsed.memo || undefined,
@@ -231,10 +241,71 @@ export async function createInvoiceAction(input: unknown): Promise<ActionResult>
 
     return {
       message:
-        `Invoice ${invoice.number} raised for ${formatCents(invoice.totalCents)}, ` +
-        `due ${invoice.dueDate}. It is on the ledger and on the aging report.`,
+        // In the document's own currency, which is what the customer owes and
+        // what the invoice will say (Phase 64).
+        `Invoice ${invoice.number} raised for ` +
+        `${formatCents(invoice.totalCents, invoice.currency)}, due ${invoice.dueDate}. ` +
+        'It is on the ledger and on the aging report.',
     }
   })
+}
+
+const quoteSchema = z.object({
+  currency: z.string().trim().toUpperCase().min(1),
+  issueDate: isoDate,
+  lineCents: z.array(z.number().int()),
+  taxCents: z.number().int().optional(),
+})
+
+/**
+ * What the document being composed will book at, before anybody commits to it
+ * (Phase 64).
+ *
+ * A read, not a write — it posts nothing and creates nothing. It exists because
+ * a document's rate is fixed at issue and never recomputed, which makes the
+ * composer the last place the number can be questioned.
+ *
+ * A missing rate comes back as `ok: false` with `rateFor`'s own sentence rather
+ * than as a thrown error, so the composer can put the refusal on the row and
+ * disable the button — Phase 47's rule — instead of letting somebody fill in a
+ * whole invoice and press a button that fails.
+ */
+export type Quoted = { note: string | null; refusal: string | null }
+
+export async function quoteDocumentAction(input: unknown): Promise<Quoted> {
+  try {
+    const actor = await requireActor()
+    const parsed = quoteSchema.parse(input)
+
+    const result = await quoteDocument(actor, {
+      currency: parsed.currency,
+      issueDate: parsed.issueDate,
+      lineCents: parsed.lineCents,
+      taxCents: parsed.taxCents,
+    })
+
+    // A refusal is the *answer*, not a failure of the asking — so it comes back
+    // beside the note rather than as a thrown error, and the composer can put
+    // it next to the currency somebody just chose.
+    return result.ok
+      ? { note: result.quote.note, refusal: null }
+      : { note: null, refusal: result.reason }
+  } catch (error) {
+    // Not routed through `run`, deliberately, for two reasons: `run`
+    // revalidates every page path, and this asks a question on every edit to
+    // the form — and a quote that cannot be produced should leave the composer
+    // as it was rather than raise a banner about a document nobody has tried to
+    // create yet.
+    return {
+      note: null,
+      refusal: messageFor(
+        error,
+        'Could not work out what this would book at. Raising it in a foreign currency is ' +
+          'blocked until that is known — a document whose rate is fixed at issue is not ' +
+          'something to guess at.',
+      ),
+    }
+  }
 }
 
 export async function createBillAction(input: unknown): Promise<ActionResult> {
@@ -248,6 +319,7 @@ export async function createBillAction(input: unknown): Promise<ActionResult> {
       // generated; what the composer collects is the supplier's.
       vendorReference: parsed.vendorReference || undefined,
       acknowledgeDuplicate: parsed.acknowledgeDuplicate,
+      currency: parsed.currency || undefined,
       issueDate: parsed.issueDate,
       dueDate: parsed.dueDate || undefined,
       memo: parsed.memo || undefined,
@@ -264,8 +336,8 @@ export async function createBillAction(input: unknown): Promise<ActionResult> {
 
     return {
       message:
-        `Bill ${bill.number}${theirs} entered for ${formatCents(bill.totalCents)}, ` +
-        `due ${bill.dueDate}.`,
+        `Bill ${bill.number}${theirs} entered for ` +
+        `${formatCents(bill.totalCents, bill.currency)}, due ${bill.dueDate}.`,
     }
   })
 }
