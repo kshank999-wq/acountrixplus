@@ -2592,6 +2592,58 @@ screen said $2,500.00. Afterwards the row reads **$2,708.75**, City Works
 Authority reads *"They owe $9,400.00, oldest 106 days overdue"*, and Harborview —
 owing $460 with a $460 overpayment held — reads **nothing due**.
 
+### The statement run nobody has time for (Phase 57)
+
+Phase 55's own ADR nominated this one: *"a scheduler that emails every customer
+without anybody deciding again is the feature that most deserves its own phase,
+with its own preview screen."*
+
+Sending statements is the highest-leverage collections act a small business has,
+for an unglamorous reason: **most late payment is not refusal.** It is an invoice
+that fell behind a filing cabinet, went to somebody who left, or was never
+matched to a purchase order. A monthly summary fixes all three without anybody
+having a difficult conversation — and it is exactly the sort of repetitive,
+unurgent, mildly awkward job that never actually happens.
+
+- **A run creates the document, then sends it** — the real difference from a
+  chase, which sends one that already exists. A statement has to be saved first
+  because saving is what freezes the figures. So a failed send leaves a saved
+  statement behind, which is right: that row is the evidence the business tried,
+  and deleting it on a bounce would destroy the only record.
+- **A customer whose money we hold gets one too.** The rule is an open balance
+  *or* held credit — Phase 54's argument reaching the schedule. They are owed a
+  refund or an application and only the business knows it, so the
+  minimum-balance floor is exempted for credit: a floor stops trivial *demands*,
+  and this is not one.
+- **Once per period, enforced by the send itself.** Not a separate "already ran"
+  flag, which can fall out of step with what went out, but `quietDays` measured
+  against `sent_at` — the same state that records the first send, and a question
+  only answerable since Phase 55 finally wrote that column. It also means a
+  statement sent by hand on the 29th stops the run sending another on the 1st.
+- **The day is capped at the 28th**, because later ones do not exist in seven
+  months of the year and a schedule that silently skips February is worse than
+  one on the 28th — the failure is invisible.
+- **The preview is asked as if it were on, and as if today were the day.**
+  Phase 43's lesson exactly: computed against the real policy, every row reads
+  "switched off", or on 27 days a month "not the day", and the preview is empty
+  at precisely the moment it is the whole point.
+- **Its own settings table**, not more columns on `chase_settings`. Chasing is a
+  demand about one invoice; a statement is a summary of an account, and plenty
+  of companies want the second without ever wanting the first.
+
+**The browser found the bug this phase claims to avoid, in this phase's own
+code.** Opened on the 29th, the preview read *"Nobody is due a statement"* with
+every customer under *"not the day of the month for the run"* — because forcing
+the day to today is not the same as skipping the check, and `isRunDay` clamps to
+28. Fixed, with two tests pinning the 29th.
+
+Afterwards the preview earned its place at once: alongside Foxglove ($6,491.94)
+and Bremen ($2,708.75) going out, it showed that **City Works Authority owes
+$9,400 and has no email address on file** — a real finding about the demo books
+no other screen surfaces. **Run it now**, pressed on the 29th with the run day
+set to the 1st, declined honestly rather than forcing a send the schedule would
+never make.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

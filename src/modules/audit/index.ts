@@ -55,6 +55,9 @@ export type AuditAction =
   // ever wrote it, so "what did we send them, and when" — the first question
   // in any collections conversation — had no answer anywhere.
   | 'statement.send'
+  // Phase 57. Switching statement runs on decides that a letter goes to every
+  // customer with an account, every month, without anybody deciding again.
+  | 'statement.policy'
   // Phase 43. Switching chasing on decides that invoices will be sent without
   // anybody deciding again, so "why did our customer get three emails" needs
   // an answer somebody can find.

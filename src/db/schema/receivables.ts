@@ -623,6 +623,53 @@ export const chaseSettings = pgTable('chase_settings', {
 })
 
 /**
+ * What a company has decided about sending statements on a schedule
+ * (spec §13, §24, Phase 57).
+ *
+ * Its own table rather than more columns on `chase_settings`, because the two
+ * are different decisions a business makes separately. Chasing is a demand
+ * aimed at one late invoice; a statement is a summary of an account, and plenty
+ * of companies want the second without ever wanting the first. Folding them
+ * together would mean switching on statements switched on chasing.
+ *
+ * Absent means off, for the reason `chase_settings` gives at length: this is
+ * email to somebody who is not a user of the system, over a company's own name,
+ * with nobody present.
+ */
+export const statementSettings = pgTable('statement_settings', {
+  companyId: uuid('company_id')
+    .primaryKey()
+    .references(() => companies.id, { onDelete: 'cascade' }),
+
+  enabled: boolean('enabled').notNull().default(false),
+
+  /**
+   * The day of the month the run goes out on.
+   *
+   * Constrained to 1..28 so every month has one. "The 31st" does not exist in
+   * seven months of the year, and a schedule that silently skips February is
+   * worse than one that runs on the 28th.
+   */
+  dayOfMonth: integer('day_of_month').notNull().default(1),
+
+  kind: text('kind', { enum: ['open_item', 'balance_forward'] })
+    .notNull()
+    .default('open_item'),
+
+  /** Nothing owed below this is sent. Held credit is exempt — see the module. */
+  minimumBalanceCents: bigint('minimum_balance_cents', { mode: 'number' }).notNull().default(500),
+
+  /** Days of quiet after the last statement went, however it went. */
+  quietDays: integer('quiet_days').notNull().default(20),
+
+  /** A ceiling on one run, for the same reason `chase_settings` has one. */
+  maxPerRun: integer('max_per_run').notNull().default(200),
+
+  updatedBy: uuid('updated_by'),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
+
+/**
  * What a company has decided about approving bills before paying them
  * (spec §13, §14, Phase 50).
  *

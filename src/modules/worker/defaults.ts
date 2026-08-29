@@ -133,6 +133,18 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
       "company's to set and a weekly job could only honour multiples of seven. Does nothing " +
       'at all unless somebody has switched chasing on — it emails their customers, not them.',
   },
+  // --- Phase 57 -------------------------------------------------------------
+  {
+    kind: 'receivables.send_statements',
+    cadence: 'daily',
+    hourUtc: 7,
+    why:
+      'Daily, and the job decides for itself whether today is the day — so the schedule lives ' +
+      "in a row somebody can change on a screen rather than in a cron expression that needs a " +
+      'deployment. Earlier than the chase, so a customer who is getting both on the same ' +
+      'morning reads the summary of their account before the demand about one invoice. Does ' +
+      'nothing at all unless somebody has switched statement runs on.',
+  },
 ]
 
 /** Housekeeping that spans every tenant. */

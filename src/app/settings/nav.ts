@@ -5,6 +5,7 @@ export const SETTINGS_NAV = [
   { href: '/settings/modules', label: 'Modules' },
   { href: '/settings/accounts', label: 'Bank accounts' },
   { href: '/settings/chasing', label: 'Chasing' },
+  { href: '/settings/statements', label: 'Statements' },
   { href: '/settings/payments', label: 'Card payments' },
   { href: '/settings/import', label: 'Bring in your books' },
   { href: '/settings/operations', label: 'Background work' },
