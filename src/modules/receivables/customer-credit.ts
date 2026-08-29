@@ -5,6 +5,7 @@ import { recordAudit } from '@/modules/audit'
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { convert } from '@/modules/fx/rates'
+import { relieveFunctional } from '@/modules/fx/documents'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DocumentError } from './service'
@@ -167,7 +168,21 @@ export async function applyCredit(
      */
     const claimed = await tx
       .update(payments)
-      .set({ unappliedCents: payment.unappliedCents - amountCents })
+      .set({
+        unappliedCents: payment.unappliedCents - amountCents,
+        // Both halves together (Phase 65). `relieveFunctional` is the rule the
+        // invoice and the credit note already use: the last draw takes whatever
+        // functional remainder is left, so the two columns reach zero on the
+        // same movement and neither strands a cent behind the other.
+        functionalUnappliedCents: relieveFunctional(
+          {
+            balanceCents: payment.unappliedCents,
+            exchangeRateMillionths: payment.exchangeRateMillionths,
+            functionalBalanceCents: payment.functionalUnappliedCents,
+          },
+          amountCents,
+        ).functionalBalanceCents,
+      })
       .where(
         and(
           eq(payments.id, payment.id),
@@ -266,7 +281,18 @@ export async function refundCredit(
 
     const claimed = await tx
       .update(payments)
-      .set({ unappliedCents: payment.unappliedCents - input.amountCents })
+      .set({
+        unappliedCents: payment.unappliedCents - input.amountCents,
+        // Refunding it releases the same functional share (Phase 65).
+        functionalUnappliedCents: relieveFunctional(
+          {
+            balanceCents: payment.unappliedCents,
+            exchangeRateMillionths: payment.exchangeRateMillionths,
+            functionalBalanceCents: payment.functionalUnappliedCents,
+          },
+          input.amountCents,
+        ).functionalBalanceCents,
+      })
       .where(
         and(
           eq(payments.id, payment.id),

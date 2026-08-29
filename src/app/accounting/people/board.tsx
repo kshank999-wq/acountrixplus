@@ -28,8 +28,14 @@ type Party = {
   openDocuments: number
   /** Home currency since Phase 56 — it used to sum face amounts across them. */
   balanceCents: number
-  /** Their overpayment, or their unspent credit against us (Phase 56). */
+  /**
+   * Their overpayment, or their unspent credit against us (Phase 56), in the
+   * home currency since Phase 65 — it summed face amounts before that and was
+   * netted against a converted balance.
+   */
   heldCreditCents: number
+  /** What that figure stands for, when some of it arrived in another currency. */
+  heldCreditNote: string | null
   oldestDueDate: string | null
   hasForeignDocuments: boolean
   documentCount: number
@@ -358,6 +364,15 @@ export function PeopleBoard({
                             {row.heldCreditCents > 0 && (
                               <span className="block text-xs text-faint">
                                 {formatCents(row.balanceCents, homeCurrency)} billed
+                              </span>
+                            )}
+                            {/* When the held figure is a conversion, say so and
+                                say what it converts (Phase 65). Phase 61's
+                                rule: a converted number shown without saying
+                                so is the defect. */}
+                            {row.heldCreditNote && (
+                              <span className="mt-0.5 block text-xs text-warning">
+                                {row.heldCreditNote}
                               </span>
                             )}
                           </>

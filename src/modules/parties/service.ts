@@ -5,6 +5,7 @@ import { DomainError } from '@/modules/errors'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { functionalCurrency } from '@/modules/fx/service'
+import { comparableHoldings } from '@/modules/fx/holdings'
 import { deactivationCheck } from './changes'
 
 /**
@@ -46,6 +47,13 @@ export type PartySummary = {
    * unspent part of a vendor credit (Phase 12).
    */
   heldCreditCents: number
+  /**
+   * What that figure stands for, when it stands for something (Phase 65).
+   *
+   * Null when every receipt behind it arrived in the company's own currency —
+   * then the number and the truth are the same and there is nothing to add.
+   */
+  heldCreditNote: string | null
   /** The due date of the oldest thing still unpaid, so the figure has an age. */
   oldestDueDate: string | null
   /** True when any open document is in a currency other than the home one. */
@@ -120,7 +128,16 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
   const heldCredit = db
     .select({
       customerId: payments.customerId,
-      heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
+      /**
+       * The **functional** amount, not the face one (Phase 65).
+       *
+       * `balanceCents` beside it sums `invoices.functional_balance_cents`, and
+       * Phase 54 nets one against the other. Summing the face amount here made
+       * a €500 overpayment reduce a converted $4,334.00 balance by 500 —
+       * subtracting euro from dollars and printing the result with a dollar
+       * sign. Both terms are now in the company's own money.
+       */
+      heldCents: sql<string>`sum(${payments.functionalUnappliedCents})`.as('held_cents'),
     })
     .from(payments)
     .where(
@@ -132,6 +149,46 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
     )
     .groupBy(payments.customerId)
     .as('held_credit')
+
+  /**
+   * The same holdings, per currency (Phase 65).
+   *
+   * A second pass rather than more columns on the subquery above: what the
+   * screen sorts and nets on is one figure, and what it *says* is the truth
+   * behind it. Rolling both into one grouped row would mean either a row per
+   * currency — which multiplies every customer — or a string assembled in SQL.
+   */
+  const heldByParty = await db
+    .select({
+      customerId: payments.customerId,
+      currency: payments.currency,
+      unappliedCents: sql<string>`sum(${payments.unappliedCents})`,
+      functionalUnappliedCents: sql<string>`sum(${payments.functionalUnappliedCents})`,
+    })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.companyId, ctx.companyId),
+        eq(payments.status, 'posted'),
+        sql`${payments.unappliedCents} > 0`,
+      ),
+    )
+    .groupBy(payments.customerId, payments.currency)
+
+  const holdingsByParty = new Map<
+    string,
+    { currency: string; unappliedCents: number; functionalUnappliedCents: number }[]
+  >()
+  for (const row of heldByParty) {
+    if (!row.customerId) continue
+    const list = holdingsByParty.get(row.customerId) ?? []
+    list.push({
+      currency: row.currency,
+      unappliedCents: Number(row.unappliedCents),
+      functionalUnappliedCents: Number(row.functionalUnappliedCents),
+    })
+    holdingsByParty.set(row.customerId, list)
+  }
 
   const rows = await db
     .select({
@@ -165,6 +222,10 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
     openDocuments: Number(row.openDocuments ?? 0),
     balanceCents: Number(row.balanceCents ?? 0),
     heldCreditCents: Number(row.heldCreditCents ?? 0),
+    // Null unless some of it arrived in another currency, in which case the
+    // figure above is a conversion and Phase 61's rule applies: a converted
+    // number shown without saying so is the defect (Phase 65).
+    heldCreditNote: comparableHoldings(holdingsByParty.get(row.customer.id) ?? [], home).note,
     oldestDueDate: row.oldestDueDate ?? null,
     hasForeignDocuments: Number(row.foreignCount ?? 0) > 0,
     documentCount: Number(row.documentCount ?? 0),
@@ -209,7 +270,13 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
   const unspentCredit = db
     .select({
       vendorId: creditNotes.vendorId,
-      heldCents: sql<string>`sum(${creditNotes.remainingCents})`.as('held_cents'),
+      /**
+       * Functional, not face (Phase 65) — the identical defect one table over.
+       * `balanceCents` beside it sums `bills.functional_balance_cents`, so a
+       * €500 vendor credit was reducing a converted figure by 500. Phase 63
+       * gave credit notes the column that makes this comparable.
+       */
+      heldCents: sql<string>`sum(${creditNotes.functionalRemainingCents})`.as('held_cents'),
     })
     .from(creditNotes)
     .where(
@@ -221,6 +288,47 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
     )
     .groupBy(creditNotes.vendorId)
     .as('unspent_credit')
+
+  // The same credits per currency, so the figure above can say what it stands
+  // for when it is a conversion (Phase 65).
+  const creditRows = await db
+    .select({
+      vendorId: creditNotes.vendorId,
+      currency: creditNotes.currency,
+      remainingCents: sql<string>`sum(${creditNotes.remainingCents})`,
+      functionalRemainingCents: sql<string>`sum(${creditNotes.functionalRemainingCents})`,
+    })
+    .from(creditNotes)
+    .where(
+      and(
+        eq(creditNotes.companyId, ctx.companyId),
+        sql`${creditNotes.vendorId} is not null`,
+        sql`${creditNotes.remainingCents} > 0`,
+      ),
+    )
+    .groupBy(creditNotes.vendorId, creditNotes.currency)
+
+  const byVendor = new Map<
+    string,
+    { currency: string; unappliedCents: number; functionalUnappliedCents: number }[]
+  >()
+  for (const row of creditRows) {
+    if (!row.vendorId) continue
+    const list = byVendor.get(row.vendorId) ?? []
+    list.push({
+      currency: row.currency,
+      unappliedCents: Number(row.remainingCents),
+      functionalUnappliedCents: Number(row.functionalRemainingCents),
+    })
+    byVendor.set(row.vendorId, list)
+  }
+
+  const creditNotesByVendor = new Map<string, string | null>(
+    [...byVendor].map(([vendorId, held]) => [
+      vendorId,
+      comparableHoldings(held, home).note,
+    ]),
+  )
 
   const rows = await db
     .select({
@@ -256,6 +364,7 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
     openDocuments: Number(row.openDocuments ?? 0),
     balanceCents: Number(row.balanceCents ?? 0),
     heldCreditCents: Number(row.heldCreditCents ?? 0),
+    heldCreditNote: creditNotesByVendor.get(row.vendor.id) ?? null,
     oldestDueDate: row.oldestDueDate ?? null,
     hasForeignDocuments: Number(row.foreignCount ?? 0) > 0,
     documentCount: Number(row.documentCount ?? 0),

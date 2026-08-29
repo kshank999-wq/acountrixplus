@@ -181,7 +181,11 @@ export async function statementCandidates(companyId: string): Promise<StatementC
   const heldCredit = db
     .select({
       customerId: payments.customerId,
-      heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
+      // Functional, to match the `owing` subquery beside it, which sums
+      // `functional_balance_cents` (Phase 65). The minimum-balance floor
+      // compares the two, and a floor that subtracts a face amount from a
+      // converted one is not a threshold in any currency.
+      heldCents: sql<string>`sum(${payments.functionalUnappliedCents})`.as('held_cents'),
     })
     .from(payments)
     .where(

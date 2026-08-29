@@ -673,7 +673,10 @@ export async function customersWithBalances(ctx: ActorContext) {
   const heldCredit = db
     .select({
       customerId: payments.customerId,
-      heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
+      // Functional (Phase 65), to match `balanceCents` below — which is
+      // explicitly the home-currency balance, and was being reduced by a face
+      // amount in whatever currency the receipt happened to arrive in.
+      heldCents: sql<string>`sum(${payments.functionalUnappliedCents})`.as('held_cents'),
     })
     .from(payments)
     .where(

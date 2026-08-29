@@ -2965,6 +2965,54 @@ put the date back and raised INV-1022 — `€4,000.00`, stored EUR at 1.0835, a
 journal entry of $4,334.00 balancing to the cent, and `€4,000.00` in the invoice
 list beside its dollar neighbours.
 
+### The credit netted against a converted balance (Phase 65)
+
+ADR 0062 named three sums that add currencies; 0063 and 0064 both left them open
+for want of the payment's rate. Read properly the defect is sharper than that.
+The customers screen builds a party's standing out of two sums:
+
+```sql
+balanceCents:    coalesce(sum(invoices.functional_balance_cents), 0)  -- converted
+heldCreditCents: coalesce(max(held_credit.held_cents), 0)             -- face amount
+```
+
+and Phase 54 nets one against the other. Bremen Hafenbau, in the development
+database: a €4,000 invoice carried at $4,334.00 and a €500 overpayment showed
+**$3,834.00** due — `4334.00 - 500` — a figure that is not dollars, not euro,
+and not what anybody owes.
+
+**`recordPayment` already had what closes it**, and has since Phase 35: it
+fetches `paymentRateMillionths`, uses it once and drops it, then computes
+`heldFunctionalCents = received - applied` outright and drops that too. Phase 62
+kept `paymentCurrency` from the line above these and left both behind. It is the
+fourth time this project has found the same shape — Phase 55's `sent_at` written
+by nothing, Phase 59's `paid` list discarded by a `catch`, Phase 62's currency,
+and now this: **a fact the code has and does not keep.**
+
+**One comparable figure, and the truth beside it.** Phase 61 rightly refuses to
+total two currencies on a *statement* — a customer is owed money in theirs. But
+"which customer is holding the most of my money" has an answer, and it is what
+those receipts were worth when they arrived. So the figure is converted and the
+screen says so, rather than quietly showing a conversion:
+
+> €500.00 held. The $541.75 shown is what that was worth when it was received —
+> it is repayable in the currency it came in.
+
+Both halves move together on every draw-down and refund, through
+`relieveFunctional` — the rule the invoice and the credit note already use — so
+neither column strands a cent. That is the defect Phase 63's browser check found
+on credit notes, caught this time before it shipped.
+
+**The data caught a bug in the backfill.** Its first draft reconstructed the held
+amount from `amount - applications`, and claimed $200.00 was still held on a
+receipt that had been refunded — a refund leaves no application behind.
+`unapplied_cents` is the only column that knows what is left now.
+
+Verified in the browser on `/accounting/people`: Bremen now reads **$4,334.00
+billed − $541.75 held = $3,792.25 due**, every term in one currency, with the
+euro truth beneath it; Harborview's domestic $460.00 holding carries no note,
+because there is nothing to explain.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

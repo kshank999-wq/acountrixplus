@@ -420,7 +420,7 @@ export async function recordPaymentAction(input: unknown): Promise<ActionResult>
       )
     }
 
-    await recordPayment(actor, {
+    const payment = await recordPayment(actor, {
       kind: parsed.kind,
       customerId: parsed.kind === 'receipt' ? parsed.partyId : undefined,
       vendorId: parsed.kind === 'disbursement' ? parsed.partyId : undefined,
@@ -435,8 +435,18 @@ export async function recordPaymentAction(input: unknown): Promise<ActionResult>
       })),
     })
 
+    /**
+     * Every figure here is in the payment's own currency (Phase 65).
+     *
+     * A receipt is denominated in the documents it settles, so all three of
+     * these are euro when the invoice was — and printing "$500.00 more than was
+     * owed" beside a euro receipt is the wrong-symbol defect ADR 0062 recorded
+     * and 0063 and 0064 left open.
+     */
+    const money = (cents: number) => formatCents(cents, payment.currency)
+
     const settled = allocation.applications
-      .map((application) => `${application.number} ${formatCents(application.amountCents)}`)
+      .map((application) => `${application.number} ${money(application.amountCents)}`)
       .join(', ')
 
     const held =
@@ -448,13 +458,13 @@ export async function recordPaymentAction(input: unknown): Promise<ActionResult>
     // left to be discovered on a balance sheet (Phase 53).
     const over =
       allocation.unappliedCents > 0
-        ? ` ${formatCents(allocation.unappliedCents)} more than was owed is held as credit for them.`
+        ? ` ${money(allocation.unappliedCents)} more than was owed is held as credit for them.`
         : ''
 
     return {
       message: settled
-        ? `${formatCents(parsed.amount)} against ${settled}.${held}${over}`
-        : `${formatCents(parsed.amount)} received.${held}${over}`,
+        ? `${money(parsed.amount)} against ${settled}.${held}${over}`
+        : `${money(parsed.amount)} received.${held}${over}`,
     }
   })
 }

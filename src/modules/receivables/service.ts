@@ -1216,6 +1216,24 @@ export async function recordPayment(
     await rateFor(ctx, paymentCurrency, input.paymentDate)
   ).rateMillionths
 
+  /**
+   * What arrived and what it settled, in the company's own money (Phase 65).
+   *
+   * Hoisted above the transaction because the row needs the held remainder at
+   * insert time. It was computed further down and thrown away — the fourth
+   * fact this block has worked out and discarded, after `paymentCurrency` on
+   * the line above, which Phase 62 kept.
+   *
+   * The remainder is `received - applied` rather than a conversion of the
+   * difference. The receipt's ledger entry splits the money that arrived into
+   * what it settled and what is left, so the two halves have to add back to the
+   * amount that actually hit the bank; converting the difference separately
+   * would leave the entry a cent out.
+   */
+  const receivedCents = convert(input.amountCents, paymentRateMillionths)
+  const appliedFunctionalCents = convert(applied, paymentRateMillionths)
+  const heldFunctionalCents = receivedCents - appliedFunctionalCents
+
   return db.transaction(async (tx) => {
     const [payment] = await tx
       .insert(payments)
@@ -1241,6 +1259,13 @@ export async function recordPayment(
          * company's own money.
          */
         currency: paymentCurrency,
+        /**
+         * Kept too (Phase 65). Phase 62 stored the currency and left the rate
+         * behind, so three queries still netted a face-amount holding against
+         * a converted invoice balance.
+         */
+        exchangeRateMillionths: paymentRateMillionths,
+        functionalUnappliedCents: heldFunctionalCents,
       })
       .returning()
 
@@ -1256,26 +1281,23 @@ export async function recordPayment(
       carriedCents += applied.functionalCents
     }
 
-    // What the money is worth today, against what the documents were carried
-    // at. Between raising an invoice and being paid, the rate moves; the
-    // difference is a realised foreign exchange gain or loss — a real profit
-    // and loss event, not a rounding artefact, and not revenue, because
-    // nothing more was sold.
-    const receivedCents = convert(input.amountCents, paymentRateMillionths)
-
     /**
-     * The exchange difference is on what was **applied**, not on the whole
-     * receipt (Phase 53).
+     * `receivedCents`, `appliedFunctionalCents` and `heldFunctionalCents` are
+     * worked out above the transaction now (Phase 65), because the row stores
+     * the held remainder. They mean here what they always did:
      *
-     * Comparing the full amount against what the documents were relieved by
-     * would read a $600 overpayment on a domestic receipt as a $600 exchange
-     * gain — inventing profit out of a customer rounding up. What is held was
-     * never carried at any document's rate, so there is no rate difference on
-     * it to realise.
+     * - `receivedCents` is what the money is worth today, against what the
+     *   documents were carried at. Between raising an invoice and being paid
+     *   the rate moves, and the difference is a realised exchange gain or loss
+     *   — a profit and loss event, not a rounding artefact, and not revenue,
+     *   because nothing more was sold.
+     * - The difference is on what was **applied**, not on the whole receipt
+     *   (Phase 53). Comparing the full amount against what the documents were
+     *   relieved by would read a $600 overpayment on a domestic receipt as a
+     *   $600 exchange gain — inventing profit out of a customer rounding up.
+     *   What is held was never carried at any document's rate, so there is no
+     *   rate difference on it to realise.
      */
-    const appliedFunctionalCents = convert(applied, paymentRateMillionths)
-    const heldFunctionalCents = receivedCents - appliedFunctionalCents
-
     const fxCents =
       input.kind === 'receipt'
         ? appliedFunctionalCents - carriedCents

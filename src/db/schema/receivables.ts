@@ -524,6 +524,32 @@ export const payments = pgTable(
      */
     currency: text('currency').notNull().default('USD'),
     /**
+     * Millionths, payment currency → functional (Phase 65).
+     *
+     * The rate `recordPayment` fetches on the line after `currency` and used to
+     * discard. Fixed when the money arrived and never recomputed: restating it
+     * from a later rate would rewrite what the business actually banked.
+     */
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' })
+      .notNull()
+      .default(1_000_000),
+    /**
+     * What is still held, in the company's own money (Phase 65).
+     *
+     * `recordPayment` computes this outright as `receivedCents -
+     * appliedFunctionalCents` and threw it away. It exists because
+     * `unappliedCents` is a face amount, and three queries netted it against a
+     * *converted* invoice balance — subtracting euro from dollars and printing
+     * the result with a dollar sign.
+     *
+     * Moves with `unappliedCents` on every draw-down and refund, never derived
+     * from it afterwards: the difference between converting the remainder and
+     * remaining what was converted is a cent, every time.
+     */
+    functionalUnappliedCents: bigint('functional_unapplied_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+    /**
      * The bank account the money moved through.
      *
      * Null since Phase 12 means the receipt is **undeposited**: the money has
