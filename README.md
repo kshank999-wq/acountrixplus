@@ -3282,6 +3282,58 @@ Nothing in the ledger changed and there is no migration. What changed is what th
 five corrections are called, what they ask for, and what the audit trail can be
 asked.
 
+### The record nobody could read (Phase 71)
+
+The audit log has been written since Phase 3 — 224 distinct actions, each with
+an actor, a time and a before-and-after payload. `historyFor` and
+`recentActivity` have existed just as long, and **every caller of either is in
+`tests/`.** No screen had ever shown one.
+
+Two phases had spent real effort on facts that land there and nowhere else.
+Phase 45 records a party's before and after on every edit — *"the whole reason
+to prefer an update over a delete and recreate"* — so that "their email changed
+on the 3rd, and Dana did it" has an answer. Phase 70 made five corrections
+insist on a reason *"so somebody reading the books later does not have to
+guess"*. Neither could be displayed. Phase 70 was half-built, and this is the
+other half.
+
+**`audit:view` is enforced for the first time.** It was declared in Phase 3 for
+exactly this, granted to an owner and an accountant, and *reasoned about in
+other modules' comments as though it were the gate* — the 1099 code keeps a tax
+identifier out of the log because that table is "read by everyone with
+`audit:view`". A precaution taken against a gate that was not there.
+
+**You may read the history of a record you may read.** The company-wide feed and
+one record's history are different questions, so `READABLE_BY` maps entity type
+to the permission that opens that record — a bookkeeper keeps their
+transaction's history without holding the key to everything. An entity type
+nobody has placed falls back to `audit:view`, the strict end.
+
+**One answer to "what happened to this record".** There were two
+implementations: `historyFor` (no permission check, every column, unbounded) and
+`transactionHistory` (gated, explicit columns). The careful one is why anybody
+noticed the careless one; its rules moved into `historyFor` and it became a
+one-line call. `ipAddress` and `userAgent` no longer reach a caller. `userId`
+stays — it is the durable identity behind a display name, and the activity
+feed's actor filter keys on it, because a log that quietly merges two colleagues
+called Dana is worse than one with no filter.
+
+**Words we have decided are used; words we have not are not invented.** The
+tempting move is a conjugation rule over all 224 actions — which writes 224
+sentences nobody checked and gets them wrong (`write_off` is not "write offed"),
+in the log somebody is reading *because* something went wrong. So the five
+corrections read their phrases from `corrections/vocabulary` — read, not copied,
+so renaming a button moves the history with it — and every other action is shown
+as its own name, rendered as the code it is. What was missing was never the
+prose: it was the before-and-after diff, written for sixty phases and displayed
+zero times, and the reason, lifted out so it leads the entry instead of sitting
+seventh in a field list.
+
+There is a history panel on the payments and the customers-and-suppliers
+screens, and an **Activity** screen for the whole company. No migration; nothing
+in the ledger moved. What changed is that what was already recorded can be read,
+and that reading it requires being allowed to.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
