@@ -16,7 +16,7 @@ import { companies, users } from './tenancy'
 import { chartAccounts } from './accounting'
 
 /**
- * Company Studio (spec §15).
+ * The Design Center — "Company Studio" in spec §15.
  *
  * The single place a company's identity lives: profile, brand, reusable
  * services, and approved legal language. Spec §15 is explicit that these feed

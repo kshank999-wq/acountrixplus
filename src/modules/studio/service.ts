@@ -12,7 +12,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 
 /**
- * Company Studio (spec §15).
+ * The Design Center — "Company Studio" in spec §15.
  *
  * Profile, brand, reusable services, and approved legal language — the single
  * source these feed both the Proposal Designer and, in Phase 5, the Marketing

@@ -245,7 +245,7 @@ export function Designer({
         <p className="card border-warning/40 p-3 text-xs text-warning">
           These merge fields have no value yet and will render blank:{' '}
           <span className="font-mono">{unresolvedFields.join(', ')}</span>. Fill them in through
-          Company Studio or the client record.
+          the Design Center or the client record.
         </p>
       )}
 
@@ -353,8 +353,8 @@ export function Designer({
                 Merge fields
               </summary>
               <p className="mt-2 text-xs text-muted">
-                Paste any of these into a text field. They fill in from the client record and
-                Company Studio.
+                Paste any of these into a text field. They fill in from the client record and the
+                Design Center.
               </p>
               {MERGE_FIELD_GROUPS.map((group) => (
                 <div key={group.group} className="mt-2">

@@ -38,7 +38,7 @@ const TABS = [
 
 type Tab = (typeof TABS)[number]['key']
 
-/** Company Studio (spec §15) — one place for identity, brand, and boilerplate. */
+/** The Design Center (spec §15) — one place for identity, brand, and boilerplate. */
 export function StudioWorkspace({
   canManage,
   profile,
@@ -99,7 +99,7 @@ export function StudioWorkspace({
 
       {!canManage && (
         <p className="card p-3 text-xs text-muted">
-          You can view the studio but not change it. Ask an owner or admin for access.
+          You can view the Design Center but not change it. Ask an owner or admin for access.
         </p>
       )}
 

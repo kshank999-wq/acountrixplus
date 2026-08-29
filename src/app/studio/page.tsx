@@ -13,7 +13,7 @@ import { StudioWorkspace } from './studio-workspace'
 
 export const dynamic = 'force-dynamic'
 
-/** Company Studio (spec §15). */
+/** The Design Center — "Company Studio" in spec §15. */
 export default async function StudioPage() {
   const actor = await requireActor()
   const session = await currentSession()
@@ -21,9 +21,9 @@ export default async function StudioPage() {
   if (!can(actor, 'crm:view')) {
     return (
       <main className="mx-auto max-w-2xl px-6 py-16">
-        <h1 className="text-xl font-semibold">Company Studio</h1>
+        <h1 className="text-xl font-semibold">Design Center</h1>
         <p className="mt-2 text-sm text-muted">
-          Your role ({actor.role}) does not include access to the Company Studio.
+          Your role ({actor.role}) does not include access to the Design Center.
         </p>
       </main>
     )

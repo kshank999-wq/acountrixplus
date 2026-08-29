@@ -197,7 +197,10 @@ export async function AppShell({
     {
       key: 'studio',
       href: '/studio',
-      label: 'Company Studio',
+      // Renamed from "Company Studio". The route stays `/studio`: a URL people
+      // have bookmarked is not a label, and moving it would break every link
+      // into it to no purpose.
+      label: 'Design Center',
       icon: 'studio',
       show: can(actor, 'crm:view'),
     },

@@ -210,7 +210,7 @@ export const aiSuggestions = pgTable(
  * Prompts are data, not string literals scattered through services. Built-in
  * versions are installed from code; a company may add its own version and
  * activate it, and rolling back is activating the previous one — the same
- * shape as the clause library in Company Studio.
+ * shape as the clause library in the Design Center.
  */
 export const aiPrompts = pgTable(
   'ai_prompts',

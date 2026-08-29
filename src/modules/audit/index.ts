@@ -263,7 +263,7 @@ export type AuditAction =
   | 'lead.intake'
   | 'intake_key.create'
   | 'intake_key.revoke'
-  // Company Studio and the design engine (spec §7, §15)
+  // The Design Center and the design engine (spec §7, §15)
   | 'profile.update'
   | 'brand_kit.create'
   | 'brand_kit.update'

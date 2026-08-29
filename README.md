@@ -123,7 +123,7 @@ from the
 
 ### Documents and brand (Phase 4)
 
-- **Company Studio** — profile, brand kit (colours, fonts, logo), a logo and image library, a
+- **Design Center** — profile, brand kit (colours, fonts, logo), a logo and image library, a
   reusable service catalog, and a versioned legal clause library.
 - **Proposal designer** — a block-based document editor with a live preview through the same
   renderer the client sees. Blocks reflow, so one document works on a phone, in print, and in
@@ -3560,7 +3560,7 @@ key and the client proposal link — keep them for steps 22 and 24.
 
 ### Documents and brand (Phase 4)
 
-26. **Company Studio** — open **Company Studio**. The profile fills merge fields; the **Brand**
+26. **Design Center** — open the **Design Center**. The profile fills merge fields; the **Brand**
     tab has the company's colours and fonts with a live preview; **Legal clauses** holds three
     approved clauses.
 27. **Brand safety** — try setting a brand colour to `red; background: url(...)`. It is refused:
@@ -4210,7 +4210,7 @@ key and the client proposal link — keep them for steps 22 and 24.
 211. **Open Clients & Sales → Proposals.** Under the open proposal, the sent versions are listed:
      v1 in grey because it was sent before the document existed, v2 as a link to exactly what the
      client received. Click it.
-212. **Now change something.** Open Company Studio, change the brand's primary colour, then open
+212. **Now change something.** Open the Design Center, change the brand's primary colour, then open
      the designer and rewrite a paragraph. Reload the client's PDF link: **it is unchanged.** The
      web view beside it has moved; the file the client was sent has not.
 213. **Send it again.** A new version appears with a new PDF carrying the new brand — and the old
@@ -4709,7 +4709,7 @@ src/
     shop/                 The ramp, customer vehicles, and what the shop was made of
     m/                    The mobile app — Today, review deck, receipts, devices
     api/mobile/v1/        Versioned mobile API: sync (outbox + state), receipts
-    studio/               Company Studio — profile, brand, catalog, clauses
+    studio/               Design Center — profile, brand, catalog, clauses
     api/intake/[key]/     Public lead-capture endpoint (unauthenticated)
     api/proposals/        Public proposal acceptance (unauthenticated)
     api/track/[token]/    Public open pixel and click redirect (unauthenticated)

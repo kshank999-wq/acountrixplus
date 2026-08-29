@@ -749,9 +749,9 @@ async function main() {
   })
   console.log(`  Lead intake key: ${intakeKey.publicKey}`)
 
-  // --- Phase 4: Company Studio and the proposal designer -------------------
+  // --- Phase 4: the Design Center and the proposal designer ----------------
 
-  console.log('Filling in Company Studio…')
+  console.log('Filling in the Design Center…')
 
   await saveProfile(ctx, {
     legalName: 'Ridgeline Construction LLC',
