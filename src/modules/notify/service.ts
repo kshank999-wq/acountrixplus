@@ -1,4 +1,5 @@
 import { invoiceSubject } from '@/modules/receivables/sharing'
+import { statementSubject } from '@/modules/receivables/statement-sharing'
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { transactionalMessages } from '@/db/schema'
@@ -57,6 +58,13 @@ const HOURLY_LIMIT: Record<TransactionalKind, number> = {
   // limit is per address per hour, so it still stops the same customer being
   // mailed the same invoice over and over.
   invoice: 12,
+  /**
+   * Lower than an invoice, because the shapes differ (Phase 55). A business
+   * legitimately sends thirty invoices in a minute to thirty addresses; one
+   * customer gets one statement a month. Four an hour to the same address is
+   * already somebody clicking Send repeatedly.
+   */
+  statement: 4,
 }
 
 export class RateLimitedError extends DomainError {
@@ -207,6 +215,11 @@ export function invoiceUrl(token: string): string {
   return `${appBaseUrl()}/i/${encodeURIComponent(token)}`
 }
 
+/** Where a customer opens the statement they were sent (Phase 55). */
+export function statementUrl(token: string): string {
+  return `${appBaseUrl()}/s/${encodeURIComponent(token)}`
+}
+
 /**
  * Sends an invoice to the customer who owes it.
  *
@@ -250,6 +263,46 @@ export async function sendInvoiceEmail(input: {
     footnote:
       'The link shows what is currently outstanding, so it stays right after a part payment. ' +
       'Reply to this message if anything on it looks wrong.',
+    reference: input.reference,
+  })
+}
+
+/**
+ * Sends a customer their statement of account (Phase 55).
+ *
+ * The footnote is the opposite of the invoice one, and deliberately so. An
+ * invoice link renders the live record, so it tells the customer the figure
+ * keeps up with their payments. A statement is a claim about a moment, and its
+ * link renders what was frozen — so it says that instead. Getting these two
+ * sentences the same way round would make one of the pages a liar.
+ */
+export async function sendStatementEmail(input: {
+  to: string
+  toName: string | null
+  companyId: string
+  companyName: string
+  asOfDate: string
+  summary: string
+  token: string
+  isResend: boolean
+  reference: string
+}): Promise<SendOutcome> {
+  return sendTransactional({
+    to: input.to,
+    toName: input.toName,
+    companyId: input.companyId,
+    kind: 'statement',
+    subject: statementSubject({
+      companyName: input.companyName,
+      asOfDate: input.asOfDate,
+      isResend: input.isResend,
+    }),
+    body: [input.toName ? `Hello ${input.toName},` : 'Hello,', input.summary],
+    action: { label: 'View the statement', url: statementUrl(input.token) },
+    footnote:
+      `This statement is as at ${input.asOfDate} and does not change — it is the document to ` +
+      'reconcile against. Anything paid since will be on the next one. Reply to this message if ' +
+      'something on it looks wrong.',
     reference: input.reference,
   })
 }

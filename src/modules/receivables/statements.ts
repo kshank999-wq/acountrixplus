@@ -391,6 +391,17 @@ async function openInvoices(ctx: ActorContext, customerId: string, asOfDate: str
  * Recording it before it is sent, rather than after, so a send that fails
  * still leaves evidence of what was about to go out — the same reasoning the
  * outbox applies to notifications.
+ *
+ * ## What it no longer claims (Phase 55)
+ *
+ * This used to write `sentTo` from the customer's address at save time, while
+ * `sentAt` was written by nothing at all. The result was a row showing a
+ * statement, a date and an email address it had never been sent to — and a
+ * business reading that column would conclude the customer had been told.
+ *
+ * Both columns now belong to `sendStatement` and neither is written here. A
+ * saved statement is a saved statement; it says nothing about where it went
+ * until it goes.
  */
 export async function saveStatement(
   ctx: ActorContext,
@@ -399,7 +410,6 @@ export async function saveStatement(
     asOfDate: string
     kind?: 'open_item' | 'balance_forward'
     periodStart?: string
-    sentTo?: string
   },
 ) {
   requirePermission(ctx, 'accounting:view')
@@ -432,7 +442,7 @@ export async function saveStatement(
           ourDebtCents: statement.ourDebtCents,
           positionNote: statement.positionNote,
         },
-        sentTo: input.sentTo ?? statement.customerEmail,
+        // `sentTo` and `sentAt` are deliberately not set here — see above.
         createdBy: ctx.userId,
       })
       .returning()
@@ -474,6 +484,7 @@ export async function listStatements(
       asOfDate: customerStatements.asOfDate,
       closingBalanceCents: customerStatements.closingBalanceCents,
       figures: customerStatements.figures,
+      sendCount: customerStatements.sendCount,
       sentAt: customerStatements.sentAt,
       sentTo: customerStatements.sentTo,
       createdAt: customerStatements.createdAt,

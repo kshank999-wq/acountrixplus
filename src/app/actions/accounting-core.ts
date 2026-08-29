@@ -10,6 +10,7 @@ import {
   writeOffInvoice,
 } from '@/modules/receivables/credits'
 import { saveStatement } from '@/modules/receivables/statements'
+import { sendStatement, statementLinkFor } from '@/modules/receivables/statement-send'
 import {
   createRecurringEntry,
   runDueRecurringEntries,
@@ -23,7 +24,7 @@ import {
 } from '@/modules/banking/deposits'
 import { applyVendorCredit, createVendorCredit } from '@/modules/receivables/vendor-credits'
 import { formatCents } from '@/lib/money'
-import { messageFor } from '@/modules/errors'
+import { DomainError, messageFor } from '@/modules/errors'
 
 /**
  * Server actions for the accounting core (Phase 11).
@@ -158,7 +159,51 @@ export async function saveStatementAction(input: unknown): Promise<ActionResult>
     const parsed = statementSchema.parse(input)
 
     const saved = await saveStatement(actor, parsed)
-    return `Statement saved with its figures frozen as at ${saved.asOfDate}.`
+    return `Statement saved with its figures frozen as at ${saved.asOfDate}. Send it when you are ready.`
+  })
+}
+
+/**
+ * Sends a saved statement to the customer it is about (Phase 55).
+ *
+ * Until this existed, `customer_statements.sent_at` was written by nothing and
+ * `sent_to` was filled in at save time — so the screen showed an address the
+ * document had never gone to.
+ */
+export async function sendStatementAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({ statementId: uuid, to: z.string().trim().optional() })
+      .parse(input)
+
+    const result = await sendStatement(actor, parsed.statementId, { to: parsed.to || null })
+
+    if (!result.delivered) {
+      throw new DomainError(
+        `The link is ready but the email did not go: ${result.error ?? 'the provider refused it'}. ` +
+          'Copy the link and send it yourself, or check the address and try again.',
+      )
+    }
+
+    return (
+      `${result.isResend ? 'Resent' : 'Sent'} to ${result.to}. ` +
+      'They see the figures exactly as they were frozen, which is what makes it reconcilable.'
+    )
+  })
+}
+
+export async function shareStatementAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const { statementId } = z.object({ statementId: uuid }).parse(input)
+
+    const url = await statementLinkFor(actor, statementId)
+    // Handing somebody a link is not the same event as posting the letter, so
+    // this deliberately does not mark the statement as sent. The URL goes in
+    // the message because a "link ready" notice with no link is the whole
+    // feature missing.
+    return `Anybody with this link can see the statement:\n${url}`
   })
 }
 

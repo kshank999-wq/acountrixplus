@@ -40,6 +40,17 @@ export type TransactionalKind =
    * who does not want it should be sent it on paper, not silenced.
    */
   | 'invoice'
+  /**
+   * A statement of account, sent to the customer it is about (Phase 55).
+   *
+   * Its own kind rather than folded into `invoice`, because the two are rate
+   * limited on different shapes. A business legitimately sends thirty invoices
+   * in a minute to thirty addresses; it sends one customer one statement a
+   * month. Sharing a bucket would let a month-end statement run exhaust the
+   * allowance that stops the same customer being mailed the same invoice over
+   * and over.
+   */
+  | 'statement'
 
 export type TransactionalMessage = {
   to: string

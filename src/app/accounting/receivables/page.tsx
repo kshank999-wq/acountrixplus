@@ -118,7 +118,11 @@ export default async function ReceivablesPage() {
           heldCreditCents: row.heldCreditCents,
           dueCents: row.dueCents,
           positionNote: row.positionNote,
+          // Date only: the hour a statement went is noise beside the day, and
+          // this renders on the server so a raw Date would not survive anyway.
+          sentAt: row.sentAt ? row.sentAt.toISOString().slice(0, 10) : null,
           sentTo: row.sentTo,
+          sendCount: row.sendCount,
         }))}
         openInvoices={openInvoices
           .filter((row) => row.balanceCents > 0 && row.status !== 'void')

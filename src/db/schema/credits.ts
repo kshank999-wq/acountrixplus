@@ -8,6 +8,7 @@ import {
   bigint,
   jsonb,
   index,
+  uniqueIndex,
   unique,
   check,
   foreignKey,
@@ -299,13 +300,33 @@ export const customerStatements = pgTable(
     /** The lines as sent, frozen. */
     figures: jsonb('figures').$type<Record<string, unknown>>().notNull().default({}),
 
+    /**
+     * When it actually went (Phase 55).
+     *
+     * Null until a send happens. Between Phase 11 and Phase 55 nothing ever
+     * wrote this, while `sentTo` was filled in at *save* time — so the screen
+     * showed an address the document had never been sent to.
+     */
     sentAt: timestamp('sent_at', { withTimezone: true }),
+    /** Where it went. Written by the send, never by the save. */
     sentTo: text('sent_to'),
+    /**
+     * The customer's door onto this one statement (Phase 55).
+     *
+     * Minted on the first send, never rotated, so a link filed in an inbox two
+     * years ago still opens. Per statement rather than per customer: a link
+     * that opened "this customer's statements" would let whoever holds June's
+     * letter read December's.
+     */
+    shareToken: text('share_token'),
+    /** How many times it went. "We have sent this three times" is the fact. */
+    sendCount: integer('send_count').notNull().default(0),
 
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
     customerIdx: index('customer_statements_customer_idx').on(t.companyId, t.customerId, t.asOfDate),
+    shareTokenIdx: uniqueIndex('customer_statements_share_token_idx').on(t.shareToken),
   }),
 )

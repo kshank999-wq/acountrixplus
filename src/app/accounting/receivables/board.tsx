@@ -8,6 +8,8 @@ import {
   createVendorCreditAction,
   recoverWriteOffAction,
   saveStatementAction,
+  sendStatementAction,
+  shareStatementAction,
   writeOffInvoiceAction,
 } from '@/app/actions/accounting-core'
 import { formatCents, parseAmountToCents } from '@/lib/money'
@@ -59,7 +61,10 @@ type StatementRow = {
   /** What was actually due after that credit — the figure the customer paid to. */
   dueCents: number
   positionNote: string | null
+  /** Null until it actually goes out (Phase 55). */
+  sentAt: string | null
   sentTo: string | null
+  sendCount: number
 }
 
 type OpenInvoice = {
@@ -539,7 +544,8 @@ export function ReceivablesBoard({
                 <th className="px-4 py-2 text-right font-medium">Billed</th>
                 <th className="px-4 py-2 text-right font-medium">Held for them</th>
                 <th className="px-4 py-2 text-right font-medium">Asked for</th>
-                <th className="px-4 py-2 font-medium">To</th>
+                <th className="px-4 py-2 font-medium">Sent</th>
+                <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody>
@@ -571,7 +577,45 @@ export function ReceivablesBoard({
                   <td className="tnum px-4 py-1.5 text-right font-medium">
                     {formatCents(row.dueCents)}
                   </td>
-                  <td className="px-4 py-1.5 text-faint">{row.sentTo ?? '—'}</td>
+                  {/*
+                    Reads "Not sent" until it actually goes (Phase 55). This
+                    column used to show the customer's email address on every
+                    saved row, because `saveStatement` wrote `sentTo` at save
+                    time and nothing ever wrote `sentAt` — so it looked like
+                    evidence of a send that had never happened.
+                  */}
+                  <td className="px-4 py-1.5 text-xs">
+                    {row.sentAt ? (
+                      <span className="text-muted">
+                        {row.sentAt}
+                        <span className="block text-faint">
+                          {row.sentTo}
+                          {row.sendCount > 1 ? ` · ${row.sendCount} times` : ''}
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="text-faint">Not sent</span>
+                    )}
+                  </td>
+                  {canManage && (
+                    <td className="whitespace-nowrap px-4 py-1.5 text-right">
+                      <button
+                        className="btn btn-ghost text-xs"
+                        disabled={pending}
+                        onClick={() => act(() => sendStatementAction({ statementId: row.id }))}
+                      >
+                        {row.sentAt ? 'Send again' : 'Send'}
+                      </button>
+                      <button
+                        className="btn btn-ghost text-xs"
+                        disabled={pending}
+                        onClick={() => act(() => shareStatementAction({ statementId: row.id }))}
+                      >
+                        Get link
+                      </button>
+                    </td>
+                  )}
+                  {!canManage && <td />}
                 </tr>
               ))}
             </tbody>

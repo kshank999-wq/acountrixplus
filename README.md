@@ -2510,6 +2510,48 @@ outstanding, moved the customer's next invoice out of **Would go out today** int
 Billed $2,000.00 / Held $460.00 / Asked for $1,540.00 on the statement — with
 both control accounts still agreeing to the cent.
 
+### The statement you could not send (Phase 55)
+
+`statements.ts` has said since Phase 11 that *"what did we send them, and when"
+is the first question in any collections conversation*. It was the one question
+the data could not answer: **`sent_at` was written by nothing, in fifty-four
+phases.**
+
+`sent_to` was worse than a null column. `saveStatement` filled it in from the
+customer's record at *save* time, and the board rendered it under a heading
+reading "To" — so a business looking at that row would conclude the customer had
+been told. On the demo books: five statements saved, four showing an address,
+**zero sends**. Phase 54 then froze a sentence written for a customer who had no
+way of ever reading it.
+
+- **The customer's page is frozen, and the invoice page is not.** This is the
+  one real design decision, and copying Phase 42 would have destroyed the
+  document. An invoice link renders the live record — a customer chasing their
+  own payables wants to know what is outstanding *now*. A statement is a claim
+  about a **moment**, and it exists so two parties can reconcile against a fixed
+  thing; a page that silently restated itself would mean they could never be
+  looking at the same document. The email footnotes are inverted for the same
+  reason: one promises the figure keeps up, the other promises it does not.
+- **The token is per statement**, not per customer — otherwise whoever holds
+  June's letter can read December's.
+- **A link is not a letter.** "Get link" mints the token and deliberately does
+  not touch `sent_at`, because recording it as a send would put back exactly the
+  claim this phase removed. It is also what the refusal tells you to do when the
+  customer has no address on file.
+- **Sending needs `accounting:view`**, not `accounting:journal`. A statement
+  asserts nothing new — every figure was frozen when it was saved, and saving
+  already required that permission. Requiring more to post the letter than to
+  compose it puts the gate in the wrong place.
+- The migration **clears every address written against an unsent row**, and the
+  column is renamed from "To" to "Sent". It reads *"Not sent"* until it goes.
+
+**How it was found**: not in the browser, but by asking the database a question
+the screen could not — `select count(*), count(sent_at), count(sent_to) from
+customer_statements` returned `5, 0, 4`. The freeze was then tested the only way
+that means anything: $1,540 was paid against the invoice the statement lists,
+and the customer's page still read **due $1,540.00, billed $2,000.00** — exactly
+what it said when it went.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
