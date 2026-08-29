@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Logo } from '@/components/logo'
 import { checkResetToken } from '@/modules/notify/password-reset'
 import { ResetForm } from './reset-form'
 
@@ -30,7 +31,7 @@ export default async function ResetPage({
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
       <div className="mb-8">
         <h1 className="text-2xl font-semibold tracking-tight">Choose a new password</h1>
-        <p className="mt-1 text-sm text-muted">Accountrix Plus</p>
+        <Logo className="mt-2" markClassName="h-6 w-6" wordClassName="text-sm" />
       </div>
 
       <div className="card p-6">

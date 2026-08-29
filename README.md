@@ -3382,6 +3382,44 @@ rather than the code: a manager's feed shows no supplier events either, because
 a manager does not hold `accounting:view` — the rule working, not failing — and
 Phase 71's "field that was emptied" test had used a tax ID as its example.
 
+### The mark nobody looked at (Phase 73)
+
+Two defects, and the second is worse.
+
+**One thing, five answers.** The application named itself in five places and no
+two the same way: the rail drew a lime square with "A+" typed into it, login had
+an `<h1>`, the reset page a `<p>`, and the marketing header and footer a `<span>`
+each. That is the shape this codebase keeps removing — Phase 70 removed it from
+the words for corrections, and this removes it from the product's own name.
+
+**The stale one.** `icon.svg` was a **teal `#0d6e60`** square with a white A, and
+the web manifest painted its splash screen and status bar the same teal. Both
+predate Phase 70's retheme by thirty phases, so the icon on somebody's home
+screen belonged to a design this product stopped using long ago. Nobody noticed,
+because a favicon is the one part of an interface its builders never look at.
+
+**The name and the mark are named data.** `modules/brand/identity` holds the
+name, the suffix, three colours and two paths. The colours are hex rather than
+the CSS custom properties they mirror, deliberately: an `.svg` served to a
+browser tab and a `.webmanifest` read by an operating system have no `:root`,
+and a favicon that tried to resolve `var(--brand)` would render as nothing.
+
+**One logo, two tones, one drawing.** The mark never changes between them — a
+lime ground carries its own contrast. What changes is the wordmark and the
+badge's hairline, which on the rail is `--chrome-line`, the token Phase 70's
+stylesheet had already named "the badge hairline". The lime is type only inside
+its own outline, which is why "PLUS" is a badge and not a word.
+
+**The raster icons are generated**, from the same geometry, with Chromium as the
+rasteriser. The script is a plain `.mjs` and cannot import a TypeScript module
+behind a path alias, so it repeats the constants — the same defect one level
+down — and the honest mitigation is a test that fails the moment the two copies
+disagree.
+
+**And `/favicon.ico` exists.** Found while verifying: every declared icon path
+returned 200 and this one returned 404 on every page load — the one request no
+page declares and every browser makes anyway.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

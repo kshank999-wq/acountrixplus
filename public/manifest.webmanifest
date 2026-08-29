@@ -1,15 +1,19 @@
 {
   "name": "Accountrix Plus",
   "short_name": "Accountrix",
-  "description": "Bookkeeping, accounting, clients, and proposals — reviewable from a phone, online or not.",
+  "description": "Bookkeeping, accounting, clients, and proposals \u2014 reviewable from a phone, online or not.",
   "id": "/m",
   "start_url": "/m",
   "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#0d6e60",
-  "theme_color": "#0d6e60",
-  "categories": ["business", "finance", "productivity"],
+  "background_color": "#D6F24E",
+  "theme_color": "#0D1117",
+  "categories": [
+    "business",
+    "finance",
+    "productivity"
+  ],
   "icons": [
     {
       "src": "/icons/icon-192.png",
@@ -41,13 +45,23 @@
       "name": "Review transactions",
       "short_name": "Review",
       "url": "/m/review",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     },
     {
       "name": "Capture a receipt",
       "short_name": "Receipt",
       "url": "/m/receipt",
-      "icons": [{ "src": "/icons/icon-192.png", "sizes": "192x192" }]
+      "icons": [
+        {
+          "src": "/icons/icon-192.png",
+          "sizes": "192x192"
+        }
+      ]
     }
   ]
 }

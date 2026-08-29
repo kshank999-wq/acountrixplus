@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Logo } from '@/components/logo'
 import { redirect } from 'next/navigation'
 import { currentActor } from '@/lib/current-user'
 import { INDUSTRY_PACKS, type IndustryModule } from '@/modules/coa/industry'
@@ -54,9 +55,7 @@ export default async function Home() {
     <div className="min-h-screen bg-canvas">
       <header className="sticky top-0 z-10 border-b border-line bg-canvas/85 backdrop-blur">
         <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-6 py-4">
-          <span className="whitespace-nowrap text-sm font-semibold tracking-tight">
-            Accountrix Plus
-          </span>
+          <Logo markClassName="h-7 w-7" wordClassName="text-[15px]" />
           <nav className="flex items-center gap-2">
             {/*
               Hidden on the narrowest screens, where three items wrap into a
@@ -314,7 +313,7 @@ export default async function Home() {
 
       <footer className="border-t border-line">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center justify-between gap-3 px-6 py-8 text-sm text-faint">
-          <span>Accountrix Plus</span>
+          <Logo markClassName="h-5 w-5" wordClassName="text-xs" />
           <span>Double-entry bookkeeping, audited by design.</span>
         </div>
       </footer>

@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { useEffect, useState } from 'react'
 import { Icon, type IconName } from './nav-icons'
 import { CompanySwitcher } from './company-switcher'
+import { Logo } from './logo'
 
 /**
  * The workspace rail, from the design canvas.
@@ -80,7 +81,7 @@ export function Sidebar({
         >
           <Icon name="menu" className="h-5 w-5" />
         </button>
-        <Wordmark />
+        <Link href="/"><Logo tone="dark" /></Link>
         <span className="ml-auto truncate text-xs text-chrome-muted">{companyName}</span>
       </div>
 
@@ -99,7 +100,7 @@ export function Sidebar({
         }`}
       >
         <div className="flex items-center gap-2 px-5 pb-4 pt-5">
-          <Wordmark />
+          <Link href="/"><Logo tone="dark" /></Link>
           <button
             type="button"
             onClick={() => setOpen(false)}
@@ -181,23 +182,5 @@ export function Sidebar({
         </div>
       </aside>
     </>
-  )
-}
-
-function Wordmark() {
-  return (
-    <Link href="/" className="flex shrink-0 items-center gap-2">
-      <span className="grid h-7 w-7 place-items-center rounded-lg bg-brand text-[13px] font-bold text-brand-ink">
-        A+
-      </span>
-      <span className="flex items-baseline gap-1.5">
-        <span className="text-[15px] font-bold tracking-tight">Accountrix</span>
-        {/* The one place lime is type: on the dark rail, where the design
-            puts it. Everywhere else the accent-as-text is blue. */}
-        <span className="rounded border border-chrome-line px-1 py-0.5 text-[9px] font-bold tracking-widest text-brand">
-          PLUS
-        </span>
-      </span>
-    </Link>
   )
 }

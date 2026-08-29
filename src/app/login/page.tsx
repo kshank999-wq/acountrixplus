@@ -1,4 +1,5 @@
 import Link from 'next/link'
+import { Logo } from '@/components/logo'
 import { redirect } from 'next/navigation'
 import { currentActor } from '@/lib/current-user'
 import { LoginForm } from './login-form'
@@ -26,8 +27,8 @@ export default async function LoginPage({
   return (
     <main className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-6 py-12">
       <div className="mb-8">
-        <h1 className="text-2xl font-semibold tracking-tight">Accountrix Plus</h1>
-        <p className="mt-1 text-sm text-muted">Sign in to your books.</p>
+        <Logo markClassName="h-9 w-9" wordClassName="text-xl" />
+        <p className="mt-3 text-sm text-muted">Sign in to your books.</p>
       </div>
 
       <div className="card p-6">
