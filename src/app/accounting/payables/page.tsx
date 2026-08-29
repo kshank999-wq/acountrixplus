@@ -8,6 +8,7 @@ import {
 } from '@/modules/payables/queue'
 import { payablesPolicy } from '@/modules/payables/approvals-service'
 import { listPayRuns } from '@/modules/payables/pay-runs'
+import { functionalCurrency } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { PayablesBoard } from './board'
 
@@ -46,6 +47,9 @@ export default async function PayablesPage() {
     listPayRuns(actor),
   ])
 
+  // The only currency a total on this screen can be in (Phase 60).
+  const homeCurrency = await functionalCurrency(actor.companyId)
+
   return (
     <AppShell
       actor={actor}
@@ -63,6 +67,10 @@ export default async function PayablesPage() {
           vendorName: row.vendorName,
           dueDate: row.dueDate,
           balanceCents: row.balanceCents,
+          // The supplier's currency, and what that is worth in ours (Phase 60).
+          currency: row.currency,
+          functionalBalanceCents: row.functionalBalanceCents,
+          functionalTotalCents: row.functionalTotalCents,
           bucket: row.bucket,
           vendorCreditCents: row.vendorCreditCents,
           totalCents: row.totalCents,
@@ -102,6 +110,7 @@ export default async function PayablesPage() {
           liveSuppliers: row.liveSuppliers,
           advisedSuppliers: row.advisedSuppliers,
         }))}
+        homeCurrency={homeCurrency}
         canPay={can(actor, 'accounting:journal')}
         canApprove={can(actor, 'accounting:approve')}
       />

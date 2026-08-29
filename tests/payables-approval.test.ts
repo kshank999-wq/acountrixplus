@@ -19,14 +19,23 @@ import {
  * whole batch.
  */
 
-const bill = (over: Partial<ApprovableBill> = {}): ApprovableBill => ({
-  id: 'bill-1',
-  number: 'BILL-1001',
-  totalCents: 120_000,
-  enteredBy: 'dana',
-  approvedBy: null,
-  ...over,
-})
+/**
+ * Domestic by default, so the two agree and keep agreeing when a test
+ * overrides the total. A foreign bill overrides the second as well, which is
+ * the figure the threshold is compared against (Phase 60).
+ */
+const bill = (over: Partial<ApprovableBill> = {}): ApprovableBill => {
+  const totalCents = over.totalCents ?? 120_000
+  return {
+    id: 'bill-1',
+    number: 'BILL-1001',
+    totalCents,
+    functionalTotalCents: totalCents,
+    enteredBy: 'dana',
+    approvedBy: null,
+    ...over,
+  }
+}
 
 const policy = (over: Partial<ApprovalPolicy> = {}): ApprovalPolicy => ({
   enabled: true,
@@ -174,7 +183,8 @@ describe('a pay run meeting an unapproved bill', () => {
     ])
 
     expect(sentence).toContain('2 bills')
-    expect(sentence).toContain('7500.00')
+    // Formatted with its currency since Phase 60; it read "worth 7500.00".
+    expect(sentence).toContain('$7,500.00')
     expect(sentence).toContain('BILL-1002, BILL-1003')
     expect(sentence).toContain('need approving')
   })
@@ -200,5 +210,57 @@ describe('a pay run meeting an unapproved bill', () => {
 
   it('has nothing to say when nothing was held', () => {
     expect(describeHeld([])).toBeNull()
+  })
+})
+
+/**
+ * The foreign bill that slipped under the control (Phase 60).
+ *
+ * The threshold is set in the company's currency — somebody typing "$1,000 and
+ * up needs approving" means dollars — and this module compared the bill's
+ * **document** amount against it. So a euro bill worth more than the threshold
+ * could be paid with nobody's second pair of eyes on it, which is not a wrong
+ * number on a screen but a control quietly switched off.
+ */
+describe('a bill invoiced in another currency', () => {
+  const policy: ApprovalPolicy = {
+    enabled: true,
+    thresholdCents: 100_000,
+    twoPersonRule: true,
+  }
+
+  /** €950 is $1,026 at 1.08 — over the line, and 95,000 < 100,000 is not. */
+  it('needs approving on what it is worth, not on its face value', () => {
+    const foreign = bill({ totalCents: 95_000, functionalTotalCents: 102_600 })
+
+    expect(approvalState(foreign, policy)).toBe('awaiting')
+    expect(payable(foreign, policy)).toBe(false)
+  })
+
+  /** And the mirror: a bill whose face value looks big but is not. */
+  it('does not ask for one when it is worth less than the threshold', () => {
+    // ¥120,000 at 0.0067 is $804.
+    const foreign = bill({ totalCents: 12_000_000, functionalTotalCents: 80_400 })
+
+    expect(approvalState(foreign, policy)).toBe('not_required')
+    expect(payable(foreign, policy)).toBe(true)
+  })
+
+  it('says so when asked to approve one below the line', () => {
+    const foreign = bill({ totalCents: 12_000_000, functionalTotalCents: 80_400 })
+    const verdict = mayApprove({ bill: foreign, policy, actorId: 'someone-else' })
+
+    expect(verdict.ok).toBe(false)
+    if (!verdict.ok) expect(verdict.why).toContain('below the amount')
+  })
+
+  /** What is held back is summed across suppliers, so it has to convert too. */
+  it('describes what is held in the company’s currency', () => {
+    const sentence = describeHeld([
+      bill({ number: 'A', totalCents: 95_000, functionalTotalCents: 102_600 }),
+      bill({ number: 'B', totalCents: 100_000, functionalTotalCents: 100_000 }),
+    ])
+
+    expect(sentence).toContain('$2,026.00')
   })
 })

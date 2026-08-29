@@ -2732,6 +2732,44 @@ was missing was the honest report. The loop itself moved out of `src/app` into
 `src/modules/payables/`, where a test can reach it — the one piece of behaviour
 this phase is about was sitting in the layer this project keeps no logic in.
 
+### The bill in euro that said dollars (Phase 60)
+
+ADR 0059 recorded one figure as a known limitation — a pay run's "still owed"
+added euro to dollars. Looking properly, it was not one figure.
+
+`payableQueue` never selected `currency` or `functional_balance_cents` **at
+all**, so every number on What we owe was computed from an amount whose currency
+nothing downstream knew: the four bucket cards, the outstanding-in-total
+headline, the per-supplier lines, the figure on the **Pay** button, the coverage
+check against the bank, Phase 50's approval threshold, and Phase 59's still-owed.
+
+And the row itself. A €4,000 bill rendered as **`$4,000.00`** with no marker of
+any kind — the screen did not merely add wrongly, it did not know there was
+anything to add. It is the defect Phase 56 fixed on the customers screen, except
+that here there is a button underneath it that spends money.
+
+The rule is short enough to state once, and every change falls out of it: **a sum
+only means something when its terms are in one currency; a supplier is only owed
+money in theirs.** So a bill carries both — `balanceCents`, which is what the
+supplier is owed and what the row shows, and `functionalBalanceCents`, which is
+the only figure allowed to be added or compared.
+
+**A supplier with bills in two currencies now has no total at all** rather than a
+wrong one. One payment per supplier is how the money leaves, and a single
+transfer cannot be €4,000 and $1,000 at once. A converted total would be worse
+than none: it is a number the business cannot actually send. `planRun` returns
+those suppliers as `blocked` and the screen names them **before** the press —
+Phase 47's rule — where Phase 59 discovered the same thing by trying and failing.
+
+**The one that is not a wrong number but a control switched off:** Phase 50 lets
+a company say "bills of $1,000 and up need approving, and not by the person who
+entered them", and `approvalState` compared the bill's *document* amount against
+that. At 1.08 a €950 bill is $1,026 — over the line, and `95,000 < 100,000` said
+it was not. So a foreign bill above the threshold could be entered and paid by
+one person, which is the exact thing Phase 50 exists to prevent. The comparison
+is in the company's currency now, and the field is required rather than optional
+so no future call site can quietly reintroduce it.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

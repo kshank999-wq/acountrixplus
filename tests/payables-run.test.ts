@@ -6,6 +6,7 @@ import {
   bucketTotals,
   daysBetween,
   groupBySupplier,
+  payableAsOneTransfer,
   planRun,
   type PayableBill,
 } from '@/modules/payables/run'
@@ -19,15 +20,25 @@ import {
  * very bill a business was deliberately holding back.
  */
 
-const bill = (over: Partial<PayableBill> = {}): PayableBill => ({
-  id: 'bill-1',
-  number: 'BILL-1001',
-  vendorId: 'vendor-a',
-  vendorName: 'Northern Supplies',
-  dueDate: '2026-08-28',
-  balanceCents: 120_000,
-  ...over,
-})
+/**
+ * A domestic bill by default: the company's own currency, so what the supplier
+ * is owed and what it is worth to us are the same number — and stay the same
+ * when a test overrides the balance. A foreign case overrides both (Phase 60).
+ */
+const bill = (over: Partial<PayableBill> = {}): PayableBill => {
+  const balanceCents = over.balanceCents ?? 120_000
+  return {
+    id: 'bill-1',
+    number: 'BILL-1001',
+    vendorId: 'vendor-a',
+    vendorName: 'Northern Supplies',
+    dueDate: '2026-08-28',
+    balanceCents,
+    currency: 'USD',
+    functionalBalanceCents: balanceCents,
+    ...over,
+  }
+}
 
 describe('how late a bill is', () => {
   const asOf = '2026-08-28'
@@ -216,5 +227,158 @@ describe('daysBetween', () => {
   it('is right across a month end and a leap day', () => {
     expect(daysBetween('2026-01-31', '2026-02-01')).toBe(1)
     expect(daysBetween('2028-02-28', '2028-03-01')).toBe(2)
+  })
+})
+
+/**
+ * The bill in euro that said dollars (Phase 60).
+ *
+ * `payableQueue` never selected `currency` or `functional_balance_cents`, so
+ * this module had one amount and used it for both jobs: showing a supplier what
+ * they are owed, and adding figures up. A €4,000 bill rendered as `$4,000.00`,
+ * the four bucket cards added euro to dollars, and the Pay button promised a
+ * total that was in no currency at all.
+ */
+
+/** €4,000, worth $4,320 at 1.08. */
+const euroBill = (over: Partial<PayableBill> = {}): PayableBill =>
+  bill({
+    currency: 'EUR',
+    balanceCents: 400_000,
+    functionalBalanceCents: 432_000,
+    ...over,
+  })
+
+describe('adding what we owe', () => {
+  it('totals the buckets in the company’s currency, not the supplier’s', () => {
+    const totals = bucketTotals(
+      [
+        bill({ id: 'a', dueDate: '2026-09-30', balanceCents: 100_000, functionalBalanceCents: 100_000 }),
+        euroBill({ id: 'b', dueDate: '2026-09-30' }),
+      ],
+      '2026-08-28',
+    )
+
+    // $1,000 + $4,320, not $1,000 + "$4,000".
+    expect(totals.later.totalCents).toBe(532_000)
+    expect(totals.later.count).toBe(2)
+  })
+
+  it('prices a run in the company’s currency', () => {
+    const verdict = planRun({
+      chosen: [
+        bill({ id: 'a', vendorId: 'v1', balanceCents: 100_000, functionalBalanceCents: 100_000 }),
+        euroBill({ id: 'b', vendorId: 'v2' }),
+      ],
+      availableCents: null,
+    })
+
+    expect(verdict.totalCents).toBe(532_000)
+  })
+
+  /** The comparison the old code got wrong in the direction that matters. */
+  it('compares the run against the bank in one currency', () => {
+    const verdict = planRun({
+      chosen: [euroBill({ id: 'b', vendorId: 'v2' })],
+      availableCents: 420_000,
+    })
+
+    // $4,200 does not cover €4,000. Comparing 400,000 against 420,000 — which
+    // is what "balanceCents" against a dollar balance did — said it did.
+    expect(verdict.covered).toBe(false)
+    expect(verdict.warning).toContain('more than the account holds')
+  })
+})
+
+describe('what one supplier can be paid in one transfer', () => {
+  it('keeps a single-currency group payable, in the supplier’s money', () => {
+    const [group] = groupBySupplier([
+      euroBill({ id: 'a' }),
+      euroBill({ id: 'b', number: 'BILL-1002', balanceCents: 100_000, functionalBalanceCents: 108_000 }),
+    ])
+
+    expect(group.currency).toBe('EUR')
+    expect(group.totalCents).toBe(500_000)
+    expect(group.functionalTotalCents).toBe(540_000)
+    expect(payableAsOneTransfer(group)).toBe(true)
+  })
+
+  /**
+   * The heart of it: one payment per supplier is how the money leaves, and a
+   * single transfer cannot be €4,000 and $1,000 at once. Rather than putting a
+   * meaningless sum on the screen, there is no supplier-currency answer.
+   */
+  it('has no supplier-currency total when the bills disagree', () => {
+    const [group] = groupBySupplier([
+      euroBill({ id: 'a' }),
+      bill({ id: 'b', number: 'BILL-1002', balanceCents: 100_000, functionalBalanceCents: 100_000 }),
+    ])
+
+    expect(group.currency).toBeNull()
+    expect(group.totalCents).toBeNull()
+    // Still answerable, because this one is a conversion rather than a sum.
+    expect(group.functionalTotalCents).toBe(532_000)
+    expect(payableAsOneTransfer(group)).toBe(false)
+  })
+
+  it('does not recover a total once two currencies are in', () => {
+    const [group] = groupBySupplier([
+      euroBill({ id: 'a' }),
+      bill({ id: 'b', number: 'BILL-1002', balanceCents: 100_000, functionalBalanceCents: 100_000 }),
+      euroBill({ id: 'c', number: 'BILL-1003' }),
+    ])
+
+    expect(group.totalCents).toBeNull()
+  })
+})
+
+describe('refusing before the press', () => {
+  const mixed = [
+    euroBill({ id: 'a', vendorId: 'v1', vendorName: 'Bremen Hafenbau' }),
+    bill({
+      id: 'b',
+      number: 'BILL-1002',
+      vendorId: 'v1',
+      vendorName: 'Bremen Hafenbau',
+      balanceCents: 100_000,
+      functionalBalanceCents: 100_000,
+    }),
+    bill({
+      id: 'c',
+      number: 'BILL-1003',
+      vendorId: 'v2',
+      vendorName: 'Northern Supplies',
+      balanceCents: 250_000,
+      functionalBalanceCents: 250_000,
+    }),
+  ]
+
+  it('leaves the mixed supplier out of what will be paid', () => {
+    const verdict = planRun({ chosen: mixed, availableCents: null })
+
+    expect(verdict.suppliers.map((row) => row.vendorName)).toEqual(['Northern Supplies'])
+    expect(verdict.blocked.map((row) => row.vendorName)).toEqual(['Bremen Hafenbau'])
+  })
+
+  /** The Pay button must not promise money that is never going to leave. */
+  it('prices only what will actually be paid', () => {
+    const verdict = planRun({ chosen: mixed, availableCents: null })
+
+    expect(verdict.totalCents).toBe(250_000)
+  })
+
+  it('says who, and what to do about it', () => {
+    const verdict = planRun({ chosen: mixed, availableCents: null })
+
+    expect(verdict.refusal).toContain('Bremen Hafenbau')
+    expect(verdict.refusal).toContain('more than one currency')
+    expect(verdict.refusal).toContain('untick all but one currency')
+  })
+
+  it('has nothing to say when every supplier is payable', () => {
+    const verdict = planRun({ chosen: [mixed[2]], availableCents: null })
+
+    expect(verdict.blocked).toEqual([])
+    expect(verdict.refusal).toBeNull()
   })
 })

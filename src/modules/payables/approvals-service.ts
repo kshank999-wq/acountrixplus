@@ -144,6 +144,9 @@ export async function approveBill(
     id: row.id,
     number: row.number,
     totalCents: row.totalCents,
+    // The threshold is in the company's currency, so the comparison has to be
+    // too — otherwise a foreign bill slips under the control (Phase 60).
+    functionalTotalCents: row.functionalTotalCents,
     enteredBy: row.enteredBy,
     approvedBy: row.approvedBy,
   }

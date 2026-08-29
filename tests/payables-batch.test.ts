@@ -63,12 +63,12 @@ describe('naming who', () => {
   })
 })
 
-const supplier = (vendorId: string, vendorName: string, amountCents: number, billCount = 1) => ({
-  vendorId,
-  vendorName,
-  amountCents,
-  billCount,
-})
+const supplier = (
+  vendorId: string,
+  vendorName: string,
+  functionalAmountCents: number,
+  billCount = 1,
+) => ({ vendorId, vendorName, functionalAmountCents, billCount })
 
 describe('what a pay run did', () => {
   it('reports a clean run as a clean run', () => {

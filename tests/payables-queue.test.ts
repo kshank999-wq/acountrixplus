@@ -184,6 +184,8 @@ describe('the queue', () => {
           vendorName: 'V',
           dueDate: '2026-08-01',
           balanceCents: 500_000,
+          currency: 'USD',
+          functionalBalanceCents: 500_000,
         },
       ],
       availableCents: null,

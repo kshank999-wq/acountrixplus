@@ -69,6 +69,13 @@ export async function payableQueue(
       dueDate: bills.dueDate,
       totalCents: bills.totalCents,
       balanceCents: bills.balanceCents,
+      // The supplier's own currency, and what the balance is worth in ours
+      // (Phase 60). Selected because everything above this line that adds or
+      // compares amounts needs the second, and everything that shows one to a
+      // person needs the first.
+      currency: bills.currency,
+      functionalBalanceCents: bills.functionalBalanceCents,
+      functionalTotalCents: bills.functionalTotalCents,
       // Who entered it and who agreed to it (Phase 50). Carried on the queue
       // because the pay run decides from these and the screen shows them.
       enteredBy: bills.enteredBy,
@@ -241,7 +248,10 @@ export async function billsByIds(
 /** Used by the screen's heading: one number for "what we owe". */
 export async function totalPayable(ctx: ActorContext): Promise<number> {
   const [row] = await db
-    .select({ total: sql<string>`coalesce(sum(${bills.balanceCents}), 0)` })
+    // Summed in the company's currency (Phase 60): this adds up every open
+    // bill on the books, and adding euro to dollars produced a headline figure
+    // with a dollar sign on it that was true of neither.
+    .select({ total: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)` })
     .from(bills)
     .where(
       scoped(ctx, bills, and(inArray(bills.status, ['open', 'partial'] as const), gt(bills.balanceCents, 0))),

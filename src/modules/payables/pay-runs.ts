@@ -196,20 +196,49 @@ export async function executePayRun(
     runDate: input.paymentDate,
     reference: input.reference || null,
     financialAccountId: input.financialAccountId,
-    suppliersAttempted: plan.suppliers.length,
+    // Blocked suppliers were attempted in the sense that matters: somebody
+    // ticked their bills and pressed Pay.
+    suppliersAttempted: plan.suppliers.length + plan.blocked.length,
   })
 
   const paid: {
     vendorId: string
     vendorName: string
-    amountCents: number
+    functionalAmountCents: number
     billCount: number
   }[] = []
-  const failed: BatchFailure[] = []
+  /**
+   * Seeded with the suppliers `planRun` refused before anything was attempted
+   * (Phase 60).
+   *
+   * A supplier whose chosen bills span two currencies cannot be settled by one
+   * transfer, and that is knowable from the selection. Phase 59's per-supplier
+   * catch used to discover it by trying and failing; naming it up front is
+   * Phase 47's rule, and the outcome reads the same either way because both
+   * arrive as a `BatchFailure`.
+   */
+  const failed: BatchFailure[] = plan.blocked.map((group) => ({
+    vendorId: group.vendorId,
+    vendorName: group.vendorName,
+    error:
+      'their chosen bills are in more than one currency, and one transfer cannot be in two',
+  }))
   const attemptedCentsByVendor: Record<string, number> = {}
 
+  for (const group of plan.blocked) {
+    attemptedCentsByVendor[group.vendorId] = group.functionalTotalCents
+  }
+
   for (const supplier of plan.suppliers) {
-    attemptedCentsByVendor[supplier.vendorId] = supplier.totalCents
+    /**
+     * The functional amount, not the supplier-currency one (Phase 60).
+     *
+     * This map is only ever summed into `unpaidCents`, which is a total across
+     * suppliers — so it has to be in the company's currency. ADR 0059 recorded
+     * the old behaviour as a known limitation: a supplier owed €4,000 recorded
+     * "$4,000 still owed". This is that fix.
+     */
+    attemptedCentsByVendor[supplier.vendorId] = supplier.functionalTotalCents
 
     // Oldest first *within* what was chosen. The choice is respected
     // absolutely — a bill nobody ticked is never touched — but among the ones
@@ -237,7 +266,9 @@ export async function executePayRun(
       paid.push({
         vendorId: supplier.vendorId,
         vendorName: supplier.vendorName,
-        amountCents: supplier.totalCents,
+        // What the run cost the company, which is what a run total is asking.
+        // `supplier.totalCents` is what this supplier received, in their money.
+        functionalAmountCents: supplier.functionalTotalCents,
         billCount: ordered.length,
       })
     } catch (error) {

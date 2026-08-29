@@ -97,6 +97,7 @@ export function PayablesBoard({
   credits,
   policy,
   runs,
+  homeCurrency,
   canPay,
   canApprove,
 }: {
@@ -106,6 +107,8 @@ export function PayablesBoard({
   credits: Credit[]
   policy: ApprovalPolicy
   runs: PayRun[]
+  /** The company's own currency — the only one a total on this screen is in. */
+  homeCurrency: string
   canPay: boolean
   canApprove: boolean
 }) {
@@ -148,7 +151,9 @@ export function PayablesBoard({
   const [creditAmount, setCreditAmount] = useState('')
 
   const totals = useMemo(() => bucketTotals(bills, today), [bills, today])
-  const owed = bills.reduce((sum, bill) => sum + bill.balanceCents, 0)
+  // In the company's currency (Phase 60). This adds every open bill together,
+  // and a sum only means something when its terms are in one currency.
+  const owed = bills.reduce((sum, bill) => sum + bill.functionalBalanceCents, 0)
 
   /**
    * What the screen says about approval, decided by the same function the pay
@@ -260,7 +265,7 @@ export function PayablesBoard({
                 bucket === 'overdue' && totals[bucket].totalCents > 0 ? 'text-danger' : ''
               }`}
             >
-              {formatCents(totals[bucket].totalCents)}
+              {formatCents(totals[bucket].totalCents, homeCurrency)}
             </p>
             <p className="text-xs text-faint">
               {totals[bucket].count} bill{totals[bucket].count === 1 ? '' : 's'}
@@ -280,7 +285,7 @@ export function PayablesBoard({
             <header className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line px-4 py-3">
               <h3 className="text-sm font-semibold">Open bills</h3>
               <p className="text-xs text-muted">
-                <span className="tnum">{formatCents(owed)}</span> outstanding in total
+                <span className="tnum">{formatCents(owed, homeCurrency)}</span> outstanding in total
               </p>
             </header>
 
@@ -366,7 +371,15 @@ export function PayablesBoard({
                         )}
                       </td>
                       <td className="tnum px-4 py-1.5 text-right">
-                        {formatCents(bill.balanceCents)}
+                        {formatCents(bill.balanceCents, bill.currency)}
+                        {bill.currency !== homeCurrency && (
+                          /* What it is worth to us, beside what they invoiced.
+                             Both, because the supplier is owed the first and
+                             every total on this screen is made of the second. */
+                          <span className="block text-xs text-faint">
+                            {formatCents(bill.functionalBalanceCents, homeCurrency)}
+                          </span>
+                        )}
                       </td>
                       {canApprove && policy.enabled && (
                         <td className="px-4 py-1.5 text-right">
@@ -428,14 +441,16 @@ export function PayablesBoard({
                   <>
                     <div className="rounded-lg border border-line bg-raised/60 px-3 py-2 text-sm">
                       <p className="font-medium">
-                        {formatCents(plan.totalCents)} across {plan.suppliers.length} payment
+                        {formatCents(plan.totalCents, homeCurrency)} across {plan.suppliers.length} payment
                         {plan.suppliers.length === 1 ? '' : 's'}
                       </p>
                       <ul className="mt-1 space-y-0.5 text-xs text-muted">
                         {plan.suppliers.map((supplier) => (
                           <li key={supplier.vendorId}>
                             <strong>{supplier.vendorName}</strong>{' '}
-                            <span className="tnum">{formatCents(supplier.totalCents)}</span>
+                            <span className="tnum">
+                              {formatCents(supplier.totalCents, supplier.currency)}
+                            </span>
                             <span className="text-faint"> — {supplier.numbers.join(', ')}</span>
                           </li>
                         ))}
@@ -450,6 +465,14 @@ export function PayablesBoard({
                             ? `${formatCents(plan.remainingCents)} left afterwards.`
                             : plan.warning}
                         </p>
+                      )}
+                      {/*
+                        Said before the press, not discovered during it (Phase
+                        60). Phase 47's rule: a refusal belongs on the row
+                        rather than behind a button that fails when pressed.
+                      */}
+                      {plan.refusal && (
+                        <p className="mt-2 text-xs text-danger">{plan.refusal}</p>
                       )}
                       {account && account.owingCents !== null && (
                         <p className="mt-2 text-xs text-faint">
@@ -499,7 +522,10 @@ export function PayablesBoard({
                       </label>
                       <button
                         className="btn btn-primary text-sm"
-                        disabled={pending || !accountId}
+                        /* Nothing payable means nothing to press. Offering
+                           "Pay $0.00" as a live button invites somebody to
+                           press it and learn nothing (Phase 60). */
+                        disabled={pending || !accountId || plan.suppliers.length === 0}
                         onClick={() =>
                           act(
                             () =>
@@ -516,7 +542,7 @@ export function PayablesBoard({
                           )
                         }
                       >
-                        Pay {formatCents(plan.totalCents)}
+                        Pay {formatCents(plan.totalCents, homeCurrency)}
                       </button>
                       <button
                         className="btn btn-ghost text-sm"
@@ -582,7 +608,7 @@ export function PayablesBoard({
                     </option>
                     {creditableBills.map((bill) => (
                       <option key={bill.id} value={bill.id}>
-                        {bill.number} — {formatCents(bill.balanceCents)} outstanding
+                        {bill.number} — {formatCents(bill.balanceCents, bill.currency)} outstanding
                       </option>
                     ))}
                   </select>

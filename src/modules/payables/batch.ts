@@ -97,7 +97,18 @@ export function nameList(names: string[], limit = 3): string {
 
 export type PayRunOutcome = {
   status: BatchStatus
-  paid: { vendorId: string; vendorName: string; amountCents: number; billCount: number }[]
+  paid: {
+    vendorId: string
+    vendorName: string
+    /**
+     * In the company's own currency, not the supplier's (Phase 60).
+     *
+     * Named for its unit because it is only ever summed across suppliers, and
+     * a total of amounts in different currencies is not a quantity of money.
+     */
+    functionalAmountCents: number
+    billCount: number
+  }[]
   failed: BatchFailure[]
   paidCents: number
   /** What the failed suppliers would have been paid, and still are owed. */
@@ -115,7 +126,18 @@ export type PayRunOutcome = {
  * failed is how the old message misled.
  */
 export function payRunOutcome(input: {
-  paid: { vendorId: string; vendorName: string; amountCents: number; billCount: number }[]
+  paid: {
+    vendorId: string
+    vendorName: string
+    /**
+     * In the company's own currency, not the supplier's (Phase 60).
+     *
+     * Named for its unit because it is only ever summed across suppliers, and
+     * a total of amounts in different currencies is not a quantity of money.
+     */
+    functionalAmountCents: number
+    billCount: number
+  }[]
   failed: BatchFailure[]
   /** Present only so the message can say what the unpaid suppliers were owed. */
   attemptedCentsByVendor?: Record<string, number>
@@ -123,7 +145,7 @@ export function payRunOutcome(input: {
   const { paid, failed } = input
   const status = batchStatus(paid.length, failed.length)
 
-  const paidCents = paid.reduce((sum, row) => sum + row.amountCents, 0)
+  const paidCents = paid.reduce((sum, row) => sum + row.functionalAmountCents, 0)
   const billsSettled = paid.reduce((sum, row) => sum + row.billCount, 0)
   const unpaidCents = failed.reduce(
     (sum, row) => sum + (input.attemptedCentsByVendor?.[row.vendorId] ?? 0),

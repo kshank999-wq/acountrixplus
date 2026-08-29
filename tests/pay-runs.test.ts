@@ -13,6 +13,7 @@ import {
   PayRunError,
 } from '@/modules/payables/pay-runs'
 import { voidPayment } from '@/modules/receivables/payment-voiding'
+import { payableQueue, totalPayable } from '@/modules/payables/queue'
 
 /**
  * The pay run that half-happened (Phase 59).
@@ -128,12 +129,12 @@ describe('a run where one supplier failed', () => {
    *
    * Cascade is paid. Bremen cannot be: they have invoiced in both euro and
    * dollars, one payment per supplier is how the money leaves, and there is no
-   * single amount of money that arrives — so Phase 35 refuses and says to
-   * record one payment per currency.
+   * single amount of money that arrives.
    *
-   * The old code let that exception out of the loop, so the caller was told
-   * *"That pay run could not be completed"* and never learned that $2,500 had
-   * already left the bank for Cascade.
+   * Phase 49 let that failure out of the loop, so the caller was told *"That
+   * pay run could not be completed"* and never learned that $2,500 had already
+   * left the bank for Cascade. Phase 60 refuses Bremen from the selection
+   * rather than by trying; the run is still partial, and still says so.
    */
   async function aMixedRun() {
     const cascade = await aVendor('Cascade Building Supply', 'ar@cascade.test')
@@ -171,7 +172,13 @@ describe('a run where one supplier failed', () => {
 
     expect(outcome.failed).toHaveLength(1)
     expect(outcome.failed[0].vendorName).toBe('Bremen Hafenbau GmbH')
-    expect(outcome.failed[0].error).toMatch(/one payment per currency/)
+    /**
+     * Phase 59 discovered this by attempting the payment and catching the
+     * domain's refusal. Phase 60 knows it from the selection and never tries —
+     * Phase 47's rule — so the sentence is the earlier one. The outcome reads
+     * the same either way, because both arrive as a `BatchFailure`.
+     */
+    expect(outcome.failed[0].error).toMatch(/more than one currency/)
   })
 
   /** The message is the fix: it used to say the run failed and nothing else. */
@@ -191,15 +198,16 @@ describe('a run where one supplier failed', () => {
     expect(run.suppliersAttempted).toBe(2)
     expect(run.suppliersPaid).toBe(1)
     /**
-     * €4,000 + $500 added together, which is meaningless — and is precisely
-     * why the payment was refused. Phase 56 named the same defect on the
-     * customers screen; `planRun` still sums document amounts across
-     * currencies, and this test pins the figure the run recorded rather than
-     * pretending it is a real quantity of money.
+     * €4,000 at 1.08 is $4,320, plus $500 — $4,820 in the company's currency.
+     *
+     * Phase 59 recorded `450_000` here, which was €4,000 and $500 added
+     * together as though a euro were a dollar, and ADR 0059 recorded it as a
+     * known limitation. Phase 60 is that fix: the figure is a conversion now
+     * rather than a sum of unlike things.
      */
-    expect(run.unpaidCents).toBe(450_000)
+    expect(run.unpaidCents).toBe(482_000)
     expect(run.failures).toContain('Bremen Hafenbau GmbH:')
-    expect(run.failures).toMatch(/one payment per currency/)
+    expect(run.failures).toMatch(/more than one currency/)
   })
 
   /**
@@ -321,5 +329,78 @@ describe('telling the run’s suppliers', () => {
     await expect(
       adviseRun(fixture.ctx, '00000000-0000-0000-0000-000000000000'),
     ).rejects.toThrow(/not on these books/)
+  })
+})
+
+/**
+ * The bill in euro that said dollars (Phase 60).
+ *
+ * `payableQueue` never selected `currency` or `functional_balance_cents`, so
+ * everything downstream had one amount and used it both to show a supplier what
+ * they are owed and to add figures up.
+ */
+describe('what the queue carries', () => {
+  it('brings both amounts back, so nothing downstream has to guess', async () => {
+    const bremen = await aVendor('Bremen Hafenbau GmbH')
+    await putRate(fixture.ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-06-01',
+      rateMillionths: 1_080_000,
+      source: 'manual',
+    })
+    await aBill(bremen, 400_000, 'EUR')
+
+    const [row] = await payableQueue(fixture.ctx, { asOf: '2026-07-01' })
+
+    expect(row.currency).toBe('EUR')
+    expect(row.balanceCents).toBe(400_000)
+    expect(row.functionalBalanceCents).toBe(432_000)
+  })
+
+  /** The headline figure on the screen, which used to add unlike things. */
+  it('totals what we owe in the company’s currency', async () => {
+    const bremen = await aVendor('Bremen Hafenbau GmbH')
+    const cascade = await aVendor('Cascade Building Supply')
+    await putRate(fixture.ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-06-01',
+      rateMillionths: 1_080_000,
+      source: 'manual',
+    })
+    await aBill(bremen, 400_000, 'EUR')
+    await aBill(cascade, 100_000)
+
+    // $4,320 + $1,000, not $4,000 + $1,000.
+    expect(await totalPayable(fixture.ctx)).toBe(532_000)
+  })
+})
+
+describe('a supplier who cannot be paid in one transfer', () => {
+  it('is left out of the run and named, without being attempted', async () => {
+    const bremen = await aVendor('Bremen Hafenbau GmbH')
+    const cascade = await aVendor('Cascade Building Supply')
+    await putRate(fixture.ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-06-01',
+      rateMillionths: 1_080_000,
+      source: 'manual',
+    })
+
+    const euro = await aBill(bremen, 400_000, 'EUR')
+    const dollars = await aBill(bremen, 50_000)
+    const domestic = await aBill(cascade, 250_000)
+
+    const { payRunId, outcome } = await executePayRun(fixture.ctx, {
+      billIds: [euro.id, dollars.id, domestic.id],
+      paymentDate: '2026-07-15',
+      financialAccountId: bankId,
+    })
+
+    expect(outcome.failed.map((row) => row.vendorName)).toEqual(['Bremen Hafenbau GmbH'])
+
+    // Nothing was posted for them: the refusal came from the selection.
+    const rows = await db.select().from(payments).where(eq(payments.payRunId, payRunId))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].vendorId).toBe(cascade)
   })
 })

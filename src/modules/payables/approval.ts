@@ -37,6 +37,8 @@
  * Nothing here touches the database or the clock.
  */
 
+import { formatCents } from '@/lib/money'
+
 /** What a company has decided about approving bills before paying them. */
 export type ApprovalPolicy = {
   /**
@@ -101,7 +103,22 @@ export const STARTING_POLICY: ApprovalPolicy = {
 export type ApprovableBill = {
   id: string
   number: string
+  /** What the supplier invoiced, in their currency. Shown, never compared. */
   totalCents: number
+  /**
+   * What that is worth in the company's own currency (Phase 60).
+   *
+   * The threshold is set in the company's currency — somebody typing "$1,000
+   * and up needs approving" means dollars — so the comparison has to happen
+   * there. Until Phase 60 this module compared `totalCents` against it
+   * directly, which meant **a foreign bill could slip under the control**: at
+   * 1.08, a €950 bill is $1,026 and needed a second pair of eyes, and got
+   * none because 95,000 is less than 100,000.
+   *
+   * It is the same defect as adding currencies on the screen, except that this
+   * one silently switched off a control rather than printing a wrong number.
+   */
+  functionalTotalCents: number
   /** Who entered it. Null on bills raised before Phase 50, and by the system. */
   enteredBy: string | null
   approvedBy: string | null
@@ -122,7 +139,7 @@ export function approvalState(bill: ApprovableBill, policy: ApprovalPolicy): App
   // At or above. A threshold of 100 means a bill for exactly 100 needs one —
   // "over £1,000 needs approval" is how people say "£1,000 and up", and the
   // off-by-one lands on the boundary somebody chose deliberately.
-  if (bill.totalCents < policy.thresholdCents) return 'not_required'
+  if (bill.functionalTotalCents < policy.thresholdCents) return 'not_required'
   return 'awaiting'
 }
 
@@ -160,7 +177,7 @@ export function mayApprove(input: {
     }
   }
 
-  if (bill.totalCents < policy.thresholdCents) {
+  if (bill.functionalTotalCents < policy.thresholdCents) {
     return {
       ok: false,
       why: `${bill.number} is below the amount that needs approving, so it can be paid as it is.`,
@@ -213,7 +230,9 @@ export function splitByApproval<T extends ApprovableBill>(
 export function describeHeld(held: ApprovableBill[]): string | null {
   if (held.length === 0) return null
 
-  const total = held.reduce((sum, bill) => sum + bill.totalCents, 0)
+  // In the company's currency: this is a sum across suppliers, and a sum only
+  // means something when its terms are in one currency (Phase 60).
+  const total = held.reduce((sum, bill) => sum + bill.functionalTotalCents, 0)
   const names = held
     .slice(0, 3)
     .map((bill) => bill.number)
@@ -221,7 +240,10 @@ export function describeHeld(held: ApprovableBill[]): string | null {
   const more = held.length > 3 ? ` and ${held.length - 3} more` : ''
 
   return (
-    `${held.length} bill${held.length === 1 ? '' : 's'} worth ${(total / 100).toFixed(2)} ` +
+    // Formatted rather than hand-divided: a total in the company's currency
+    // should say so, which is the whole subject of Phase 60. It read
+    // "2 bills worth 2026.00", with no symbol and no separator.
+    `${held.length} bill${held.length === 1 ? '' : 's'} worth ${formatCents(total)} ` +
     `${held.length === 1 ? 'was' : 'were'} left out — ${names}${more} ` +
     `${held.length === 1 ? 'needs' : 'need'} approving first.`
   )

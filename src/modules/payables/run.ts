@@ -24,7 +24,24 @@
  * Nothing here touches the database or the clock. `asOf` is passed in.
  */
 
-/** A bill as this module needs to see it. */
+/**
+ * A bill as this module needs to see it.
+ *
+ * ## Two amounts, because one number cannot answer two questions (Phase 60)
+ *
+ * `balanceCents` is what the **supplier** is owed, in the currency they
+ * invoiced in. It is what will be paid and what the remittance advice shows,
+ * and converting it would be telling a German supplier they are owed dollars.
+ *
+ * `functionalBalanceCents` is what that is worth in the company's own currency.
+ * It is the only figure that may be **added up or compared** — against the bank
+ * balance, against an approval threshold, against another supplier's bill.
+ *
+ * Until Phase 60 this module had only `balanceCents` and used it for both, so
+ * "what we owe" added euro to dollars and reported the result with a dollar
+ * sign. The same defect [ADR 0056](../../../docs/adr/0056-the-balance-that-added-currencies-together.md)
+ * fixed on the customers screen.
+ */
 export type PayableBill = {
   id: string
   number: string
@@ -33,6 +50,10 @@ export type PayableBill = {
   dueDate: string
   /** What is still outstanding, not the original total. */
   balanceCents: number
+  /** The currency the supplier invoiced in. */
+  currency: string
+  /** What `balanceCents` is worth in the company's own currency. */
+  functionalBalanceCents: number
 }
 
 /**
@@ -75,7 +96,13 @@ export type BucketTotals = Record<AgeBucket, { count: number; totalCents: number
 
 const EMPTY_BUCKET = { count: 0, totalCents: 0 }
 
-/** What is owed, split by how late it is. */
+/**
+ * What is owed, split by how late it is.
+ *
+ * Totalled in the company's own currency: these four figures are sums across
+ * whatever suppliers happen to fall in each bucket, and a sum only means
+ * something when its terms are in one currency.
+ */
 export function bucketTotals(bills: PayableBill[], asOf: string): BucketTotals {
   const totals: BucketTotals = {
     overdue: { ...EMPTY_BUCKET },
@@ -87,7 +114,7 @@ export function bucketTotals(bills: PayableBill[], asOf: string): BucketTotals {
   for (const bill of bills) {
     const bucket = totals[bucketFor(bill.dueDate, asOf)]
     bucket.count += 1
-    bucket.totalCents += bill.balanceCents
+    bucket.totalCents += bill.functionalBalanceCents
   }
 
   return totals
@@ -109,7 +136,20 @@ export type SupplierRun = {
   billIds: string[]
   /** In the order chosen, which is the order the payment applies them in. */
   numbers: string[]
-  totalCents: number
+  /**
+   * What the payment will be for, in the supplier's currency.
+   *
+   * **Null when the chosen bills span two currencies**, because then there is
+   * no such amount. One payment per supplier is how the money leaves, and a
+   * single transfer cannot be €4,000 and $4,000 at once — so rather than
+   * putting a meaningless sum here for the screen to print, this says there is
+   * no answer and `planRun` blocks the supplier.
+   */
+  totalCents: number | null
+  /** The currency of every chosen bill, or null when they disagree. */
+  currency: string | null
+  /** What the group is worth in the company's currency. Always answerable. */
+  functionalTotalCents: number
   /** The oldest due date in the group, for sorting a run sensibly. */
   earliestDue: string
 }
@@ -127,6 +167,8 @@ export function groupBySupplier(bills: PayableBill[]): SupplierRun[] {
         billIds: [bill.id],
         numbers: [bill.number],
         totalCents: bill.balanceCents,
+        currency: bill.currency,
+        functionalTotalCents: bill.functionalBalanceCents,
         earliestDue: bill.dueDate,
       })
       continue
@@ -134,21 +176,59 @@ export function groupBySupplier(bills: PayableBill[]): SupplierRun[] {
 
     existing.billIds.push(bill.id)
     existing.numbers.push(bill.number)
-    existing.totalCents += bill.balanceCents
+    existing.functionalTotalCents += bill.functionalBalanceCents
+
+    if (existing.currency === bill.currency && existing.totalCents !== null) {
+      existing.totalCents += bill.balanceCents
+    } else {
+      // Once two currencies are in the group there is no supplier-currency
+      // total, and there is no going back to having one.
+      existing.currency = null
+      existing.totalCents = null
+    }
+
     if (bill.dueDate < existing.earliestDue) existing.earliestDue = bill.dueDate
   }
 
   return [...groups.values()].sort((a, b) => a.earliestDue.localeCompare(b.earliestDue))
 }
 
+/**
+ * A group that really can be settled by one transfer.
+ *
+ * The narrowing is the point: everything downstream of `planRun` — the amount
+ * on the Pay button, the amount `recordPayment` is given — needs an amount in a
+ * currency, and this is the type that has one.
+ */
+export type PayableSupplierRun = SupplierRun & { totalCents: number; currency: string }
+
+/** Whether this supplier's chosen bills can be settled by one payment. */
+export function payableAsOneTransfer(group: SupplierRun): group is PayableSupplierRun {
+  return group.currency !== null && group.totalCents !== null
+}
+
 export type RunVerdict = {
-  suppliers: SupplierRun[]
+  /** The suppliers this run will actually pay. */
+  suppliers: PayableSupplierRun[]
+  /**
+   * Suppliers left out because their chosen bills span two currencies.
+   *
+   * Named before the press rather than discovered during it. Phase 59 made a
+   * failure in the middle of a run survivable and honestly reported, which is
+   * the right safety net for what cannot be predicted — but this one can be,
+   * and Phase 47's rule is that a refusal belongs on the row rather than behind
+   * a button that fails when pressed.
+   */
+  blocked: SupplierRun[]
+  /** What the run costs, in the company's own currency. */
   totalCents: number
   /** What is left in the account afterwards. Negative means it does not cover. */
   remainingCents: number
   covered: boolean
   /** A sentence, or null when there is nothing worth saying. */
   warning: string | null
+  /** What to say about the blocked suppliers, or null when there are none. */
+  refusal: string | null
 }
 
 /**
@@ -166,16 +246,36 @@ export function planRun(input: {
   /** What the ledger says is in the account the money is leaving. */
   availableCents: number | null
 }): RunVerdict {
-  const suppliers = groupBySupplier(input.chosen)
-  const totalCents = suppliers.reduce((sum, group) => sum + group.totalCents, 0)
+  const grouped = groupBySupplier(input.chosen)
+  const suppliers = grouped.filter(payableAsOneTransfer)
+  const blocked = grouped.filter((group) => !payableAsOneTransfer(group))
+
+  /**
+   * Totalled in the company's currency, and over the payable suppliers only.
+   *
+   * Two changes from Phase 49, both the same correction. It used to add
+   * supplier-currency amounts together, so a run of a €4,000 bill and a $4,000
+   * bill said `$8,000.00` — and it counted suppliers the run cannot pay, so the
+   * Pay button promised money that was never going to leave.
+   */
+  const totalCents = suppliers.reduce((sum, group) => sum + group.functionalTotalCents, 0)
+
+  const refusal = blocked.length
+    ? `${blocked.map((group) => group.vendorName).join(', ')} ` +
+      `${blocked.length === 1 ? 'has' : 'have'} bills in more than one currency here. ` +
+      'One payment per supplier is how the money leaves, and a single transfer cannot be in ' +
+      'two currencies — untick all but one currency, and pay the rest in a second run.'
+    : null
 
   if (input.availableCents === null) {
     return {
       suppliers,
+      blocked,
       totalCents,
       remainingCents: 0,
       covered: true,
       warning: null,
+      refusal,
     }
   }
 
@@ -183,6 +283,7 @@ export function planRun(input: {
 
   return {
     suppliers,
+    blocked,
     totalCents,
     remainingCents,
     covered: remainingCents >= 0,
@@ -192,6 +293,7 @@ export function planRun(input: {
           'bank’s — a cheque written last week may not have cleared — so it is worth a look ' +
           'rather than a reason to stop.'
         : null,
+    refusal,
   }
 }
 
