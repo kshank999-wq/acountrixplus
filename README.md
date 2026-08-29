@@ -2770,6 +2770,56 @@ one person, which is the exact thing Phase 50 exists to prevent. The comparison
 is in the company's currency now, and the field is required rather than optional
 so no future call site can quietly reintroduce it.
 
+### The statement that told the customer a made-up number (Phase 61)
+
+ADR 0060 nominated the chase queue for this check. The chase queue was indeed
+wrong, and it was not the serious one.
+
+`openInvoices` selected `invoices.balance_cents` — the amount the customer was
+invoiced in **their** currency — and the statement added those together. Two
+hundred lines further down the same file:
+
+> The company's own currency, because every figure on this statement is the
+> home-currency one (Phase 35) — including the balance the sentence restates.
+
+It was not. A customer invoiced €1,241.94 and $5,250.00 was told they owed
+**$6,491.94**: a number in no currency at all, with a dollar sign on it.
+
+This is the worst place in the system for that to be true. It is not an internal
+report — Phase 42 links the customer to it, Phase 55 emails it, and Phase 57
+sends it **every month with nobody looking**. It is the one document the business
+puts in front of somebody else and asks them to pay against, and a customer who
+can disprove it from their own purchase ledger stops believing every figure that
+comes after it.
+
+**A statement now states a balance per currency.** Converting instead would give
+a German customer a figure they cannot send, at a rate they did not agree, that
+will not match their ledger. Verified in the browser end to end — saved a
+statement for a customer with a euro invoice among dollar ones and opened the
+customer's own link:
+
+> **Billed and open in USD** $5,250.00
+> **Billed and open in EUR** €1,241.94
+
+**Held credit nets against the home-currency balance alone.** A payment carries
+no currency column (Phase 58), so what a receipt had left over can only safely be
+read as the company's own money — and setting a dollar credit against a euro
+invoice would be this phase's own defect one level up. The foreign balance gets
+its own sentence instead, because silence would leave somebody reading "nothing
+is due" over a euro invoice three lines above it:
+
+> €1,241.94 is outstanding separately, and payable in that currency. Any credit
+> we are holding is in USD and has not been set against it.
+
+The frozen statement **derives** its currency split from its saved lines rather
+than storing a new column: a statement written before this phase has no currency
+on its lines, and reading those as the company's own is exactly what it claimed
+when it was written — which is what freezing is for.
+
+And the nominated one: the chase floor is set in the company's currency, so
+comparing an invoice's face value against it chased or spared foreign invoices on
+the wrong number.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

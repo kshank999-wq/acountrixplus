@@ -46,6 +46,11 @@
  */
 
 import { formatCents } from '@/lib/money'
+import {
+  balancesByCurrency,
+  foreignBalanceNote,
+  type CurrencyBalance,
+} from './statement-currency'
 
 /** A statement row, as much of it as this module is willing to look at. */
 export type StatementFacts = {
@@ -71,6 +76,16 @@ export type StatementLineFacts = {
   runningBalanceCents: number
   dueDate?: string
   balanceCents?: number
+  /**
+   * The currency this line was invoiced in (Phase 61).
+   *
+   * Absent on every statement frozen before Phase 61, which is exactly what
+   * those statements meant at the time — the code assumed one currency and
+   * said so in a comment. Read as the company's own when missing.
+   */
+  currency?: string
+  /** What `amountCents` is worth in the company's currency. */
+  functionalBalanceCents?: number
 }
 
 export type PartyFacts = {
@@ -100,6 +115,16 @@ export type CustomerFacingStatement = {
   dueCents: number
   /** The sentence Phase 54 wrote, if this statement is new enough to have one. */
   positionNote: string | null
+  /**
+   * What is outstanding, in the currency each part of it is outstanding in.
+   *
+   * One entry for almost every statement ever written, and for every one
+   * frozen before Phase 61. More than one means there is no single total, and
+   * `closingBalanceCents` above is a company-currency sum rather than a demand.
+   */
+  currencyBalances: CurrencyBalance[]
+  /** What to say about a balance Phase 54's sentence did not cover. */
+  foreignNote: string | null
   customerName: string
   company: CompanyFacts
   lines: StatementLineFacts[]
@@ -127,6 +152,25 @@ export function customerFacingStatement(input: {
   const { statement } = input
   const heldCreditCents = Math.max(0, statement.heldCreditCents ?? 0)
 
+  /**
+   * Derived from the frozen lines rather than stored (Phase 61).
+   *
+   * A statement written before Phase 61 has no currency on its lines, and
+   * reading them as the company's own is precisely what that statement claimed
+   * when it was saved. Deriving keeps every view of a statement — the page, the
+   * email, the board — answering from one place, which is the rule this module
+   * exists to hold.
+   */
+  const currencyBalances = balancesByCurrency(
+    input.lines
+      .filter((line) => (line.balanceCents ?? 0) > 0)
+      .map((line) => ({
+        currency: line.currency ?? input.currency,
+        balanceCents: line.balanceCents ?? 0,
+        functionalBalanceCents: line.functionalBalanceCents ?? line.balanceCents ?? 0,
+      })),
+  )
+
   return {
     kind: statement.kind,
     periodStart: statement.periodStart,
@@ -137,6 +181,8 @@ export function customerFacingStatement(input: {
     heldCreditCents,
     dueCents: statement.dueCents ?? Math.max(0, statement.closingBalanceCents),
     positionNote: statement.positionNote ?? null,
+    currencyBalances,
+    foreignNote: foreignBalanceNote(currencyBalances, input.currency),
     customerName: input.customer.name,
     company: input.company,
     lines: input.lines.map((line) => ({
@@ -148,6 +194,8 @@ export function customerFacingStatement(input: {
       runningBalanceCents: line.runningBalanceCents,
       dueDate: line.dueDate,
       balanceCents: line.balanceCents,
+      currency: line.currency ?? input.currency,
+      functionalBalanceCents: line.functionalBalanceCents ?? line.amountCents,
     })),
     isFrozen: true,
   }

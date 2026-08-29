@@ -14,6 +14,12 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { describeNet, netPosition } from './net-position'
+import {
+  balancesByCurrency,
+  foreignBalanceNote,
+  homeCurrencyOwed,
+  type CurrencyBalance,
+} from './statement-currency'
 import { agingBucket } from '@/modules/ledger/reports'
 
 /**
@@ -46,8 +52,23 @@ export type StatementLine = {
   kind: 'invoice' | 'payment' | 'credit' | 'write_off'
   reference: string
   description: string
-  /** Positive increases what they owe; negative reduces it. */
+  /**
+   * Positive increases what they owe; negative reduces it.
+   *
+   * In `currency` where one is given — what the customer was actually
+   * invoiced, which is what they have to pay (Phase 61).
+   */
   amountCents: number
+  /** The currency of `amountCents`. Absent on a movement line. */
+  currency?: string
+  /** What `amountCents` is worth in the company's currency. Comparable. */
+  functionalBalanceCents?: number
+  /**
+   * The company-currency total so far.
+   *
+   * Never a demand: it is a sum across documents, and this is the only
+   * currency such a sum can be in.
+   */
   runningBalanceCents: number
   /** Only on open invoices. */
   dueDate?: string
@@ -63,6 +84,8 @@ export type CustomerStatement = {
   periodStart: string | null
   asOfDate: string
   openingBalanceCents: number
+  /** The company's own currency — the one every total here is in. */
+  currency: string
   /**
    * What the invoices on this statement come to, before credit is netted off.
    *
@@ -70,8 +93,27 @@ export type CustomerStatement = {
    * answer different questions: the gross is what was billed, and the net is
    * what to pay. A statement that showed only the net would leave a customer
    * unable to reconcile it against their own purchase ledger.
+   *
+   * **In the company's currency** (Phase 61). It is a sum across documents, so
+   * it can be in no other — and it is therefore a figure for comparing one
+   * customer against another, not one to ask anybody to pay. What to pay is
+   * `currencyBalances`.
    */
   closingBalanceCents: number
+  /**
+   * What is outstanding, in the currency each part of it is outstanding in.
+   *
+   * One entry for almost every customer there has ever been. More than one
+   * means there is no single total to state, and stating one is exactly what
+   * this document used to do: a customer invoiced €4,000 and $1,200 was told
+   * they owed "$5,200.00".
+   */
+  currencyBalances: CurrencyBalance[]
+  /**
+   * What to say about a balance the net-position sentence did not cover, or
+   * null when there is none.
+   */
+  foreignNote: string | null
   /**
    * What the business is holding for this customer (Phase 54).
    *
@@ -151,13 +193,18 @@ export async function buildStatement(
     const open = await openInvoices(ctx, input.customerId, input.asOfDate)
 
     for (const invoice of open) {
-      running += invoice.balanceCents
+      // The running total is in the company's currency, because it is a sum
+      // across documents and a sum only means something when its terms agree
+      // (Phase 61). The line itself shows what the customer was invoiced.
+      running += invoice.functionalBalanceCents
       lines.push({
         date: invoice.issueDate,
         kind: 'invoice',
         reference: invoice.number,
         description: `Invoice ${invoice.number}`,
         amountCents: invoice.balanceCents,
+        currency: invoice.currency,
+        functionalBalanceCents: invoice.functionalBalanceCents,
         runningBalanceCents: running,
         dueDate: invoice.dueDate,
         bucket: agingBucket(invoice.dueDate, input.asOfDate),
@@ -169,7 +216,7 @@ export async function buildStatement(
   const closingBalanceCents =
     kind === 'balance_forward'
       ? running
-      : lines.reduce((sum, line) => sum + (line.balanceCents ?? 0), 0)
+      : lines.reduce((sum, line) => sum + (line.functionalBalanceCents ?? 0), 0)
 
   /**
    * What the business is holding for them, across every posted receipt.
@@ -196,15 +243,14 @@ export async function buildStatement(
     )
 
   const heldCreditCents = Number(heldRow?.total ?? 0)
-  const position = netPosition({ owedCents: closingBalanceCents, heldCents: heldCreditCents })
 
-  // The company's own currency, because every figure on this statement is the
-  // home-currency one (Phase 35) — including the balance the sentence restates.
   const [company] = await db
     .select({ currency: companies.currency })
     .from(companies)
     .where(eq(companies.id, ctx.companyId))
     .limit(1)
+
+  const homeCurrency = company?.currency ?? 'USD'
 
   const aging: Record<string, number> = {
     current: 0,
@@ -216,8 +262,37 @@ export async function buildStatement(
 
   const open = await openInvoices(ctx, input.customerId, input.asOfDate)
   for (const invoice of open) {
-    aging[agingBucket(invoice.dueDate, input.asOfDate)] += invoice.balanceCents
+    // In the company's currency: an aging bucket sums across customers and
+    // documents, so it is a comparison figure and never a demand (Phase 61).
+    aging[agingBucket(invoice.dueDate, input.asOfDate)] += invoice.functionalBalanceCents
   }
+
+  /**
+   * What is outstanding, in the currency each part of it is outstanding in.
+   *
+   * The figure a customer acts on. `closingBalanceCents` above is a sum across
+   * documents and is therefore in the company's money — useful for comparing
+   * one customer against another, and no use at all for telling somebody what
+   * to pay, because they cannot send it (Phase 61).
+   */
+  const currencyBalances = balancesByCurrency(open)
+
+  /**
+   * Phase 54's netting, against the home-currency balance alone.
+   *
+   * `payments.unapplied_cents` is what a receipt had left over, and nothing on
+   * the payment records which currency that receipt was in — so the only
+   * currency it can safely be read as is the company's own. Setting a dollar
+   * credit against a euro invoice would be this phase's own defect committed
+   * one level up: it would tell a customer that money held in one currency has
+   * discharged a demand in another. It has not.
+   */
+  const position = netPosition({
+    owedCents: homeCurrencyOwed(currencyBalances, homeCurrency),
+    heldCents: heldCreditCents,
+  })
+
+  const foreignNote = foreignBalanceNote(currencyBalances, homeCurrency)
 
   return {
     customerId: customer.id,
@@ -231,7 +306,15 @@ export async function buildStatement(
     heldCreditCents,
     dueCents: position.dueCents,
     ourDebtCents: position.ourDebtCents,
-    positionNote: describeNet(position, company?.currency ?? 'USD'),
+    currency: homeCurrency,
+    currencyBalances,
+    positionNote: describeNet(position, homeCurrency),
+    /**
+     * Said beneath the sentence above, because Phase 54's sentence covers the
+     * home-currency balance alone. Silence would leave a customer reading
+     * "nothing is due" over a euro invoice listed right there.
+     */
+    foreignNote,
     lines,
     aging,
     oldestUnpaidDate: open[0]?.issueDate ?? null,
@@ -370,6 +453,11 @@ async function openInvoices(ctx: ActorContext, customerId: string, asOfDate: str
       issueDate: invoices.issueDate,
       dueDate: invoices.dueDate,
       balanceCents: invoices.balanceCents,
+      // What the customer was invoiced in, and what that is worth to us
+      // (Phase 61). The first is what the line shows and what they must pay;
+      // the second is the only one that may be added or compared.
+      currency: invoices.currency,
+      functionalBalanceCents: invoices.functionalBalanceCents,
     })
     .from(invoices)
     .where(

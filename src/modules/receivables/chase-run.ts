@@ -94,6 +94,8 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
       dueDate: invoices.dueDate,
       balanceCents: invoices.balanceCents,
       currency: invoices.currency,
+      // What the floor is compared against (Phase 61).
+      functionalBalanceCents: invoices.functionalBalanceCents,
       sentAt: invoices.sentAt,
       sendCount: invoices.sendCount,
       customerId: customers.id,
@@ -124,6 +126,7 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
     status: row.status,
     dueDate: row.dueDate,
     balanceCents: Number(row.balanceCents),
+    functionalBalanceCents: Number(row.functionalBalanceCents),
     sentAt: row.sentAt ? row.sentAt.toISOString().slice(0, 10) : null,
     sendCount: row.sendCount,
     lastPaymentDate: row.lastPaymentDate ?? null,

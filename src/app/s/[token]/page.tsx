@@ -92,6 +92,18 @@ export default async function PublicStatementPage({
         </p>
       )}
 
+      {/*
+        Phase 54's sentence covers the balance in our own currency, because a
+        credit we are holding is only knowable in ours. Silence here would
+        leave somebody reading "nothing is due" over a euro invoice listed
+        below it (Phase 61).
+      */}
+      {view.foreignNote && (
+        <p className="mt-3 rounded border border-line bg-raised/60 px-4 py-3 text-sm text-danger">
+          {view.foreignNote}
+        </p>
+      )}
+
       <table className="mt-6 w-full text-sm">
         <thead className="border-b border-line text-left text-xs uppercase tracking-wide text-muted">
           <tr>
@@ -118,7 +130,8 @@ export default async function PublicStatementPage({
                 <td className="py-1.5">{line.description}</td>
                 {isOpenItem && <td className="py-1.5 text-muted">{line.dueDate ?? '—'}</td>}
                 <td className="tnum py-1.5 text-right">
-                  {formatCents(line.amountCents, view.currency)}
+                  {/* What they were invoiced, in their money (Phase 61). */}
+                  {formatCents(line.amountCents, line.currency ?? view.currency)}
                 </td>
                 {!isOpenItem && (
                   <td className="tnum py-1.5 text-right text-muted">
@@ -140,14 +153,28 @@ export default async function PublicStatementPage({
               </td>
             </tr>
           )}
-          <tr className="border-t border-line">
-            <td colSpan={isOpenItem ? 4 : 4} className="py-2 pr-3 text-right font-medium">
-              Billed and open
-            </td>
-            <td className="tnum py-2 text-right font-semibold">
-              {formatCents(view.closingBalanceCents, view.currency)}
-            </td>
-          </tr>
+          {/*
+            One row per currency, because a total across currencies is not a
+            quantity of money and this document is asking somebody to send one
+            (Phase 61). For almost every statement there is exactly one row and
+            this reads as it always did.
+          */}
+          {(view.currencyBalances.length > 0
+            ? view.currencyBalances
+            : [{ currency: view.currency, balanceCents: view.closingBalanceCents, functionalBalanceCents: view.closingBalanceCents }]
+          ).map((balance) => (
+            <tr key={balance.currency} className="border-t border-line">
+              <td colSpan={4} className="py-2 pr-3 text-right font-medium">
+                Billed and open
+                {view.currencyBalances.length > 1 && (
+                  <span className="text-muted"> in {balance.currency}</span>
+                )}
+              </td>
+              <td className="tnum py-2 text-right font-semibold">
+                {formatCents(balance.balanceCents, balance.currency)}
+              </td>
+            </tr>
+          ))}
           {/*
             The gross is kept above the net, because a customer reconciling
             against their own purchase ledger needs to see what was billed

@@ -21,18 +21,27 @@ import {
 
 const on: ChasePolicy = { ...DEFAULT_CHASE_POLICY, enabled: true }
 
-const invoice = (over: Partial<ChaseableInvoice> = {}): ChaseableInvoice => ({
-  id: 'inv-1',
-  number: 'INV-1001',
-  status: 'open',
-  dueDate: '2026-03-31',
-  balanceCents: 120_000,
-  sentAt: '2026-03-01',
-  sendCount: 1,
-  lastPaymentDate: null,
-  customerEmail: 'ap@harborview.test',
-  ...over,
-})
+/**
+ * Domestic by default, so what the customer was invoiced and what it is worth
+ * to us are the same number — and stay the same when a test overrides the
+ * balance. A foreign invoice overrides both (Phase 61).
+ */
+const invoice = (over: Partial<ChaseableInvoice> = {}): ChaseableInvoice => {
+  const balanceCents = over.balanceCents ?? 120_000
+  return {
+    id: 'inv-1',
+    number: 'INV-1001',
+    status: 'open',
+    dueDate: '2026-03-31',
+    balanceCents,
+    functionalBalanceCents: balanceCents,
+    sentAt: '2026-03-01',
+    sendCount: 1,
+    lastPaymentDate: null,
+    customerEmail: 'ap@harborview.test',
+    ...over,
+  }
+}
 
 describe('daysBetween', () => {
   it('counts whole days forward', () => {

@@ -91,7 +91,19 @@ export type ChaseableInvoice = {
   number: string
   status: string
   dueDate: string
+  /** What the customer was invoiced, in their currency. Shown, never compared. */
   balanceCents: number
+  /**
+   * What that is worth in the company's currency (Phase 61).
+   *
+   * The floor below which nothing is chased is set in the company's currency —
+   * somebody typing "don't chase under $50" means dollars — so the comparison
+   * has to happen there. This module used to compare `balanceCents` against it
+   * directly, which chased or spared a foreign invoice on its face value: at
+   * 1.08 a €45 invoice is $48.60 and stays under a $50 floor, while a ¥4,000
+   * invoice is $26.80 and was chased because 400,000 is a big number.
+   */
+  functionalBalanceCents: number
   /** Null when it has never been sent. You cannot remind somebody of nothing. */
   sentAt: string | null
   /** Phase 42's counter: the first send is one, so a chase is the second. */
@@ -210,7 +222,7 @@ export function chaseVerdict(input: {
   // customer record still has no address. There is nowhere for a chase to go.
   if (!invoice.customerEmail?.trim()) return { chase: false, reason: 'no_address' }
 
-  if (invoice.balanceCents < policy.minimumBalanceCents) {
+  if (invoice.functionalBalanceCents < policy.minimumBalanceCents) {
     return { chase: false, reason: 'too_small' }
   }
 
@@ -328,7 +340,7 @@ export function nextChaseDate(input: {
   if (invoice.balanceCents <= 0) return null
   if (!invoice.sentAt) return null
   if (!invoice.customerEmail?.trim()) return null
-  if (invoice.balanceCents < policy.minimumBalanceCents) return null
+  if (invoice.functionalBalanceCents < policy.minimumBalanceCents) return null
 
   const chasesSoFar = Math.max(0, invoice.sendCount - 1)
   if (chasesSoFar >= policy.maxChases) return null
