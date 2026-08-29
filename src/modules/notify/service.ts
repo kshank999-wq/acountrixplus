@@ -1,5 +1,6 @@
 import { invoiceSubject } from '@/modules/receivables/sharing'
 import { statementSubject } from '@/modules/receivables/statement-sharing'
+import { remittanceSubject } from '@/modules/payables/remittance'
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { transactionalMessages } from '@/db/schema'
@@ -65,6 +66,13 @@ const HOURLY_LIMIT: Record<TransactionalKind, number> = {
    * already somebody clicking Send repeatedly.
    */
   statement: 4,
+  /**
+   * Between the two (Phase 58). A pay run sends many at once, to many different
+   * addresses, so the ceiling cannot be as low as a statement's — but one
+   * supplier receives one advice per payment, and six an hour to the same
+   * address is already somebody clicking Send repeatedly.
+   */
+  remittance: 6,
 }
 
 export class RateLimitedError extends DomainError {
@@ -220,6 +228,11 @@ export function statementUrl(token: string): string {
   return `${appBaseUrl()}/s/${encodeURIComponent(token)}`
 }
 
+/** Where a supplier opens the remittance advice they were sent (Phase 58). */
+export function remittanceUrl(token: string): string {
+  return `${appBaseUrl()}/r/${encodeURIComponent(token)}`
+}
+
 /**
  * Sends an invoice to the customer who owes it.
  *
@@ -303,6 +316,46 @@ export async function sendStatementEmail(input: {
       `This statement is as at ${input.asOfDate} and does not change — it is the document to ` +
       'reconcile against. Anything paid since will be on the next one. Reply to this message if ' +
       'something on it looks wrong.',
+    reference: input.reference,
+  })
+}
+
+/**
+ * Sends a supplier the advice for a payment they have just received (Phase 58).
+ *
+ * The footnote is the third variant of the same sentence and each says
+ * something different on purpose. An invoice link tracks the live balance; a
+ * statement link is frozen at a date; this one describes a payment, which does
+ * not change — unless it is voided, and then the page says so. Getting them the
+ * same way round would make one of the three pages a liar.
+ */
+export async function sendRemittanceEmail(input: {
+  to: string
+  toName: string | null
+  companyId: string
+  companyName: string
+  amount: string
+  summary: string
+  token: string
+  isResend: boolean
+  reference: string
+}): Promise<SendOutcome> {
+  return sendTransactional({
+    to: input.to,
+    toName: input.toName,
+    companyId: input.companyId,
+    kind: 'remittance',
+    subject: remittanceSubject({
+      companyName: input.companyName,
+      amount: input.amount,
+      isResend: input.isResend,
+    }),
+    body: [input.toName ? `Hello ${input.toName},` : 'Hello,', input.summary],
+    action: { label: 'See what it covers', url: remittanceUrl(input.token) },
+    footnote:
+      'The link lists the invoices this payment settles, so you can apply it. It describes one ' +
+      'payment and does not change — if the payment is ever reversed, the page will say so. ' +
+      'Reply to this message if anything on it looks wrong.',
     reference: input.reference,
   })
 }

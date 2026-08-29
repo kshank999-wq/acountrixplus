@@ -51,6 +51,16 @@ export type TransactionalKind =
    * and over.
    */
   | 'statement'
+  /**
+   * A remittance advice, sent to a supplier who has just been paid (Phase 58).
+   *
+   * Its own kind because it is the only transactional message addressed to
+   * somebody the business *owes* rather than somebody who owes it, and because
+   * the rate limit belongs to a different shape: a pay run legitimately sends
+   * fifty of these in a minute to fifty addresses, but one supplier gets one
+   * per payment.
+   */
+  | 'remittance'
 
 export type TransactionalMessage = {
   to: string

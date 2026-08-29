@@ -502,6 +502,21 @@ export const payments = pgTable(
     /** Why. A void with no reason is a hole somebody has to reconstruct later. */
     voidReason: text('void_reason'),
 
+    /**
+     * The supplier's door onto this one payment (Phase 58).
+     *
+     * Minted on the first remittance send, never rotated, so an advice filed in
+     * an accounts-receivable inbox two years ago still opens. Per payment
+     * rather than per supplier: a link that opened "this supplier's payments"
+     * would let whoever holds July's advice read December's.
+     */
+    shareToken: text('share_token'),
+    /** When a remittance advice actually went, and where. Null until it does. */
+    remittanceSentAt: timestamp('remittance_sent_at', { withTimezone: true }),
+    remittanceSentTo: text('remittance_sent_to'),
+    /** How many times. "We sent that twice" is the fact a call turns on. */
+    remittanceSendCount: integer('remittance_send_count').notNull().default(0),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -512,6 +527,7 @@ export const payments = pgTable(
       t.status,
       t.paymentDate,
     ),
+    shareTokenIdx: uniqueIndex('payments_share_token_idx').on(t.shareToken),
     unappliedWithinAmount: check(
       'payments_unapplied_within_amount',
       sql`${t.unappliedCents} >= 0 AND ${t.unappliedCents} <= ${t.amountCents}`,

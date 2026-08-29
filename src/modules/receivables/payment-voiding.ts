@@ -149,6 +149,9 @@ export type PaymentRow = VoidablePayment & {
   restorations: Restoration[]
   /** Whether it may be taken back, and why not when it may not. */
   verdict: VoidVerdict
+  /** When the supplier was told what it covered, if ever (Phase 58). */
+  remittanceSentAt: Date | null
+  remittanceSendCount: number
 }
 
 /**
@@ -179,6 +182,9 @@ export async function listPayments(
       drawerShiftId: payments.drawerShiftId,
       customerName: customers.name,
       vendorName: vendors.name,
+      // Whether the supplier has been told what this payment covered (Phase 58).
+      remittanceSentAt: payments.remittanceSentAt,
+      remittanceSendCount: payments.remittanceSendCount,
     })
     .from(payments)
     .leftJoin(customers, eq(customers.id, payments.customerId))
@@ -209,6 +215,8 @@ export async function listPayments(
         voidReason: row.voidReason,
         restorations: await restorationsForPayment(ctx, row.id, row.kind),
         verdict: voidability({ payment, ties, closedPeriods, today }),
+        remittanceSentAt: row.remittanceSentAt,
+        remittanceSendCount: row.remittanceSendCount,
       }
     }),
   )

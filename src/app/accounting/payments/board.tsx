@@ -8,6 +8,7 @@ import {
   voidPaymentAction,
   type ActionResult,
 } from '@/app/actions/payables'
+import { sendRemittanceAction, shareRemittanceAction } from '@/app/actions/remittance'
 import type { VoidVerdict } from '@/modules/receivables/payment-void'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 
@@ -22,6 +23,9 @@ type Row = {
   voidReason: string | null
   restorations: { number: string; amountCents: number; status: 'open' | 'partial' }[]
   verdict: VoidVerdict
+  /** When the supplier was told what this payment covered (Phase 58). */
+  remittanceSentAt: string | null
+  remittanceSendCount: number
 }
 
 type Credit = {
@@ -323,6 +327,7 @@ export function PaymentsBoard({
                   <th className="px-4 py-2 font-medium">Who</th>
                   <th className="px-4 py-2 font-medium">Reference</th>
                   <th className="px-4 py-2 font-medium">Settled</th>
+                  <th className="px-4 py-2 font-medium">Advised</th>
                   <th className="px-4 py-2 text-right font-medium">Amount</th>
                   {canVoid && <th className="px-4 py-2" />}
                 </tr>
@@ -357,13 +362,64 @@ export function PaymentsBoard({
                             ? '—'
                             : row.restorations.map((r) => r.number).join(', ')}
                         </td>
+                        {/*
+                          Only money going out can be advised — a remittance
+                          sent to a customer would tell them the business had
+                          paid *them* (Phase 58).
+                        */}
+                        <td className="px-4 py-1.5 text-xs">
+                          {row.kind !== 'disbursement' ? (
+                            <span className="text-faint">—</span>
+                          ) : row.remittanceSentAt ? (
+                            <span className="text-muted">
+                              {row.remittanceSentAt}
+                              {row.remittanceSendCount > 1 && (
+                                <span className="text-faint">
+                                  {' '}
+                                  · {row.remittanceSendCount} times
+                                </span>
+                              )}
+                            </span>
+                          ) : voided ? (
+                            <span className="text-faint">—</span>
+                          ) : (
+                            <span className="text-faint">not sent</span>
+                          )}
+                        </td>
                         <td
                           className={`tnum px-4 py-1.5 text-right ${voided ? 'line-through' : ''}`}
                         >
                           {formatCents(row.amountCents)}
                         </td>
                         {canVoid && (
-                          <td className="px-4 py-1.5 text-right">
+                          <td className="whitespace-nowrap px-4 py-1.5 text-right">
+                            {/*
+                              Advising a supplier is not the same act as voiding
+                              a payment, and needs less: it describes money that
+                              has already gone (Phase 58).
+                            */}
+                            {row.kind === 'disbursement' && !voided && (
+                              <>
+                                <button
+                                  className="btn btn-ghost text-xs"
+                                  disabled={pending}
+                                  onClick={() =>
+                                    act(() => sendRemittanceAction({ paymentId: row.id }))
+                                  }
+                                >
+                                  {row.remittanceSentAt ? 'Advise again' : 'Advise'}
+                                </button>
+                                <button
+                                  className="btn btn-ghost text-xs"
+                                  disabled={pending}
+                                  onClick={() =>
+                                    act(() => shareRemittanceAction({ paymentId: row.id }))
+                                  }
+                                >
+                                  Get link
+                                </button>
+                              </>
+                            )}
                             {row.verdict.ok ? (
                               <button
                                 className="btn btn-ghost text-xs"
@@ -393,7 +449,7 @@ export function PaymentsBoard({
 
                       {open && row.verdict.ok && (
                         <tr className="border-t border-line bg-raised/40">
-                          <td colSpan={canVoid ? 6 : 5} className="px-4 py-3">
+                          <td colSpan={canVoid ? 7 : 6} className="px-4 py-3">
                             <p className="text-sm">{row.verdict.why}</p>
 
                             {row.restorations.length > 0 && (
@@ -439,7 +495,9 @@ export function PaymentsBoard({
                           the record that has the money and what to do there. */}
                       {!row.verdict.ok && !voided && canVoid && (
                         <tr className="border-t border-line/60">
-                          <td colSpan={6} className="px-4 pb-2 text-xs text-muted">
+                          {/* Only rendered when `canVoid`, so the row always
+                              carries the trailing action column too. */}
+                          <td colSpan={7} className="px-4 pb-2 text-xs text-muted">
                             {row.verdict.why}
                           </td>
                         </tr>

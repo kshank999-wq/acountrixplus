@@ -2644,6 +2644,48 @@ no other screen surfaces. **Run it now**, pressed on the 29th with the run day
 set to the 1st, declined honestly rather than forcing a send the schedule would
 never make.
 
+### Telling a supplier what a payment was for (Phase 58)
+
+Phase 57's ADR nominated this one: *"the useful version is a remittance advice —
+what a pay run just paid and against which bills."*
+
+Phase 49 made one payment settle four bills. What reaches the supplier's bank is
+a single line — `BACS 88213`, $12,054.00 — against a ledger carrying nine open
+invoices, and they have to guess which. Guessing wrong leaves invoices showing as
+unpaid, which produces a statement chasing money already sent, which produces the
+phone call. Every figure needed to prevent that already sat in
+`payment_applications`; nothing had ever pointed it at the person who needed it.
+
+**Advise** on the payments board emails the supplier a link to `/r/<token>`,
+which lists what the payment covered — **their** invoice reference first, because
+`BILL-1005` means nothing on their side of the transaction (Phase 47). **Get
+link** mints the same URL without claiming an advice was sent, which is also what
+a supplier with no address on file is told to use.
+
+**The advice is not frozen, and that is the whole design.** Phase 55 froze a
+statement because a statement is a claim about a *moment* and the books move
+underneath it. This is a claim about a *payment*, and a posted payment does not
+change — so a snapshot table would only be a second copy of figures that cannot
+drift.
+
+**With one exception, and it is the exception that decided it.** Phase 52 made a
+payment voidable, and reading live is exactly what lets the page tell a supplier
+the money came back:
+
+> **This payment was reversed.** The money described below came back, so the
+> invoices it covered are outstanding again. Reason given: Paid the wrong
+> supplier.
+
+Verified in the browser end to end: advised Supply Depot ($6,200.00 against
+BILL-1001), opened the supplier's page, took the payment back, and reloaded **the
+same link** — which now leads with the reversal, strikes through the amount and
+relabels it *Was paid*. A stored snapshot would have gone on insisting the
+payment stood. It is the first public page in the system that changes what it
+says after the fact, and it does so because the underlying fact changed.
+
+Sending is gated on `accounting:view` rather than the permission that moves
+money: telling somebody what they were already paid asserts nothing new.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

@@ -78,6 +78,12 @@ export default async function PaymentsPage() {
             status: r.status,
           })),
           verdict: row.verdict,
+          // Date only: the hour an advice went is noise beside the day, and a
+          // raw Date would not survive the server boundary anyway.
+          remittanceSentAt: row.remittanceSentAt
+            ? row.remittanceSentAt.toISOString().slice(0, 10)
+            : null,
+          remittanceSendCount: row.remittanceSendCount,
         }))}
         credits={credits.map((row) => ({
           paymentId: row.paymentId,
