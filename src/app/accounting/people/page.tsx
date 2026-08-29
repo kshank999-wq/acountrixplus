@@ -2,6 +2,7 @@ import { requireActor, currentSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listCustomerSummaries, listVendorSummaries } from '@/modules/parties/service'
+import { functionalCurrency } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { PeopleBoard } from './board'
 
@@ -30,9 +31,10 @@ export default async function PeoplePage() {
     )
   }
 
-  const [customers, vendors] = await Promise.all([
+  const [customers, vendors, homeCurrency] = await Promise.all([
     can(actor, 'crm:view') ? listCustomerSummaries(actor) : Promise.resolve([]),
     listVendorSummaries(actor),
+    functionalCurrency(actor.companyId),
   ])
 
   return (
@@ -47,6 +49,10 @@ export default async function PeoplePage() {
         vendors={vendors}
         canEditCustomers={can(actor, 'crm:manage')}
         canEditVendors={can(actor, 'accounting:journal')}
+        homeCurrency={homeCurrency}
+        // Decided here rather than in the browser: an age computed from the
+        // reader's own clock is one two people disagree about (Phase 56).
+        asOf={new Date().toISOString().slice(0, 10)}
       />
     </AppShell>
   )

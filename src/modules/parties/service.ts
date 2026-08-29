@@ -1,9 +1,10 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { bills, customers, invoices, vendors } from '@/db/schema'
+import { bills, creditNotes, customers, invoices, payments, vendors } from '@/db/schema'
 import { DomainError } from '@/modules/errors'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { functionalCurrency } from '@/modules/fx/service'
 import { deactivationCheck } from './changes'
 
 /**
@@ -30,8 +31,25 @@ export type PartySummary = {
   isActive: boolean
   /** Documents still open. What stops them being retired. */
   openDocuments: number
-  /** What they owe, or what is owed to them. */
+  /**
+   * What their open documents come to, in the **home currency** (Phase 56).
+   *
+   * Functional, not face. This summed `balance_cents` until Phase 56, so a
+   * customer with a €2,500 invoice was shown "$2,500.00" and one holding a
+   * $1,000 and a €2,500 invoice was shown "$3,500.00" — which Phase 35 called
+   * "3,500 of nothing with a dollar sign in front of it" when it fixed the
+   * identical bug two queries away.
+   */
   balanceCents: number
+  /**
+   * What is held against them: a customer's overpayment (Phase 53), or the
+   * unspent part of a vendor credit (Phase 12).
+   */
+  heldCreditCents: number
+  /** The due date of the oldest thing still unpaid, so the figure has an age. */
+  oldestDueDate: string | null
+  /** True when any open document is in a currency other than the home one. */
+  hasForeignDocuments: boolean
   /** Every document ever, so a quiet record is distinguishable from a new one. */
   documentCount: number
 }
@@ -54,13 +72,36 @@ const OPEN_STATUSES = ['open', 'partial'] as const
 export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySummary[]> {
   requirePermission(ctx, 'crm:view')
 
+  // Phase 35's helper rather than a third inline copy of the same query.
+  const home = await functionalCurrency(ctx.companyId)
+
   const trading = db
     .select({
       customerId: invoices.customerId,
       openDocuments: sql<string>`count(*) filter (where ${inArray(invoices.status, [...OPEN_STATUSES])})`.as(
         'open_documents',
       ),
-      balanceCents: sql<string>`coalesce(sum(${invoices.balanceCents}), 0)`.as('balance_cents'),
+      /**
+       * The **home-currency** balance (Phase 56, and Phase 35's rule).
+       *
+       * `balance_cents` is what the document says; `functional_balance_cents` is
+       * what it is worth on these books. Summing the first across currencies
+       * produces a number with no meaning and a currency symbol that lies.
+       */
+      balanceCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`.as(
+        'balance_cents',
+      ),
+      /**
+       * The oldest thing still unpaid, so the figure carries an age. Filtered
+       * to documents with something left on them: a settled invoice from 2019
+       * is not what makes an account late.
+       */
+      oldestDueDate: sql<string | null>`min(${invoices.dueDate}) filter (where ${invoices.balanceCents} > 0)`.as(
+        'oldest_due_date',
+      ),
+      foreignCount: sql<string>`count(*) filter (where ${invoices.currency} <> ${home} and ${invoices.balanceCents} > 0)`.as(
+        'foreign_count',
+      ),
       documentCount: sql<string>`count(*)`.as('document_count'),
     })
     .from(invoices)
@@ -68,15 +109,43 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
     .groupBy(invoices.customerId)
     .as('trading')
 
+  /**
+   * What the business is holding for each customer (Phase 53).
+   *
+   * A subquery rather than another join onto the grouped invoice rows, for the
+   * reason Phase 54 gave when it did the same on the statement picker: joining
+   * it alongside `invoices` multiplies the credit by the number of documents.
+   * Void receipts hold nothing (Phase 52).
+   */
+  const heldCredit = db
+    .select({
+      customerId: payments.customerId,
+      heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
+    })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.companyId, ctx.companyId),
+        eq(payments.status, 'posted'),
+        sql`${payments.unappliedCents} > 0`,
+      ),
+    )
+    .groupBy(payments.customerId)
+    .as('held_credit')
+
   const rows = await db
     .select({
       customer: customers,
       openDocuments: trading.openDocuments,
       balanceCents: trading.balanceCents,
+      oldestDueDate: trading.oldestDueDate,
+      foreignCount: trading.foreignCount,
       documentCount: trading.documentCount,
+      heldCreditCents: heldCredit.heldCents,
     })
     .from(customers)
     .leftJoin(trading, eq(trading.customerId, customers.id))
+    .leftJoin(heldCredit, eq(heldCredit.customerId, customers.id))
     .where(scoped(ctx, customers))
     .orderBy(sql`lower(${customers.name})`)
 
@@ -95,6 +164,9 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
     isActive: row.customer.isActive,
     openDocuments: Number(row.openDocuments ?? 0),
     balanceCents: Number(row.balanceCents ?? 0),
+    heldCreditCents: Number(row.heldCreditCents ?? 0),
+    oldestDueDate: row.oldestDueDate ?? null,
+    hasForeignDocuments: Number(row.foreignCount ?? 0) > 0,
     documentCount: Number(row.documentCount ?? 0),
   }))
 }
@@ -102,13 +174,25 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
 export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSummary[]> {
   requirePermission(ctx, 'accounting:view')
 
+  // Phase 35's helper rather than a third inline copy of the same query.
+  const home = await functionalCurrency(ctx.companyId)
+
   const trading = db
     .select({
       vendorId: bills.vendorId,
       openDocuments: sql<string>`count(*) filter (where ${inArray(bills.status, [...OPEN_STATUSES])})`.as(
         'open_documents',
       ),
-      balanceCents: sql<string>`coalesce(sum(${bills.balanceCents}), 0)`.as('balance_cents'),
+      // The home-currency balance, for the reason on the customer side above.
+      balanceCents: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)`.as(
+        'balance_cents',
+      ),
+      oldestDueDate: sql<string | null>`min(${bills.dueDate}) filter (where ${bills.balanceCents} > 0)`.as(
+        'oldest_due_date',
+      ),
+      foreignCount: sql<string>`count(*) filter (where ${bills.currency} <> ${home} and ${bills.balanceCents} > 0)`.as(
+        'foreign_count',
+      ),
       documentCount: sql<string>`count(*)`.as('document_count'),
     })
     .from(bills)
@@ -116,15 +200,41 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
     .groupBy(bills.vendorId)
     .as('trading')
 
+  /**
+   * The mirror of a customer's held credit: what a supplier still owes us back
+   * (Phase 12). An unspent vendor credit reduces what the next payment run will
+   * send them, so a screen showing the gross overstates what is about to leave
+   * the bank — the same untruth the customer side told, pointing the other way.
+   */
+  const unspentCredit = db
+    .select({
+      vendorId: creditNotes.vendorId,
+      heldCents: sql<string>`sum(${creditNotes.remainingCents})`.as('held_cents'),
+    })
+    .from(creditNotes)
+    .where(
+      and(
+        eq(creditNotes.companyId, ctx.companyId),
+        sql`${creditNotes.vendorId} is not null`,
+        sql`${creditNotes.remainingCents} > 0`,
+      ),
+    )
+    .groupBy(creditNotes.vendorId)
+    .as('unspent_credit')
+
   const rows = await db
     .select({
       vendor: vendors,
       openDocuments: trading.openDocuments,
       balanceCents: trading.balanceCents,
+      oldestDueDate: trading.oldestDueDate,
+      foreignCount: trading.foreignCount,
       documentCount: trading.documentCount,
+      heldCreditCents: unspentCredit.heldCents,
     })
     .from(vendors)
     .leftJoin(trading, eq(trading.vendorId, vendors.id))
+    .leftJoin(unspentCredit, eq(unspentCredit.vendorId, vendors.id))
     .where(scoped(ctx, vendors))
     .orderBy(sql`lower(${vendors.name})`)
 
@@ -145,6 +255,9 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
     is1099Vendor: row.vendor.is1099Vendor,
     openDocuments: Number(row.openDocuments ?? 0),
     balanceCents: Number(row.balanceCents ?? 0),
+    heldCreditCents: Number(row.heldCreditCents ?? 0),
+    oldestDueDate: row.oldestDueDate ?? null,
+    hasForeignDocuments: Number(row.foreignCount ?? 0) > 0,
     documentCount: Number(row.documentCount ?? 0),
   }))
 }

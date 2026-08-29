@@ -10,6 +10,7 @@ import {
   type ActionResult,
 } from '@/app/actions/parties'
 import { formatCents } from '@/lib/money'
+import { partyStanding } from '@/modules/parties/standing'
 
 type Party = {
   id: string
@@ -25,7 +26,12 @@ type Party = {
   notes: string | null
   isActive: boolean
   openDocuments: number
+  /** Home currency since Phase 56 — it used to sum face amounts across them. */
   balanceCents: number
+  /** Their overpayment, or their unspent credit against us (Phase 56). */
+  heldCreditCents: number
+  oldestDueDate: string | null
+  hasForeignDocuments: boolean
   documentCount: number
 }
 
@@ -46,11 +52,16 @@ export function PeopleBoard({
   vendors,
   canEditCustomers,
   canEditVendors,
+  asOf,
+  homeCurrency,
 }: {
   customers: Party[]
   vendors: Vendor[]
   canEditCustomers: boolean
   canEditVendors: boolean
+  /** Today, decided on the server so every reader sees the same ages. */
+  asOf: string
+  homeCurrency: string
 }) {
   const router = useRouter()
   const [side, setSide] = useState<'customers' | 'vendors'>('customers')
@@ -207,14 +218,31 @@ export function PeopleBoard({
                 <th className="px-4 py-2">Where</th>
                 <th className="px-4 py-2 text-right">Terms</th>
                 <th className="px-4 py-2 text-right">Outstanding</th>
+                <th className="px-4 py-2">Standing</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
             <tbody>
-              {rows.map((row) => (
+              {rows.map((row) => {
+                /**
+                 * Computed once per row, and from `asOf` rather than the
+                 * browser's clock — this is a client component, and a figure
+                 * that depends on the reader's machine is one two people
+                 * disagree about (Phase 56).
+                 */
+                const standing = partyStanding({
+                  owedCents: row.balanceCents,
+                  heldCents: row.heldCreditCents,
+                  oldestDueDate: row.oldestDueDate,
+                  asOf,
+                  side: isVendors ? 'vendor' : 'customer',
+                  currency: homeCurrency,
+                })
+
+                return (
                 <tr key={row.id} className="border-t border-line align-top">
                   {editing === row.id ? (
-                    <td colSpan={6} className="px-4 py-4">
+                    <td colSpan={7} className="px-4 py-4">
                       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                         {field('name', 'Name')}
                         {field(
@@ -306,11 +334,57 @@ export function PeopleBoard({
                       <td className="tnum px-4 py-2 text-right text-muted">
                         {row.paymentTermsDays}d
                       </td>
+                      {/*
+                        The net, with the gross under it when they differ
+                        (Phase 56). Showing only the net would leave somebody
+                        unable to tie this to the invoices; showing only the
+                        gross is what the screen used to do, and it asks for
+                        money the business is already holding.
+                      */}
                       <td className="tnum px-4 py-2 text-right">
-                        {row.balanceCents === 0 ? (
+                        {standing.position.dueCents === 0 &&
+                        row.balanceCents === 0 &&
+                        row.heldCreditCents === 0 ? (
                           <span className="text-faint">—</span>
                         ) : (
-                          formatCents(row.balanceCents)
+                          <>
+                            <span
+                              className={
+                                standing.band === 'long_overdue' ? 'text-danger' : undefined
+                              }
+                            >
+                              {formatCents(standing.position.dueCents, homeCurrency)}
+                            </span>
+                            {row.heldCreditCents > 0 && (
+                              <span className="block text-xs text-faint">
+                                {formatCents(row.balanceCents, homeCurrency)} billed
+                              </span>
+                            )}
+                          </>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-xs">
+                        <span
+                          className={
+                            standing.band === 'long_overdue'
+                              ? 'text-danger'
+                              : standing.band === 'overdue'
+                                ? 'text-muted'
+                                : 'text-faint'
+                          }
+                        >
+                          {standing.note}
+                        </span>
+                        {/*
+                          Said out loud rather than silently converted. The
+                          figure beside it is the home-currency one, and a
+                          customer billed in euros needs somebody to know that
+                          before they quote it back down a phone (Phase 35).
+                        */}
+                        {row.hasForeignDocuments && (
+                          <span className="block text-faint">
+                            includes documents in another currency
+                          </span>
                         )}
                       </td>
                       <td className="px-4 py-2 text-right">
@@ -327,7 +401,8 @@ export function PeopleBoard({
                     </>
                   )}
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>

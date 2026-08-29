@@ -2552,6 +2552,46 @@ that means anything: $1,540 was paid against the invoice the statement lists,
 and the customer's page still read **due $1,540.00, billed $2,000.00** — exactly
 what it said when it went.
 
+### The balance that added currencies together (Phase 56)
+
+Two defects on one column of the customers and suppliers screen, both live on
+the demo books.
+
+**It added currencies together.** `listCustomerSummaries` summed
+`invoices.balance_cents` — the *document* amount — and the board rendered it with
+`formatCents`, which defaults to USD. Bremen Hafenbau GmbH owes **€2,500**, worth
+$2,708.75 on these books, and the screen said **$2,500.00**. A customer billed in
+both currencies would have had their $1,000 and their €2,500 added to "$3,500.00"
+— which Phase 35 called *"3,500 of nothing with a dollar sign in front of it"*
+when it fixed this identical bug one query away, and left this one alone.
+
+**It could not see held credit.** Phase 53 gave an overpayment a home and Phase 54
+netted it off the statement and the chase; this screen — the one somebody opens
+when the customer rings — still showed the gross. Both ADRs named it as the
+follow-up.
+
+- **The figure is the functional balance**, and the row says *"includes documents
+  in another currency"* out loud rather than silently converting, so nobody
+  quotes $2,708.75 down a phone to somebody holding a euro invoice.
+- **The number is the net, with the gross beneath it** — the shape Phase 54 chose
+  for the statement, for the same reason. On the supplier side the mirror is an
+  unspent vendor credit, which overstates what is about to leave the bank.
+- **The band follows the net, not the age.** A customer with a $900 invoice two
+  hundred days old and $900 of their own money in `2520` is not somebody to
+  chase; painting that row red sends a person to have the wrong conversation.
+- **It composes `netPosition` rather than answering again.** "What does this
+  party owe on net" was decided in Phase 54, and a second implementation would be
+  two answers to one question. This module adds only the age and the wording.
+- **`asOf` comes from the server**, because the board is a client component and
+  an age computed from the reader's clock is one two people disagree about.
+
+**How it was found**: by reading the query, then confirming against the books
+before changing anything — `select currency, balance_cents,
+functional_balance_cents` showed Bremen at `EUR / 250000 / 270875` while the
+screen said $2,500.00. Afterwards the row reads **$2,708.75**, City Works
+Authority reads *"They owe $9,400.00, oldest 106 days overdue"*, and Harborview —
+owing $460 with a $460 overpayment held — reads **nothing due**.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
