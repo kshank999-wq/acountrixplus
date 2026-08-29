@@ -802,8 +802,10 @@ function PaymentPanel({
           {isCustomer ? 'Record money received' : 'Record money paid'}
         </h3>
         <p className="text-xs text-muted">
-          Applied oldest first unless you say otherwise. A payment for more than is outstanding
-          is refused rather than left sitting against nothing.
+          Applied oldest first unless you say otherwise.{' '}
+          {isCustomer
+            ? 'More than is outstanding is banked in full and the difference held as credit for them — never trimmed to fit.'
+            : 'More than is outstanding is refused: paying a supplier too much leaves them owing you, which is a vendor credit.'}
         </p>
       </header>
 

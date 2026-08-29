@@ -30,6 +30,11 @@
  * Nothing here touches the database or the clock. `asOf` is passed in.
  */
 
+// The one import this module has, and it is another pure one: the rule about
+// not chasing somebody whose money you are holding is documented where it is
+// decided (Phase 54), rather than restated here as a bare comparison.
+import { chaseableAgainstCredit } from './net-position'
+
 /** How a company wants its invoices chased. */
 export type ChasePolicy = {
   /**
@@ -101,6 +106,13 @@ export type ChaseableInvoice = {
    * out today and then does not send it is worse than one that never listed it.
    */
   customerEmail: string | null
+  /**
+   * What the business is holding for this customer, across all their receipts
+   * (Phase 54). Optional so every existing caller keeps compiling and reads as
+   * "nothing held", which is what it was before Phase 53 made otherwise
+   * possible.
+   */
+  heldCreditCents?: number
 }
 
 export type ChaseVerdict =
@@ -130,6 +142,15 @@ export type ChaseRefusal =
   | 'enough_already'
   | 'too_small'
   | 'just_paid'
+  /**
+   * The business is holding money for this customer (Phase 54).
+   *
+   * Phase 53 gave an overpayment somewhere to live and left this run blind to
+   * it, so a customer who had sent too much would receive a demand for money
+   * the business was sitting on — sent by a scheduler, without anybody
+   * deciding again.
+   */
+  | 'holding_their_money'
 
 /** Whole days from `from` to `to`, negative when `to` is earlier. */
 export function daysBetween(from: string, to: string): number {
@@ -165,6 +186,20 @@ export function chaseVerdict(input: {
   }
 
   if (invoice.balanceCents <= 0) return { chase: false, reason: 'settled' }
+
+  /**
+   * Nothing goes out while the business is holding this customer's money.
+   *
+   * Placed here, among the reasons it is *wrong to chase at all*, rather than
+   * with the timing ones: a letter asking for money you are sitting on is not
+   * early, it is incorrect. And it is decided on the customer's whole position
+   * rather than this invoice, because somebody has to say where that credit
+   * belongs — apply it or refund it — and that is a person's decision, not a
+   * scheduler's.
+   */
+  if (!chaseableAgainstCredit({ heldCents: invoice.heldCreditCents ?? 0 })) {
+    return { chase: false, reason: 'holding_their_money' }
+  }
 
   // You cannot remind somebody of something you never told them. The first
   // contact is a person's decision — a robot introducing itself with a demand
@@ -232,6 +267,7 @@ export const REFUSAL_LABELS: Record<ChaseRefusal, string> = {
   enough_already: 'chased as often as the policy allows',
   too_small: 'below the amount worth chasing',
   just_paid: 'paid something recently',
+  holding_their_money: 'we are holding credit for this customer',
 }
 
 /**

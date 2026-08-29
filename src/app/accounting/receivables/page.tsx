@@ -107,6 +107,7 @@ export default async function ReceivablesPage() {
           email: row.email,
           balanceCents: Number(row.balanceCents),
           openCount: Number(row.openCount),
+          heldCreditCents: Number(row.heldCreditCents),
         }))}
         statements={statements.map((row) => ({
           id: row.id,
@@ -114,6 +115,9 @@ export default async function ReceivablesPage() {
           kind: row.kind,
           asOfDate: row.asOfDate,
           closingBalanceCents: row.closingBalanceCents,
+          heldCreditCents: row.heldCreditCents,
+          dueCents: row.dueCents,
+          positionNote: row.positionNote,
           sentTo: row.sentTo,
         }))}
         openInvoices={openInvoices

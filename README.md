@@ -2467,6 +2467,49 @@ Two exports were deleted before commit rather than shipped: `describeCredit` and
 `creditFor` were written, tested and called from nowhere — the exact pattern
 Phases 48, 49 and 51 each found as a live defect.
 
+### The letter that asks for money we are holding (Phase 54)
+
+Phase 53 closed a real hole and opened two — and this phase fixes damage the
+previous one did, rather than something that was always broken. Once a customer
+could hold $600 of credit against a $900 open invoice:
+
+- **The chase run** reads invoice balances and nothing else, so it would have
+  emailed that customer a demand for $900. Phase 43's whole design is that these
+  letters go out *without anybody deciding again*, which is exactly what makes a
+  wrong one serious — nobody is in the loop to catch it.
+- **The statement** computes its closing balance from open invoices, so the same
+  customer would receive a document claiming $900 is due. That is a claim they
+  can disprove from their own bank records.
+
+- **Nothing goes out while anything is held**, decided on the customer's whole
+  position rather than invoice by invoice. A customer holding $600 with two $500
+  invoices owes $400 on net: chasing the older one for its full $500 asks for
+  more than is due, and chasing neither leaves $400 uncollected for ever.
+- **It is a pause, not an exemption.** Somebody has to decide where the credit
+  belongs — apply it or refund it — and that is a person's call, not a
+  scheduler's. Chasing resumes the moment the credit is nil, through all three
+  ends: applied, refunded, or the receipt voided (Phase 52).
+- **The statement keeps the gross and adds the net.** Replacing the gross would
+  break its other job — a customer reconciling against their own purchase ledger
+  needs to see what was *billed*. So it says both, plus a sentence.
+- **Not netted into the aging report.** Aging is about receivables, by age, so
+  somebody can judge how collectable they are; held credit is a liability on the
+  other side of the balance sheet, and netting it in would hide it. A statement
+  and a chase are different — both address one customer and claim what *they*
+  should do next, and for those the gross is not merely unhelpful, it is untrue.
+- **A saved statement is read back, never recomputed** — otherwise one sent in
+  March quietly changes its mind in July, and "what did we tell them?" is the
+  only question that list answers.
+
+**The browser found two real things.** The sentence had no currency symbol —
+*"1540.00 is due"* beside a table of `$` figures — and the payment form still
+promised Phase 53's removed refusal: *"A payment for more than is outstanding is
+refused."* Both fixed. The walk-through then recorded $29,500 against $29,040
+outstanding, moved the customer's next invoice out of **Would go out today** into
+**Not being chased** under *"we are holding credit for this customer"*, and read
+Billed $2,000.00 / Held $460.00 / Asked for $1,540.00 on the statement — with
+both control accounts still agreeing to the cent.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

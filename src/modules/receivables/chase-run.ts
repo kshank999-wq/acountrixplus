@@ -1,4 +1,4 @@
-import { and, eq, inArray, sql } from 'drizzle-orm'
+import { and, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { customers, invoices, payments, paymentApplications } from '@/db/schema'
 import { logUnexpected } from '@/modules/errors'
@@ -61,6 +61,31 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
     .groupBy(paymentApplications.invoiceId)
     .as('last_payment')
 
+  /**
+   * What the business is holding for each customer (Phase 54).
+   *
+   * A subquery rather than a second round trip: `chaseCandidates` runs once a
+   * day over every invoice on the books, and the preview screen calls it too.
+   *
+   * Void receipts hold nothing (Phase 52), which is the same exclusion the
+   * last-payment subquery above makes for the same reason.
+   */
+  const heldCredit = db
+    .select({
+      customerId: payments.customerId,
+      heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
+    })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.companyId, companyId),
+        eq(payments.status, 'posted'),
+        gt(payments.unappliedCents, 0),
+      ),
+    )
+    .groupBy(payments.customerId)
+    .as('held_credit')
+
   const rows = await db
     .select({
       id: invoices.id,
@@ -75,10 +100,12 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
       customerName: customers.name,
       customerEmail: customers.email,
       lastPaymentDate: lastPayment.lastDate,
+      heldCreditCents: heldCredit.heldCents,
     })
     .from(invoices)
     .innerJoin(customers, eq(customers.id, invoices.customerId))
     .leftJoin(lastPayment, eq(lastPayment.invoiceId, invoices.id))
+    .leftJoin(heldCredit, eq(heldCredit.customerId, invoices.customerId))
     .where(
       and(
         eq(invoices.companyId, companyId),
@@ -100,6 +127,7 @@ export async function chaseCandidates(companyId: string): Promise<ChaseCandidate
     sentAt: row.sentAt ? row.sentAt.toISOString().slice(0, 10) : null,
     sendCount: row.sendCount,
     lastPaymentDate: row.lastPaymentDate ?? null,
+    heldCreditCents: Number(row.heldCreditCents ?? 0),
     customerEmail: row.customerEmail,
     customerId: row.customerId,
     customerName: row.customerName,

@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, lte, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
+  companies,
   creditApplications,
   creditNotes,
   customerStatements,
@@ -12,6 +13,7 @@ import {
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { describeNet, netPosition } from './net-position'
 import { agingBucket } from '@/modules/ledger/reports'
 
 /**
@@ -61,7 +63,30 @@ export type CustomerStatement = {
   periodStart: string | null
   asOfDate: string
   openingBalanceCents: number
+  /**
+   * What the invoices on this statement come to, before credit is netted off.
+   *
+   * Kept alongside `dueCents` rather than replaced by it, because the two
+   * answer different questions: the gross is what was billed, and the net is
+   * what to pay. A statement that showed only the net would leave a customer
+   * unable to reconcile it against their own purchase ledger.
+   */
   closingBalanceCents: number
+  /**
+   * What the business is holding for this customer (Phase 54).
+   *
+   * Phase 53 gave an overpayment somewhere to live and left this document
+   * blind to it, so a customer holding $600 against a $900 invoice was sent a
+   * statement claiming $900 — a claim they could disprove from their own bank
+   * records.
+   */
+  heldCreditCents: number
+  /** What is actually due once the credit is netted off. Never below zero. */
+  dueCents: number
+  /** What the business still owes them, when the credit runs past the debt. */
+  ourDebtCents: number
+  /** A sentence for the covering note, decided by the same pure function. */
+  positionNote: string
   lines: StatementLine[]
   /** Unpaid documents by age, so the covering note can say "60 days overdue". */
   aging: Record<string, number>
@@ -146,6 +171,41 @@ export async function buildStatement(
       ? running
       : lines.reduce((sum, line) => sum + (line.balanceCents ?? 0), 0)
 
+  /**
+   * What the business is holding for them, across every posted receipt.
+   *
+   * Read here rather than by the caller because all three views of a statement
+   * — the preview, the saved record and the rendered document — come through
+   * this function, and they must never disagree about what a customer owes.
+   *
+   * Cut off at `asOfDate`, like the invoices above it: a receipt that arrived
+   * in August did not reduce what was due on the June statement, and counting
+   * it would net a credit against invoices it had not yet met.
+   */
+  const [heldRow] = await db
+    .select({ total: sql<string>`coalesce(sum(${payments.unappliedCents}), 0)` })
+    .from(payments)
+    .where(
+      scoped(
+        ctx,
+        payments,
+        eq(payments.customerId, input.customerId),
+        eq(payments.status, 'posted'),
+        lte(payments.paymentDate, input.asOfDate),
+      ),
+    )
+
+  const heldCreditCents = Number(heldRow?.total ?? 0)
+  const position = netPosition({ owedCents: closingBalanceCents, heldCents: heldCreditCents })
+
+  // The company's own currency, because every figure on this statement is the
+  // home-currency one (Phase 35) — including the balance the sentence restates.
+  const [company] = await db
+    .select({ currency: companies.currency })
+    .from(companies)
+    .where(eq(companies.id, ctx.companyId))
+    .limit(1)
+
   const aging: Record<string, number> = {
     current: 0,
     d1_30: 0,
@@ -168,6 +228,10 @@ export async function buildStatement(
     asOfDate: input.asOfDate,
     openingBalanceCents,
     closingBalanceCents,
+    heldCreditCents,
+    dueCents: position.dueCents,
+    ourDebtCents: position.ourDebtCents,
+    positionNote: describeNet(position, company?.currency ?? 'USD'),
     lines,
     aging,
     oldestUnpaidDate: open[0]?.issueDate ?? null,
@@ -357,6 +421,16 @@ export async function saveStatement(
           lines: statement.lines,
           aging: statement.aging,
           oldestUnpaidDate: statement.oldestUnpaidDate,
+          /**
+           * Frozen with everything else (Phase 54). A statement sent in March
+           * has to still say in July what it said in March — including that
+           * $600 of the customer's money was being held at the time, which is
+           * the figure they would query.
+           */
+          heldCreditCents: statement.heldCreditCents,
+          dueCents: statement.dueCents,
+          ourDebtCents: statement.ourDebtCents,
+          positionNote: statement.positionNote,
         },
         sentTo: input.sentTo ?? statement.customerEmail,
         createdBy: ctx.userId,
@@ -374,6 +448,8 @@ export async function saveStatement(
           kind: statement.kind,
           asOfDate: statement.asOfDate,
           closingBalanceCents: statement.closingBalanceCents,
+          heldCreditCents: statement.heldCreditCents,
+          dueCents: statement.dueCents,
         },
       },
       tx,
@@ -389,7 +465,7 @@ export async function listStatements(
 ) {
   requirePermission(ctx, 'accounting:view')
 
-  return db
+  const rows = await db
     .select({
       id: customerStatements.id,
       customerId: customerStatements.customerId,
@@ -397,6 +473,7 @@ export async function listStatements(
       kind: customerStatements.kind,
       asOfDate: customerStatements.asOfDate,
       closingBalanceCents: customerStatements.closingBalanceCents,
+      figures: customerStatements.figures,
       sentAt: customerStatements.sentAt,
       sentTo: customerStatements.sentTo,
       createdAt: customerStatements.createdAt,
@@ -412,11 +489,58 @@ export async function listStatements(
     )
     .orderBy(desc(customerStatements.createdAt))
     .limit(opts.limit ?? 50)
+
+  return rows.map((row) => {
+    /**
+     * Read back out of the frozen figures rather than recomputed (Phase 54).
+     *
+     * Asking the books again would answer as of *today*, so a statement sent in
+     * March would silently change its mind in July — which is exactly the
+     * question somebody has the list open to answer: what did we tell them?
+     *
+     * Absent on every statement saved before Phase 54, which read as a plain
+     * gross balance and should keep reading as one.
+     */
+    const frozen = (row.figures ?? {}) as Partial<
+      Pick<CustomerStatement, 'heldCreditCents' | 'dueCents' | 'positionNote'>
+    >
+
+    return {
+      ...row,
+      heldCreditCents: frozen.heldCreditCents ?? 0,
+      dueCents: frozen.dueCents ?? row.closingBalanceCents,
+      positionNote: frozen.positionNote ?? null,
+    }
+  })
 }
 
 /** Customers with something outstanding, for choosing who to send to. */
 export async function customersWithBalances(ctx: ActorContext) {
   requirePermission(ctx, 'accounting:view')
+
+  /**
+   * What the business is holding for each customer (Phase 54).
+   *
+   * A subquery rather than another join onto the same grouped rows: joining it
+   * alongside `invoices` would multiply the receipts by the open invoices and
+   * count the held credit once per invoice. Void receipts hold nothing
+   * (Phase 52).
+   */
+  const heldCredit = db
+    .select({
+      customerId: payments.customerId,
+      heldCents: sql<string>`sum(${payments.unappliedCents})`.as('held_cents'),
+    })
+    .from(payments)
+    .where(
+      and(
+        eq(payments.companyId, ctx.companyId),
+        eq(payments.status, 'posted'),
+        gt(payments.unappliedCents, 0),
+      ),
+    )
+    .groupBy(payments.customerId)
+    .as('held_credit')
 
   return db
     .select({
@@ -429,6 +553,7 @@ export async function customersWithBalances(ctx: ActorContext) {
       // front of it (Phase 35).
       balanceCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
       openCount: sql<string>`count(${invoices.id})`,
+      heldCreditCents: sql<string>`coalesce(max(${heldCredit.heldCents}), 0)`,
     })
     .from(customers)
     .leftJoin(
@@ -439,6 +564,7 @@ export async function customersWithBalances(ctx: ActorContext) {
         sql`${invoices.status} NOT IN ('void', 'written_off')`,
       ),
     )
+    .leftJoin(heldCredit, eq(heldCredit.customerId, customers.id))
     .where(scoped(ctx, customers))
     .groupBy(customers.id, customers.name, customers.email)
     .orderBy(desc(sql`coalesce(sum(${invoices.functionalBalanceCents}), 0)`))

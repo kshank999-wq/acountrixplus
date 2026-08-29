@@ -44,6 +44,8 @@ type CustomerRow = {
   email: string | null
   balanceCents: number
   openCount: number
+  /** What is being held for them right now (Phase 54). */
+  heldCreditCents: number
 }
 
 type StatementRow = {
@@ -52,6 +54,11 @@ type StatementRow = {
   kind: string
   asOfDate: string
   closingBalanceCents: number
+  /** What was being held for them when the statement was sent (Phase 54). */
+  heldCreditCents: number
+  /** What was actually due after that credit — the figure the customer paid to. */
+  dueCents: number
+  positionNote: string | null
   sentTo: string | null
 }
 
@@ -452,6 +459,14 @@ export function ReceivablesBoard({
                 <option key={customer.id} value={customer.id}>
                   {customer.name}
                   {customer.balanceCents > 0 ? ` — ${formatCents(customer.balanceCents)}` : ''}
+                  {/*
+                    Said here as well as on the statement, because the person
+                    choosing who to send to is the one who can decide where the
+                    credit belongs before it goes out (Phase 54).
+                  */}
+                  {customer.heldCreditCents > 0
+                    ? ` · ${formatCents(customer.heldCreditCents)} held for them`
+                    : ''}
                 </option>
               ))}
             </select>
@@ -521,18 +536,40 @@ export function ReceivablesBoard({
                 <th className="px-4 py-2 font-medium">Customer</th>
                 <th className="px-4 py-2 font-medium">Kind</th>
                 <th className="px-4 py-2 font-medium">As of</th>
-                <th className="px-4 py-2 text-right font-medium">Balance</th>
+                <th className="px-4 py-2 text-right font-medium">Billed</th>
+                <th className="px-4 py-2 text-right font-medium">Held for them</th>
+                <th className="px-4 py-2 text-right font-medium">Asked for</th>
                 <th className="px-4 py-2 font-medium">To</th>
               </tr>
             </thead>
             <tbody>
               {statements.map((row) => (
-                <tr key={row.id} className="border-t border-line">
-                  <td className="px-4 py-1.5 font-medium">{row.customerName}</td>
+                <tr key={row.id} className="border-t border-line align-top">
+                  <td className="px-4 py-1.5 font-medium">
+                    {row.customerName}
+                    {/*
+                      The sentence the customer read, kept with the row. When
+                      they ring up about a statement, the question is what it
+                      said — not what the books say now.
+                    */}
+                    {row.heldCreditCents > 0 && row.positionNote && (
+                      <div className="text-xs text-faint">{row.positionNote}</div>
+                    )}
+                  </td>
                   <td className="px-4 py-1.5 text-muted">{row.kind.replace('_', ' ')}</td>
                   <td className="px-4 py-1.5 text-muted">{row.asOfDate}</td>
                   <td className="tnum px-4 py-1.5 text-right">
                     {formatCents(row.closingBalanceCents)}
+                  </td>
+                  <td className="tnum px-4 py-1.5 text-right">
+                    {row.heldCreditCents > 0 ? (
+                      <span className="text-success">{formatCents(row.heldCreditCents)}</span>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
+                  <td className="tnum px-4 py-1.5 text-right font-medium">
+                    {formatCents(row.dueCents)}
                   </td>
                   <td className="px-4 py-1.5 text-faint">{row.sentTo ?? '—'}</td>
                 </tr>
