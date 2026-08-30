@@ -3541,6 +3541,42 @@ documents created from a template after today and on nothing else, while the
 proposals most likely to be signed are the ones already composed. Snapshots do
 not move; a proposal already sent keeps the bytes it was sent as.
 
+### The parties nobody wrote down (Phase 77)
+
+A signed proposal is a contract, and this application froze everything about one
+except the two parties to it.
+
+| Question | Where the answer lived | Did it move? |
+| --- | --- | --- |
+| What was offered | `proposal_versions.snapshot` | no |
+| What the client looked at | the content-addressed PDF | no |
+| Who signed, their title, their signature, the network | `proposal_acceptances` | no |
+| **Which two businesses are bound** | a walk to live rows | **yes** |
+
+The company resolved through `company_id` to `companies` and
+`company_profiles`; the client through the opportunity to `organizations`. Both
+are ordinary editable records — Phase 74 established that people rename a
+company in the Design Center, and ADR 0045 made correcting a client a
+first-class action. Do either, and every acceptance already signed reports a
+contract with a party that did not exist when it was signed. It was the one
+unfrozen fact in an otherwise carefully frozen record, and the fact a dispute is
+about.
+
+Phase 76 made it worse before making it visible: putting both parties into the
+PDF meant the picture became right forever while the record still resolved
+live, so the two could disagree.
+
+`proposal_versions.parties` now freezes them in the transaction that writes the
+snapshot and renders the PDF. A `Party` is `{ names, address }` rather than a
+name plus a legal name, because the two sides disagree about which is which — a
+company is registered as one thing and trades as another, while `organizations`
+has one name and no registration at all.
+
+**Nothing is backfilled.** The obvious backfill is a join to the three live
+tables, which is the read this column exists to remove; it would write today's
+names onto yesterday's agreements and make them look authoritative. Old rows
+stay null and every reader says so.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

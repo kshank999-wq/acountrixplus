@@ -11,6 +11,7 @@ import {
 } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { recordEvent } from '@/modules/worker/outbox'
+import { isParties } from './parties'
 import { OPEN_STAGES } from './pipeline'
 import { computeTotals } from './proposals'
 
@@ -268,17 +269,31 @@ function today(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-/** The acceptance record for a proposal, for the internal view. */
+/**
+ * The acceptance record for a proposal, for the internal view.
+ *
+ * Carries the parties frozen into the version that was signed (Phase 77). They
+ * are `null` for an agreement made before that column existed — see
+ * `modules/crm/parties` for why nothing is reconstructed from today's rows.
+ */
 export async function acceptanceFor(ctx: ActorContext, proposalId: string) {
   requirePermission(ctx, 'proposals:view')
 
-  const [acceptance] = await db
-    .select()
+  const [row] = await db
+    .select({ acceptance: proposalAcceptances, parties: proposalVersions.parties })
     .from(proposalAcceptances)
+    .leftJoin(proposalVersions, eq(proposalVersions.id, proposalAcceptances.proposalVersionId))
     .where(scoped(ctx, proposalAcceptances, eq(proposalAcceptances.proposalId, proposalId)))
     .limit(1)
 
-  return acceptance ?? null
+  if (!row) return null
+
+  return {
+    ...row.acceptance,
+    // Narrowed rather than trusted: the column is `jsonb` and holds rows from
+    // every version of the writer that ever ran.
+    parties: isParties(row.parties) ? row.parties : null,
+  }
 }
 
 /** Whether a proposal is currently open for a client to accept. */

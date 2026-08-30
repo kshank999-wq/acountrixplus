@@ -400,6 +400,27 @@ export const proposalVersions = pgTable(
     totalCents: bigint('total_cents', { mode: 'number' }).notNull(),
 
     /**
+     * Who the two parties were when the offer was made (Phase 77).
+     *
+     * The snapshot above records *what* was offered and this records *between
+     * whom*. Until Phase 77 the second question was answered by walking to the
+     * live `companies`, `company_profiles` and `organizations` rows — so a
+     * rename on either side rewrote the parties of every agreement already
+     * signed.
+     *
+     * Nullable, and deliberately not backfilled: a version sent before this
+     * column existed has no record of its parties, and reconstructing one from
+     * today's rows would manufacture exactly the wrong answer in the one case
+     * that matters.
+     *
+     * Typed loosely, as `snapshot` above is and for the same reason: the shape
+     * belongs to `modules/crm/parties`, this column holds rows written by every
+     * version of that module that ever ran, and a reader narrows with
+     * `isParties` rather than trusting the column's declared type.
+     */
+    parties: jsonb('parties').$type<Record<string, unknown>>(),
+
+    /**
      * The rendered PDF, as sent (spec §18, Phase 21).
      *
      * The data snapshot above records what the numbers were; this records what

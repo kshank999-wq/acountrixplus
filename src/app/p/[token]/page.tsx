@@ -2,9 +2,15 @@ import { notFound } from 'next/navigation'
 import { headers } from 'next/headers'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { brandKits, designDocuments, proposalAcceptances } from '@/db/schema'
+import {
+  brandKits,
+  designDocuments,
+  proposalAcceptances,
+  proposalVersions,
+} from '@/db/schema'
 import { proposalByToken, recordView } from '@/modules/crm/proposals'
 import { isAcceptable } from '@/modules/crm/acceptance'
+import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
 import { truncateIp } from '@/modules/crm/intake'
 import { DocumentPage, brandTokens } from '@/components/design/document-page'
@@ -42,8 +48,12 @@ export default async function PublicProposalPage({
   const [render, existingAcceptance, documents] = await Promise.all([
     proposalRenderContext(proposal.companyId, proposal.id),
     db
-      .select()
+      // The parties come from the version that was signed, frozen at send time
+      // (Phase 77) rather than resolved from whatever the two businesses are
+      // called today.
+      .select({ acceptance: proposalAcceptances, parties: proposalVersions.parties })
       .from(proposalAcceptances)
+      .leftJoin(proposalVersions, eq(proposalVersions.id, proposalAcceptances.proposalVersionId))
       .where(
         and(
           eq(proposalAcceptances.proposalId, proposal.id),
@@ -69,7 +79,9 @@ export default async function PublicProposalPage({
     ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
     : []
 
-  const accepted = existingAcceptance[0] ?? null
+  const acceptedRow = existingAcceptance[0] ?? null
+  const accepted = acceptedRow?.acceptance ?? null
+  const parties = isParties(acceptedRow?.parties) ? acceptedRow.parties : null
   const acceptable = isAcceptable(proposal) && !accepted
 
   const items = (render?.items ?? []).map((item) => ({
@@ -144,6 +156,12 @@ export default async function PublicProposalPage({
                         signerName: accepted.signerName,
                         acceptedAt: accepted.acceptedAt.toISOString().slice(0, 10),
                         totalCents: accepted.acceptedTotalCents,
+                        parties: parties
+                          ? {
+                              offeredBy: parties.offeredBy.names[0],
+                              offeredTo: parties.offeredTo.names[0],
+                            }
+                          : null,
                       }
                     : null
                 }

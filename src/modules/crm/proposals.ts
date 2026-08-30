@@ -2,6 +2,8 @@ import { randomBytes } from 'node:crypto'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
+  companies,
+  companyProfiles,
   opportunities,
   organizations,
   proposalItems,
@@ -10,6 +12,8 @@ import {
   proposals,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { letterheadFor } from '@/modules/brand/letterhead'
+import { partiesFor } from './parties'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { logActivity } from './opportunities'
 import { snapshotProposalPdf } from '@/modules/pdf/service'
@@ -200,6 +204,11 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
     .where(scoped(ctx, proposalItems, eq(proposalItems.proposalId, proposalId)))
     .orderBy(asc(proposalItems.sortOrder))
 
+  // Who the two parties are, read now and frozen below (Phase 77). Every other
+  // fact about this send is already frozen; this one was resolved live on every
+  // later read, so renaming either side rewrote agreements already signed.
+  const parties = await partiesAtSend(ctx, proposalId)
+
   return db.transaction(async (tx) => {
     const [{ nextVersion }] = await tx
       .select({ nextVersion: sql<number>`coalesce(max(${proposalVersions.versionNumber}), 0) + 1` })
@@ -237,6 +246,7 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
           isSelected: item.isSelected,
         })),
       },
+      parties,
       totalCents: proposal.totalCents,
       sentAt,
       sentBy: ctx.userId,
@@ -489,6 +499,41 @@ export async function updateProposalItems(
     )
 
     return updated
+  })
+}
+
+/**
+ * Both parties to a proposal, as they stand at this instant (Phase 77).
+ *
+ * Called once per send and written into the version. The client is reached
+ * through the opportunity, which is where a proposal's counterparty has lived
+ * since Phase 3; the company through Phase 75's letterhead, so the names on the
+ * record are the same names the document prints.
+ *
+ * A proposal whose opportunity or organisation has since gone gets a party with
+ * no name rather than a failed send — the agreement still happened, and the
+ * record of it should say what it can.
+ */
+async function partiesAtSend(ctx: ActorContext, proposalId: string) {
+  const [row] = await db
+    .select({
+      company: companies,
+      profile: companyProfiles,
+      client: organizations,
+    })
+    .from(proposals)
+    .innerJoin(companies, eq(companies.id, proposals.companyId))
+    .leftJoin(companyProfiles, eq(companyProfiles.companyId, proposals.companyId))
+    .leftJoin(opportunities, eq(opportunities.id, proposals.opportunityId))
+    .leftJoin(organizations, eq(organizations.id, opportunities.organizationId))
+    .where(scoped(ctx, proposals, eq(proposals.id, proposalId)))
+    .limit(1)
+
+  if (!row) throw new Error('Proposal not found')
+
+  return partiesFor({
+    letterhead: letterheadFor({ companyName: row.company.name, profile: row.profile }),
+    client: row.client,
   })
 }
 

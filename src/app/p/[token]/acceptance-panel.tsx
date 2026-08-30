@@ -33,7 +33,17 @@ export function AcceptancePanel({
   discountCents: number
   taxCents: number
   acceptable: boolean
-  accepted: { signerName: string; acceptedAt: string; totalCents: number } | null
+  accepted: {
+    signerName: string
+    acceptedAt: string
+    totalCents: number
+    /**
+     * The two businesses, as they were named when the offer was made — frozen
+     * into the version rather than read from whatever they are called today
+     * (Phase 77). Null for an agreement signed before that was recorded.
+     */
+    parties: { offeredBy: string; offeredTo: string } | null
+  } | null
   expired: boolean
 }) {
   const router = useRouter()
@@ -65,6 +75,12 @@ export function AcceptancePanel({
           Signed by <strong>{accepted.signerName}</strong> on {accepted.acceptedAt} for{' '}
           <strong>{formatCents(accepted.totalCents)}</strong>.
         </p>
+        {accepted.parties && (
+          <p>
+            Between <strong>{accepted.parties.offeredBy}</strong> and{' '}
+            <strong>{accepted.parties.offeredTo}</strong>.
+          </p>
+        )}
       </div>
     )
   }

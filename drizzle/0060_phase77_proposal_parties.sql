@@ -1,0 +1,50 @@
+-- Phase 77: who the agreement was between.
+--
+-- ## The one fact that moved
+--
+-- A signed proposal is a contract, and this application froze everything about
+-- one except the two parties to it:
+--
+--   * `proposal_versions.snapshot`  — what was offered, frozen at send time.
+--   * `proposal_versions.pdf_document_id` — what the client actually looked at,
+--     content-addressed, so the digest *is* the proof it never changed.
+--   * `proposal_acceptances` — who signed, their title, their typed signature,
+--     the version they were reading and the network they signed from.
+--   * **The parties** — resolved live, every time, by walking `company_id` to
+--     `companies` and `company_profiles`, and the opportunity to
+--     `organizations`.
+--
+-- All three of those tables are ordinary editable records. Phase 74 established
+-- that people do rename a company in the Design Center; ADR 0045 made
+-- correcting a client a first-class action with an audit trail. Do either, and
+-- every acceptance already signed silently reports a contract with a party that
+-- did not exist when it was signed.
+--
+-- Phase 76 put both parties into the rendered PDF, permanently. That made the
+-- gap worse rather than better: the picture is now right forever while the
+-- record still resolves live, so the two can disagree about who agreed.
+--
+-- The rule, which Phase 55 applied to a statement and Phase 62 to a payment's
+-- currency: **a record of an agreement names the parties as they were, not as
+-- they are.**
+--
+-- ## Why it is not backfilled
+--
+-- The obvious backfill is a join to `companies`, `company_profiles` and
+-- `organizations` — which is precisely the live read this column exists to
+-- remove. It would write today's names onto yesterday's agreements and make
+-- them look authoritative, producing a confident wrong answer in exactly the
+-- case the column is for.
+--
+-- So the column is nullable and old rows stay null. `modules/crm/parties`
+-- exports `NOT_RECORDED` for them, and every reader says so rather than
+-- guessing. A version sent before this migration has no record of its parties,
+-- and that is the truth about it.
+--
+-- Its shape belongs to `modules/crm/parties` and readers narrow with
+-- `isParties`, the same forgiveness `parseBlocks` applies on the document read
+-- path — `jsonb` holds rows written by every version of that module that ever
+-- ran.
+
+ALTER TABLE "proposal_versions"
+  ADD COLUMN IF NOT EXISTS "parties" jsonb;
