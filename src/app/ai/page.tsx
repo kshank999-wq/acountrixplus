@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatMicros } from '@/modules/ai/provider'
@@ -28,7 +28,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function AiPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'ai:manage')) {
     return (
@@ -59,7 +59,7 @@ export default async function AiPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="ai"
     >
       <SubNav items={AI_NAV} active="/ai" />

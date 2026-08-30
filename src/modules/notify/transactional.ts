@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import { OUR_NAME } from '@/modules/brand/voice'
 import { buildTransactionalProvider } from './providers'
 
 /**
@@ -192,7 +193,7 @@ export function getTransactionalProvider(): TransactionalProvider {
  */
 export function transactionalSender(): { fromName: string; fromEmail: string } {
   return {
-    fromName: process.env.TRANSACTIONAL_FROM_NAME ?? 'Accountrix Plus',
+    fromName: process.env.TRANSACTIONAL_FROM_NAME ?? OUR_NAME,
     fromEmail: process.env.TRANSACTIONAL_FROM_EMAIL ?? 'no-reply@accountrixplus.test',
   }
 }

@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listEmployees } from '@/modules/payroll/service'
@@ -11,7 +11,7 @@ export const dynamic = 'force-dynamic'
 /** The people payroll is run for (spec §13). */
 export default async function PeoplePage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'payroll:view')) return <NoAccess role={actor.role} what="Payroll" />
 
@@ -20,7 +20,7 @@ export default async function PeoplePage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="payroll"
     >
       <SubNav items={payrollNav(actor)} active="/payroll/people" />

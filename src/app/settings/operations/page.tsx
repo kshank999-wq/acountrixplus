@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { SETTINGS_NAV } from '../nav'
@@ -36,7 +36,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function OperationsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'operations:view')) {
     return (
@@ -90,7 +90,7 @@ export default async function OperationsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="bookkeeping"
     >
       <SubNav items={SETTINGS_NAV} active="/settings/operations" />

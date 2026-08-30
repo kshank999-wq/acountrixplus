@@ -1,5 +1,5 @@
 import { cookies } from 'next/headers'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { mfaStatus } from '@/modules/auth/mfa'
@@ -31,7 +31,7 @@ export default async function SecurityPage({
   searchParams: Promise<{ enrol?: string }>
 }) {
   const actor = await requireActor({ allowUnenrolled: true })
-  const session = await currentSession()
+  const session = await requireSession()
   const params = await searchParams
 
   const cookieStore = await cookies()
@@ -52,7 +52,7 @@ export default async function SecurityPage({
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="bookkeeping"
     >
       <SubNav items={SETTINGS_NAV} active="/settings/security" />

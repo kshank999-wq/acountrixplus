@@ -1,3 +1,4 @@
+import { OUR_NAME } from '@/modules/brand/voice'
 import { toWinAnsi, widthOf, type StandardFont } from './metrics'
 
 /**
@@ -186,7 +187,7 @@ export function writePdf(input: PdfDocumentInput): Buffer {
   objects[3] =
     `<< /Title (${escapeString(toWinAnsi(input.title))}) ` +
     `/Author (${escapeString(toWinAnsi(input.author))}) ` +
-    `/Producer (Accountrix Plus) ` +
+    `/Producer (${escapeString(toWinAnsi(OUR_NAME))}) ` +
     `/CreationDate (${pdfDate(input.createdAt)}) ` +
     `/ModDate (${pdfDate(input.createdAt)}) >>`
 

@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listSuppressions } from '@/modules/marketing/audience'
@@ -24,7 +24,7 @@ const REASON_LABELS: Record<string, string> = {
  */
 export default async function SuppressionsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'marketing:view')) {
     return <NoAccess role={actor.role} what="Suppressions" />
@@ -36,7 +36,7 @@ export default async function SuppressionsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="marketing"
     >
       <SubNav items={MARKETING_NAV} active="/marketing/suppressions" />

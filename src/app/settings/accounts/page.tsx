@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { cashTieOut, listFinancialAccounts } from '@/modules/banking/accounts'
@@ -17,7 +17,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function AccountsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'bookkeeping:view')) {
     return (
@@ -40,7 +40,7 @@ export default async function AccountsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="bookkeeping"
     >
       <SubNav items={SETTINGS_NAV} active="/settings/accounts" />

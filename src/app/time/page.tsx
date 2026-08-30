@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled } from '@/modules/industry/modules'
@@ -25,7 +25,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function TimePage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'accounting:view')) {
     return (
@@ -40,7 +40,7 @@ export default async function TimePage() {
 
   if (!(await moduleEnabled(actor.companyId, 'time_billing'))) {
     return (
-      <AppShell actor={actor} companyName={session?.companyName ?? 'Accountrix Plus'} active="time">
+      <AppShell actor={actor} companyName={session.companyName} active="time">
         <div className="mx-auto max-w-2xl py-12 text-center">
           <h2 className="text-lg font-semibold">Time and billing is switched off</h2>
           <p className="mt-2 text-sm text-muted">
@@ -83,7 +83,7 @@ export default async function TimePage() {
     ])
 
   return (
-    <AppShell actor={actor} companyName={session?.companyName ?? 'Accountrix Plus'} active="time">
+    <AppShell actor={actor} companyName={session.companyName} active="time">
       <TimeBoard
         today={today}
         rows={rows.map((row) => ({

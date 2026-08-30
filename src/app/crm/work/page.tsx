@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { closedWork, myWork, openWork, workSummary } from '@/modules/engagement/tasks'
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function WorkPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'crm:view')) {
     return (
@@ -48,7 +48,7 @@ export default async function WorkPage() {
   ])
 
   return (
-    <AppShell actor={actor} companyName={session?.companyName ?? 'Accountrix Plus'} active="crm">
+    <AppShell actor={actor} companyName={session.companyName} active="crm">
       <SubNav items={CRM_NAV} active="/crm/work" />
       <WorkBoard
         today={today}

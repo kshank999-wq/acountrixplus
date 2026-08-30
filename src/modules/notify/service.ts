@@ -1,6 +1,7 @@
 import { invoiceSubject } from '@/modules/receivables/sharing'
 import { statementSubject } from '@/modules/receivables/statement-sharing'
 import { remittanceSubject } from '@/modules/payables/remittance'
+import { OUR_NAME } from '@/modules/brand/voice'
 import { and, desc, eq, gte, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { transactionalMessages } from '@/db/schema'
@@ -391,7 +392,7 @@ export async function sendPasswordReset(input: {
     toName: input.toName,
     companyId: input.companyId ?? null,
     kind: 'password_reset',
-    subject: 'Reset your Accountrix Plus password',
+    subject: `Reset your ${OUR_NAME} password`,
     body: [
       `Hello ${input.toName},`,
       'Somebody asked to reset the password on this account. If that was you, use the link below.',
@@ -452,7 +453,7 @@ export async function sendPracticeInvitation(input: {
     subject: `${input.inviterName} invited you to ${input.practiceName}`,
     body: [
       input.toName ? `Hello ${input.toName},` : 'Hello,',
-      `${input.inviterName} has invited you to join ${input.practiceName} on Accountrix Plus.`,
+      `${input.inviterName} has invited you to join ${input.practiceName} on ${OUR_NAME}.`,
       'You will choose your own password. You will be able to work on the books of every client ' +
         'the practice acts for, within whatever each of them has agreed to.',
     ],

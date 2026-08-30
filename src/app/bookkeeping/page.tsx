@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { inboxCounts, listInbox, UNREVIEWED_STATES, type ReviewState } from '@/modules/bookkeeping/transactions'
 import { categorizableAccounts } from '@/modules/coa/service'
@@ -23,7 +23,7 @@ const PAGE_SIZE = 50
 
 export default async function BookkeepingPage({ searchParams }: { searchParams: SearchParams }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const params = await searchParams
 
   // A user without bookkeeping access gets a plain explanation rather than a
@@ -72,7 +72,7 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="bookkeeping"
       actions={can(actor, 'bookkeeping:import') ? <SyncButton /> : null}
     >

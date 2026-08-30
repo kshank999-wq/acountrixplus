@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import {
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic'
 /** The Design Center — "Company Studio" in spec §15. */
 export default async function StudioPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'crm:view')) {
     return (
@@ -41,7 +41,7 @@ export default async function StudioPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="studio"
     >
       <StudioWorkspace

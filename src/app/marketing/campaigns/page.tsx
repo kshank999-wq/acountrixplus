@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listCampaigns } from '@/modules/marketing/campaigns'
@@ -22,7 +22,7 @@ const STATUS_STYLES: Record<string, string> = {
 /** The campaign list (spec §10). */
 export default async function CampaignsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'marketing:view')) {
     return <NoAccess role={actor.role} what="Campaigns" />
@@ -33,7 +33,7 @@ export default async function CampaignsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="marketing"
     >
       <SubNav items={MARKETING_NAV} active="/marketing/campaigns" />
@@ -80,7 +80,7 @@ export default async function CampaignsPage() {
         {can(actor, 'marketing:manage') && (
           <CampaignComposer
             segments={segments.map((segment) => ({ id: segment.id, name: segment.name }))}
-            defaultFromName={session?.companyName ?? ''}
+            defaultFromName={session.companyName}
           />
         )}
       </div>

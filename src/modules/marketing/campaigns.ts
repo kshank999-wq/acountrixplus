@@ -6,12 +6,14 @@ import {
   campaignRecipients,
   campaignSteps,
   campaigns,
+  companies,
   companyProfiles,
   contacts,
   designDocuments,
   segments,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { senderName } from '@/modules/brand/voice'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { parseBlocks } from '@/modules/design/blocks'
 import { buildMergeContext, resolveBlocks } from '@/modules/design/merge-fields'
@@ -185,6 +187,18 @@ export async function sendStep(
     .where(eq(companyProfiles.companyId, ctx.companyId))
     .limit(1)
 
+  // The company's own name, which this module never loaded (Phase 74). The
+  // profile is optional and its legal name is nullable; `companies.name` is
+  // NOT NULL and exists from the moment a tenant registers, so it is the end
+  // of the chain that stops a company's marketing going out under ours.
+  const [company] = await db
+    .select({ name: companies.name })
+    .from(companies)
+    .where(eq(companies.id, ctx.companyId))
+    .limit(1)
+
+  if (!company) throw new Error('This company no longer exists.')
+
   const provider = getEmailProvider()
   const baseUrl = publicBaseUrl()
 
@@ -250,6 +264,7 @@ export async function sendStep(
       step,
       creative,
       profile,
+      companyName: company.name,
       baseUrl,
       contactName: await contactDisplayName(member.contactId),
       organizationName: member.organizationName,
@@ -358,15 +373,20 @@ async function buildMessage(input: {
   step: typeof campaignSteps.$inferSelect
   creative: typeof designDocuments.$inferSelect | null
   profile: typeof companyProfiles.$inferSelect | undefined
+  /** `companies.name`. Not null, and the reason a letter cannot fall through. */
+  companyName: string
   baseUrl: string
   contactName: string | null
   organizationName: string | null
 }): Promise<OutboundMessage> {
-  const { recipient, campaign, step, creative, profile, baseUrl } = input
+  const { recipient, campaign, step, creative, profile, companyName, baseUrl } = input
 
   const context = buildMergeContext({
     company: {
-      name: profile?.legalName,
+      // `{{company.name}}` in a creative used to resolve to the *legal* name,
+      // and to nothing at all without a profile. Same question as the `From:`
+      // line below, so the same answer — asking it twice is how they drift.
+      name: senderName({ legalName: profile?.legalName, companyName }),
       legalName: profile?.legalName,
       email: profile?.email,
       phone: profile?.phone,
@@ -396,7 +416,13 @@ async function buildMessage(input: {
 
   return {
     to: recipient.email,
-    fromName: campaign.fromName ?? profile?.legalName ?? 'Accountrix Plus',
+    // Theirs, never ours (Phase 74). This is a company's own marketing, going
+    // to its own contacts, over its own unsubscribe link.
+    fromName: senderName({
+      chosen: campaign.fromName,
+      legalName: profile?.legalName,
+      companyName,
+    }),
     fromEmail: campaign.fromEmail!,
     replyTo: campaign.replyTo,
     subject: resolveSubject(step.subject, context),

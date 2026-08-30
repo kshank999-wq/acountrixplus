@@ -1,5 +1,5 @@
 import Link from 'next/link'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function ReconcilePage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'reconciliation:view')) {
     return (
@@ -37,7 +37,7 @@ export default async function ReconcilePage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="accounting"
     >
       <SubNav items={ACCOUNTING_NAV} active="/accounting/reconcile" />

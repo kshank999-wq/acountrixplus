@@ -3,7 +3,7 @@ import { notFound } from 'next/navigation'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { projects } from '@/db/schema'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can, scoped } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
@@ -33,7 +33,7 @@ export default async function JobDetailPage({
 }) {
   const { id } = await params
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'jobs:view')) return <NoAccess role={actor.role} />
   if (!(await moduleEnabled(actor.companyId, 'job_costing'))) return <ModuleOff />
@@ -81,7 +81,7 @@ export default async function JobDetailPage({
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="jobs"
     >
       <SubNav items={JOBS_NAV} active="/jobs" />

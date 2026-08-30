@@ -1,6 +1,6 @@
 import { notFound } from 'next/navigation'
 import Link from 'next/link'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatBasisPoints } from '@/modules/crm/analytics'
@@ -24,7 +24,7 @@ const SKIP_LABELS: Record<string, string> = {
 /** One campaign: its steps, what it achieved, and who it reached (spec §10). */
 export default async function CampaignPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const { id } = await params
 
   if (!can(actor, 'marketing:view')) {
@@ -54,7 +54,7 @@ export default async function CampaignPage({ params }: { params: Promise<{ id: s
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="marketing"
       actions={
         <Link href="/marketing/campaigns" className="btn text-xs">

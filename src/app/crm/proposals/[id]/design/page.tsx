@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { brandKits } from '@/db/schema'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { getProposal } from '@/modules/crm/proposals'
@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic'
 /** The proposal designer (spec §7). */
 export default async function DesignPage({ params }: { params: Promise<{ id: string }> }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const { id } = await params
 
   if (!can(actor, 'proposals:view')) {
@@ -60,7 +60,7 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="crm"
       actions={
         <Link href={`/p/${proposal.publicToken}`} target="_blank" className="btn text-xs">

@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listProposals } from '@/modules/crm/proposals'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function ProposalsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'proposals:view')) {
     return (
@@ -44,7 +44,7 @@ export default async function ProposalsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="crm"
     >
       <SubNav items={CRM_NAV} active="/crm/proposals" />

@@ -3,7 +3,7 @@ import Link from 'next/link'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { brandKits } from '@/db/schema'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { Designer } from '@/components/design/designer'
@@ -32,7 +32,7 @@ export default async function CreativeDesignPage({
   params: Promise<{ id: string }>
 }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const { id } = await params
 
   if (!can(actor, 'marketing:view')) {
@@ -60,7 +60,7 @@ export default async function CreativeDesignPage({
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="marketing"
       actions={
         <Link href="/marketing/creative" className="btn text-xs">

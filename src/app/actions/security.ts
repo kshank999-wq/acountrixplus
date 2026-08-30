@@ -6,7 +6,7 @@ import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/db'
 import { securityPolicies } from '@/db/schema'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { requirePermission } from '@/modules/tenancy/context'
 import { recordAudit } from '@/modules/audit'
 import {
@@ -62,10 +62,10 @@ export type EnrollResult =
 export async function beginMfaEnrollmentAction(): Promise<EnrollResult> {
   try {
     const actor = await requireActor({ allowUnenrolled: true })
-    const session = await currentSession()
+    const session = await requireSession()
 
     const started = await beginEnrollment(actor.userId, {
-      issuer: session?.companyName ?? 'Accountrix Plus',
+      issuer: session.companyName,
     })
 
     return { ok: true, ...started }
@@ -162,11 +162,11 @@ export async function changePasswordAction(input: unknown): Promise<ActionResult
     return { ok: false, error: parsed.error.issues[0]?.message ?? 'Please check the form.' }
   }
 
-  const session = await currentSession()
+  const session = await requireSession()
   const result = await changePassword(actor, {
     currentPassword: parsed.data.currentPassword,
     newPassword: parsed.data.newPassword,
-    currentSessionId: session?.sessionId,
+    currentSessionId: session.sessionId,
   })
 
   if (!result.ok) return { ok: false, error: result.error }

@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled, companyTerminology } from '@/modules/industry/modules'
@@ -25,7 +25,7 @@ export default async function FundsPage({
   searchParams: Promise<{ month?: string }>
 }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'accounting:view')) {
     return (
@@ -42,7 +42,7 @@ export default async function FundsPage({
     return (
       <AppShell
         actor={actor}
-        companyName={session?.companyName ?? 'Accountrix Plus'}
+        companyName={session.companyName}
         active="funds"
       >
         <div className="mx-auto max-w-2xl py-12 text-center">
@@ -79,7 +79,7 @@ export default async function FundsPage({
     ])
 
   return (
-    <AppShell actor={actor} companyName={session?.companyName ?? 'Accountrix Plus'} active="funds">
+    <AppShell actor={actor} companyName={session.companyName} active="funds">
       <FundsBoard
         month={month}
         balances={balances}

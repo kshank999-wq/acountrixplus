@@ -3,6 +3,7 @@ import { and, eq, isNull, ne } from 'drizzle-orm'
 import { db } from '@/db'
 import { mfaRecoveryCodes, sessions, userMfa, users } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { OUR_NAME } from '@/modules/brand/voice'
 import type { ActorContext } from '@/modules/tenancy/context'
 import { hashPassword, verifyPassword } from './password'
 import { decryptSecret, encryptSecret } from './secret-box'
@@ -117,7 +118,7 @@ export async function beginEnrollment(
     otpauthUri: otpauthUri({
       secretBase32: secret,
       accountName: user.email,
-      issuer: opts.issuer ?? 'Accountrix Plus',
+      issuer: opts.issuer ?? OUR_NAME,
     }),
   }
 }

@@ -3420,6 +3420,45 @@ disagree.
 returned 200 and this one returned 404 on every page load — the one request no
 page declares and every browser makes anyway.
 
+### Whose letter is it (Phase 74)
+
+Phase 73 nominated the two places the product names itself to somebody who is
+not looking at a screen: an email subject and a PDF's `/Producer`. Grepping
+`'Accountrix Plus'` found it in **six modules and sixty-eight pages**, meaning
+**three different things** — and two of the three were defects.
+
+**Ours.** The authenticator issuer, the password-reset subject, the invitation
+body, the transactional `From:`, the actor on an automatic send, the PDF
+producer. All correct: those letters *are* from us, and signing them with a
+company's name would be the lie in the other direction — a reset that looks like
+it came from your employer is one you cannot tell from a phishing attempt. Six
+literals, now one `OUR_NAME`.
+
+**Theirs, signed by us.** `campaigns.ts` ended its sender chain
+`?? 'Accountrix Plus'` — on a **marketing campaign a business sends to its own
+contacts, over its own unsubscribe link**. It read the optional
+`company_profiles` table and never loaded `companies`, whose `name` is
+`NOT NULL`. Two states reach the end of that chain and fail differently: a
+company whose profile row is missing sent its marketing under *our* name, and a
+company that **cleared the Legal name box** sent it from **nobody** — the box is
+`.optional()` with no `.min(1)` and the form is controlled, so clearing it saves
+`''`, and `''` does not trip `??`. That second one is the reachable one.
+
+`modules/brand/voice` holds the rule: *a letter is either ours or theirs; ours
+may carry our name, theirs never may.* `senderName` cannot return `OUR_NAME` —
+blank is not a choice, and the chain ends at the company's own name.
+
+**The fallback nobody chose.** `session?.companyName ?? 'Accountrix Plus'`,
+written **seventy-seven times across sixty-eight pages**. It is what you write
+to make the type checker stop: `currentSession()` is `Session | null`, and every
+one of those pages calls `requireActor()` first, which redirects when there is
+no session. The branch was never reachable — and it put our name in the one
+place on the screen that answers *whose books am I in*, the account card at the
+foot of the rail. So it is deleted rather than improved: `requireSession()`
+returns a session or redirects, and seventy-seven fallbacks become
+`session.companyName`. A defect that cannot be written beats one written
+correctly seventy-seven times.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

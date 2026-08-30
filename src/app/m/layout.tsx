@@ -1,6 +1,6 @@
 import Link from 'next/link'
 import { redirect } from 'next/navigation'
-import { currentActor, currentSession } from '@/lib/current-user'
+import { currentActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { ServiceWorker } from './service-worker'
 
@@ -24,7 +24,7 @@ export default async function MobileLayout({ children }: { children: React.React
   // cookie, one authentication path to get right.
   if (!actor) redirect('/login?next=/m')
 
-  const session = await currentSession()
+  const session = await requireSession()
 
   const tabs = [
     { href: '/m', label: 'Today', icon: HomeIcon },
@@ -42,7 +42,7 @@ export default async function MobileLayout({ children }: { children: React.React
         <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
           <div className="min-w-0">
             <p className="truncate text-sm font-semibold">
-              {session?.companyName ?? 'Accountrix Plus'}
+              {session.companyName}
             </p>
             <p className="truncate text-xs text-muted">{actor.userName}</p>
           </div>

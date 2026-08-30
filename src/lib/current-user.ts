@@ -67,3 +67,35 @@ export async function currentSession() {
   const cookieStore = await cookies()
   return resolveSession(cookieStore.get(SESSION_COOKIE)?.value)
 }
+
+/**
+ * Same, for a page that has already established there is somebody there.
+ *
+ * ## Why this exists (Phase 74)
+ *
+ * `currentSession()` is typed `Session | null`, which is honest — an anonymous
+ * visitor has none. But every signed-in page calls `requireActor()` first, and
+ * that redirects when there is no session, so by the time these pages read one
+ * it cannot be null. TypeScript does not know that, and sixty-eight of them
+ * settled the argument the same way:
+ *
+ * ```tsx
+ * companyName={session?.companyName ?? 'Accountrix Plus'}
+ * ```
+ *
+ * Seventy-seven times, and nobody ever decided it. It is what you write to make
+ * the type checker stop, and it put **our** name in the one place on the screen
+ * that answers *whose books am I in* — the account card at the foot of the
+ * rail, which exists for the moment before somebody types a number into the
+ * wrong company's ledger.
+ *
+ * The fallback was never reachable, so the fix is to delete it rather than
+ * choose a better one. A page that needs the session asks for it and gets a
+ * session; a request with none never arrives here.
+ */
+export async function requireSession() {
+  const session = await currentSession()
+  if (!session) redirect('/login')
+
+  return session
+}

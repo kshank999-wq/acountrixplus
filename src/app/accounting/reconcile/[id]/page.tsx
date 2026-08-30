@@ -1,5 +1,5 @@
 import { notFound } from 'next/navigation'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import {
@@ -18,7 +18,7 @@ export default async function ReconcileSessionPage({
   params: Promise<{ id: string }>
 }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const { id } = await params
 
   if (!can(actor, 'reconciliation:view')) {
@@ -49,7 +49,7 @@ export default async function ReconcileSessionPage({
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="accounting"
     >
       <SubNav items={ACCOUNTING_NAV} active="/accounting/reconcile" />

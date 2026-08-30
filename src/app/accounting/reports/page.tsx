@@ -1,5 +1,5 @@
 import { Fragment } from 'react'
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can, type ActorContext } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
@@ -46,7 +46,7 @@ function defaultRange() {
 
 export default async function ReportsPage({ searchParams }: { searchParams: SearchParams }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const params = await searchParams
 
   if (!can(actor, 'accounting:view')) {
@@ -68,7 +68,7 @@ export default async function ReportsPage({ searchParams }: { searchParams: Sear
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="accounting"
     >
       <SubNav items={ACCOUNTING_NAV} active="/accounting/reports" />

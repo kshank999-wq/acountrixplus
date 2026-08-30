@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
@@ -27,7 +27,7 @@ export default async function ContractorsPage({
   searchParams: Promise<{ year?: string; all?: string }>
 }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'tax:view')) return <NoAccess role={actor.role} what="Tax" />
 
@@ -40,7 +40,7 @@ export default async function ContractorsPage({
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="payroll"
     >
       <SubNav items={payrollNav(actor)} active="/payroll/contractors" />

@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listSegments } from '@/modules/marketing/audience'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 /** Audience segments (spec §10). */
 export default async function SegmentsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'marketing:view')) {
     return <NoAccess role={actor.role} what="Segments" />
@@ -23,7 +23,7 @@ export default async function SegmentsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="marketing"
     >
       <SubNav items={MARKETING_NAV} active="/marketing/segments" />

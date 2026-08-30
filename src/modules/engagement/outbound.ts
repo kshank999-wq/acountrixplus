@@ -1,6 +1,7 @@
 import { and, eq, isNotNull, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { communications, contacts } from '@/db/schema'
+import { OUR_NAME } from '@/modules/brand/voice'
 import type { CommunicationChannel } from './communications'
 
 /**
@@ -93,7 +94,7 @@ export async function recordOutboundMail(
           recordedBy: null,
           // Not a person. Attributing an automatic send to whoever happened to
           // trigger it would put their name on a letter they never wrote.
-          actorName: 'Accountrix Plus',
+          actorName: OUR_NAME,
         })
         .returning({ id: communications.id })
 

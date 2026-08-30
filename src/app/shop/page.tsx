@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled } from '@/modules/industry/modules'
@@ -27,7 +27,7 @@ export default async function ShopPage({
   searchParams: Promise<{ order?: string; vehicle?: string }>
 }) {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
   const params = await searchParams
 
   if (!can(actor, 'jobs:view')) {
@@ -43,7 +43,7 @@ export default async function ShopPage({
 
   if (!(await moduleEnabled(actor.companyId, 'vehicles'))) {
     return (
-      <AppShell actor={actor} companyName={session?.companyName ?? 'Accountrix Plus'} active="shop">
+      <AppShell actor={actor} companyName={session.companyName} active="shop">
         <div className="mx-auto max-w-2xl py-12 text-center">
           <h2 className="text-lg font-semibold">Vehicles is switched off</h2>
           <p className="mt-2 text-sm text-muted">
@@ -72,7 +72,7 @@ export default async function ShopPage({
   const history = params.vehicle ? await vehicleHistory(actor, params.vehicle) : []
 
   return (
-    <AppShell actor={actor} companyName={session?.companyName ?? 'Accountrix Plus'} active="shop">
+    <AppShell actor={actor} companyName={session.companyName} active="shop">
       <ShopBoard
         orders={orders}
         cars={cars}

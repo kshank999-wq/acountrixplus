@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { moduleEnabled } from '@/modules/industry/modules'
@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function SubcontractorsPage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'jobs:view')) return <NoAccess role={actor.role} />
   if (!(await moduleEnabled(actor.companyId, 'job_costing'))) return <ModuleOff />
@@ -29,7 +29,7 @@ export default async function SubcontractorsPage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="jobs"
     >
       <SubNav items={JOBS_NAV} active="/jobs/subcontractors" />

@@ -1,4 +1,4 @@
-import { requireActor, currentSession } from '@/lib/current-user'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { listDocuments, listTemplates } from '@/modules/design/documents'
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic'
  */
 export default async function CreativePage() {
   const actor = await requireActor()
-  const session = await currentSession()
+  const session = await requireSession()
 
   if (!can(actor, 'marketing:view')) {
     return <NoAccess role={actor.role} what="Creative" />
@@ -32,7 +32,7 @@ export default async function CreativePage() {
   return (
     <AppShell
       actor={actor}
-      companyName={session?.companyName ?? 'Accountrix Plus'}
+      companyName={session.companyName}
       active="marketing"
     >
       <SubNav items={MARKETING_NAV} active="/marketing/creative" />
