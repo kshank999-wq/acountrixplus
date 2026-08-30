@@ -20,7 +20,10 @@ const COMPANY = {
   name: 'Ridgeline Construction',
   email: 'accounts@ridgeline.test',
   phone: '555 0100',
-  addressLine: '412 Mill Street',
+  address: ['412 Mill Street', 'Bellingham, WA 98225'],
+  tradingName: null,
+  website: null,
+  footer: null,
 }
 
 const SUPPLIER = { name: 'Cascade Building Supply', email: 'ar@cascade.test' }

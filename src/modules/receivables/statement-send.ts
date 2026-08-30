@@ -3,6 +3,7 @@ import { eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { companies, companyProfiles, customerStatements, customers } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { letterheadFor } from '@/modules/brand/letterhead'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DomainError } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
@@ -107,6 +108,7 @@ async function loadStatement(ctx: ActorContext, statementId: string) {
 /** The projection the page and the email both read from. */
 function viewOf(row: Awaited<ReturnType<typeof loadStatement>>): CustomerFacingStatement {
   const figures = (row.statement.figures ?? {}) as FrozenFigures
+  const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
 
   return customerFacingStatement({
     statement: {
@@ -125,10 +127,7 @@ function viewOf(row: Awaited<ReturnType<typeof loadStatement>>): CustomerFacingS
     lines: figures.lines ?? [],
     customer: { name: row.customer.name, email: row.customer.email },
     company: {
-      name: row.company.name,
-      email: row.profile?.email ?? null,
-      phone: row.profile?.phone ?? null,
-      addressLine: row.profile?.addressLine1 ?? null,
+      ...head,
     },
     currency: row.company.currency,
   })

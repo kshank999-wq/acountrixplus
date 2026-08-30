@@ -10,6 +10,7 @@ import {
   vendors,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { letterheadFor } from '@/modules/brand/letterhead'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DomainError } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
@@ -112,6 +113,8 @@ function viewOf(
   row: Awaited<ReturnType<typeof loadPayment>>,
   bills: Awaited<ReturnType<typeof settledBills>>,
 ): SupplierFacingRemittance {
+  const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
+
   return supplierFacingRemittance({
     payment: {
       kind: row.payment.kind,
@@ -141,10 +144,7 @@ function viewOf(
     })),
     supplier: { name: row.vendor?.name ?? '', email: row.vendor?.email ?? null },
     company: {
-      name: row.company.name,
-      email: row.profile?.email ?? null,
-      phone: row.profile?.phone ?? null,
-      addressLine: row.profile?.addressLine1 ?? null,
+      ...head,
     },
   })
 }

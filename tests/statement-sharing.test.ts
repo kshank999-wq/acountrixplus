@@ -20,7 +20,10 @@ const COMPANY = {
   name: 'Ridgeline Construction',
   email: 'accounts@ridgeline.test',
   phone: '555 0100',
-  addressLine: '1 Quarry Road',
+  address: ['1 Quarry Road', 'Bellingham, WA 98225'],
+  tradingName: null,
+  website: null,
+  footer: null,
 }
 
 const CUSTOMER = { name: 'Meridian Facilities Ltd', email: 'ap@meridian.test' }

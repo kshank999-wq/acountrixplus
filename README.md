@@ -3459,6 +3459,55 @@ returns a session or redirects, and seventy-seven fallbacks become
 `session.companyName`. A defect that cannot be written beats one written
 correctly seventy-seven times.
 
+### The letterhead that was never on the letter (Phase 75)
+
+Phase 74 nominated the thirteen Design Center boxes that save `''` when cleared.
+Following them into the documents found something worse than a blank-handling
+bug.
+
+**The invoice had no letterhead.** It carried `companies.name` on the cover, the
+same string in the footer, and nothing else from the profile but the payment
+instructions — no address, no telephone number, no email, no website. On the one
+document this application produces that a stranger receives, has to pay against,
+and in most places has to keep. The company had typed all of it in; nothing ever
+asked for it.
+
+**And `documentFooter` reached the wrong document.** The schema calls it
+"default footer language for generated documents"; its only consumer was the
+footer of a marketing email. The seeded value is a contractor licence number —
+the kind of text a trade is required to publish on the documents it bills with,
+and it appeared on none of them.
+
+**Four spellings of one question.** "What is this company called, and how do you
+reach it" was answered four ways — and two of them sit in the same file thirty
+lines apart, differing by one character: `profile?.legalName ?? company.name` in
+the marketing preview against `|| company.name` in the proposal. `??` keeps `''`
+and `||` does not, so with a legal name cleared the proposal was right and the
+marketing preview showed a company with no name. The Phase 74 defect, still
+live, one file over.
+
+`modules/brand/letterhead` holds the rule: **a blank box is an unanswered
+question, not an answer.** Every field is dropped when missing, null or blank;
+a company that has filled in nothing gets its name and nothing else. The name
+comes from Phase 74's `senderName`, so a document's masthead and the `From:`
+line of the letter carrying it cannot disagree. The registered name heads it
+(that is where a payment must go) with *trading as …* beneath (that is the name
+the customer recognises), and the three contact channels stay separate, because
+a PDF prints all three while the web page wants the email as a `mailto:`.
+
+The same change fixed the customer-facing pages, which had a fourth, partial
+copy of the shape — `{ name, email, phone, addressLine }` declared identically
+in three modules, where `addressLine` was line one alone, so a customer got the
+street and never the city. All three now take the whole letterhead. Doing it in
+this phase rather than the next was the point: a full address on the PDF and one
+line on the web page would have *created* a divergence in the same change that
+removed four.
+
+The tax ID is deliberately **not** printed. Publishing an identifier on a
+company's behalf is not a decision to make from a box labelled "Tax ID" — and a
+company that wants it on their documents already has the field for that, which
+is exactly what the seed does with its licence number.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

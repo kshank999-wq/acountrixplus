@@ -40,7 +40,10 @@ const company: CompanyFacts = {
   name: 'Ridgeline Construction',
   email: 'accounts@ridgeline.test',
   phone: '555 0100',
-  addressLine: '4 Mill Lane',
+  address: ['4 Mill Lane', 'Bellingham, WA 98225'],
+  tradingName: null,
+  website: null,
+  footer: null,
 }
 
 const customer = { name: 'Harborview LLC', email: 'ap@harborview.test' }

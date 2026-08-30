@@ -45,7 +45,9 @@ export default async function PublicStatementPage({
         <div>
           <h1 className="text-xl font-semibold">{view.company.name}</h1>
           <div className="mt-1 space-y-0.5 text-sm text-muted">
-            {view.company.addressLine && <p>{view.company.addressLine}</p>}
+            {view.company.address.map((line) => (
+              <p key={line}>{line}</p>
+            ))}
             {view.company.email && <p>{view.company.email}</p>}
             {view.company.phone && <p>{view.company.phone}</p>}
           </div>

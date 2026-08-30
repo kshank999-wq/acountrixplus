@@ -45,6 +45,7 @@
  * Nothing here touches the database or the clock.
  */
 
+import type { Letterhead } from '@/modules/brand/letterhead'
 import { formatCents } from '@/lib/money'
 import {
   balancesByCurrency,
@@ -100,12 +101,15 @@ export type PartyFacts = {
   email: string | null
 }
 
-export type CompanyFacts = {
-  name: string
-  email: string | null
-  phone: string | null
-  addressLine: string | null
-}
+/**
+ * Who the business is, as the recipient sees it.
+ *
+ * The letterhead itself since Phase 75. This was a hand-written four-field
+ * subset — name, email, phone and `addressLine1` — repeated identically in
+ * three modules, which meant a customer was shown the first line of an address
+ * and never the city it was in.
+ */
+export type CompanyFacts = Letterhead
 
 /** Exactly what the page and the email are allowed to say. */
 export type CustomerFacingStatement = {

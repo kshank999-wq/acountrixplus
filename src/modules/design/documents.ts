@@ -17,6 +17,7 @@ import { recordAudit } from '@/modules/audit'
 import type { Permission } from '@/modules/permissions'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { defaultBrandKit } from '@/modules/studio/service'
+import { letterheadFor } from '@/modules/brand/letterhead'
 import { parseBlocks, validateBlocks, type Block } from './blocks'
 import { buildMergeContext, type MergeContext } from './merge-fields'
 import { builtInTemplate, templatesForIndustry, type TemplateDefinition } from './templates'
@@ -370,10 +371,21 @@ export async function marketingRenderContext(companyId: string): Promise<MergeCo
     .where(eq(companies.id, companyId))
     .limit(1)
 
+  // A company that does not exist has no fields to merge. Previously this
+  // returned a context of empty strings, which renders as a creative addressed
+  // from nobody rather than as the missing company it is.
+  if (!row) return buildMergeContext({})
+
+  // `?? row.company.name` used to be the answer here, and `|| row.company.name`
+  // thirty lines below in `proposalRenderContext`. One character apart, and with
+  // a legal name cleared to `''` (ADR 0074) the proposal was right and this
+  // preview showed a company with no name. One answer now, for both. Phase 75.
+  const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
+
   return buildMergeContext({
     company: {
-      name: row?.profile?.legalName ?? row?.company.name,
-      legalName: row?.profile?.legalName ?? row?.company.name,
+      name: head.name,
+      legalName: head.name,
       email: row?.profile?.email,
       phone: row?.profile?.phone,
       website: row?.profile?.website,
@@ -434,9 +446,11 @@ export async function proposalRenderContext(
 
   const contactName = [row.contact?.firstName, row.contact?.lastName].filter(Boolean).join(' ')
 
+  const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
+
   const context = buildMergeContext({
     company: {
-      name: row.profile?.legalName || row.company.name,
+      name: head.name,
       legalName: row.profile?.legalName,
       email: row.profile?.email,
       phone: row.profile?.phone,

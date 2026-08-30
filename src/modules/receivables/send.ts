@@ -9,6 +9,7 @@ import {
   invoices,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { letterheadFor } from '@/modules/brand/letterhead'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DomainError, logUnexpected } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
@@ -279,6 +280,8 @@ export async function invoiceByShareToken(token: string): Promise<PublicInvoice 
     .where(eq(invoiceLines.invoiceId, row.invoice.id))
     .orderBy(asc(invoiceLines.sortOrder))
 
+  const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
+
   return {
     invoiceId: row.invoice.id,
     companyId: row.invoice.companyId,
@@ -292,10 +295,7 @@ export async function invoiceByShareToken(token: string): Promise<PublicInvoice 
       })),
       customer: { name: row.customer.name, email: row.customer.email },
       company: {
-        name: row.company.name,
-        email: row.profile?.email ?? null,
-        phone: row.profile?.phone ?? null,
-        addressLine: row.profile?.addressLine1 ?? null,
+        ...head,
       },
       asOf: new Date().toISOString().slice(0, 10),
     }),

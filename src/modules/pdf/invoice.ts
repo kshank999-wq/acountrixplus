@@ -1,6 +1,7 @@
 import { and, asc, eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { companies, companyProfiles, customers, invoiceLines, invoices } from '@/db/schema'
+import { contactLines, letterheadFor } from '@/modules/brand/letterhead'
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { renderDocumentPdf, type BrandTokens } from './layout'
 import type { Block } from '@/modules/design/blocks'
@@ -78,16 +79,41 @@ export async function renderInvoicePdf(
     .filter(Boolean)
     .join('\n')
 
+  // Who is billing, from the profile they filled in (Phase 75). Until now this
+  // document carried the company's name and nothing else — no address, no
+  // telephone number, no email — on the one thing this application produces
+  // that a stranger receives and has to pay against.
+  const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
+  // Everything below the name, which the cover band already carries.
+  const identity = [
+    ...(head.tradingName ? [`trading as ${head.tradingName}`] : []),
+    ...head.address,
+    ...contactLines(head),
+  ]
+
   const blocks: Block[] = [
     {
       id: 'cover',
       type: 'cover',
       title: 'Invoice',
       subtitle: row.invoice.number,
-      preparedFor: row.company.name,
+      preparedFor: head.name,
       showLogo: false,
       useBrandBackground: true,
     },
+    ...(identity.length > 0
+      ? ([
+          {
+            id: 'letterhead',
+            type: 'text',
+            // One line each. `wrapText` breaks on newlines before it wraps, so
+            // an address reads down the page the way an envelope does.
+            text: identity.join('\n'),
+            align: 'left',
+            emphasis: false,
+          },
+        ] satisfies Block[])
+      : []),
     {
       id: 'details',
       type: 'keyValue',
@@ -116,7 +142,10 @@ export async function renderInvoicePdf(
     pageSize: 'letter',
     orientation: 'portrait',
     headerText: null,
-    footerText: row.company.name,
+    // What they chose to say at the foot of a document — a licence number, a
+    // registration, whatever their trade requires. It has existed since Phase 4
+    // and, until now, reached only the footer of a marketing email.
+    footerText: head.footer ?? head.name,
     showPageNumbers: true,
     lines: lines.map((line) => ({
       description: line.description,
@@ -133,7 +162,7 @@ export async function renderInvoicePdf(
       totalCents: row.invoice.totalCents,
     },
     title: `Invoice ${row.invoice.number}`,
-    author: row.company.name,
+    author: head.name,
     createdAt: at,
   })
 
