@@ -13,6 +13,7 @@ import {
   segments,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { letterheadFor } from '@/modules/brand/letterhead'
 import { senderName } from '@/modules/brand/voice'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { parseBlocks } from '@/modules/design/blocks'
@@ -381,21 +382,14 @@ async function buildMessage(input: {
 }): Promise<OutboundMessage> {
   const { recipient, campaign, step, creative, profile, companyName, baseUrl } = input
 
+  // The letterhead, since Phase 76 — the same object the invoice prints its
+  // masthead from, so `{{company.address}}` in a campaign and the address on
+  // that company's invoice cannot disagree. Its `name` is `senderName`'s, which
+  // is also the `From:` line below.
+  const head = letterheadFor({ companyName, profile })
+
   const context = buildMergeContext({
-    company: {
-      // `{{company.name}}` in a creative used to resolve to the *legal* name,
-      // and to nothing at all without a profile. Same question as the `From:`
-      // line below, so the same answer — asking it twice is how they drift.
-      name: senderName({ legalName: profile?.legalName, companyName }),
-      legalName: profile?.legalName,
-      email: profile?.email,
-      phone: profile?.phone,
-      website: profile?.website,
-      addressLine1: profile?.addressLine1,
-      city: profile?.city,
-      region: profile?.region,
-      postalCode: profile?.postalCode,
-    },
+    company: head,
     client: {
       name: input.organizationName,
       contactName: input.contactName,
@@ -418,11 +412,7 @@ async function buildMessage(input: {
     to: recipient.email,
     // Theirs, never ours (Phase 74). This is a company's own marketing, going
     // to its own contacts, over its own unsubscribe link.
-    fromName: senderName({
-      chosen: campaign.fromName,
-      legalName: profile?.legalName,
-      companyName,
-    }),
+    fromName: senderName({ chosen: campaign.fromName, legalName: profile?.legalName, companyName }),
     fromEmail: campaign.fromEmail!,
     replyTo: campaign.replyTo,
     subject: resolveSubject(step.subject, context),

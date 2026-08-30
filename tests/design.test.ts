@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { letterheadFor } from '@/modules/brand/letterhead'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { brandKits, companyProfiles, designDocuments } from '@/db/schema'
@@ -168,14 +169,24 @@ describe('merge fields', () => {
   })
 
   it('omits absent values rather than writing empty strings', () => {
-    const built = buildMergeContext({ company: { name: 'Ridgeline' } })
+    const built = buildMergeContext({
+      company: letterheadFor({ companyName: 'Ridgeline' }),
+    })
     expect(built['company.name']).toBe('Ridgeline')
     expect(built['client.name']).toBeUndefined()
   })
 
+  /**
+   * The company fields come from the letterhead since Phase 76, so `name` is
+   * already the registered name where there is one and `legalName` is the same
+   * string rather than a second, differently-derived answer.
+   */
   it('falls back to the company name when no legal name is set', () => {
-    const built = buildMergeContext({ company: { name: 'Ridgeline', legalName: null } })
+    const built = buildMergeContext({
+      company: letterheadFor({ companyName: 'Ridgeline', profile: { legalName: null } }),
+    })
     expect(built['company.legalName']).toBe('Ridgeline')
+    expect(built['company.tradingName']).toBeUndefined()
   })
 })
 

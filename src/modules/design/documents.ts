@@ -383,17 +383,7 @@ export async function marketingRenderContext(companyId: string): Promise<MergeCo
   const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
 
   return buildMergeContext({
-    company: {
-      name: head.name,
-      legalName: head.name,
-      email: row?.profile?.email,
-      phone: row?.profile?.phone,
-      website: row?.profile?.website,
-      addressLine1: row?.profile?.addressLine1,
-      city: row?.profile?.city,
-      region: row?.profile?.region,
-      postalCode: row?.profile?.postalCode,
-    },
+    company: head,
     client: {
       name: 'Sample Client Ltd',
       contactName: 'Sample Contact',
@@ -449,18 +439,7 @@ export async function proposalRenderContext(
   const head = letterheadFor({ companyName: row.company.name, profile: row.profile })
 
   const context = buildMergeContext({
-    company: {
-      name: head.name,
-      legalName: row.profile?.legalName,
-      email: row.profile?.email,
-      phone: row.profile?.phone,
-      website: row.profile?.website,
-      addressLine1: row.profile?.addressLine1,
-      city: row.profile?.city,
-      region: row.profile?.region,
-      postalCode: row.profile?.postalCode,
-      paymentInstructions: row.profile?.paymentInstructions,
-    },
+    company: { ...head, paymentInstructions: row.profile?.paymentInstructions },
     client: {
       name: row.organization.name,
       contactName: contactName || null,

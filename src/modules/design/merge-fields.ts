@@ -1,4 +1,9 @@
 import { formatCents } from '@/lib/money'
+import {
+  addressLines,
+  type Letterhead,
+  type LetterheadProfile,
+} from '@/modules/brand/letterhead'
 import type { Block } from './blocks'
 
 /**
@@ -21,11 +26,13 @@ export const MERGE_FIELD_GROUPS: Array<{
     fields: [
       { key: 'company.name', label: 'Company name' },
       { key: 'company.legalName', label: 'Legal name' },
+      { key: 'company.tradingName', label: 'Trading as' },
       { key: 'company.email', label: 'Email' },
       { key: 'company.phone', label: 'Phone' },
       { key: 'company.website', label: 'Website' },
       { key: 'company.address', label: 'Address' },
       { key: 'company.paymentInstructions', label: 'Payment instructions' },
+      { key: 'company.footer', label: 'Document footer' },
     ],
   },
   {
@@ -196,27 +203,27 @@ function textsOf(block: Block): string[] {
 }
 
 export type MergeSources = {
-  company?: {
-    name?: string | null
-    legalName?: string | null
-    email?: string | null
-    phone?: string | null
-    website?: string | null
-    addressLine1?: string | null
-    city?: string | null
-    region?: string | null
-    postalCode?: string | null
-    paymentInstructions?: string | null
-  } | null
-  client?: {
-    name?: string | null
-    contactName?: string | null
-    email?: string | null
-    addressLine1?: string | null
-    city?: string | null
-    region?: string | null
-    postalCode?: string | null
-  } | null
+  /**
+   * The letterhead, since Phase 76 — not a hand-picked set of profile columns.
+   * Everything the designer can insert about the company now comes from the
+   * same object the invoice prints its masthead from.
+   */
+  company?: (Letterhead & { paymentInstructions?: string | null }) | null
+  /**
+   * A client's address is a postal address like anybody else's, so it takes
+   * the same fields the letterhead does — including the second line and the
+   * country, which the formatter this replaced dropped on the floor.
+   */
+  client?:
+    | (Pick<
+        LetterheadProfile,
+        'addressLine1' | 'addressLine2' | 'city' | 'region' | 'postalCode' | 'country'
+      > & {
+        name?: string | null
+        contactName?: string | null
+        email?: string | null
+      })
+    | null
   proposal?: {
     number?: string | null
     title?: string | null
@@ -244,18 +251,23 @@ export function buildMergeContext(sources: MergeSources): MergeContext {
 
   const { company, client, proposal, project } = sources
 
+  // `company.name` is the letterhead's name, which is the registered one where
+  // there is one — the same string the invoice heads itself with. `legalName`
+  // was `?? company.name` before, which made the two keys indistinguishable.
   set('company.name', company?.name)
-  set('company.legalName', company?.legalName ?? company?.name)
+  set('company.legalName', company?.name)
+  set('company.tradingName', company?.tradingName)
   set('company.email', company?.email)
   set('company.phone', company?.phone)
   set('company.website', company?.website)
-  set('company.address', formatAddress(company))
+  set('company.address', company ? company.address.join('\n') : null)
   set('company.paymentInstructions', company?.paymentInstructions)
+  set('company.footer', company?.footer)
 
   set('client.name', client?.name)
   set('client.contactName', client?.contactName)
   set('client.email', client?.email)
-  set('client.address', formatAddress(client))
+  set('client.address', addressLines(client).join('\n') || null)
 
   set('proposal.number', proposal?.number)
   set('proposal.title', proposal?.title)
@@ -272,23 +284,4 @@ export function buildMergeContext(sources: MergeSources): MergeContext {
   set('project.name', project?.name)
 
   return context
-}
-
-function formatAddress(
-  source:
-    | {
-        addressLine1?: string | null
-        city?: string | null
-        region?: string | null
-        postalCode?: string | null
-      }
-    | null
-    | undefined,
-): string {
-  if (!source) return ''
-
-  const cityLine = [source.city, source.region].filter(Boolean).join(', ')
-  return [source.addressLine1, [cityLine, source.postalCode].filter(Boolean).join(' ')]
-    .filter(Boolean)
-    .join('\n')
 }

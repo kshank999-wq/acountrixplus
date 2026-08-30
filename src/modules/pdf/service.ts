@@ -123,7 +123,10 @@ export async function proposalRenderInput(
     pageSize: document.pageSize as 'letter' | 'a4' | 'legal',
     orientation: document.orientation as 'portrait' | 'landscape',
     headerText: document.headerText,
-    footerText: document.footerText,
+    // The author's choice wins; the company's standing footer is the default
+    // rather than nothing (Phase 76). `documentFooter` has been on every
+    // invoice since Phase 75 and reached no proposal at all.
+    footerText: document.footerText ?? rendered?.context['company.footer'] ?? null,
     showPageNumbers: document.showPageNumbers,
     lines: items.map((item) => ({
       description: item.description,
@@ -140,7 +143,10 @@ export async function proposalRenderInput(
       totalCents: row.proposal.totalCents,
     },
     title: `${row.proposal.number} ${row.proposal.title}`.trim(),
-    author: row.company.name,
+    // The registered name, as the invoice does since Phase 75 — this is the
+    // `/Author` a reader's PDF viewer shows, and it should not disagree with
+    // the party named on the signature block.
+    author: rendered?.context['company.name'] ?? row.company.name,
     createdAt,
   }
 }

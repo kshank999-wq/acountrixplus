@@ -163,6 +163,29 @@ class Composer {
     return resolveMergeFields(value ?? '', this.input.merge)
   }
 
+  /**
+   * The party making the offer, for the signature block (Phase 76).
+   *
+   * Taken from the merge context, which since Phase 76 is built from the
+   * letterhead — so this is the same name and the same address the company's
+   * invoices carry, rather than a third rendering of them.
+   *
+   * Empty when the context has no company at all, which is how a marketing
+   * creative or a bare preview renders: the block then draws exactly as it did
+   * before, rather than growing a heading with nothing under it.
+   */
+  private party(): string[] {
+    const name = this.input.merge['company.name']
+    if (!name) return []
+
+    const address = (this.input.merge['company.address'] ?? '')
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+
+    return [`Offered by ${name}`, ...address]
+  }
+
   private paragraph(
     value: string,
     options: {
@@ -555,7 +578,24 @@ class Composer {
           maxWidth: this.contentWidth - 24,
         })
 
-        const total = height + agreementLines.length * base * 1.3 + base * 2
+        // Who is offering (Phase 76).
+        //
+        // This block is where a proposal stops being a document and becomes a
+        // contract: the client signs here, and `proposal_acceptances` records
+        // their name, their title, their typed signature, the version they were
+        // looking at and the network they signed from. The agreement text names
+        // them — "on behalf of {{client.name}}".
+        //
+        // The other party was never named. A signed agreement identified the
+        // side that signed it and not the side that would be bound by it.
+        //
+        // Read from the merge context rather than from a new block field, so it
+        // appears on proposals that were composed before this phase — the ones
+        // whose authors cannot go back and add it.
+        const offeredBy = this.party()
+
+        const total =
+          height + (agreementLines.length + offeredBy.length) * base * 1.3 + base * 2
 
         this.pieces.push({
           height: total,
@@ -582,6 +622,21 @@ class Composer {
                 x: MARGIN + 12,
                 y: y + 12 + base * 1.9 + index * base * 1.3,
                 font: this.body,
+                size: base * 0.9,
+                color: this.muted,
+              })
+            })
+
+            offeredBy.forEach((line, index) => {
+              page.text(line, {
+                x: MARGIN + 12,
+                y:
+                  y +
+                  12 +
+                  base * 1.9 +
+                  (agreementLines.length + index) * base * 1.3 +
+                  base * 0.6,
+                font: index === 0 ? this.headingBold : this.body,
                 size: base * 0.9,
                 color: this.muted,
               })

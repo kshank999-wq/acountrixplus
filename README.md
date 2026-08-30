@@ -3508,6 +3508,39 @@ company's behalf is not a decision to make from a box labelled "Tax ID" — and 
 company that wants it on their documents already has the field for that, which
 is exactly what the seed does with its licence number.
 
+### The contract that named one party (Phase 76)
+
+ADR 0075 nominated the proposal, whose letterhead is whatever its author
+composed. Following that found the sharper version.
+
+**A signed proposal named one of its two parties.** `proposal_acceptances`
+records the client's side completely — signer name, title, email, the typed
+signature, the version they were looking at, the network they signed from — and
+the agreement text names them: *"on behalf of {{client.name}}"*. The company was
+never named. A document that becomes a binding agreement identified the side
+that signed it and not the side that would be bound by it.
+
+**A second address formatter.** `merge-fields` had its own, reading four
+columns where Phase 75's `addressLines` reads six. A company with a suite number
+got it on their invoice and not in `{{company.address}}` on their proposal — two
+documents from one business, disagreeing about where the business is. And
+`company.legalName` resolved as `profile.legalName ?? company.name` while
+`company.name` resolved by its own route: two offered fields, differently
+derived, usually equal, with nothing making them stay that way.
+
+So: `formatAddress` is deleted and `addressLines` lays out **anybody's** postal
+address, a client's included. `buildMergeContext` takes the letterhead rather
+than hand-picked profile columns, so every field the designer offers comes off
+the object the invoice prints its masthead from. The name that was actually
+being lost gets its own key, `company.tradingName`.
+
+And the signature block draws *Offered by …* with the company's address,
+opposite the client the agreement already names. It reads the **merge context**
+rather than a new field on the block — deliberately: a new field would appear on
+documents created from a template after today and on nothing else, while the
+proposals most likely to be signed are the ones already composed. Snapshots do
+not move; a proposal already sent keeps the bytes it was sent as.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
