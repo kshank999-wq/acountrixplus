@@ -6,7 +6,7 @@ import { listContacts, listOrganizations } from '@/modules/crm/opportunities'
 import { listProjects } from '@/modules/crm/conversion'
 import { CRM_NAV } from '../nav'
 import { lastContactedAt } from '@/modules/engagement/communications'
-import { NewOrganization } from './new-organization'
+import { EditOrganization, NewOrganization } from './new-organization'
 import { ClientTimeline } from './client-timeline'
 
 export const dynamic = 'force-dynamic'
@@ -106,6 +106,26 @@ export default async function OrganizationsPage() {
                     </div>
 
                     <div className="flex shrink-0 items-center gap-1.5">
+                      {can(actor, 'crm:manage') && (
+                        <EditOrganization
+                          organizationId={organization.id}
+                          initial={{
+                            name: organization.name,
+                            email: organization.email ?? '',
+                            phone: organization.phone ?? '',
+                            website: organization.website ?? '',
+                            addressLine1: organization.addressLine1 ?? '',
+                            addressLine2: organization.addressLine2 ?? '',
+                            city: organization.city ?? '',
+                            region: organization.region ?? '',
+                            postalCode: organization.postalCode ?? '',
+                            country: organization.country ?? '',
+                            industry: organization.industry ?? '',
+                            source: organization.source ?? '',
+                            isStrategicAccount: organization.isStrategicAccount,
+                          }}
+                        />
+                      )}
                       {organization.isStrategicAccount && (
                         <span className="chip bg-action/10 text-action">Strategic</span>
                       )}

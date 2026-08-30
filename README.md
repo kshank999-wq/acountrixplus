@@ -3577,6 +3577,41 @@ tables, which is the read this column exists to remove; it would write today's
 names onto yesterday's agreements and make them look authoritative. Old rows
 stay null and every reader says so.
 
+### The client nobody could correct (Phase 78)
+
+ADR 0077 nominated one line: `createOrganization` takes a city and a region and
+no street, postcode or country, though `organizations` has all six columns.
+Looking at the write paths found the larger shape — there were only ever three,
+and **none of them was an edit**. The public lead form creates an organisation,
+`createOrganization` creates one, and winning a deal sets its lifecycle stage.
+There was no update service, no action and no form.
+
+So an organisation created with a typo at lead intake kept it for ever, and the
+only escape was a second record — which splits its opportunities, its proposals
+and its timeline in two. That is the sentence `modules/parties/changes` opens
+with, written in Phase 45 about customers. Phase 45 then built the whole
+vocabulary for fixing it and gave it to `customers` and `vendors`; the CRM's own
+record of who the client is got none of it. `'organization.update'` has been in
+the audit action union since Phase 3 with nothing ever writing it.
+
+Phase 77 raised the stakes: a client's name and address are now frozen into
+every agreement they sign, so a typo is copied into the record of a contract and
+kept there deliberately.
+
+`ORGANIZATION_FIELDS` now sits beside the other two registries and
+`updateOrganization` mirrors `updateCustomer` — a partial input so a form
+showing six of thirteen fields cannot blank the other seven, and no audit entry
+when nothing changed. `normaliseParty` and `auditable` moved out of
+`receivables/service` to sit beside `diffParty`, rather than being copied a
+third time.
+
+**And the CRM can now read its own history.** Found while giving
+`organization.update` a writer: six CRM entity types have written audit events
+since Phase 3 and **none** was ever listed in `READABLE_BY`, so every one fell
+through to `audit:view` — which `sales` does not hold. A salesperson could move
+an opportunity, send a proposal and correct a client, then read the history of
+none of it. All six are `crm:view` now.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things

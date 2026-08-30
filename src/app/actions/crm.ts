@@ -9,6 +9,8 @@ import {
   createContact,
   createOpportunity,
   createOrganization,
+  organizationById,
+  updateOrganization,
   reopenOpportunity,
   updateOpportunity,
 } from '@/modules/crm/opportunities'
@@ -19,6 +21,11 @@ import {
   updateProposalItems,
 } from '@/modules/crm/proposals'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
+import {
+  ORGANIZATION_FIELDS,
+  describeChanges,
+  diffParty,
+} from '@/modules/parties/changes'
 import { createIntakeKey, revokeIntakeKey } from '@/modules/crm/intake'
 import type { Stage } from '@/modules/crm/pipeline'
 import { messageFor } from '@/modules/errors'
@@ -44,8 +51,16 @@ const organizationSchema = z.object({
   name: z.string().trim().min(1, 'A name is required.'),
   email: z.string().trim().email().optional().or(z.literal('')),
   phone: z.string().trim().optional(),
+  website: z.string().trim().optional(),
   industry: z.string().trim().optional(),
+  // The whole address, since Phase 78. `organizations` has had all six columns
+  // since Phase 3 and this schema offered one of them.
+  addressLine1: z.string().trim().optional(),
+  addressLine2: z.string().trim().optional(),
+  city: z.string().trim().optional(),
   region: z.string().trim().optional(),
+  postalCode: z.string().trim().optional(),
+  country: z.string().trim().optional(),
   source: z.string().trim().optional(),
   isStrategicAccount: z.boolean().optional(),
 })
@@ -61,6 +76,33 @@ export async function createOrganizationAction(
       email: parsed.email || undefined,
     })
     return `Added ${organization.name}.`
+  })
+}
+
+/**
+ * Corrects a client (Phase 78).
+ *
+ * The organisation record had no update path at all until now — see
+ * `updateOrganization`. The notice names the fields that changed rather than
+ * counting them, which is Phase 45's `describeChanges` doing the same job it
+ * does for a customer.
+ */
+export async function updateOrganizationAction(
+  organizationId: string,
+  input: z.input<typeof organizationSchema>,
+): Promise<ActionResult> {
+  return run('/crm/organizations', async () => {
+    const actor = await requireActor()
+    const parsed = organizationSchema.parse(input)
+
+    const fields = { ...parsed, email: parsed.email || null }
+
+    const before = await organizationById(actor, organizationId)
+    const changes = diffParty({ fields: ORGANIZATION_FIELDS, before, after: fields })
+
+    await updateOrganization(actor, organizationId, fields)
+
+    return describeChanges(changes)
   })
 }
 

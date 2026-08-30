@@ -9,6 +9,12 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import {
+  ORGANIZATION_FIELDS,
+  auditable,
+  diffParty,
+  normaliseParty,
+} from '@/modules/parties/changes'
+import {
   assertStageTransition,
   isTerminal,
   requiresLossReason,
@@ -435,8 +441,18 @@ export async function createOrganization(
     website?: string
     industry?: string
     source?: string
+    /**
+     * The whole address, since Phase 78. `organizations` has had all six
+     * columns since Phase 3 and this took two of them, so a client's street and
+     * postcode could not be entered at all — and Phase 77 freezes that address
+     * into every agreement they sign.
+     */
+    addressLine1?: string
+    addressLine2?: string
     city?: string
     region?: string
+    postalCode?: string
+    country?: string
     isStrategicAccount?: boolean
     ownerId?: string | null
   },
@@ -455,8 +471,12 @@ export async function createOrganization(
       website: input.website ?? null,
       industry: input.industry ?? null,
       source: input.source ?? null,
+      addressLine1: input.addressLine1 ?? null,
+      addressLine2: input.addressLine2 ?? null,
       city: input.city ?? null,
       region: input.region ?? null,
+      postalCode: input.postalCode ?? null,
+      country: input.country ?? null,
       isStrategicAccount: input.isStrategicAccount ?? false,
       ownerId: input.ownerId ?? ctx.userId,
     })
@@ -474,6 +494,115 @@ export async function createOrganization(
   )
 
   return organization
+}
+
+/** One organisation, for the correction screen. See `customerById`. */
+export async function organizationById(ctx: ActorContext, organizationId: string) {
+  requirePermission(ctx, 'crm:view')
+
+  const [row] = await db
+    .select()
+    .from(organizations)
+    .where(scoped(ctx, organizations, eq(organizations.id, organizationId)))
+    .limit(1)
+
+  if (!row) throw new Error('That organization is not on these books.')
+  return row
+}
+
+/**
+ * Corrects an organisation (Phase 78).
+ *
+ * ## Why this did not exist
+ *
+ * Phase 45 asked what it means to change a party record, built the vocabulary
+ * for it — `PartyField`, `diffParty`, `describeChanges` — and gave `customers`
+ * and `vendors` a correction screen. The CRM's own record of **who the client
+ * is** never got one. There was no update service, no action, and no form: an
+ * organisation created with a typo at lead intake kept it for ever, and the
+ * only escape was a second record, which splits its opportunities, its
+ * proposals and its timeline in two.
+ *
+ * `'organization.update'` has been in the audit action union since Phase 3.
+ * Nothing has ever written it. The vocabulary anticipated this service and the
+ * service never arrived.
+ *
+ * Phase 77 raised the stakes: an organisation's name and address are now frozen
+ * into every agreement it signs, so a typo does not merely persist — it is
+ * copied into the record of a contract and kept there deliberately.
+ *
+ * Gated on `crm:manage`, like creating one. A partial input, so a form showing
+ * six of thirteen fields cannot blank the other seven.
+ */
+export async function updateOrganization(
+  ctx: ActorContext,
+  organizationId: string,
+  input: Partial<{
+    name: string
+    email: string | null
+    phone: string | null
+    website: string | null
+    addressLine1: string | null
+    addressLine2: string | null
+    city: string | null
+    region: string | null
+    postalCode: string | null
+    country: string | null
+    industry: string | null
+    lifecycleStage: (typeof organizations.$inferSelect)['lifecycleStage']
+    source: string | null
+    isStrategicAccount: boolean
+    ownerId: string | null
+  }>,
+) {
+  requirePermission(ctx, 'crm:manage')
+
+  const [before] = await db
+    .select()
+    .from(organizations)
+    .where(scoped(ctx, organizations, eq(organizations.id, organizationId)))
+    .limit(1)
+
+  if (!before) throw new Error('That organization is not on these books.')
+
+  if (input.name !== undefined && !input.name.trim()) {
+    throw new Error('An organization needs a name.')
+  }
+
+  const changes = diffParty({ fields: ORGANIZATION_FIELDS, before, after: input })
+
+  // An untouched form saved is not a change — the same rule `updateCustomer`
+  // applies, and for the same reason: an audit log full of empty saves buries
+  // the one edit that mattered. `isStrategicAccount` and `ownerId` are not on
+  // the field registry, so they are checked separately.
+  const untouched =
+    changes.length === 0 &&
+    input.isStrategicAccount === undefined &&
+    input.ownerId === undefined
+
+  if (untouched) return before
+
+  return db.transaction(async (tx) => {
+    const [updated] = await tx
+      .update(organizations)
+      .set({ ...normaliseParty(input), updatedAt: new Date() })
+      .where(scoped(ctx, organizations, eq(organizations.id, organizationId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'organization.update',
+        entityType: 'organization',
+        entityId: organizationId,
+        before: auditable(changes, 'from'),
+        after: auditable(changes, 'to'),
+      },
+      tx,
+    )
+
+    return updated
+  })
 }
 
 export async function createContact(

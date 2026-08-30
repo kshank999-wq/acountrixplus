@@ -43,6 +43,8 @@
  * Nothing here touches the database or the clock.
  */
 
+import { isSecret, maskSecret } from '@/modules/audit/visibility'
+
 /** What kind of thing a field is, which decides what changing it means. */
 export type FieldKind =
   /** How to refer to somebody. Correcting it corrects it everywhere. */
@@ -89,6 +91,43 @@ export const CUSTOMER_FIELDS: PartyField[] = [
     note: 'Applies to the next invoice. Ones already raised keep the due date they were given.',
   },
   { key: 'notes', label: 'Notes', kind: 'description' },
+]
+
+/**
+ * A CRM organisation (Phase 78).
+ *
+ * The same three kinds, applied to the record that says who a *client* is —
+ * which until Phase 78 had no update path at all, so none of this had ever been
+ * asked about it.
+ *
+ * `lifecycleStage` is a `default` rather than a description: it decides which
+ * segments a contact falls into and therefore which campaigns reach them, so
+ * changing it changes what happens next rather than only what is written down.
+ */
+export const ORGANIZATION_FIELDS: PartyField[] = [
+  { key: 'name', label: 'Name', kind: 'description' },
+  {
+    key: 'email',
+    label: 'Email',
+    kind: 'description',
+    note: 'Proposals and campaign mail reach the contacts, not here — this is the switchboard.',
+  },
+  { key: 'phone', label: 'Phone', kind: 'description' },
+  { key: 'website', label: 'Website', kind: 'description' },
+  { key: 'addressLine1', label: 'Address', kind: 'description' },
+  { key: 'addressLine2', label: 'Address line 2', kind: 'description' },
+  { key: 'city', label: 'City', kind: 'description' },
+  { key: 'region', label: 'County or state', kind: 'description' },
+  { key: 'postalCode', label: 'Postcode', kind: 'description' },
+  { key: 'country', label: 'Country', kind: 'description' },
+  { key: 'industry', label: 'Industry', kind: 'description' },
+  {
+    key: 'lifecycleStage',
+    label: 'Lifecycle stage',
+    kind: 'default',
+    note: 'Segments are built on this, so it decides which campaigns reach their contacts.',
+  },
+  { key: 'source', label: 'Source', kind: 'description' },
 ]
 
 export const VENDOR_FIELDS: PartyField[] = [
@@ -249,4 +288,45 @@ export function deactivationCheck(input: {
   }
 
   return { ok: true }
+}
+
+/**
+ * A partial update, trimmed, with `undefined` left alone (Phase 45).
+ *
+ * Lived in `receivables/service` until Phase 78 needed it for a third party
+ * kind. Copying it would have been the defect this module exists to describe.
+ *
+ * The name keeps its empty string rather than becoming null: a party without a
+ * name is not a correction, it is a deletion wearing one, and the services
+ * refuse it explicitly with a message rather than writing a null.
+ */
+export function normaliseParty<T extends Record<string, unknown>>(input: T): T {
+  const out: Record<string, unknown> = {}
+
+  for (const [key, value] of Object.entries(input)) {
+    if (value === undefined) continue
+    if (typeof value === 'string') {
+      const trimmed = value.trim()
+      out[key] = key === 'name' ? trimmed : trimmed === '' ? null : trimmed
+    } else {
+      out[key] = value
+    }
+  }
+
+  return out as T
+}
+
+/**
+ * One side of a change set, ready for the audit log, with secrets masked.
+ *
+ * Phase 72's rule, applied at the writer as well as the reader — see
+ * `audit/visibility`. Also moved out of `receivables/service` in Phase 78.
+ */
+export function auditable(changes: FieldChange[], side: 'from' | 'to'): Record<string, unknown> {
+  return Object.fromEntries(
+    changes.map((change) => [
+      change.key,
+      isSecret(change.key) ? maskSecret(change[side]) : change[side],
+    ]),
+  )
 }

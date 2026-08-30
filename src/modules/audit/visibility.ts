@@ -85,6 +85,25 @@ const READABLE_BY: Record<string, Permission> = {
   tax_code: 'tax:view',
   tax_filing: 'tax:view',
   tax_remittance: 'tax:view',
+
+  /**
+   * The CRM, placed in Phase 78.
+   *
+   * These six types have written audit events since Phase 3 and none of them
+   * were ever listed, so every one fell through to `audit:view` — which the
+   * `sales` role does not hold. A salesperson could move an opportunity through
+   * the pipeline, send a proposal and correct a client, and then read the
+   * history of none of it.
+   *
+   * Noticed while giving `organization.update` a writer: an audit entry the
+   * person who made the correction cannot see is not much of an audit trail.
+   */
+  organization: 'crm:view',
+  opportunity: 'crm:view',
+  proposal: 'crm:view',
+  design_document: 'crm:view',
+  document_template: 'crm:view',
+  lead_intake_key: 'crm:view',
 }
 
 /** What somebody must hold to be shown events about this kind of record. */
