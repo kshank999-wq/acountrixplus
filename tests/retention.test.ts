@@ -5,6 +5,8 @@ import {
   actionTokens,
   backgroundJobs,
   campaignEvents,
+  campaignRecipients,
+  campaigns,
   documentBlobs,
   domainEvents,
   journalLines,
@@ -324,6 +326,40 @@ describe('the schedules that were owed', () => {
   })
 })
 
+/**
+ * Recipients in whatever states the test needs, without running a campaign:
+ * the question is what the rates say, not how the rows got there.
+ */
+async function seedSending(
+  companyId: string,
+  counts: { accepted: number; bounced?: number; complained?: number },
+) {
+  const [campaign] = await db
+    .insert(campaigns)
+    .values({ companyId, name: 'Reputation', kind: 'broadcast', status: 'sent' })
+    .returning()
+
+  const bounced = counts.bounced ?? 0
+  const complained = counts.complained ?? 0
+  const now = new Date()
+
+  const rows = Array.from({ length: counts.accepted }, (_, index) => ({
+    companyId,
+    campaignId: campaign.id,
+    email: `reader${index}@example.test`,
+    unsubscribeToken: `tok-${campaign.id}-${index}`,
+    status:
+      index < bounced
+        ? ('bounced' as const)
+        : index < bounced + complained
+          ? ('complained' as const)
+          : ('delivered' as const),
+    sentAt: now,
+  }))
+
+  await db.insert(campaignRecipients).values(rows)
+}
+
 describe('the failure digest', () => {
   it('finds a dead job and a bounced letter in one shape', async () => {
     const fixture = await createCompanyFixture({ name: 'Digest Co' })
@@ -367,6 +403,40 @@ describe('the failure digest', () => {
     // The whole point of the digest. One that fires on a quiet day teaches
     // people to ignore the one that fires on a loud one.
     expect(state.total).toBe(0)
+    expect(state.worthSaying).toBe(false)
+
+    // And a company that has sent nothing has no sending verdict at all —
+    // which is not the same as a healthy one (Phase 84).
+    expect(state.sending).toBeNull()
+  })
+
+  /**
+   * The one failure here that gets worse while nobody does anything about it
+   * (Phase 84). Nothing has *failed* — the mail was accepted and delivered to
+   * a mailbox that then rejected it — so a digest keyed on a count of failures
+   * would stay silent until the sending domain was already spent.
+   */
+  it('speaks when the sending reputation is going bad, though nothing failed', async () => {
+    const fixture = await createCompanyFixture({ name: 'Reputation Co' })
+    await seedSending(fixture.companyId, { accepted: 200, bounced: 12 })
+
+    const state = await health(fixture.ctx)
+
+    expect(state.total).toBe(0)
+    expect(state.sending?.level).toBe('urgent')
+    expect(state.sending?.concern).toBe('6.0% of mail is bouncing')
+    expect(state.worthSaying).toBe(true)
+  })
+
+  it('will not cry wolf over a handful of recipients', async () => {
+    const fixture = await createCompanyFixture({ name: 'Small Co' })
+    await seedSending(fixture.companyId, { accepted: 20, bounced: 4 })
+
+    const state = await health(fixture.ctx)
+
+    // A 20% bounce rate over twenty sends is not a signal about anything.
+    expect(state.sending).toBeNull()
+    expect(state.worthSaying).toBe(false)
   })
 
   it('does not report the same failure every morning', async () => {

@@ -11,6 +11,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { basisPoints } from '@/modules/crm/analytics'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import type { SendingCounts } from './reputation'
 
 /**
  * Campaign analytics (spec §10).
@@ -345,4 +346,42 @@ export async function campaignCalendar(ctx: ActorContext, fromDate: Date) {
     .from(campaigns)
     .where(scoped(ctx, campaigns, gte(campaigns.scheduledFor, fromDate)))
     .orderBy(campaigns.scheduledFor)
+}
+
+/**
+ * What this company's sending looks like to a mailbox provider (Phase 84).
+ *
+ * Counted over recipients *sent* in the window rather than events recorded in
+ * it, because the question is "of the mail we sent, how much failed" — an
+ * event-window count would divide this week's bounces by this week's sends and
+ * mix two different cohorts.
+ *
+ * Takes a `companyId` rather than an actor: the caller is the failure digest,
+ * running on the worker, which has already established who it is acting for.
+ */
+export async function sendingCounts(
+  companyId: string,
+  since: Date,
+): Promise<SendingCounts> {
+  const [row] = await db
+    .select({
+      // Everything a provider accepted. `failed` never reached one and
+      // `skipped` was never sent, so neither belongs in the denominator.
+      accepted: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} NOT IN ('pending', 'skipped', 'failed'))`,
+      bounced: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} = 'bounced')`,
+      complained: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} = 'complained')`,
+    })
+    .from(campaignRecipients)
+    .where(
+      and(
+        eq(campaignRecipients.companyId, companyId),
+        gte(campaignRecipients.sentAt, since),
+      ),
+    )
+
+  return {
+    accepted: Number(row?.accepted ?? 0),
+    bounced: Number(row?.bounced ?? 0),
+    complained: Number(row?.complained ?? 0),
+  }
 }

@@ -1,5 +1,11 @@
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { failedDeliveries } from '@/modules/notify/service'
+import { sendingCounts } from '@/modules/marketing/analytics'
+import {
+  REPUTATION_WINDOW_DAYS,
+  sendingHealth,
+  type SendingHealth,
+} from '@/modules/marketing/reputation'
 import { listJobs } from './queue'
 
 /**
@@ -37,8 +43,25 @@ export type Health = {
     error: string | null
     createdAt: Date
   }>
+  /**
+   * How this company's sending looks to a mailbox provider (Phase 84).
+   *
+   * `null` below the volume floor, which is not the same as healthy — see
+   * `sendingHealth`. Measured over its own, longer window: a bounce arrives
+   * days after the send, so the digest's twenty-four hours would miss the
+   * bounces those sends are about to produce.
+   */
+  sending: SendingHealth | null
   /** The number a digest leads with. Zero means say nothing at all. */
   total: number
+  /**
+   * Whether there is anything worth saying.
+   *
+   * Not just `total > 0` since Phase 84. A sending reputation going bad is not
+   * a count of things that failed — nothing failed, and that is exactly what
+   * makes it easy to miss until the domain is spent.
+   */
+  worthSaying: boolean
 }
 
 /**
@@ -52,17 +75,25 @@ export type Health = {
  */
 export async function health(
   ctx: ActorContext,
-  opts: { since?: Date; limit?: number } = {},
+  opts: { since?: Date; limit?: number; reputationSince?: Date } = {},
 ): Promise<Health> {
   requirePermission(ctx, 'company:manage')
 
   const since = opts.since ?? new Date(Date.now() - 24 * 60 * 60 * 1000)
   const limit = opts.limit ?? 20
 
-  const [jobs, mail] = await Promise.all([
+  const reputationSince =
+    opts.reputationSince ??
+    new Date(Date.now() - REPUTATION_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+
+  const [jobs, mail, counts] = await Promise.all([
     listJobs({ companyId: ctx.companyId, status: ['dead'], since, limit }),
     failedDeliveries(ctx.companyId, limit, undefined, since),
+    sendingCounts(ctx.companyId, reputationSince),
   ])
+
+  const sending = sendingHealth(counts)
+  const total = jobs.length + mail.length
 
   return {
     since,
@@ -74,6 +105,8 @@ export async function health(
       attempts: job.attempts,
     })),
     bouncedMail: mail,
-    total: jobs.length + mail.length,
+    sending,
+    total,
+    worthSaying: total > 0 || (sending !== null && sending.level !== 'ok'),
   }
 }

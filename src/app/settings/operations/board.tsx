@@ -83,6 +83,14 @@ type Failures = {
     error: string | null
     createdAt: string
   }>
+  /** How the company's marketing looks to a mailbox provider (Phase 84). */
+  sending: {
+    level: 'ok' | 'watch' | 'urgent'
+    accepted: number
+    bounceRateBp: number
+    complaintRateBp: number
+    concern: string | null
+  } | null
 } | null
 
 type Integrity = {
@@ -309,6 +317,29 @@ export function OperationsBoard({
             onRetry={(id) => act(() => retryJobAction(id))}
             onCancel={(id) => act(() => cancelJobAction(id))}
           />
+        </Card>
+      )}
+
+      {failures?.sending && failures.sending.level !== 'ok' && (
+        <Card
+          title={`Marketing email: ${failures.sending.concern}`}
+          subtitle={
+            failures.sending.level === 'urgent'
+              ? 'Past the level mailbox providers act on. They score a sender over weeks, so by the time campaigns visibly stop arriving the reputation that has to recover is already spent.'
+              : 'Not yet a problem, and the point of saying so early is that it takes weeks to undo once it is one.'
+          }
+        >
+          <dl className="grid grid-cols-3 gap-4 px-4 py-3 text-sm">
+            <Rate label="Bouncing" bp={failures.sending.bounceRateBp} />
+            <Rate label="Marked as spam" bp={failures.sending.complaintRateBp} />
+            <div>
+              <dt className="text-xs text-muted">Messages</dt>
+              <dd className="tnum mt-0.5 text-lg font-semibold">
+                {failures.sending.accepted.toLocaleString()}
+              </dd>
+              <p className="text-xs text-faint">accepted in the last week</p>
+            </div>
+          </dl>
         </Card>
       )}
 
@@ -658,6 +689,21 @@ function Card({
       </header>
       <div className="overflow-x-auto">{children}</div>
     </section>
+  )
+}
+
+/**
+ * One rate, in the units a mailbox provider talks in (Phase 84).
+ *
+ * One decimal place, because 0.1% and 0.3% are the two numbers Google
+ * publishes and rounding to whole percent makes both of them zero.
+ */
+function Rate({ label, bp }: { label: string; bp: number }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="tnum mt-0.5 text-lg font-semibold">{(bp / 100).toFixed(1)}%</dd>
+    </div>
   )
 }
 

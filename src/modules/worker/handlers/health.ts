@@ -43,10 +43,18 @@ registerHandler({
 
     const state = await health(actor, { since })
 
-    // The whole point. A digest that fires on a quiet day teaches people to
-    // ignore the one that fires on a loud one.
-    if (state.total === 0) {
-      return { since: since.toISOString(), total: 0, sent: 0 }
+    /*
+      The whole point. A digest that fires on a quiet day teaches people to
+      ignore the one that fires on a loud one.
+
+      `worthSaying` rather than `total > 0` since Phase 84. A sending
+      reputation going bad is not a count of things that failed — nothing
+      failed, which is exactly why it is easy to miss until the domain is
+      spent. It is the one thing here that gets worse while nobody does
+      anything about it.
+    */
+    if (!state.worthSaying) {
+      return { since: since.toISOString(), total: state.total, sent: 0 }
     }
 
     const rows = await db
@@ -69,6 +77,13 @@ registerHandler({
         `${state.bouncedMail.length} letter${state.bouncedMail.length === 1 ? '' : 's'} did not arrive`,
       )
     }
+    if (state.sending && state.sending.concern) {
+      // Leads, when it is the urgent one. A dead job is still there tomorrow;
+      // a sending reputation is not.
+      const phrase = `Marketing email: ${state.sending.concern}`
+      if (state.sending.level === 'urgent') parts.unshift(phrase)
+      else parts.push(phrase)
+    }
 
     let sent = 0
     let suppressed = 0
@@ -84,9 +99,12 @@ registerHandler({
           // reading this on a phone wants to know whether to get a laptop out,
           // and one real message answers that better than a tally.
           body:
-            state.deadJobs[0]?.lastError ??
-            state.bouncedMail[0]?.error ??
-            'Nothing retried them, and nothing will.',
+            state.sending?.level === 'urgent'
+              ? `Over ${state.sending.accepted} messages in the last week. Mailbox providers score this over weeks, so it is worth looking today.`
+              : (state.deadJobs[0]?.lastError ??
+                state.bouncedMail[0]?.error ??
+                state.sending?.concern ??
+                'Nothing retried them, and nothing will.'),
           url: '/settings/operations',
           tag: 'failure-digest',
         },
@@ -100,6 +118,7 @@ registerHandler({
       since: since.toISOString(),
       deadJobs: state.deadJobs.length,
       bouncedMail: state.bouncedMail.length,
+      sending: state.sending?.level ?? 'unknown',
       total: state.total,
       sent,
       suppressed,

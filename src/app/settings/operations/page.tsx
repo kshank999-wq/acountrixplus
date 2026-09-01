@@ -154,6 +154,9 @@ export default async function OperationsPage() {
               error: mail.error,
               createdAt: mail.createdAt.toISOString(),
             })),
+            // Its own window, seven days rather than the page's — a bounce
+            // arrives days after the send (Phase 84).
+            sending: failures.sending,
           }
         }
         retention={retention}
