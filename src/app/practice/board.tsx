@@ -24,6 +24,28 @@ type QueueItem = {
   role: string
   awaitingReview: number
   oldestAwaiting: string | null
+  /** What most needs somebody here, and how much else there is (Phase 87). */
+  triage: {
+    rung: 'wrong' | 'spending' | 'stuck' | 'waiting' | 'unchecked' | 'clear'
+    headline: string | null
+    others: number
+  }
+}
+
+/**
+ * How loudly a rung reads.
+ *
+ * Only two rungs are allowed to be loud. A roster where every row shouts is a
+ * roster nobody scans, which is the failure mode Phase 24 named for the digest
+ * and it applies here for the same reason.
+ */
+const RUNG_TONE: Record<QueueItem['triage']['rung'], string> = {
+  wrong: 'text-negative font-medium',
+  spending: 'text-negative font-medium',
+  stuck: 'font-medium',
+  waiting: '',
+  unchecked: 'text-muted',
+  clear: 'text-faint',
 }
 
 type Engagement = {
@@ -183,7 +205,7 @@ export function PracticeBoard({
 
       <Card
         title="Clients"
-        subtitle="What is waiting in each set of books. Counts only — you are not in anybody’s ledger until you open it."
+        subtitle="Worst first: what most needs somebody in each set of books. Counts only — you are not in anybody’s ledger until you open it."
       >
         {queue.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-muted">
@@ -196,8 +218,7 @@ export function PracticeBoard({
               <tr>
                 <th className="px-4 py-2 font-medium">Company</th>
                 <th className="px-4 py-2 font-medium">Your role</th>
-                <th className="px-4 py-2 text-right font-medium">Waiting</th>
-                <th className="px-4 py-2 font-medium">Oldest</th>
+                <th className="px-4 py-2 font-medium">Needs somebody</th>
                 <th className="px-4 py-2" />
               </tr>
             </thead>
@@ -206,14 +227,21 @@ export function PracticeBoard({
                 <tr key={item.companyId} className="border-t border-line">
                   <td className="px-4 py-1.5 font-medium">{item.companyName}</td>
                   <td className="px-4 py-1.5 text-muted">{item.role}</td>
-                  <td
-                    className={`tnum px-4 py-1.5 text-right ${
-                      item.awaitingReview > 0 ? 'font-medium' : 'text-muted'
-                    }`}
-                  >
-                    {item.awaitingReview === 0 ? '—' : item.awaitingReview}
+                  <td className={`px-4 py-1.5 ${RUNG_TONE[item.triage.rung]}`}>
+                    {item.triage.headline ?? 'Nothing waiting'}
+                    {item.triage.others > 0 && (
+                      // One line per client. An accountant scanning twelve rows
+                      // will not read four bullets each, so the rest is a count.
+                      //
+                      // The space is a real one rather than a margin: a margin
+                      // is invisible to anything that reads the text instead of
+                      // painting it, and this ran together when it was.
+                      <span className="text-xs font-normal text-faint">
+                        {' '}
+                        and {item.triage.others} more
+                      </span>
+                    )}
                   </td>
-                  <td className="px-4 py-1.5 text-muted">{item.oldestAwaiting ?? '—'}</td>
                   <td className="px-4 py-1.5 text-right">
                     <form action={enterClientAction.bind(null, item.companyId)}>
                       <button className="btn btn-ghost text-xs">Open their books</button>

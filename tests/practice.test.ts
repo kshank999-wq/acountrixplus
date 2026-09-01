@@ -1,7 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { auditEvents, customers, memberships, practiceEngagements } from '@/db/schema'
+import {
+  auditEvents,
+  backgroundJobs,
+  customers,
+  integrityRuns,
+  memberships,
+  practiceEngagements,
+  sendingSnapshots,
+} from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
 import {
   addPracticeMember,
@@ -605,6 +613,148 @@ describe('the work queue', () => {
 
     const outsider = await accountant('Curious Person')
     expect(await practiceWorkQueue(outsider.id, rival.practiceId)).toEqual([])
+  })
+
+  /**
+   * Phase 87. Until now this queue asked one question of every client — the
+   * categorization backlog — which is the least urgent thing the application
+   * knows about a set of books. Everything else had been built one client at
+   * a time and was reachable only by opening that client's operations page.
+   */
+  describe('asking the other questions', () => {
+    const NOW = new Date('2026-09-01T09:00:00.000Z')
+
+    /** `days` before NOW, as `YYYY-MM-DD`. */
+    function ago(days: number): string {
+      return new Date(NOW.getTime() - days * 86_400_000).toISOString().slice(0, 10)
+    }
+
+    async function checked(company: Fixture, faults: number, errors = 0) {
+      await db.insert(integrityRuns).values({
+        companyId: company.companyId,
+        asOf: ago(0),
+        checksRun: 10,
+        checksSkipped: 0,
+        faults,
+        errors,
+      })
+    }
+
+    it('puts the client whose books disagree at the top', async () => {
+      const broken = await createCompanyFixture({ name: 'Zebra Ltd' })
+      const fine = await createCompanyFixture({ name: 'Alpha Ltd' })
+      const shop = await firm('Hartley & Co')
+      await engaged(broken, shop)
+      await engaged(fine, shop)
+      await checked(broken, 2)
+      await checked(fine, 0)
+
+      const queue = await practiceWorkQueue(shop.ownerId, shop.practiceId, NOW)
+
+      // Alphabetically Alpha comes first; by urgency it does not.
+      expect(queue.map((row) => row.companyName)).toEqual(['Zebra Ltd', 'Alpha Ltd'])
+      expect(queue[0].triage.rung).toBe('wrong')
+      expect(queue[0].triage.headline).toBe('2 checks disagree with the ledger')
+      expect(queue[1].triage.rung).toBe('clear')
+    })
+
+    it('sees a dead job in a client’s books without entering them', async () => {
+      const client = await createCompanyFixture({ name: 'Stuck Ltd' })
+      const shop = await firm('Hartley & Co')
+      await engaged(client, shop)
+      await checked(client, 0)
+
+      await db.insert(backgroundJobs).values({
+        companyId: client.companyId,
+        kind: 'bank.sync_all',
+        payload: {},
+        status: 'dead',
+        attempts: 5,
+        maxAttempts: 5,
+        lastError: 'The provider refused the token.',
+        runAt: NOW,
+        updatedAt: NOW,
+        finishedAt: NOW,
+      })
+
+      const queue = await practiceWorkQueue(shop.ownerId, shop.practiceId, NOW)
+
+      expect(queue[0].triage.rung).toBe('stuck')
+      expect(queue[0].triage.headline).toBe('1 job gave up')
+    })
+
+    /**
+     * The reason this is affordable at all: Phase 86 writes one snapshot row
+     * per company per day, so a forty-client roster reads the sending
+     * reputation with one indexed row each rather than the four-query
+     * `health()` the operations page runs.
+     */
+    it('reads the sending reputation from the daily snapshot', async () => {
+      const client = await createCompanyFixture({ name: 'Bouncy Ltd' })
+      const shop = await firm('Hartley & Co')
+      await engaged(client, shop)
+      await checked(client, 0)
+
+      await db.insert(sendingSnapshots).values([
+        {
+          companyId: client.companyId,
+          takenOn: ago(9),
+          windowDays: 7,
+          accepted: 400,
+          bounced: 4,
+          complained: 0,
+        },
+        {
+          companyId: client.companyId,
+          takenOn: ago(0),
+          windowDays: 7,
+          accepted: 400,
+          bounced: 24,
+          complained: 0,
+        },
+      ])
+
+      const queue = await practiceWorkQueue(shop.ownerId, shop.practiceId, NOW)
+
+      expect(queue[0].triage.rung).toBe('spending')
+      expect(queue[0].triage.headline).toBe(
+        'Marketing email is bouncing past the level providers act on',
+      )
+    })
+
+    /**
+     * A roster showing a green tick for a company nobody has ever examined
+     * would be lying quietly, at scale — the rule Phase 84 drew with `null`
+     * rather than `ok`.
+     */
+    it('does not call a client nobody has checked clear', async () => {
+      const client = await createCompanyFixture({ name: 'Unknown Ltd' })
+      const shop = await firm('Hartley & Co')
+      await engaged(client, shop)
+
+      const queue = await practiceWorkQueue(shop.ownerId, shop.practiceId, NOW)
+
+      expect(queue[0].triage.rung).toBe('unchecked')
+      expect(queue[0].triage.headline).toBe('The books have never been checked')
+    })
+
+    it('still keeps one firm’s clients out of another’s triage', async () => {
+      const mine = await createCompanyFixture({ name: 'My Client' })
+      const theirs = await createCompanyFixture({ name: 'Their Client' })
+      const ours = await firm('Hartley & Co')
+      const rival = await firm('Rival Books')
+      await engaged(mine, ours)
+      await engaged(theirs, rival)
+      // Their client is the broken one. It must not appear on our roster.
+      await checked(theirs, 5)
+      await checked(mine, 0)
+
+      const queue = await practiceWorkQueue(ours.ownerId, ours.practiceId, NOW)
+
+      expect(queue).toHaveLength(1)
+      expect(queue[0].companyName).toBe('My Client')
+      expect(queue[0].triage.rung).toBe('clear')
+    })
   })
 
   it('drops a client the moment the engagement ends', async () => {

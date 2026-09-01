@@ -58,6 +58,11 @@ export default async function PracticePage({
           role: item.role,
           awaitingReview: item.awaitingReview,
           oldestAwaiting: item.oldestAwaiting,
+          triage: {
+            rung: item.triage.rung,
+            headline: item.triage.headline,
+            others: item.triage.others,
+          },
         }))}
         engagements={engagements.map((engagement) => ({
           id: engagement.id,

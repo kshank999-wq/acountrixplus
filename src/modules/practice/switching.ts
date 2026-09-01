@@ -1,18 +1,25 @@
-import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
+import { and, desc, eq, gte, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
+  backgroundJobs,
   bankTransactions,
   companies,
+  integrityRuns,
   memberships,
   practiceEngagements,
   practiceMembers,
   practices,
+  sendingSnapshots,
   sessions,
+  transactionalMessages,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import type { ActorContext } from '@/modules/tenancy/context'
 import type { Role } from '@/modules/permissions'
 import { DomainError } from '@/modules/errors'
+import { sendingHealth, REPUTATION_WINDOW_DAYS } from '@/modules/marketing/reputation'
+import { trendFor, type Reading } from '@/modules/marketing/trend'
+import { triageFor, byUrgency, type Triage } from './triage'
 
 /**
  * Switching between the companies one person can reach (spec §14).
@@ -173,6 +180,16 @@ export type ClientWorkItem = {
   /** The oldest of them, which is what says whether the backlog is stale. */
   oldestAwaiting: string | null
   lastActivityAt: Date | null
+  /**
+   * What most needs somebody at this client, and how much else there is
+   * (Phase 87).
+   *
+   * Until now this row carried one number — the categorization backlog — which
+   * is the least urgent thing the application knows about a set of books. The
+   * rest had been built one client at a time and was reachable only by opening
+   * that client's own operations page.
+   */
+  triage: Triage
 }
 
 /**
@@ -198,6 +215,8 @@ export type ClientWorkItem = {
 export async function practiceWorkQueue(
   userId: string,
   practiceId: string,
+  /** The moment to judge against. A parameter so a test can name it. */
+  now?: Date,
 ): Promise<ClientWorkItem[]> {
   // Membership at the practice, checked before anything is read. A gate
   // rather than a filter: a practice id somebody guessed returns nothing,
@@ -246,27 +265,101 @@ export async function practiceWorkQueue(
 
   if (clients.length === 0) return []
 
+  const asOf = now ?? new Date()
+  const failureSince = new Date(asOf.getTime() - 24 * 60 * 60 * 1000)
+  const reputationSince = new Date(
+    asOf.getTime() - 4 * REPUTATION_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  )
+
   // Counted per client rather than in one grouped query over every company:
   // the grouped version is the one that, with a filter typo, returns every
   // company in the database. This one cannot, because each query names a
   // company that was already proven reachable above.
-  return Promise.all(
+  const items = await Promise.all(
     clients.map(async (client) => {
-      const [pending] = await db
-        .select({
-          count: sql<string>`count(*)`,
-          oldest: sql<string | null>`min(${bankTransactions.postedDate})`,
-          latest: sql<Date | null>`max(${bankTransactions.createdAt})`,
-        })
-        .from(bankTransactions)
-        .where(
-          and(
-            eq(bankTransactions.companyId, client.companyId),
-            // Everything a person still has to decide about. `excluded` and
-            // `reconciled` are decisions somebody already made.
-            inArray(bankTransactions.reviewState, ['new', 'suggested', 'needs_review']),
+      /*
+        Five counts per client rather than one (Phase 87), and every one of
+        them a count rather than rows — the rule this function has followed
+        since Phase 18, because an accountant triaging a roster needs a number,
+        not a list of somebody else's transactions on a page they have not
+        entered yet.
+
+        Affordable because of what the phases before it left behind. The
+        integrity register writes one summary row per run, and the sending
+        reputation writes one snapshot per company per day (Phase 86), so the
+        two most valuable signals cost one indexed read each instead of the
+        four-query `health()` the operations page runs.
+      */
+      const [pending, integrity, jobs, mail, readings] = await Promise.all([
+        db
+          .select({
+            count: sql<string>`count(*)`,
+            oldest: sql<string | null>`min(${bankTransactions.postedDate})`,
+            latest: sql<Date | null>`max(${bankTransactions.createdAt})`,
+          })
+          .from(bankTransactions)
+          .where(
+            and(
+              eq(bankTransactions.companyId, client.companyId),
+              // Everything a person still has to decide about. `excluded` and
+              // `reconciled` are decisions somebody already made.
+              inArray(bankTransactions.reviewState, ['new', 'suggested', 'needs_review']),
+            ),
           ),
-        )
+
+        db
+          .select({
+            asOf: integrityRuns.asOf,
+            faults: integrityRuns.faults,
+            errors: integrityRuns.errors,
+          })
+          .from(integrityRuns)
+          .where(eq(integrityRuns.companyId, client.companyId))
+          .orderBy(desc(integrityRuns.startedAt))
+          .limit(1),
+
+        db
+          .select({ count: sql<string>`count(*)` })
+          .from(backgroundJobs)
+          .where(
+            and(
+              eq(backgroundJobs.companyId, client.companyId),
+              eq(backgroundJobs.status, 'dead'),
+              gte(backgroundJobs.updatedAt, failureSince),
+            ),
+          ),
+
+        db
+          .select({ count: sql<string>`count(*)` })
+          .from(transactionalMessages)
+          .where(
+            and(
+              eq(transactionalMessages.companyId, client.companyId),
+              eq(transactionalMessages.outcome, 'failed'),
+              gte(transactionalMessages.createdAt, failureSince),
+            ),
+          ),
+
+        db
+          .select({
+            takenOn: sendingSnapshots.takenOn,
+            accepted: sendingSnapshots.accepted,
+            bounced: sendingSnapshots.bounced,
+            complained: sendingSnapshots.complained,
+          })
+          .from(sendingSnapshots)
+          .where(
+            and(
+              eq(sendingSnapshots.companyId, client.companyId),
+              gte(sendingSnapshots.takenOn, reputationSince.toISOString().slice(0, 10)),
+            ),
+          )
+          .orderBy(sendingSnapshots.takenOn),
+      ])
+
+      const latest = readings.at(-1) as Reading | undefined
+      const verdict = latest ? sendingHealth(latest) : null
+      const trend = trendFor(readings as Reading[])
 
       return {
         companyId: client.companyId,
@@ -274,12 +367,36 @@ export async function practiceWorkQueue(
         industry: client.industry,
         role: client.role as Role,
         engagementId: client.engagementId as string,
-        awaitingReview: Number(pending?.count ?? 0),
-        oldestAwaiting: pending?.oldest ?? null,
-        lastActivityAt: pending?.latest ?? null,
+        awaitingReview: Number(pending[0]?.count ?? 0),
+        oldestAwaiting: pending[0]?.oldest ?? null,
+        lastActivityAt: pending[0]?.latest ?? null,
+        triage: triageFor(
+          {
+            awaitingReview: Number(pending[0]?.count ?? 0),
+            oldestAwaiting: pending[0]?.oldest ?? null,
+            integrity: integrity[0]
+              ? {
+                  asOf: integrity[0].asOf,
+                  faults: integrity[0].faults,
+                  errors: integrity[0].errors,
+                }
+              : null,
+            deadJobs: Number(jobs[0]?.count ?? 0),
+            bouncedMail: Number(mail[0]?.count ?? 0),
+            sending: verdict
+              ? { level: verdict.level, worsening: trend?.direction === 'worsening' }
+              : null,
+          },
+          asOf,
+        ),
       }
     }),
   )
+
+  // Worst first, rather than the alphabetical order this returned since Phase
+  // 18. A roster sorted by name is a roster you read top to bottom every
+  // morning; one sorted by urgency is a roster you read until it goes quiet.
+  return items.sort(byUrgency)
 }
 
 /** Companies this person belongs to directly, for the "my own books" case. */
