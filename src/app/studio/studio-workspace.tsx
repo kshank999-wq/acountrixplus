@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatCents } from '@/lib/money'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
+import { BRAND_STYLE_FIELDS } from '@/modules/design/style-values'
 import {
   createClauseAction,
   createServiceItemAction,
@@ -226,13 +227,18 @@ function ProfileTab({
   )
 }
 
-const COLOR_FIELDS = [
-  { key: 'primaryColor', label: 'Primary' },
-  { key: 'accentColor', label: 'Accent' },
-  { key: 'textColor', label: 'Text' },
-  { key: 'mutedColor', label: 'Muted' },
-  { key: 'surfaceColor', label: 'Background' },
-] as const
+/**
+ * The captions, from the registry the server refuses against (Phase 80).
+ *
+ * These five were written out here as well, and the refusal named the column
+ * instead — `primaryColor must be a hex colour…` beside a field captioned
+ * "Primary". One list now, so a caption renamed here changes what the refusal
+ * says, and `tests/brand-style.test.ts` fails if the two ever separate.
+ */
+const COLOR_FIELDS = BRAND_STYLE_FIELDS.filter((field) => field.kind === 'color')
+
+const label = (key: string) =>
+  BRAND_STYLE_FIELDS.find((field) => field.key === key)?.label ?? key
 
 function BrandTab({
   kits,
@@ -308,7 +314,7 @@ function BrandTab({
 
         <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <label className="text-xs text-muted">
-            <span className="mb-1 block">Heading font</span>
+            <span className="mb-1 block">{label('headingFont')}</span>
             <select
               value={kit.headingFont}
               onChange={(event) =>
@@ -325,7 +331,7 @@ function BrandTab({
           </label>
 
           <label className="text-xs text-muted">
-            <span className="mb-1 block">Body font</span>
+            <span className="mb-1 block">{label('bodyFont')}</span>
             <select
               value={kit.bodyFont}
               onChange={(event) =>

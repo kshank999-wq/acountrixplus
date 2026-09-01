@@ -1,4 +1,5 @@
 import type { Block } from '@/modules/design/blocks'
+import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { safeUrl } from '@/modules/design/urls'
 
 /**
@@ -41,12 +42,61 @@ export type EmailBrand = {
   headingFont: string
 }
 
+/**
+ * The kit an email uses when the company has none.
+ *
+ * The **colours** come from `DEFAULT_BRAND_KIT` — this was a seventh written-out
+ * copy of them, missed by Phase 79 because it is a different type in a
+ * different module and does not mention `BrandTokens`.
+ *
+ * The **fonts** are deliberately not the kit's. A document renders in a browser
+ * that has `system-ui`; an email renders in Outlook, which does not, so the
+ * stack names the real families each platform ships. Same rule, different
+ * medium — the one place the two are allowed to differ.
+ */
 const DEFAULT_EMAIL_BRAND: EmailBrand = {
-  primaryColor: '#0d6e60',
-  textColor: '#0f172a',
-  mutedColor: '#64748b',
+  primaryColor: DEFAULT_BRAND_KIT.primaryColor,
+  textColor: DEFAULT_BRAND_KIT.textColor,
+  mutedColor: DEFAULT_BRAND_KIT.mutedColor,
   bodyFont: "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
   headingFont: 'Georgia, serif',
+}
+
+/**
+ * A stored brand kit as this renderer wants it.
+ *
+ * The body font stays the email stack rather than the kit's: see above. The
+ * heading font is the company's, because a heading is where a brand is actually
+ * seen and Georgia degrades gracefully wherever the choice does not resolve.
+ */
+export function emailBrand(
+  kit: { primaryColor: string; textColor: string; mutedColor: string; headingFont: string } | null,
+): EmailBrand {
+  if (!kit) return DEFAULT_EMAIL_BRAND
+
+  return {
+    primaryColor: kit.primaryColor,
+    textColor: kit.textColor,
+    mutedColor: kit.mutedColor,
+    headingFont: kit.headingFont,
+    bodyFont: DEFAULT_EMAIL_BRAND.bodyFont,
+  }
+}
+
+/**
+ * A brand value on its way into a `style` attribute.
+ *
+ * Belt and braces (Phase 80). `studio/service` refuses any colour that is not
+ * plain hex and any font that is not a font list, so nothing that reaches here
+ * should need escaping — but this file's own rule is that *every author string
+ * passes through `escapeHtml`*, and these are author strings that quietly did
+ * not. A validator three modules away is a promise; this is the second lock.
+ *
+ * Entities are decoded by the HTML parser before the CSS is parsed, so a
+ * legitimate `'Segoe UI'` still resolves after its quotes are escaped.
+ */
+function styleValue(value: string): string {
+  return escapeHtml(value)
 }
 
 /**
@@ -65,8 +115,8 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
   switch (block.type) {
     case 'cover':
       return `
-        <tr><td style="padding:32px 24px;background:${brand.primaryColor};color:#ffffff;">
-          ${block.title ? `<h1 style="margin:0;font-family:${brand.headingFont};font-size:26px;line-height:1.2;color:#ffffff;">${escapeHtml(block.title)}</h1>` : ''}
+        <tr><td style="padding:32px 24px;background:${styleValue(brand.primaryColor)};color:#ffffff;">
+          ${block.title ? `<h1 style="margin:0;font-family:${styleValue(brand.headingFont)};font-size:26px;line-height:1.2;color:#ffffff;">${escapeHtml(block.title)}</h1>` : ''}
           ${block.subtitle ? `<p style="margin:8px 0 0;font-size:14px;color:#ffffff;opacity:0.9;">${escapeHtml(block.subtitle)}</p>` : ''}
         </td></tr>`
 
@@ -74,7 +124,7 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
       const size = block.level === 1 ? 24 : block.level === 2 ? 19 : 16
       return `
         <tr><td style="padding:20px 24px 6px;">
-          <h${block.level} style="margin:0;font-family:${brand.headingFont};font-size:${size}px;line-height:1.3;color:${brand.primaryColor};text-align:${block.align};">${escapeHtml(block.text)}</h${block.level}>
+          <h${block.level} style="margin:0;font-family:${styleValue(brand.headingFont)};font-size:${size}px;line-height:1.3;color:${styleValue(brand.primaryColor)};text-align:${block.align};">${escapeHtml(block.text)}</h${block.level}>
         </td></tr>`
     }
 
@@ -84,7 +134,7 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
           ${paragraphs(block.text)
             .map(
               (p) =>
-                `<p style="margin:0 0 12px;font-size:${block.emphasis ? 17 : 15}px;line-height:1.6;color:${brand.textColor};text-align:${block.align};">${escapeHtml(p)}</p>`,
+                `<p style="margin:0 0 12px;font-size:${block.emphasis ? 17 : 15}px;line-height:1.6;color:${styleValue(brand.textColor)};text-align:${block.align};">${escapeHtml(p)}</p>`,
             )
             .join('')}
         </td></tr>`
@@ -92,7 +142,7 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
     case 'list':
       return `
         <tr><td style="padding:6px 24px;">
-          <${block.ordered ? 'ol' : 'ul'} style="margin:0;padding-left:20px;font-size:15px;line-height:1.6;color:${brand.textColor};">
+          <${block.ordered ? 'ol' : 'ul'} style="margin:0;padding-left:20px;font-size:15px;line-height:1.6;color:${styleValue(brand.textColor)};">
             ${block.items.filter((i) => i.trim()).map((i) => `<li style="margin-bottom:6px;">${escapeHtml(i)}</li>`).join('')}
           </${block.ordered ? 'ol' : 'ul'}>
         </td></tr>`
@@ -100,13 +150,13 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
     case 'keyValue':
       return `
         <tr><td style="padding:6px 24px;">
-          ${block.title ? `<p style="margin:0 0 8px;font-weight:600;color:${brand.textColor};">${escapeHtml(block.title)}</p>` : ''}
+          ${block.title ? `<p style="margin:0 0 8px;font-weight:600;color:${styleValue(brand.textColor)};">${escapeHtml(block.title)}</p>` : ''}
           <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
             ${block.rows
               .filter((row) => row.value.trim())
               .map(
                 (row) =>
-                  `<tr><td style="padding:4px 12px 4px 0;font-size:14px;color:${brand.mutedColor};white-space:nowrap;">${escapeHtml(row.label)}</td><td style="padding:4px 0;font-size:14px;color:${brand.textColor};">${escapeHtml(row.value)}</td></tr>`,
+                  `<tr><td style="padding:4px 12px 4px 0;font-size:14px;color:${styleValue(brand.mutedColor)};white-space:nowrap;">${escapeHtml(row.label)}</td><td style="padding:4px 0;font-size:14px;color:${styleValue(brand.textColor)};">${escapeHtml(row.value)}</td></tr>`,
               )
               .join('')}
           </table>
@@ -119,8 +169,8 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
         .map(
           (column) => `
         <tr><td style="padding:10px 24px;">
-          ${column.heading ? `<p style="margin:0 0 4px;font-family:${brand.headingFont};font-size:16px;color:${brand.primaryColor};">${escapeHtml(column.heading)}</p>` : ''}
-          ${paragraphs(column.body).map((p) => `<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:${brand.textColor};">${escapeHtml(p)}</p>`).join('')}
+          ${column.heading ? `<p style="margin:0 0 4px;font-family:${styleValue(brand.headingFont)};font-size:16px;color:${styleValue(brand.primaryColor)};">${escapeHtml(column.heading)}</p>` : ''}
+          ${paragraphs(column.body).map((p) => `<p style="margin:0 0 8px;font-size:15px;line-height:1.6;color:${styleValue(brand.textColor)};">${escapeHtml(p)}</p>`).join('')}
         </td></tr>`,
         )
         .join('')
@@ -132,8 +182,8 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
         <tr><td style="padding:16px 24px;text-align:${block.align};">
           <a href="${escapeHtml(url)}" style="display:inline-block;padding:12px 28px;border-radius:6px;font-size:15px;font-weight:600;text-decoration:none;${
             solid
-              ? `background:${brand.primaryColor};color:#ffffff;`
-              : `border:2px solid ${brand.primaryColor};color:${brand.primaryColor};`
+              ? `background:${styleValue(brand.primaryColor)};color:#ffffff;`
+              : `border:2px solid ${styleValue(brand.primaryColor)};color:${styleValue(brand.primaryColor)};`
           }">${escapeHtml(block.label)}</a>
         </td></tr>`
     }
@@ -147,7 +197,7 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
       const url = track(safeUrl(block.url))
       return `
         <tr><td style="padding:16px 24px;text-align:center;">
-          <a href="${escapeHtml(url)}" style="display:inline-block;padding:24px 32px;border-radius:6px;background:#f1f5f9;color:${brand.primaryColor};font-weight:600;text-decoration:none;">
+          <a href="${escapeHtml(url)}" style="display:inline-block;padding:24px 32px;border-radius:6px;background:#f1f5f9;color:${styleValue(brand.primaryColor)};font-weight:600;text-decoration:none;">
             ${escapeHtml(block.caption || 'Watch the video')}
           </a>
         </td></tr>`
@@ -167,8 +217,8 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
     case 'clause':
       return `
         <tr><td style="padding:6px 24px;">
-          ${block.title ? `<p style="margin:0 0 4px;font-size:13px;font-weight:700;color:${brand.textColor};">${escapeHtml(block.title)}</p>` : ''}
-          ${paragraphs(block.body).map((p) => `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:${brand.mutedColor};">${escapeHtml(p)}</p>`).join('')}
+          ${block.title ? `<p style="margin:0 0 4px;font-size:13px;font-weight:700;color:${styleValue(brand.textColor)};">${escapeHtml(block.title)}</p>` : ''}
+          ${paragraphs(block.body).map((p) => `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:${styleValue(brand.mutedColor)};">${escapeHtml(p)}</p>`).join('')}
         </td></tr>`
 
     // Proposal-only blocks never appear in a marketing document, but a
@@ -209,7 +259,7 @@ export function renderEmailHtml(input: {
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>&nbsp;</title>
 </head>
-<body style="margin:0;padding:0;background:#f8fafc;font-family:${brand.bodyFont};">
+<body style="margin:0;padding:0;background:#f8fafc;font-family:${styleValue(brand.bodyFont)};">
 ${
   input.previewText
     ? `<div style="display:none;max-height:0;overflow:hidden;opacity:0;">${escapeHtml(input.previewText)}</div>`
@@ -220,9 +270,9 @@ ${
     <table role="presentation" cellpadding="0" cellspacing="0" width="${CONTENT_WIDTH}" style="max-width:${CONTENT_WIDTH}px;width:100%;background:#ffffff;border-radius:8px;overflow:hidden;">
       ${body}
       <tr><td style="padding:20px 24px;border-top:1px solid #e2e8f0;">
-        ${input.footer ? `<p style="margin:0 0 8px;font-size:12px;color:${brand.mutedColor};">${escapeHtml(input.footer)}</p>` : ''}
-        <p style="margin:0;font-size:12px;color:${brand.mutedColor};">
-          <a href="${escapeHtml(input.unsubscribeUrl)}" style="color:${brand.mutedColor};text-decoration:underline;">Unsubscribe from these emails</a>
+        ${input.footer ? `<p style="margin:0 0 8px;font-size:12px;color:${styleValue(brand.mutedColor)};">${escapeHtml(input.footer)}</p>` : ''}
+        <p style="margin:0;font-size:12px;color:${styleValue(brand.mutedColor)};">
+          <a href="${escapeHtml(input.unsubscribeUrl)}" style="color:${styleValue(brand.mutedColor)};text-decoration:underline;">Unsubscribe from these emails</a>
         </p>
       </td></tr>
     </table>

@@ -11,7 +11,7 @@ import {
 } from '@/modules/brand/palette'
 import { MARK } from '@/modules/brand/identity'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
-import { isHexColor } from '@/modules/studio/service'
+import { isHexColor } from '@/modules/design/style-values'
 import { parseColor } from '@/modules/pdf/writer'
 
 /** A colour nothing would ever choose, so "fell back" is unambiguous. */

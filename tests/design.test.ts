@@ -33,11 +33,11 @@ import {
 import {
   createBrandKit,
   createClause,
-  isHexColor,
   listClauses,
   reviseClause,
   saveProfile,
 } from '@/modules/studio/service'
+import { isHexColor } from '@/modules/design/style-values'
 import { createOpportunity, createOrganization } from '@/modules/crm/opportunities'
 import { createProposal } from '@/modules/crm/proposals'
 import { PermissionError } from '@/modules/permissions'

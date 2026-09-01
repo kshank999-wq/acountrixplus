@@ -18,7 +18,8 @@ import { senderName } from '@/modules/brand/voice'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { parseBlocks } from '@/modules/design/blocks'
 import { buildMergeContext, resolveBlocks } from '@/modules/design/merge-fields'
-import { renderEmailHtml, renderEmailText } from './render-email'
+import { emailBrand, renderEmailHtml, renderEmailText, type EmailBrand } from './render-email'
+import { defaultBrandKit } from '@/modules/studio/service'
 import { evaluateSegment, parseDefinition, suppressedEmails } from './audience'
 import { getEmailProvider, publicBaseUrl, type OutboundMessage } from './email-provider'
 
@@ -188,6 +189,20 @@ export async function sendStep(
     .where(eq(companyProfiles.companyId, ctx.companyId))
     .limit(1)
 
+  /*
+    The company's own brand kit (Phase 80).
+
+    `renderEmailHtml` has taken a `brand` since Phase 5 and **nothing has ever
+    passed one**, so every campaign this application has sent went out in the
+    default colours while the company's chosen ones sat in the Design Center
+    styling its proposals. Phase 74 stopped a company's marketing going out
+    under our name; this stops it going out in our colours.
+
+    Loaded once per run rather than per recipient — a send to four thousand
+    contacts is one row read, not four thousand.
+  */
+  const kit = await defaultBrandKit(ctx.companyId)
+
   // The company's own name, which this module never loaded (Phase 74). The
   // profile is optional and its legal name is nullable; `companies.name` is
   // NOT NULL and exists from the moment a tenant registers, so it is the end
@@ -265,6 +280,7 @@ export async function sendStep(
       step,
       creative,
       profile,
+      brand: emailBrand(kit),
       companyName: company.name,
       baseUrl,
       contactName: await contactDisplayName(member.contactId),
@@ -374,13 +390,15 @@ async function buildMessage(input: {
   step: typeof campaignSteps.$inferSelect
   creative: typeof designDocuments.$inferSelect | null
   profile: typeof companyProfiles.$inferSelect | undefined
+  /** The company's own colours, or the default when it has no kit (Phase 80). */
+  brand: EmailBrand
   /** `companies.name`. Not null, and the reason a letter cannot fall through. */
   companyName: string
   baseUrl: string
   contactName: string | null
   organizationName: string | null
 }): Promise<OutboundMessage> {
-  const { recipient, campaign, step, creative, profile, companyName, baseUrl } = input
+  const { recipient, campaign, step, creative, profile, brand, companyName, baseUrl } = input
 
   // The letterhead, since Phase 76 — the same object the invoice prints its
   // masthead from, so `{{company.address}}` in a campaign and the address on
@@ -418,6 +436,7 @@ async function buildMessage(input: {
     subject: resolveSubject(step.subject, context),
     html: renderEmailHtml({
       blocks,
+      brand,
       previewText: step.previewText,
       unsubscribeUrl,
       trackUrl,

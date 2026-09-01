@@ -9,6 +9,8 @@ import {
   serviceItems,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { DomainError } from '@/modules/errors'
+import { BRAND_STYLE_FIELDS, brandStyleProblem } from '@/modules/design/style-values'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 
 /**
@@ -104,33 +106,45 @@ export type BrandKitInput = {
   isDefault?: boolean
 }
 
-/** Rejects anything that is not a 3- or 6-digit hex colour. */
-export function isHexColor(value: string): boolean {
-  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value)
+/**
+ * A brand value that may not be interpolated into a style attribute.
+ *
+ * A `DomainError` rather than a bare `Error`, since Phase 80. `messageFor`
+ * denies by default — only a `DomainError` reaches the browser — so
+ * `assertColors` threw `primaryColor must be a hex colour such as #0d6e60.`
+ * and the Design Center put **"Something went wrong."** on screen. That
+ * sentence had never once been read by the person it was written for; the
+ * browser check for this phase is what found it.
+ */
+export class BrandValueError extends DomainError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'BrandValueError'
+  }
 }
 
-const COLOR_FIELDS = [
-  'primaryColor',
-  'accentColor',
-  'textColor',
-  'mutedColor',
-  'surfaceColor',
-] as const
+/**
+ * Refuses any brand value that must not be interpolated into a style attribute.
+ *
+ * The rule itself is in `modules/design/style-values`, and covers the two font
+ * fields as well as the five colours since Phase 80 — they land in the same
+ * attribute and had no rule at all, so `bodyFont` accepted any two hundred
+ * characters a caller sent. This function is the enforcement; the guarantee is
+ * that both write paths call it, which `tests/brand-style.test.ts` asserts.
+ */
+function assertBrandStyle(input: Partial<BrandKitInput>) {
+  for (const field of BRAND_STYLE_FIELDS) {
+    const value = input[field.key]
+    if (value === undefined) continue
 
-function assertColors(input: Partial<BrandKitInput>) {
-  for (const field of COLOR_FIELDS) {
-    const value = input[field]
-    // Colours land in a `style` attribute on client-facing pages, so anything
-    // that is not a plain hex value is refused rather than sanitized.
-    if (value !== undefined && !isHexColor(value)) {
-      throw new Error(`${field} must be a hex colour such as #0d6e60.`)
-    }
+    const problem = brandStyleProblem(field, value)
+    if (problem) throw new BrandValueError(problem)
   }
 }
 
 export async function createBrandKit(ctx: ActorContext, input: BrandKitInput) {
   requirePermission(ctx, 'company:manage')
-  assertColors(input)
+  assertBrandStyle(input)
 
   return db.transaction(async (tx) => {
     if (input.isDefault) await clearDefaultKit(ctx, tx)
@@ -161,7 +175,7 @@ export async function updateBrandKit(
   input: Partial<BrandKitInput>,
 ) {
   requirePermission(ctx, 'company:manage')
-  assertColors(input)
+  assertBrandStyle(input)
 
   return db.transaction(async (tx) => {
     if (input.isDefault) await clearDefaultKit(ctx, tx)

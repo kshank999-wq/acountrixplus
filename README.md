@@ -3653,6 +3653,54 @@ takes into the database, accepts three-digit hex and `parseColor` took only six.
 A company whose kit said `#fff` got a white document on screen and three
 slightly-wrong teals on paper. `parseColor` now expands `#abc` to `#aabbcc`.
 
+### The comment that was doing the escaping (Phase 80)
+
+ADR 0079 nominated the check: widening a validator is the moment to ask who else
+trusted it. The Design Center refused any colour that was not plain hex and said
+why — *they land in a `style` attribute on client-facing pages* — and that
+comment was the whole defence. The email renderer interpolates brand values
+straight into `style="…"`, twenty-two times, none escaped, in a file whose own
+rule is that every author string passes through `escapeHtml`.
+
+**And the guard named five fields while the renderer used seven.**
+`headingFont` and `bodyFont` were `z.string().max(200)` with no rule at all, so
+a body font of `serif" onload="…` closes the attribute. The picker offers four
+stacks; a server action takes whatever is posted.
+
+Stated plainly, because it changes what this is: storing an arbitrary string in
+those two columns was reachable, and the injection was not. `renderEmailHtml`
+has taken a `brand` since Phase 5 and **nothing ever passed one** — a loaded gun
+whose safety was that nobody had wired the trigger.
+
+**Which is the finding worth the most.** A company sets its brand in the Design
+Center, its proposals and invoices use it, and every marketing campaign this
+application has ever sent went out in the default teal. Phase 74 stopped a
+company's marketing going out under our name; Phase 80 stops it going out in our
+colours. The send path loads the kit once per run and hands it over — and the
+body font stays the email stack on purpose, because an email renders in Outlook,
+which has no `system-ui`.
+
+Wiring that caller is what makes the guard load-bearing, so it happens in the
+same phase, after it. `modules/design/style-values` holds the rule as data —
+`isHexColor` moved out of the service, a new `isFontStack`, and the registry of
+every field that reaches a style attribute — and the renderer escapes anyway.
+The test asserts the outcome rather than the guard: render with a hostile kit and
+check the `<body>` tag still has exactly two quote characters.
+
+**And the browser check found a third thing.** `messageFor` denies by default —
+only a `DomainError` reaches a person — and the brand-kit guard threw a bare
+`Error`. So the sentence it had been throwing since Phase 4, written for whoever
+hit it, had never once been shown to anybody: the Design Center said *"Something
+went wrong."* It says `Heading font must be a font list such as Georgia, serif.`
+now, and the caption comes from the same registry the picker renders, because
+naming the column beside a field labelled "Heading font" is the same defect one
+level down.
+
+**A correction to the section above.** The default brand kit was written out
+seven times, not six. `DEFAULT_EMAIL_BRAND` is the same three colours again, in
+a different type in a different module, which is how the Phase 79 sweep went
+past it.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5751,6 +5799,11 @@ Gaps within the phases already built:
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not
   restyle existing documents: right for sent proposals, arguably surprising for drafts.
+- **Stored fonts predating Phase 80 are not swept.** `heading_font` and `body_font` had no
+  validation until then, so the gate is on the way in and a row written before it is only checked
+  when it is next saved. Every existing value came out of the Design Center's own picker, and
+  rewriting a customer's stored font on the strength of a validator added afterwards would be doing
+  more than the finding justifies.
 - **The default brand kit is a colour nobody chose.** `#0d6e60` was copied from the application's
   own palette back when that palette was teal, and it outlived it by nine phases. Phase 79 made it
   one constant rather than six and deliberately left the value alone — changing it repaints the
