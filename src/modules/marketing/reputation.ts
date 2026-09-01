@@ -59,6 +59,37 @@ export type SendingCounts = {
   complained: number
 }
 
+/**
+ * The statuses that mean a provider took the message (Phase 85).
+ *
+ * Written down once because it had been written down three times, differently.
+ * `campaignStats` excluded `skipped`, `failed` and `pending`; `sendingCounts`
+ * agreed; and `marketingOverview` — never revisited when Phase 83 introduced
+ * `failed` — excluded `bounced` and counted `failed`, which is both halves
+ * wrong. A `failed` row never reached a provider at all, and a `bounced` row
+ * was accepted and then rejected downstream, so a denominator that drops the
+ * bounces flatters itself by exactly the thing being measured.
+ *
+ * An allow-list rather than the `NOT IN` it replaces, deliberately. A status
+ * added to the enum and forgotten here falls *out* of the denominator, which
+ * makes every rate look worse than it is — a false alarm. The deny-list fails
+ * the other way, quietly enlarging the denominator and hiding a real one, and
+ * Phase 84 exists because the missed alarm is the expensive mistake.
+ */
+export const ACCEPTED_BY_PROVIDER = [
+  'sent',
+  'delivered',
+  'opened',
+  'clicked',
+  'bounced',
+  'complained',
+  'unsubscribed',
+] as const
+
+export function wasAccepted(status: string): boolean {
+  return (ACCEPTED_BY_PROVIDER as readonly string[]).includes(status)
+}
+
 export type SendingLevel = 'ok' | 'watch' | 'urgent'
 
 export type SendingHealth = {

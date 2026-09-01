@@ -1,6 +1,7 @@
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { failedDeliveries } from '@/modules/notify/service'
-import { sendingCounts } from '@/modules/marketing/analytics'
+import { sendingByCampaign, sendingCounts } from '@/modules/marketing/analytics'
+import { worstOffender, type Culprit } from '@/modules/marketing/attribution'
 import {
   REPUTATION_WINDOW_DAYS,
   sendingHealth,
@@ -52,6 +53,15 @@ export type Health = {
    * bounces those sends are about to produce.
    */
   sending: SendingHealth | null
+  /**
+   * Which send is most responsible for that, when one is (Phase 85).
+   *
+   * `null` whenever `sending` is null or `ok` — there is nothing to attribute —
+   * and also when no single campaign is worse than the company's own rate,
+   * because a uniformly bad list has no culprit and naming the biggest
+   * campaign in it would be naming the biggest campaign.
+   */
+  culprit: Culprit | null
   /** The number a digest leads with. Zero means say nothing at all. */
   total: number
   /**
@@ -93,6 +103,18 @@ export async function health(
   ])
 
   const sending = sendingHealth(counts)
+
+  /*
+    Only asked when there is something to attribute (Phase 85). The breakdown
+    is a group-by over the same rows `sendingCounts` has just scanned, and a
+    company whose sending is fine — which is nearly all of them, nearly always
+    — should pay for one query rather than two.
+  */
+  const culprit =
+    sending !== null && sending.level !== 'ok'
+      ? worstOffender(counts, await sendingByCampaign(ctx.companyId, reputationSince))
+      : null
+
   const total = jobs.length + mail.length
 
   return {
@@ -106,6 +128,7 @@ export async function health(
     })),
     bouncedMail: mail,
     sending,
+    culprit,
     total,
     worthSaying: total > 0 || (sending !== null && sending.level !== 'ok'),
   }

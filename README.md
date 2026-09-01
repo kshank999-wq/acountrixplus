@@ -3848,6 +3848,44 @@ quiet day, still one message, and an urgent sending problem takes the front of
 the sentence. It says the number and links to the page; it does not pause a
 campaign, because a company's mailing list is its own.
 
+### The culprit the digest could not name (Phase 85)
+
+Phase 84's verdict is company-wide. The cause almost never is — one
+badly-sourced list, one import from a conference badge scanner, one campaign to
+a segment nobody had mailed in three years. The digest said the domain was in
+trouble and left the reader to find which send did it, from a per-campaign
+bounce rate that has existed since Phase 5 and that nobody opens until they
+already know something is wrong. **Knowing to worry and knowing what to stop are
+different facts, and only the second one can be acted on.**
+
+**A culprit is a counterfactual, not a maximum.** Naming the campaign with the
+worst rate is the obvious implementation and it is wrong in the way that
+matters: the worst rate in any window usually belongs to the *smallest* campaign
+in it. Three bounces out of eight is 37% and moves a four-thousand-message week
+by four hundredths of a per cent. So the question asked is the one a person
+actually has — *would we still be over the line if this campaign had not gone
+out?* — and the materiality test comes free, because a campaign too small to
+matter cannot move the number.
+
+**Naming somebody has to be worth acting on**, which the unit tests did not
+catch and the browser check did. Two equally bad campaigns plus a little clean
+traffic makes both of them worse than the average they are pulling up, so one
+was always named — and stopping it would have moved the rate from 11.9% to
+11.8%. A culprit now also has to move a rate by at least one watch threshold's
+worth. Where none does, the answer is **no name at all**: a uniformly bad list
+has no culprit, and the biggest campaign in it is the biggest campaign rather
+than the cause.
+
+And **one definition of what a provider accepted**, found while writing the
+per-campaign query. Three answers lived in `analytics.ts`, which is why the
+disagreement was hard to see. `marketingOverview` was never revisited when Phase
+83 introduced `failed`, so it counted rows a provider had *refused* as sent and
+dropped the bounced rows a provider had *accepted* — wrong twice, and every rate
+on the marketing dashboard was computed against it. There is now one list,
+applied in TypeScript and in SQL, and it is an allow-list: a status added to the
+enum and forgotten falls out of the denominator and makes the rates look worse
+than they are, which is a false alarm rather than a missed one.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -3941,7 +3979,7 @@ Coverage matches what spec §21 asks for:
 | `tests/intake.test.ts` | Honeypot, rate limiting, log ceiling, origin allowlist, address truncation, key scoping and enumeration |
 | `tests/design.test.ts` | Block validation, merge-field resolution, template composition, brand colour validation, clause versioning |
 | `tests/acceptance.test.ts` | Server-side total recomputation, signature matching, expiry, double-acceptance, foreign item ids |
-| `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics denominators, tenant and role isolation |
+| `tests/marketing.test.ts` | Segment matching, contactability, link safety, email rendering and escaping, send-time consent, suppression, engagement tracking, unsubscribe idempotence, analytics — including **the same send count three ways**, a bounce counted as sent because it was and a provider's refusal not, and the window split by campaign with one company's sends out of another's denominators, tenant and role isolation |
 | `tests/mobile.test.ts` | Replay safety under sequential and concurrent retries, fingerprint conflicts, key scoping and rollback, the outbox's ordering/superseding/backoff/classification rules, device revocation and session invalidation, receipt permissions and idempotent attachment, notification defaults and delivery outcomes, the proposal-acceptance push, a full offline session, and a regression test for the journal-numbering deadlock |
 | `tests/jobs.test.ts` | Module resolution from pack plus override, workflow gating, terminology, the cost-code dimension end to end, budget vs actual, change-order approval posting nothing, application pricing and increments, retainage splitting AR from Retainage Receivable, the AR-control-equals-subledger identity, retainage release without double-recognizing revenue, WIP arithmetic, compliance expiry, and the no-forked-ledger reconciliation |
 | `tests/payroll.test.ts` | The payroll identity and the arithmetic behind it, the entry's shape line by line (withholding never touching an expense account), negative net pay refused, voiding reversing rather than deleting, liability positions read from the ledger, over-remitting and kind/account mismatches refused, a remittance touching no expense, sales tax per jurisdiction with exempt sales and a frozen rate, an invoice pricing its own tax from its codes, contractor payments counted from payments not bills, a tax identifier never reaching the audit log, the manual adapter's refusal and the registry's absence of a fallback, illustrative runs marked in the database, the workpaper exceptions, and a filing blocked until its blocker is cleared |
@@ -3969,7 +4007,7 @@ Coverage matches what spec §21 asks for:
 | `tests/control-accounts.test.ts` | **What the balance sheet says is owed, against the documents behind it** — the check that would have caught Phases 29 and 30 on their first day. An empty company agreeing; a delivered visit agreeing **and naming who owes it**, with the aging report able to see it too; a billed repair order agreeing against its keeper; **a walk-in billed to one house account** however many of them there are, rather than to nobody; **a hand-written journal entry against 1100 caught** with the difference named, because that is the one thing that genuinely breaks the agreement; payables checked the same way **without blaming receivables for one fault**; one company's control accounts out of another's; and **a gift card settling the invoice and not just the ledger**, so the two sides still agree at £15 after a £50 card is spent on a £65 visit |
 | `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
-| `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day** and nothing said about a sending reputation nobody has the volume to judge, **the digest speaking when the mail is bouncing though nothing failed**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
+| `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day** and nothing said about a sending reputation nobody has the volume to judge, **the digest speaking when the mail is bouncing though nothing failed**, **the send that did it named** and **nobody named when every campaign is as bad as the rest**, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -5964,10 +6002,21 @@ Gaps within the phases already built:
   alone rather than migrated on a guess. New rows carry the distinction.
 - ~~**A rising bounce rate tells nobody.**~~ Watched since Phase 84, in Phase 24's health digest
   and on the operations page.
-- **The reputation verdict is company-wide; the cause is usually one campaign.** A single
-  badly-sourced list can put a whole domain's rate over the line, and the digest says the domain is
-  in trouble without naming which send did it. `campaignStats` already computes a per-campaign
-  bounce rate and nothing joins the two.
+- ~~**The reputation verdict is company-wide; the cause is usually one campaign.**~~ Attributed
+  since Phase 85, on the operations page and in the digest.
+- **The verdict has no memory.** The window is a fixed seven days and nothing writes the number
+  down, so 3% today cannot be told from the fourth week of a slide — and those call for different
+  actions. The one question a reputation metric exists to answer, *is this getting better or
+  worse?*, is the one the page cannot answer.
+- **A uniformly bad list gets no name.** Deliberate — the biggest campaign in it is the biggest
+  campaign, not the cause — but it does mean the worst case for a sender, every send equally bad,
+  is the case where the page is least specific about what to do.
+- **Attribution names one campaign, never two.** A domain put over the line by a pair of bad
+  imports is reported as whichever of them moves the number more, with `explainsIt` false, and the
+  reader has to find the second one themselves.
+- **Recipient rows written before Phase 83 still distort the window.** They were all stored as
+  `bounced` whether the provider refused them or a mailbox rejected them, so within seven days of
+  that upgrade the rate reads high. It settles as those rows age out.
 - **The warning repeats every day the rate stays bad.** A real cost and the deliberate trade: the
   fact is still true tomorrow, and a warning that fires once about a condition that persists is a
   warning designed to be missed.

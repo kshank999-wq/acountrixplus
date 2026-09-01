@@ -8,6 +8,7 @@ import {
   MIN_VOLUME,
   REPUTATION_WINDOW_DAYS,
   sendingHealth,
+  wasAccepted,
 } from '@/modules/marketing/reputation'
 
 /**
@@ -126,10 +127,17 @@ describe('the window', () => {
     expect(source).toContain('REPUTATION_WINDOW_DAYS * 24 * 60 * 60 * 1000')
   })
 
+  /**
+   * Was a grep for this query's status list until Phase 85 moved the list into
+   * `wasAccepted` and shared it with the two other counts that had drifted
+   * from it. The rule is the same one; asserting it against the function
+   * rather than the file is what the grep was standing in for.
+   */
   it('counts what a provider accepted, not what was skipped or never sent', () => {
-    const source = readFileSync('src/modules/marketing/analytics.ts', 'utf8')
-
-    expect(source).toContain("NOT IN ('pending', 'skipped', 'failed')")
+    expect(wasAccepted('skipped')).toBe(false)
+    expect(wasAccepted('pending')).toBe(false)
+    expect(wasAccepted('failed')).toBe(false)
+    expect(wasAccepted('sent')).toBe(true)
   })
 })
 

@@ -157,6 +157,7 @@ export default async function OperationsPage() {
             // Its own window, seven days rather than the page's — a bounce
             // arrives days after the send (Phase 84).
             sending: failures.sending,
+            culprit: failures.culprit,
           }
         }
         retention={retention}

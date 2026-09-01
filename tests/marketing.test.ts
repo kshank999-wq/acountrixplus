@@ -35,7 +35,14 @@ import {
   recordOpen,
   unsubscribeByToken,
 } from '@/modules/marketing/engagement'
-import { campaignStats, marketingOverview, openTasks } from '@/modules/marketing/analytics'
+import {
+  campaignStats,
+  marketingOverview,
+  openTasks,
+  sendingByCampaign,
+  sendingCounts,
+} from '@/modules/marketing/analytics'
+import { worstOffender } from '@/modules/marketing/attribution'
 import { renderEmailHtml, renderEmailText, escapeHtml } from '@/modules/marketing/render-email'
 import { safeUrl, safeQrValue } from '@/modules/design/urls'
 import { signDestination } from '@/modules/marketing/click-links'
@@ -842,6 +849,156 @@ describe('campaign analytics', () => {
     const stats = await campaignStats(ctx, campaign.id)
     expect(stats.openRateBp).toBe(0)
     expect(stats.clickThroughRateBp).toBe(0)
+  })
+})
+
+/**
+ * One definition of what a provider accepted (Phase 85).
+ *
+ * `analytics.ts` held three answers to the same question, and the one behind
+ * the marketing dashboard was wrong in both directions: it dropped bounced rows
+ * out of the denominator, and — never revisited when Phase 83 introduced the
+ * status — counted `failed` rows a provider never took as sent.
+ */
+describe('what counts as sent', () => {
+  beforeEach(() => {
+    mockEmailProvider().reset()
+  })
+
+  /** Both sent recipients bounce; the skipped one is turned into a failure. */
+  async function afterTheProviderAnswered() {
+    const { ctx, campaign } = await sentCampaign()
+
+    await db
+      .update(campaignRecipients)
+      .set({ status: 'bounced' })
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaign.id),
+          eq(campaignRecipients.status, 'sent'),
+        ),
+      )
+
+    await db
+      .update(campaignRecipients)
+      .set({ status: 'failed', failureReason: 'provider refused' })
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaign.id),
+          eq(campaignRecipients.status, 'skipped'),
+        ),
+      )
+
+    return { ctx, campaign }
+  }
+
+  it('gives the same answer three ways', async () => {
+    const { ctx, campaign } = await afterTheProviderAnswered()
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    const stats = await campaignStats(ctx, campaign.id)
+    const counts = await sendingCounts(ctx.companyId, since)
+    const overview = await marketingOverview(ctx)
+
+    // Two bounces were accepted and then rejected downstream; one failure never
+    // reached a provider at all. Before Phase 85 the overview said 1 — it threw
+    // the bounces away and kept the failure.
+    expect(stats.sent).toBe(2)
+    expect(counts.accepted).toBe(2)
+    expect(overview.totalSent).toBe(2)
+  })
+
+  it('counts a bounce as sent, because it was', async () => {
+    const { ctx, campaign } = await afterTheProviderAnswered()
+
+    const stats = await campaignStats(ctx, campaign.id)
+
+    expect(stats.matched).toBe(3)
+    expect(stats.bounced).toBe(2)
+    expect(stats.failed).toBe(1)
+    // A bounce rate computed against sends that excluded the bounces would
+    // flatter itself by exactly the thing being measured.
+    expect(stats.sent).toBe(2)
+    expect(stats.bounceRateBp).toBe(10_000)
+  })
+})
+
+/**
+ * Naming the send that did it (Phase 85).
+ *
+ * Phase 84's verdict is company-wide; this is the join that turns "the domain
+ * is in trouble" into "stop this one".
+ */
+describe('attributing a bad rate to a campaign', () => {
+  beforeEach(() => {
+    mockEmailProvider().reset()
+  })
+
+  it('splits the window by campaign', async () => {
+    const { ctx, campaign } = await sentCampaign()
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    await db
+      .update(campaignRecipients)
+      .set({ status: 'bounced' })
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaign.id),
+          eq(campaignRecipients.status, 'sent'),
+        ),
+      )
+
+    const rows = await sendingByCampaign(ctx.companyId, since)
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0]).toMatchObject({
+      campaignId: campaign.id,
+      name: 'Autumn note',
+      accepted: 2,
+      bounced: 2,
+    })
+  })
+
+  it('names the campaign the counts came from', async () => {
+    const { ctx, campaign } = await sentCampaign()
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    await db
+      .update(campaignRecipients)
+      .set({ status: 'bounced' })
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaign.id),
+          eq(campaignRecipients.status, 'sent'),
+        ),
+      )
+
+    const rows = await sendingByCampaign(ctx.companyId, since)
+
+    // Two accepted messages is nowhere near the volume floor, so the real
+    // verdict is null and there is nothing to attribute — the core refuses to
+    // name anybody rather than reporting a 100% bounce rate on two letters.
+    expect(worstOffender(await sendingCounts(ctx.companyId, since), rows)).toBeNull()
+
+    // Given a company that has sent enough, the same rows do name it.
+    const culprit = worstOffender({ accepted: 1_000, bounced: 62, complained: 0 }, [
+      ...rows,
+      { campaignId: 'other', name: 'Newsletter', accepted: 998, bounced: 60, complained: 0 },
+    ])!
+
+    expect(culprit.campaignId).toBe(campaign.id)
+    expect(culprit.name).toBe('Autumn note')
+  })
+
+  it('keeps one company’s campaigns out of another’s breakdown', async () => {
+    const { campaign } = await sentCampaign()
+    const other = await createCompanyFixture({ name: 'Somebody Else' })
+    const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+
+    const rows = await sendingByCampaign(other.companyId, since)
+
+    expect(rows).toHaveLength(0)
+    void campaign
   })
 })
 

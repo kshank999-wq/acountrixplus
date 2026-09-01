@@ -332,11 +332,16 @@ describe('the schedules that were owed', () => {
  */
 async function seedSending(
   companyId: string,
-  counts: { accepted: number; bounced?: number; complained?: number },
+  counts: { accepted: number; bounced?: number; complained?: number; name?: string },
 ) {
   const [campaign] = await db
     .insert(campaigns)
-    .values({ companyId, name: 'Reputation', kind: 'broadcast', status: 'sent' })
+    .values({
+      companyId,
+      name: counts.name ?? 'Reputation',
+      kind: 'broadcast',
+      status: 'sent',
+    })
     .returning()
 
   const bounced = counts.bounced ?? 0
@@ -408,6 +413,8 @@ describe('the failure digest', () => {
     // And a company that has sent nothing has no sending verdict at all —
     // which is not the same as a healthy one (Phase 84).
     expect(state.sending).toBeNull()
+    // Nothing to attribute, and the breakdown query is never run (Phase 85).
+    expect(state.culprit).toBeNull()
   })
 
   /**
@@ -437,6 +444,44 @@ describe('the failure digest', () => {
     // A 20% bounce rate over twenty sends is not a signal about anything.
     expect(state.sending).toBeNull()
     expect(state.worthSaying).toBe(false)
+    expect(state.culprit).toBeNull()
+  })
+
+  /**
+   * Phase 85. Knowing the domain is in trouble and knowing which send did it
+   * are different facts, and only the second one can be acted on.
+   */
+  it('names the send that did it', async () => {
+    const fixture = await createCompanyFixture({ name: 'Attribution Co' })
+    await seedSending(fixture.companyId, {
+      name: 'Conference badges',
+      accepted: 200,
+      bounced: 24,
+    })
+    await seedSending(fixture.companyId, { name: 'Newsletter', accepted: 200, bounced: 2 })
+
+    const state = await health(fixture.ctx)
+
+    expect(state.sending?.level).toBe('urgent')
+    expect(state.culprit?.name).toBe('Conference badges')
+    // Without it, 1% — the rest of the company's mail is fine.
+    expect(state.culprit?.explainsIt).toBe(true)
+    expect(state.culprit?.withoutItBounceRateBp).toBe(100)
+  })
+
+  /**
+   * A uniformly bad list has no culprit, and naming the biggest campaign in it
+   * would be naming the biggest campaign rather than the cause.
+   */
+  it('names nobody when every campaign is as bad as the rest', async () => {
+    const fixture = await createCompanyFixture({ name: 'Rotten List Co' })
+    await seedSending(fixture.companyId, { name: 'One', accepted: 200, bounced: 12 })
+    await seedSending(fixture.companyId, { name: 'Two', accepted: 200, bounced: 12 })
+
+    const state = await health(fixture.ctx)
+
+    expect(state.sending?.level).toBe('urgent')
+    expect(state.culprit).toBeNull()
   })
 
   it('does not report the same failure every morning', async () => {

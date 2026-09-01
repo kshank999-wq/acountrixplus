@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { memberships } from '@/db/schema'
 import { hasPermission, type Role } from '@/modules/permissions'
 import { notify } from '@/modules/mobile/notifications'
+import { culpritPhrase } from '@/modules/marketing/attribution'
 import { health } from '../health'
 import { registerHandler, type JobContext } from '../registry'
 
@@ -100,7 +101,11 @@ registerHandler({
           // and one real message answers that better than a tally.
           body:
             state.sending?.level === 'urgent'
-              ? `Over ${state.sending.accepted} messages in the last week. Mailbox providers score this over weeks, so it is worth looking today.`
+              ? // The culprit when there is one, because "which send do I stop"
+                // is the question somebody reading this on a phone actually
+                // has, and a company-wide rate does not answer it (Phase 85).
+                (culpritPhrase(state.culprit) ??
+                `Over ${state.sending.accepted} messages in the last week. Mailbox providers score this over weeks, so it is worth looking today.`)
               : (state.deadJobs[0]?.lastError ??
                 state.bouncedMail[0]?.error ??
                 state.sending?.concern ??
@@ -119,6 +124,7 @@ registerHandler({
       deadJobs: state.deadJobs.length,
       bouncedMail: state.bouncedMail.length,
       sending: state.sending?.level ?? 'unknown',
+      culprit: state.culprit?.campaignId ?? null,
       total: state.total,
       sent,
       suppressed,

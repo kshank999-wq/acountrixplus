@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
+import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
   cancelJobAction,
@@ -90,6 +91,17 @@ type Failures = {
     bounceRateBp: number
     complaintRateBp: number
     concern: string | null
+  } | null
+  /** Which send is most responsible for that, when one is (Phase 85). */
+  culprit: {
+    campaignId: string
+    name: string
+    accepted: number
+    bounceRateBp: number
+    complaintRateBp: number
+    withoutItBounceRateBp: number
+    withoutItComplaintRateBp: number
+    explainsIt: boolean
   } | null
 } | null
 
@@ -340,6 +352,34 @@ export function OperationsBoard({
               <p className="text-xs text-faint">accepted in the last week</p>
             </div>
           </dl>
+
+          {failures.culprit && (
+            <div className="border-t border-line px-4 py-3 text-sm">
+              <p>
+                {failures.culprit.explainsIt ? 'Mostly ' : 'Worst is '}
+                <Link
+                  href={`/marketing/campaigns/${failures.culprit.campaignId}`}
+                  className="font-medium underline underline-offset-2"
+                >
+                  {failures.culprit.name}
+                </Link>
+                {' — '}
+                <span className="tnum">
+                  {(failures.culprit.bounceRateBp / 100).toFixed(1)}%
+                </span>{' '}
+                bouncing and{' '}
+                <span className="tnum">
+                  {(failures.culprit.complaintRateBp / 100).toFixed(1)}%
+                </span>{' '}
+                marked as spam, over {failures.culprit.accepted.toLocaleString()} messages.
+              </p>
+              <p className="mt-1 text-xs text-faint">
+                {failures.culprit.explainsIt
+                  ? `Without it the rest is fine — ${(failures.culprit.withoutItBounceRateBp / 100).toFixed(1)}% bouncing and ${(failures.culprit.withoutItComplaintRateBp / 100).toFixed(1)}% marked as spam.`
+                  : `Not the whole story: without it the rest is still ${(failures.culprit.withoutItBounceRateBp / 100).toFixed(1)}% bouncing and ${(failures.culprit.withoutItComplaintRateBp / 100).toFixed(1)}% marked as spam.`}
+              </p>
+            </div>
+          )}
         </Card>
       )}
 

@@ -11,7 +11,17 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { basisPoints } from '@/modules/crm/analytics'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
-import type { SendingCounts } from './reputation'
+import type { CampaignSending } from './attribution'
+import { ACCEPTED_BY_PROVIDER, wasAccepted, type SendingCounts } from './reputation'
+
+/**
+ * "Did a provider take this message", in SQL (Phase 85).
+ *
+ * The same list `wasAccepted` applies in TypeScript, so the three counts in
+ * this file cannot drift apart again — which they had, in the one file where
+ * the disagreement was hardest to see.
+ */
+const acceptedByProvider = inArray(campaignRecipients.status, [...ACCEPTED_BY_PROVIDER])
 
 /**
  * Campaign analytics (spec §10).
@@ -80,10 +90,12 @@ export async function campaignStats(
     right denominator for the wrong reason. A `bounced` row *was* accepted and
     then rejected downstream, so it stays in the denominator: a bounce rate
     computed against sends that excluded the bounces would flatter itself.
+
+    Since Phase 85 the rule is `wasAccepted` rather than a status list written
+    out here, because it had been written out three times in this file and one
+    of the three disagreed.
   */
-  const sent = rows.filter(
-    (row) => row.status !== 'skipped' && row.status !== 'failed' && row.status !== 'pending',
-  )
+  const sent = rows.filter((row) => wasAccepted(row.status))
 
   const opened = rows.filter((row) => row.openedAt !== null)
   const clicked = rows.filter((row) => row.clickedAt !== null)
@@ -140,7 +152,14 @@ export async function marketingOverview(ctx: ActorContext): Promise<MarketingOve
   const [totals] = await db
     .select({
       total: sql<string>`count(*)`,
-      sent: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} NOT IN ('skipped','bounced','pending'))`,
+      /*
+        Was `NOT IN ('skipped','bounced','pending')` until Phase 85, which is
+        the same question answered a third way and answered wrongly: it dropped
+        the bounces out of the denominator and — never revisited when Phase 83
+        added the status — counted `failed` rows a provider never took as sent.
+        Every rate on the marketing dashboard was computed against it.
+      */
+      sent: sql<string>`count(*) FILTER (WHERE ${acceptedByProvider})`,
       opened: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.openedAt} IS NOT NULL)`,
       clicked: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.clickedAt} IS NOT NULL)`,
       unsubscribed: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.unsubscribedAt} IS NOT NULL)`,
@@ -367,7 +386,7 @@ export async function sendingCounts(
     .select({
       // Everything a provider accepted. `failed` never reached one and
       // `skipped` was never sent, so neither belongs in the denominator.
-      accepted: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} NOT IN ('pending', 'skipped', 'failed'))`,
+      accepted: sql<string>`count(*) FILTER (WHERE ${acceptedByProvider})`,
       bounced: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} = 'bounced')`,
       complained: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} = 'complained')`,
     })
@@ -384,4 +403,47 @@ export async function sendingCounts(
     bounced: Number(row?.bounced ?? 0),
     complained: Number(row?.complained ?? 0),
   }
+}
+
+/**
+ * The same counts, split by campaign (Phase 85).
+ *
+ * Every campaign that sent anything in the window, not only the bad ones: the
+ * attribution core needs the whole set to work out whether removing one would
+ * bring the rest back under the line, and a query that pre-filtered to the
+ * campaigns that look bad would be answering the maximum question rather than
+ * the counterfactual one.
+ *
+ * Only run when there is something to attribute. It is a group-by over the
+ * same rows `sendingCounts` scans, and a quiet week should cost one query.
+ */
+export async function sendingByCampaign(
+  companyId: string,
+  since: Date,
+): Promise<CampaignSending[]> {
+  const rows = await db
+    .select({
+      campaignId: campaigns.id,
+      name: campaigns.name,
+      accepted: sql<string>`count(*) FILTER (WHERE ${acceptedByProvider})`,
+      bounced: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} = 'bounced')`,
+      complained: sql<string>`count(*) FILTER (WHERE ${campaignRecipients.status} = 'complained')`,
+    })
+    .from(campaignRecipients)
+    .innerJoin(campaigns, eq(campaigns.id, campaignRecipients.campaignId))
+    .where(
+      and(
+        eq(campaignRecipients.companyId, companyId),
+        gte(campaignRecipients.sentAt, since),
+      ),
+    )
+    .groupBy(campaigns.id, campaigns.name)
+
+  return rows.map((row) => ({
+    campaignId: row.campaignId,
+    name: row.name,
+    accepted: Number(row.accepted),
+    bounced: Number(row.bounced),
+    complained: Number(row.complained),
+  }))
 }
