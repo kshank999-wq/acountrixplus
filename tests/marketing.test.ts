@@ -39,6 +39,7 @@ import { campaignStats, marketingOverview, openTasks } from '@/modules/marketing
 import { renderEmailHtml, renderEmailText, escapeHtml } from '@/modules/marketing/render-email'
 import { safeUrl, safeQrValue } from '@/modules/design/urls'
 import { signDestination } from '@/modules/marketing/click-links'
+import { recordDeliveryEvent } from '@/modules/marketing/delivery'
 import {
   LIST_UNSUBSCRIBE,
   LIST_UNSUBSCRIBE_POST,
@@ -415,7 +416,14 @@ describe('the send pipeline', () => {
     expect(tokens.size).toBe(provider.sent.length)
   })
 
-  it('records a bounce without failing the whole send', async () => {
+  /**
+   * Renamed in Phase 83. It was "records a bounce without failing the whole
+   * send", and a provider refusing an API call is not a bounce — a bounce is
+   * the receiving server rejecting a message the provider accepted, which now
+   * arrives on the delivery callback and means something else about the
+   * address.
+   */
+  it('records a send failure without failing the whole send', async () => {
     const { ctx, segment, creative } = await marketingFixture()
     mockEmailProvider().failFor('kit@northgate.test')
 
@@ -429,6 +437,108 @@ describe('the send pipeline', () => {
     const summary = await sendStep(ctx, campaign.id, 1)
     expect(summary.sent).toBe(1)
     expect(summary.failed).toBe(1)
+
+    const [failed] = await db
+      .select()
+      .from(campaignRecipients)
+      .where(
+        and(
+          eq(campaignRecipients.campaignId, campaign.id),
+          eq(campaignRecipients.email, 'kit@northgate.test'),
+        ),
+      )
+
+    expect(failed.status).toBe('failed')
+    expect(failed.failureReason).toBe('Mailbox unavailable')
+    // The question `skipReason` answers is a different one.
+    expect(failed.skipReason).toBeNull()
+
+    // And nothing about a provider's bad afternoon touches the address.
+    const suppressed = await db
+      .select()
+      .from(suppressions)
+      .where(eq(suppressions.companyId, ctx.companyId))
+
+    expect(suppressed).toHaveLength(0)
+  })
+
+  /**
+   * The callback the schema has been waiting for since Phase 5:
+   * `provider_message_id` was stored "for reconciling delivery webhooks later"
+   * and nothing reconciled, so a dead mailbox was mailed again every campaign.
+   */
+  it('suppresses an address on a hard bounce reported by the provider', async () => {
+    const { ctx, recipient } = await sentCampaign()
+
+    const result = await recordDeliveryEvent({
+      providerMessageId: recipient.providerMessageId,
+      event: { kind: 'bounced', bounce: 'hard' },
+    })
+
+    expect(result).toMatchObject({ ok: true, status: 'bounced', suppressed: true })
+
+    const [row] = await db
+      .select()
+      .from(campaignRecipients)
+      .where(eq(campaignRecipients.id, recipient.id))
+    expect(row.status).toBe('bounced')
+
+    const [suppression] = await db
+      .select()
+      .from(suppressions)
+      .where(
+        and(
+          eq(suppressions.companyId, ctx.companyId),
+          eq(suppressions.email, recipient.email.toLowerCase()),
+        ),
+      )
+    expect(suppression.reason).toBe('bounce')
+  })
+
+  it('records a soft bounce without silencing a real customer', async () => {
+    const { ctx, recipient } = await sentCampaign()
+
+    const result = await recordDeliveryEvent({
+      providerMessageId: recipient.providerMessageId,
+      event: { kind: 'bounced', bounce: 'soft' },
+    })
+
+    expect(result).toMatchObject({ ok: true, suppressed: false })
+
+    const suppressed = await db
+      .select()
+      .from(suppressions)
+      .where(eq(suppressions.companyId, ctx.companyId))
+    expect(suppressed).toHaveLength(0)
+  })
+
+  it('makes delivered a status a recipient can actually reach', async () => {
+    const { recipient } = await sentCampaign()
+
+    await recordDeliveryEvent({
+      providerMessageId: recipient.providerMessageId,
+      event: { kind: 'delivered' },
+    })
+
+    const [row] = await db
+      .select()
+      .from(campaignRecipients)
+      .where(eq(campaignRecipients.id, recipient.id))
+
+    expect(row.status).toBe('delivered')
+  })
+
+  /** A provider that echoes its tags, for the events where it does. */
+  it('finds the recipient by the tag when there is no message id', async () => {
+    const { recipient } = await sentCampaign()
+
+    const result = await recordDeliveryEvent({
+      providerMessageId: null,
+      recipientId: recipient.id,
+      event: { kind: 'complained' },
+    })
+
+    expect(result).toMatchObject({ ok: true, status: 'complained', suppressed: true })
   })
 
   it('refuses to send without an audience or a from address', async () => {

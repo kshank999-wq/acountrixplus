@@ -309,15 +309,25 @@ export async function sendStep(
 
       summary.sent++
     } else {
+      /*
+        A send failure, not a bounce (Phase 83).
+
+        This set `status: 'bounced'` and put the provider's error into
+        `skipReason` — a column documented as why a recipient was *skipped*.
+        Neither was true. The provider refusing an API call is ours and usually
+        transient; a bounce is the receiving server rejecting the message after
+        the provider took it, which arrives on the delivery callback and means
+        something quite different about the address.
+      */
       await db
         .update(campaignRecipients)
-        .set({ status: 'bounced', skipReason: result.error })
+        .set({ status: 'failed', failureReason: result.error })
         .where(eq(campaignRecipients.id, recipient.id))
 
       await db.insert(campaignEvents).values({
         companyId: ctx.companyId,
         recipientId: recipient.id,
-        kind: 'bounce',
+        kind: 'send_failed',
       })
 
       summary.failed++

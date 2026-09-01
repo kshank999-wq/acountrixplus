@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto'
+import type { DeliveryCallback } from './delivery'
 
 /**
  * Email delivery (spec §10: "should use a dedicated email delivery provider").
@@ -57,6 +58,21 @@ export type SendResult =
 export interface EmailProvider {
   readonly key: string
   send(message: OutboundMessage): Promise<SendResult>
+  /**
+   * Turns this provider's callback body into events the application
+   * understands (Phase 83).
+   *
+   * Optional, because a provider that reports nothing is still a usable
+   * provider — the send works, and only the bounce handling is missing. The
+   * route answers 404 for a provider that has not implemented it rather than
+   * pretending to have accepted something.
+   *
+   * Every provider's webhook is a different shape, which is precisely why the
+   * parsing belongs behind this seam and the *meaning* belongs in
+   * `delivery-events`. An adapter decides what the provider said; it does not
+   * decide whether that suppresses an address.
+   */
+  parseDeliveryEvents?(payload: unknown): DeliveryCallback[]
 }
 
 /**
@@ -90,6 +106,36 @@ export class MockEmailProvider implements EmailProvider {
 
     this.sent.push(message)
     return { ok: true, providerMessageId: `mock-${randomUUID()}` }
+  }
+
+  /**
+   * The shape a real ESP's webhook would be translated *into*.
+   *
+   * Deliberately the plainest thing that carries the facts, so the endpoint,
+   * the tests and the demo all have something to exercise before anybody picks
+   * an ESP. A real adapter maps its provider's vocabulary onto this and
+   * nothing else changes.
+   */
+  parseDeliveryEvents(payload: unknown): DeliveryCallback[] {
+    const items = Array.isArray(payload) ? payload : [payload]
+
+    return items.flatMap((item) => {
+      if (!item || typeof item !== 'object') return []
+      const row = item as Record<string, unknown>
+
+      const kind = row.type
+      if (kind !== 'delivered' && kind !== 'bounced' && kind !== 'complained') return []
+
+      const bounce = row.bounce === 'hard' || row.bounce === 'soft' ? row.bounce : undefined
+
+      return [
+        {
+          providerMessageId: typeof row.messageId === 'string' ? row.messageId : null,
+          recipientId: typeof row.recipientId === 'string' ? row.recipientId : null,
+          event: { kind, bounce },
+        },
+      ]
+    })
   }
 }
 

@@ -52,6 +52,14 @@ export const recipientStatusEnum = pgEnum('recipient_status', [
   'complained',
   'unsubscribed',
   'skipped',
+  /**
+   * The provider would not take the message (Phase 83).
+   *
+   * Distinct from `bounced`, which is the receiving server rejecting it after
+   * the provider accepted it. One is ours and usually transient; the other is
+   * a fact about the address.
+   */
+  'failed',
 ])
 
 /**
@@ -186,6 +194,14 @@ export const campaignRecipients = pgTable(
     status: recipientStatusEnum('status').notNull().default('pending'),
     /** Why a recipient was skipped: "no_consent", "suppressed", "no_email". */
     skipReason: text('skip_reason'),
+    /**
+     * What the provider said when it would not take the message (Phase 83).
+     *
+     * Its own column: this used to go into `skipReason`, which answers a
+     * different question, and the two shared a field only because there was
+     * nowhere else to put it.
+     */
+    failureReason: text('failure_reason'),
 
     sentAt: timestamp('sent_at', { withTimezone: true }),
     openedAt: timestamp('opened_at', { withTimezone: true }),

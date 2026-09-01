@@ -3775,6 +3775,39 @@ field, so an adapter passes them through verbatim instead of rediscovering RFC
 8058 — and `listUnsubscribeHeaders` **throws** rather than omitting on a URL that
 cannot go in a header, because a send that silently loses it fails invisibly.
 
+### The bounce that was a failed API call (Phase 83)
+
+`sendStep` had two outcomes, and called the unhappy one `bounced` — with the
+provider's error string in `skipReason`, a column documented as *why a recipient
+was skipped: no_consent, suppressed, no_email*.
+
+Neither half was true. A provider refusing an API call is a **send failure**:
+ours, usually transient, no reason to touch the address. A **bounce** is the
+receiving server rejecting the message after the provider accepted it, hours
+later — and that never reached this application at all.
+
+**Five places had been waiting for it since Phase 5.**
+`provider_message_id` is stored "for reconciling delivery webhooks later";
+`recipient_status` has `delivered` and `complained`, both unreachable;
+`campaign_events.kind` names bounce and complaint; `suppressions.reason` names
+them too and only ever held `unsubscribe`; and `campaignStats` reports a bounce
+rate. Five anticipations, no arrival — the schema playing the part the comments
+played in Phases 79 to 82.
+
+It matters because a hard bounce that never suppresses means the same dead
+mailbox is mailed on every campaign, which is the fastest way to lose a sending
+domain's reputation. Phase 82 got the headers right to reach the inbox; this is
+what keeps a sender there.
+
+A send failure is now `failed` with its own `failure_reason`. The delivery
+callback has an endpoint that **fails closed** — a shared bearer secret with no
+development fallback, because an unconfigured webhook loses bounce handling
+while an unauthenticated one hands somebody a way to suppress a company's list.
+And the judgement lives in a core rather than an adapter: a hard bounce
+suppresses, a **soft** bounce does not (a full mailbox is temporary, and
+silencing a real customer over one bad afternoon is the worse mistake), and a
+complaint always does.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5883,9 +5916,14 @@ Gaps within the phases already built:
   Phase 82 and left alone: the reported "opened" figure already counts distinct recipients rather
   than fetches, so a replay flips one recipient's flag and cannot run a number up. A GET anybody can
   replay is inherent to pixel tracking.
-- **No bounce or complaint webhook.** `OutboundMessage.tags` exists to correlate a provider callback
-  back to a recipient row, and nothing reads it, because there is no callback handler. A hard bounce
-  or a spam complaint should feed the suppression list automatically and currently does not.
+- ~~**No bounce or complaint webhook.**~~ Built in Phase 83. `EMAIL_WEBHOOK_SECRET` must be set for
+  the endpoint to accept anything — it fails closed, so an unconfigured deployment silently has no
+  bounce handling. Check it during setup rather than after a send.
+- **Recipient rows written before Phase 83 do not distinguish a send failure from a bounce.** Both
+  were stored as `bounced`, and nothing in the record says which a given row was, so they are left
+  alone rather than migrated on a guess. New rows carry the distinction.
+- **A rising bounce rate tells nobody.** It is measurable for the first time since Phase 83 and
+  nothing watches it. Phase 24's health digest is where that belongs.
 - **Stored fonts predating Phase 80 are not swept.** `heading_font` and `body_font` had no
   validation until then, so the gate is on the way in and a row written before it is only checked
   when it is next saved. Every existing value came out of the Design Center's own picker, and

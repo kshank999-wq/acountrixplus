@@ -29,7 +29,11 @@ export type CampaignStats = {
   matched: number
   sent: number
   skipped: number
+  /** The provider would not take it. Ours, and usually transient (Phase 83). */
+  failed: number
+  /** The receiving server rejected it after the provider took it. */
   bounced: number
+  complained: number
   opened: number
   clicked: number
   unsubscribed: number
@@ -40,6 +44,7 @@ export type CampaignStats = {
   clickThroughRateBp: number
   unsubscribeRateBp: number
   bounceRateBp: number
+  complaintRateBp: number
 
   skipReasons: Record<string, number>
 }
@@ -62,10 +67,21 @@ export async function campaignStats(
     .where(scoped(ctx, campaignRecipients, eq(campaignRecipients.campaignId, campaignId)))
 
   const skipped = rows.filter((row) => row.status === 'skipped')
+  const failed = rows.filter((row) => row.status === 'failed')
   const bounced = rows.filter((row) => row.status === 'bounced')
-  // Anything that reached a provider successfully.
+  const complained = rows.filter((row) => row.status === 'complained')
+
+  /*
+    Anything a provider accepted.
+
+    A `failed` row never reached one, so it is out — that used to be counted as
+    `bounced` and excluded here for the same reason, which happened to give the
+    right denominator for the wrong reason. A `bounced` row *was* accepted and
+    then rejected downstream, so it stays in the denominator: a bounce rate
+    computed against sends that excluded the bounces would flatter itself.
+  */
   const sent = rows.filter(
-    (row) => row.status !== 'skipped' && row.status !== 'bounced' && row.status !== 'pending',
+    (row) => row.status !== 'skipped' && row.status !== 'failed' && row.status !== 'pending',
   )
 
   const opened = rows.filter((row) => row.openedAt !== null)
@@ -83,7 +99,9 @@ export async function campaignStats(
     matched: rows.length,
     sent: sent.length,
     skipped: skipped.length,
+    failed: failed.length,
     bounced: bounced.length,
+    complained: complained.length,
     opened: opened.length,
     clicked: clicked.length,
     unsubscribed: unsubscribed.length,
@@ -92,7 +110,8 @@ export async function campaignStats(
     clickRateBp: basisPoints(clicked.length, sent.length),
     clickThroughRateBp: basisPoints(clicked.length, opened.length),
     unsubscribeRateBp: basisPoints(unsubscribed.length, sent.length),
-    bounceRateBp: basisPoints(bounced.length, rows.length),
+    bounceRateBp: basisPoints(bounced.length, sent.length),
+    complaintRateBp: basisPoints(complained.length, sent.length),
 
     skipReasons,
   }
