@@ -158,6 +158,7 @@ export default async function OperationsPage() {
             // arrives days after the send (Phase 84).
             sending: failures.sending,
             culprit: failures.culprit,
+            trend: failures.trend,
           }
         }
         retention={retention}

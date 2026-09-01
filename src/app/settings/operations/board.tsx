@@ -103,6 +103,13 @@ type Failures = {
     withoutItComplaintRateBp: number
     explainsIt: boolean
   } | null
+  /** Which way it is going, when there is enough history to say (Phase 86). */
+  trend: {
+    direction: 'improving' | 'worsening' | 'steady'
+    thenTakenOn: string
+    spanDays: number
+    summary: string | null
+  } | null
 } | null
 
 type Integrity = {
@@ -332,13 +339,26 @@ export function OperationsBoard({
         </Card>
       )}
 
-      {failures?.sending && failures.sending.level !== 'ok' && (
+      {/*
+        Shown when the rate is over the line, and also when it is still fine
+        but climbing (Phase 86) — which is the whole point of keeping a
+        history. A trend that only ever appears beside an alarm arrives with
+        the news it was supposed to precede.
+      */}
+      {failures?.sending &&
+        (failures.sending.level !== 'ok' || failures.trend?.direction === 'worsening') && (
         <Card
-          title={`Marketing email: ${failures.sending.concern}`}
+          title={
+            failures.sending.concern
+              ? `Marketing email: ${failures.sending.concern}`
+              : 'Marketing email: still fine, and heading the wrong way'
+          }
           subtitle={
             failures.sending.level === 'urgent'
               ? 'Past the level mailbox providers act on. They score a sender over weeks, so by the time campaigns visibly stop arriving the reputation that has to recover is already spent.'
-              : 'Not yet a problem, and the point of saying so early is that it takes weeks to undo once it is one.'
+              : failures.sending.level === 'watch'
+                ? 'Not yet a problem, and the point of saying so early is that it takes weeks to undo once it is one.'
+                : 'Under every threshold. Here because the direction is what gives you the weeks of warning, and the number will not be under them for ever at this rate.'
           }
         >
           <dl className="grid grid-cols-3 gap-4 px-4 py-3 text-sm">
@@ -352,6 +372,36 @@ export function OperationsBoard({
               <p className="text-xs text-faint">accepted in the last week</p>
             </div>
           </dl>
+
+          {failures.trend && (
+            <div className="border-t border-line px-4 py-3 text-sm">
+              {failures.trend.summary ? (
+                <p>
+                  <span
+                    className={
+                      failures.trend.direction === 'improving'
+                        ? 'font-medium text-positive'
+                        : 'font-medium text-negative'
+                    }
+                  >
+                    {failures.trend.direction === 'improving' ? 'Improving' : 'Getting worse'}
+                  </span>
+                  {' — '}
+                  {failures.trend.summary}.
+                </p>
+              ) : (
+                <p className="text-muted">
+                  Steady against {failures.trend.spanDays} days ago. Neither rate has moved
+                  enough to call it a direction.
+                </p>
+              )}
+              <p className="mt-1 text-xs text-faint">
+                {failures.trend.direction === 'improving'
+                  ? 'Somebody has already changed something. Worth knowing before cleaning the list again.'
+                  : `Compared against the reading of ${failures.trend.thenTakenOn} — a whole window back, so the two do not share any of the same mail.`}
+              </p>
+            </div>
+          )}
 
           {failures.culprit && (
             <div className="border-t border-line px-4 py-3 text-sm">

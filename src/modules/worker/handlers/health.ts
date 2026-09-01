@@ -4,6 +4,8 @@ import { memberships } from '@/db/schema'
 import { hasPermission, type Role } from '@/modules/permissions'
 import { notify } from '@/modules/mobile/notifications'
 import { culpritPhrase } from '@/modules/marketing/attribution'
+import { recordSendingSnapshot } from '@/modules/marketing/analytics'
+import { REPUTATION_WINDOW_DAYS } from '@/modules/marketing/reputation'
 import { health } from '../health'
 import { registerHandler, type JobContext } from '../registry'
 
@@ -42,7 +44,37 @@ registerHandler({
       ? new Date(String(context.payload.since))
       : new Date(Date.now() - hours * 60 * 60 * 1000)
 
+    /*
+      The day this reading belongs to (Phase 86). A parameter rather than a
+      clock read for the reason Phase 16 gave for depreciation and Phase 24 for
+      the retention cutoff: a run that reads the clock cannot be asked what it
+      would have written last Tuesday, and cannot be asserted on.
+    */
+    const asOf = context.payload.asOf ? new Date(String(context.payload.asOf)) : new Date()
+
     const state = await health(actor, { since })
+
+    /*
+      Write today's reading down before deciding whether to say anything
+      (Phase 86).
+
+      Before the silence check, deliberately. A record that holds only the bad
+      days is blank on exactly the days that are the baseline — which is the
+      flaw in the accidental history `background_jobs.result` has kept since
+      Phase 84, and repeating it here would build the same hole into a table
+      whose whole purpose is to have none.
+
+      Recorded even when there is no verdict. A week below the volume floor is
+      a real fact about a company's sending, and a gap that means "we did not
+      look" is worse than a row that means "we looked, and there was not enough
+      to judge".
+    */
+    await recordSendingSnapshot(
+      actor.companyId,
+      state.sendingCounts,
+      asOf,
+      REPUTATION_WINDOW_DAYS,
+    )
 
     /*
       The whole point. A digest that fires on a quiet day teaches people to
@@ -79,9 +111,17 @@ registerHandler({
       )
     }
     if (state.sending && state.sending.concern) {
-      // Leads, when it is the urgent one. A dead job is still there tomorrow;
-      // a sending reputation is not.
-      const phrase = `Marketing email: ${state.sending.concern}`
+      /*
+        Leads, when it is the urgent one. A dead job is still there tomorrow;
+        a sending reputation is not.
+
+        And says which way it is going when it knows (Phase 86), because a bad
+        rate that is falling is somebody's fix working. Telling them to clean
+        the list again is telling them to undo it.
+      */
+      const direction =
+        state.trend && state.trend.direction !== 'steady' ? `, ${state.trend.direction}` : ''
+      const phrase = `Marketing email: ${state.sending.concern}${direction}`
       if (state.sending.level === 'urgent') parts.unshift(phrase)
       else parts.push(phrase)
     }
@@ -125,6 +165,8 @@ registerHandler({
       bouncedMail: state.bouncedMail.length,
       sending: state.sending?.level ?? 'unknown',
       culprit: state.culprit?.campaignId ?? null,
+      trend: state.trend?.direction ?? 'unknown',
+      snapshotOn: asOf.toISOString().slice(0, 10),
       total: state.total,
       sent,
       suppressed,

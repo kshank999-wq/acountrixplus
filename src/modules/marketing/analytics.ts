@@ -6,6 +6,7 @@ import {
   campaigns,
   opportunities,
   organizations,
+  sendingSnapshots,
   tasks,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
@@ -13,6 +14,7 @@ import { basisPoints } from '@/modules/crm/analytics'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import type { CampaignSending } from './attribution'
 import { ACCEPTED_BY_PROVIDER, wasAccepted, type SendingCounts } from './reputation'
+import type { Reading } from './trend'
 
 /**
  * "Did a provider take this message", in SQL (Phase 85).
@@ -446,4 +448,79 @@ export async function sendingByCampaign(
     bounced: Number(row.bounced),
     complained: Number(row.complained),
   }))
+}
+
+/**
+ * Write down today's reading (Phase 86).
+ *
+ * Called by the daily digest on every run — **including the quiet ones**. A
+ * record that only holds the bad days is blank on exactly the days that are the
+ * baseline, which is the flaw in the accidental history
+ * `background_jobs.result` has held since Phase 84.
+ *
+ * `takenOn` is a parameter rather than a clock read, the rule Phase 16 applied
+ * to depreciation and Phase 24 to the retention cutoff: a snapshot that reads
+ * the clock cannot be asked "what would you have written last Tuesday", and
+ * cannot be asserted on.
+ *
+ * Idempotent on the day. The digest is scheduled daily and a worker restart can
+ * run it twice; the second run replaces the first rather than adding a second
+ * reading for the same date.
+ */
+export async function recordSendingSnapshot(
+  companyId: string,
+  counts: SendingCounts,
+  takenOn: Date,
+  windowDays: number,
+): Promise<void> {
+  await db
+    .insert(sendingSnapshots)
+    .values({
+      companyId,
+      takenOn: takenOn.toISOString().slice(0, 10),
+      windowDays,
+      accepted: counts.accepted,
+      bounced: counts.bounced,
+      complained: counts.complained,
+    })
+    .onConflictDoUpdate({
+      target: [sendingSnapshots.companyId, sendingSnapshots.takenOn],
+      set: {
+        windowDays,
+        accepted: counts.accepted,
+        bounced: counts.bounced,
+        complained: counts.complained,
+      },
+    })
+}
+
+/**
+ * The readings, most recent last (Phase 86).
+ *
+ * Takes a `companyId` rather than an actor for the same reason `sendingCounts`
+ * does: the caller is the digest, running on the worker, which has already
+ * established who it is acting for. The operations page reaches it through
+ * `health`, which does the permission check.
+ */
+export async function sendingHistory(
+  companyId: string,
+  since: Date,
+): Promise<Reading[]> {
+  const rows = await db
+    .select({
+      takenOn: sendingSnapshots.takenOn,
+      accepted: sendingSnapshots.accepted,
+      bounced: sendingSnapshots.bounced,
+      complained: sendingSnapshots.complained,
+    })
+    .from(sendingSnapshots)
+    .where(
+      and(
+        eq(sendingSnapshots.companyId, companyId),
+        gte(sendingSnapshots.takenOn, since.toISOString().slice(0, 10)),
+      ),
+    )
+    .orderBy(sendingSnapshots.takenOn)
+
+  return rows
 }

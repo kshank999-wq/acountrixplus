@@ -435,6 +435,13 @@
       "when": 1788360000000,
       "tag": "0061_phase83_delivery_outcome",
       "breakpoints": true
+    },
+    {
+      "idx": 62,
+      "version": "7",
+      "when": 1788620000000,
+      "tag": "0062_phase86_sending_snapshots",
+      "breakpoints": true
     }
   ]
 }

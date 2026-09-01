@@ -13,6 +13,7 @@ import {
   leadSubmissions,
   loginAttempts,
   proposalViews,
+  sendingSnapshots,
   sessions,
   transactionalMessages,
 } from '@/db/schema'
@@ -31,7 +32,7 @@ import { recordLoginAttempt } from '@/modules/auth/login-history'
 import { issueToken } from '@/modules/notify/tokens'
 import { createTask, openWork } from '@/modules/engagement/tasks'
 import { COMPANY_SCHEDULES, GLOBAL_SCHEDULES } from '@/modules/worker/defaults'
-import { registeredKinds } from '@/modules/worker/registry'
+import { getHandler, registeredKinds } from '@/modules/worker/registry'
 import '@/modules/worker/handlers'
 
 /**
@@ -330,6 +331,11 @@ describe('the schedules that were owed', () => {
  * Recipients in whatever states the test needs, without running a campaign:
  * the question is what the rates say, not how the rows got there.
  */
+/** A `YYYY-MM-DD` that many days back, for seeding readings. */
+function daysAgo(days: number): string {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+}
+
 async function seedSending(
   companyId: string,
   counts: { accepted: number; bounced?: number; complained?: number; name?: string },
@@ -467,6 +473,150 @@ describe('the failure digest', () => {
     // Without it, 1% — the rest of the company's mail is fine.
     expect(state.culprit?.explainsIt).toBe(true)
     expect(state.culprit?.withoutItBounceRateBp).toBe(100)
+  })
+
+  /**
+   * Phase 86. Knowing the rate and knowing which way it is going are different
+   * facts: 3% that was 1% is a domain sliding, 3% that was 6% is somebody's fix
+   * working, and telling them to clean the list again undoes it.
+   */
+  it('says which way it is going once there are two readings a window apart', async () => {
+    const fixture = await createCompanyFixture({ name: 'Trend Co' })
+    await seedSending(fixture.companyId, { accepted: 400, bounced: 24 })
+
+    // Last week it was worse. The reading is written, not derived.
+    await db.insert(sendingSnapshots).values([
+      {
+        companyId: fixture.companyId,
+        takenOn: daysAgo(9),
+        windowDays: 7,
+        accepted: 400,
+        bounced: 60,
+        complained: 0,
+      },
+      {
+        companyId: fixture.companyId,
+        takenOn: daysAgo(0),
+        windowDays: 7,
+        accepted: 400,
+        bounced: 24,
+        complained: 0,
+      },
+    ])
+
+    const state = await health(fixture.ctx)
+
+    expect(state.sending?.level).toBe('urgent')
+    expect(state.trend?.direction).toBe('improving')
+    expect(state.trend?.summary).toBe('bounces down from 15.0% to 6.0% over 9 days')
+  })
+
+  it('knows nothing about the direction on a company with one reading', async () => {
+    const fixture = await createCompanyFixture({ name: 'New Co' })
+    await seedSending(fixture.companyId, { accepted: 400, bounced: 24 })
+
+    await db.insert(sendingSnapshots).values({
+      companyId: fixture.companyId,
+      takenOn: daysAgo(0),
+      windowDays: 7,
+      accepted: 400,
+      bounced: 24,
+      complained: 0,
+    })
+
+    const state = await health(fixture.ctx)
+
+    // "We do not know yet" is not "it is steady".
+    expect(state.sending?.level).toBe('urgent')
+    expect(state.trend).toBeNull()
+  })
+
+  /**
+   * A record that holds only the bad days is blank on exactly the days that
+   * are the baseline — the flaw in the accidental history
+   * `background_jobs.result` has kept since Phase 84.
+   */
+  it('writes the reading down on a quiet day too', async () => {
+    const fixture = await createCompanyFixture({ name: 'Snapshot Co' })
+    const handler = getHandler('ops.failure_digest')!
+
+    const result = (await handler.handler({
+      actor: fixture.ctx,
+      companyId: fixture.companyId,
+      payload: { asOf: '2026-09-01T07:00:00.000Z' },
+      attempt: 1,
+      jobId: 'test',
+    })) as Record<string, unknown>
+
+    // Nothing wrong, nothing sent — and a row all the same.
+    expect(result.sent).toBe(0)
+
+    const rows = await db
+      .select()
+      .from(sendingSnapshots)
+      .where(eq(sendingSnapshots.companyId, fixture.companyId))
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].takenOn).toBe('2026-09-01')
+    expect(rows[0].accepted).toBe(0)
+    expect(rows[0].windowDays).toBe(7)
+  })
+
+  /** A worker restart runs the digest twice; the day has one reading. */
+  it('records one reading per day however often the digest fires', async () => {
+    const fixture = await createCompanyFixture({ name: 'Retry Co' })
+    await seedSending(fixture.companyId, { accepted: 400, bounced: 24 })
+
+    const handler = getHandler('ops.failure_digest')!
+    const fire = () =>
+      handler.handler({
+        actor: fixture.ctx,
+        companyId: fixture.companyId,
+        payload: { asOf: '2026-09-01T07:00:00.000Z' },
+        attempt: 1,
+        jobId: 'test',
+      })
+
+    await fire()
+    await fire()
+
+    const rows = await db
+      .select()
+      .from(sendingSnapshots)
+      .where(eq(sendingSnapshots.companyId, fixture.companyId))
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].bounced).toBe(24)
+  })
+
+  it('keeps one company’s readings out of another’s trend', async () => {
+    const mine = await createCompanyFixture({ name: 'Mine' })
+    const theirs = await createCompanyFixture({ name: 'Theirs' })
+    await seedSending(mine.companyId, { accepted: 400, bounced: 24 })
+
+    await db.insert(sendingSnapshots).values([
+      {
+        companyId: theirs.companyId,
+        takenOn: daysAgo(9),
+        windowDays: 7,
+        accepted: 400,
+        bounced: 4,
+        complained: 0,
+      },
+      {
+        companyId: mine.companyId,
+        takenOn: daysAgo(0),
+        windowDays: 7,
+        accepted: 400,
+        bounced: 24,
+        complained: 0,
+      },
+    ])
+
+    const state = await health(mine.ctx)
+
+    // Their history is not our baseline.
+    expect(state.trend).toBeNull()
   })
 
   /**

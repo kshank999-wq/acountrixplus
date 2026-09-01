@@ -1,10 +1,16 @@
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { failedDeliveries } from '@/modules/notify/service'
-import { sendingByCampaign, sendingCounts } from '@/modules/marketing/analytics'
+import {
+  sendingByCampaign,
+  sendingCounts,
+  sendingHistory,
+} from '@/modules/marketing/analytics'
 import { worstOffender, type Culprit } from '@/modules/marketing/attribution'
+import { trendFor, type Trend } from '@/modules/marketing/trend'
 import {
   REPUTATION_WINDOW_DAYS,
   sendingHealth,
+  type SendingCounts,
   type SendingHealth,
 } from '@/modules/marketing/reputation'
 import { listJobs } from './queue'
@@ -54,6 +60,14 @@ export type Health = {
    */
   sending: SendingHealth | null
   /**
+   * The raw counts the verdict came from (Phase 86).
+   *
+   * Carried rather than recomputed: the digest writes today's reading down, and
+   * a snapshot that re-ran the query would be recording a second measurement
+   * taken moments after the one it reports.
+   */
+  sendingCounts: SendingCounts
+  /**
    * Which send is most responsible for that, when one is (Phase 85).
    *
    * `null` whenever `sending` is null or `ok` — there is nothing to attribute —
@@ -62,6 +76,20 @@ export type Health = {
    * campaign in it would be naming the biggest campaign.
    */
   culprit: Culprit | null
+  /**
+   * Which way it is going (Phase 86).
+   *
+   * `null` until there are two readings a full window apart — a company with no
+   * history, or one whose older readings were below the volume floor. "We do
+   * not know yet" is not "it is steady", the same distinction `sendingHealth`
+   * draws for the rate itself.
+   *
+   * Reported whatever the current level is, deliberately. A rate that is fine
+   * and climbing is worth seeing, and a rate that is bad and falling is
+   * somebody's fix working — telling them to clean the list again would be
+   * telling them to undo it.
+   */
+  trend: Trend | null
   /** The number a digest leads with. Zero means say nothing at all. */
   total: number
   /**
@@ -85,7 +113,13 @@ export type Health = {
  */
 export async function health(
   ctx: ActorContext,
-  opts: { since?: Date; limit?: number; reputationSince?: Date } = {},
+  opts: {
+    since?: Date
+    limit?: number
+    reputationSince?: Date
+    /** How far back to read snapshots. Long enough for two windows. */
+    historySince?: Date
+  } = {},
 ): Promise<Health> {
   requirePermission(ctx, 'company:manage')
 
@@ -96,13 +130,25 @@ export async function health(
     opts.reputationSince ??
     new Date(Date.now() - REPUTATION_WINDOW_DAYS * 24 * 60 * 60 * 1000)
 
-  const [jobs, mail, counts] = await Promise.all([
+  /*
+    Enough history for a comparison plus room for the days the worker missed.
+    Four windows rather than two: a reading has to be a whole window old to be
+    comparable at all, and reading only two would mean a single week of worker
+    downtime silently costs the trend rather than widening its span.
+  */
+  const historySince =
+    opts.historySince ??
+    new Date(Date.now() - 4 * REPUTATION_WINDOW_DAYS * 24 * 60 * 60 * 1000)
+
+  const [jobs, mail, counts, readings] = await Promise.all([
     listJobs({ companyId: ctx.companyId, status: ['dead'], since, limit }),
     failedDeliveries(ctx.companyId, limit, undefined, since),
     sendingCounts(ctx.companyId, reputationSince),
+    sendingHistory(ctx.companyId, historySince),
   ])
 
   const sending = sendingHealth(counts)
+  const trend = trendFor(readings)
 
   /*
     Only asked when there is something to attribute (Phase 85). The breakdown
@@ -128,7 +174,9 @@ export async function health(
     })),
     bouncedMail: mail,
     sending,
+    sendingCounts: counts,
     culprit,
+    trend,
     total,
     worthSaying: total > 0 || (sending !== null && sending.level !== 'ok'),
   }

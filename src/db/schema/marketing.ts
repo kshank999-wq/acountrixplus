@@ -353,3 +353,55 @@ export const tasks = pgTable(
     ),
   }),
 )
+
+/**
+ * One day's reading of how a company's mail is landing (Phase 86).
+ *
+ * Phase 84 measures the rate and Phase 85 attributes it; both answer *how bad
+ * is it now*. The question a reputation metric exists for is **is it getting
+ * better or worse**, and nothing was keeping the number long enough to say. The
+ * daily digest had been recording its verdict in `background_jobs.result` since
+ * Phase 84, which is almost a history and is not one: it stores the *level*, so
+ * 2.1% and 4.9% are both `watch`; it omits sending entirely on quiet days, so
+ * the record is blank on exactly the days that are the baseline; and nothing
+ * reads it.
+ *
+ * **The counts, not the rates.** A rate is these two numbers divided, and
+ * storing it beside them would be a second answer to a question that already
+ * has one. Anything that wants a rate divides.
+ *
+ * `windowDays` is stored per row rather than assumed: a later change to
+ * `REPUTATION_WINDOW_DAYS` would otherwise make old readings quietly
+ * incomparable with new ones, and a trend computed across that boundary would
+ * be a fact about the constant rather than about the sending.
+ */
+export const sendingSnapshots = pgTable(
+  'sending_snapshots',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+
+    /** The day the reading was taken, not the window it covers. */
+    takenOn: date('taken_on').notNull(),
+    windowDays: integer('window_days').notNull(),
+
+    accepted: integer('accepted').notNull(),
+    bounced: integer('bounced').notNull(),
+    complained: integer('complained').notNull(),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    /**
+     * One reading per company per day.
+     *
+     * The digest is scheduled daily, but a worker restart can run it twice and
+     * the second run must overwrite rather than accumulate. The database
+     * arbitrates, rather than a read-then-write in the handler.
+     */
+    dayUnique: unique('sending_snapshots_company_day_unique').on(t.companyId, t.takenOn),
+    companyIdx: index('sending_snapshots_company_idx').on(t.companyId, t.takenOn),
+  }),
+)

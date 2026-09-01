@@ -959,7 +959,14 @@ describe('attributing a bad rate to a campaign', () => {
     })
   })
 
-  it('names the campaign the counts came from', async () => {
+  /**
+   * The worst rate in a window usually belongs to the smallest campaign in it,
+   * and naming it sends somebody to audit a list that is not the problem.
+   * Asserted here against rows a real send produced rather than a fixture the
+   * test invented, because two letters with a 100% bounce rate is exactly the
+   * shape that fools a naive "worst rate wins".
+   */
+  it('will not blame a two-letter campaign for a company-sized problem', async () => {
     const { ctx, campaign } = await sentCampaign()
     const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
 
@@ -974,20 +981,21 @@ describe('attributing a bad rate to a campaign', () => {
       )
 
     const rows = await sendingByCampaign(ctx.companyId, since)
+    expect(rows[0]).toMatchObject({ name: 'Autumn note', accepted: 2, bounced: 2 })
 
-    // Two accepted messages is nowhere near the volume floor, so the real
-    // verdict is null and there is nothing to attribute — the core refuses to
-    // name anybody rather than reporting a 100% bounce rate on two letters.
+    // Two accepted messages is nowhere near the volume floor, so there is no
+    // verdict to attribute in the first place.
     expect(worstOffender(await sendingCounts(ctx.companyId, since), rows)).toBeNull()
 
-    // Given a company that has sent enough, the same rows do name it.
+    // And inside a company that *has* sent enough, this campaign is still not
+    // the cause: removing it takes 6.2% to 6.0%, so "stop this one" would be
+    // advice that would not have helped.
     const culprit = worstOffender({ accepted: 1_000, bounced: 62, complained: 0 }, [
       ...rows,
       { campaignId: 'other', name: 'Newsletter', accepted: 998, bounced: 60, complained: 0 },
-    ])!
+    ])
 
-    expect(culprit.campaignId).toBe(campaign.id)
-    expect(culprit.name).toBe('Autumn note')
+    expect(culprit).toBeNull()
   })
 
   it('keeps one company’s campaigns out of another’s breakdown', async () => {
