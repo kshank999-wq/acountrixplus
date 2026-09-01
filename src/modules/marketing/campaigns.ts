@@ -19,6 +19,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { parseBlocks } from '@/modules/design/blocks'
 import { buildMergeContext, resolveBlocks } from '@/modules/design/merge-fields'
 import { trackedLink } from './click-links'
+import { listUnsubscribeHeaders } from './list-headers'
 import { emailBrand, renderEmailHtml, renderEmailText, type EmailBrand } from './render-email'
 import { defaultBrandKit } from '@/modules/studio/service'
 import { evaluateSegment, parseDefinition, suppressedEmails } from './audience'
@@ -418,7 +419,11 @@ async function buildMessage(input: {
 
   const blocks = creative ? resolveBlocks(parseBlocks(creative.blocks), context) : []
 
+  // The page a person clicks in the footer, and the endpoint a mail client
+  // POSTs to when they press its own unsubscribe button. Two different things,
+  // and putting the first in the header would unsubscribe nobody.
   const unsubscribeUrl = `${baseUrl}/u/${recipient.unsubscribeToken}`
+  const unsubscribePostUrl = `${baseUrl}/api/unsubscribe/${recipient.unsubscribeToken}`
   const trackUrl = `${baseUrl}/api/track/${recipient.unsubscribeToken}`
 
   // Every author link goes through the click recorder, which redirects to the
@@ -445,7 +450,16 @@ async function buildMessage(input: {
     }),
     text: renderEmailText({ blocks, unsubscribeUrl, trackLink }),
     unsubscribeUrl,
-    unsubscribePostUrl: `${baseUrl}/api/unsubscribe/${recipient.unsubscribeToken}`,
+    unsubscribePostUrl,
+    /*
+      The headers that make this unsubscribable (Phase 82).
+
+      Built here rather than in an adapter, because until now nothing built
+      them at all: `OutboundMessage` carried the two URLs and three separate
+      comments called them headers. Every adapter now passes `headers` through
+      verbatim, including one written against an ESP nobody has picked yet.
+    */
+    headers: listUnsubscribeHeaders({ unsubscribePostUrl }),
     tags: { recipientId: recipient.id, campaignId: campaign.id },
   }
 }

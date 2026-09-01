@@ -39,6 +39,11 @@ import { campaignStats, marketingOverview, openTasks } from '@/modules/marketing
 import { renderEmailHtml, renderEmailText, escapeHtml } from '@/modules/marketing/render-email'
 import { safeUrl, safeQrValue } from '@/modules/design/urls'
 import { signDestination } from '@/modules/marketing/click-links'
+import {
+  LIST_UNSUBSCRIBE,
+  LIST_UNSUBSCRIBE_POST,
+  ONE_CLICK,
+} from '@/modules/marketing/list-headers'
 
 /** Two destinations the tests click through to, signed as a real link would be. */
 const READ = 'https://example.com/read'
@@ -498,6 +503,41 @@ async function sentCampaign() {
 
   return { ...setup, campaign, recipient }
 }
+
+/**
+ * The test `MockEmailProvider`'s own comment promised from Phase 5 — "every
+ * message is kept so a test can assert exactly what would have gone out,
+ * including the unsubscribe header" — and which could not be written until
+ * Phase 82, because there was no header.
+ */
+describe('what actually goes out with a campaign', () => {
+  beforeEach(() => {
+    mockEmailProvider().reset()
+  })
+
+  it('carries the one-click unsubscribe headers', async () => {
+    await sentCampaign()
+    const [message] = mockEmailProvider().sent
+
+    expect(message.headers[LIST_UNSUBSCRIBE]).toBe(`<${message.unsubscribePostUrl}>`)
+    expect(message.headers[LIST_UNSUBSCRIBE_POST]).toBe(ONE_CLICK)
+  })
+
+  /**
+   * The two URLs are different things and the header must carry the second.
+   * `/u/:token` is a page that asks; `/api/unsubscribe/:token` is the endpoint
+   * that acts.
+   */
+  it('points the header at the endpoint and the footer at the page', async () => {
+    await sentCampaign()
+    const [message] = mockEmailProvider().sent
+
+    expect(message.unsubscribeUrl).toContain('/u/')
+    expect(message.unsubscribePostUrl).toContain('/api/unsubscribe/')
+    expect(message.headers[LIST_UNSUBSCRIBE]).not.toContain('/u/')
+    expect(message.html).toContain(message.unsubscribeUrl)
+  })
+})
 
 describe('engagement tracking', () => {
   beforeEach(() => {

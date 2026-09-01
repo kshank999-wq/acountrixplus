@@ -21,18 +21,31 @@ export type OutboundMessage = {
   html: string
   text: string
   /**
-   * The page a person lands on from the footer link. Sent as the
-   * `List-Unsubscribe` header too, which is what mail clients surface as their
-   * own unsubscribe button — and what keeps a sender out of the spam folder.
+   * The page a person lands on from the footer link.
+   *
+   * **Not** the `List-Unsubscribe` header, though this comment said it was
+   * until Phase 82. RFC 8058 has the mail client POST to the URI in that
+   * header, and this is the confirmation page — whose whole purpose is that it
+   * does *not* change state without somebody pressing a button. A client
+   * posting here would unsubscribe nobody.
    */
   unsubscribeUrl: string
   /**
-   * The RFC 8058 one-click target, paired with
-   * `List-Unsubscribe-Post: List-Unsubscribe=One-Click`. A mail client POSTs
-   * here on the reader's behalf, so it must be the endpoint rather than the
-   * confirmation page.
+   * The RFC 8058 one-click target. A mail client POSTs here on the reader's
+   * behalf, so it must be the endpoint rather than the confirmation page —
+   * which is why it, and not `unsubscribeUrl`, is what `headers` carries.
    */
   unsubscribePostUrl: string
+  /**
+   * The headers the message must actually go out with (Phase 82).
+   *
+   * Built once by the send pipeline from `listUnsubscribeHeaders`, so an
+   * adapter passes them through verbatim rather than rediscovering RFC 8058 —
+   * an adapter that has to work it out is an adapter that will ship without
+   * it, and a bulk send with no `List-Unsubscribe` is filtered by Gmail and
+   * Yahoo rather than refused, so nothing tells the sender.
+   */
+  headers: Record<string, string>
   /** Correlates a provider callback back to a recipient row. */
   tags?: Record<string, string>
 }
@@ -51,7 +64,8 @@ export interface EmailProvider {
  *
  * The default, so the demo and the tests run with no credentials and no risk
  * of a real send. Every message is kept so a test can assert exactly what
- * would have gone out — including the unsubscribe header.
+ * would have gone out — including the unsubscribe header, which this comment
+ * promised from Phase 5 and which only existed to be asserted from Phase 82.
  */
 export class MockEmailProvider implements EmailProvider {
   readonly key = 'mock'

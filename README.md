@@ -3741,6 +3741,40 @@ so `evil.com/x" onmouseover=` was prefixed rather than refused. Both sinks escap
 so it was never exploitable — but it is the Phase 80 shape again: a promise wider
 than the guarantee kept.
 
+### The header three comments described and nothing built (Phase 82)
+
+ADR 0081 nominated the tracking pixel. Checking it first found three things
+already right, which is worth recording because the absence of a defect is also
+a finding: the reported "opened" figure already counts distinct recipients rather
+than pixel fetches, `campaign_events` is swept under a Phase 24 retention policy,
+and the unsubscribe page renders a confirm button rather than acting on GET.
+What is left of that nomination — a pixel URL is a GET anyone can replay — is
+inherent to the medium and is now a caveat rather than a fix.
+
+One layer out was the real thing. `OutboundMessage` has carried
+`unsubscribeUrl` and `unsubscribePostUrl` since Phase 5, and **three** comments
+say they become the `List-Unsubscribe` headers: the field docs, the mock
+provider's promise that a test can assert "including the unsubscribe header",
+and the POST route's own header. No code anywhere built one. Two strings on a
+type, called headers by prose.
+
+That promise decides whether the mail arrives. Gmail and Yahoo have required
+one-click unsubscribe from bulk senders since February 2024, and a campaign
+without the headers is **filtered rather than refused** — the delivery rate falls
+with nothing saying why.
+
+**And the two field docs disagreed.** `unsubscribeUrl`'s said it goes in the
+header; it must not. RFC 8058 has the client *POST* to that URI, and that field
+is the confirmation page — whose whole purpose is not to change state without a
+person pressing a button. A client posting there would unsubscribe nobody, and
+the reader would stay subscribed believing they had left. `unsubscribePostUrl`'s
+doc had it right, one field away.
+
+The pipeline now builds the headers and the message carries them as a required
+field, so an adapter passes them through verbatim instead of rediscovering RFC
+8058 — and `listUnsubscribeHeaders` **throws** rather than omitting on a URL that
+cannot go in a header, because a send that silently loses it fails invisibly.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5845,8 +5879,13 @@ Gaps within the phases already built:
   with real campaigns already in inboxes would want a grace window instead of this.
 - **Anyone holding a recipient token can inflate that recipient's opens.** The tracking pixel takes
   a token and nothing else, by design — a failed analytic must never break a rendered email — but
-  nothing distinguishes a mail client fetching the pixel from somebody replaying the URL. It moves
-  engagement figures a salesperson acts on.
+  nothing distinguishes a mail client fetching the pixel from somebody replaying the URL. Checked in
+  Phase 82 and left alone: the reported "opened" figure already counts distinct recipients rather
+  than fetches, so a replay flips one recipient's flag and cannot run a number up. A GET anybody can
+  replay is inherent to pixel tracking.
+- **No bounce or complaint webhook.** `OutboundMessage.tags` exists to correlate a provider callback
+  back to a recipient row, and nothing reads it, because there is no callback handler. A hard bounce
+  or a spam complaint should feed the suppression list automatically and currently does not.
 - **Stored fonts predating Phase 80 are not swept.** `heading_font` and `body_font` had no
   validation until then, so the gate is on the way in and a row written before it is only checked
   when it is next saved. Every existing value came out of the Design Center's own picker, and
