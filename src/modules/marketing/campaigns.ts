@@ -18,6 +18,7 @@ import { senderName } from '@/modules/brand/voice'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { parseBlocks } from '@/modules/design/blocks'
 import { buildMergeContext, resolveBlocks } from '@/modules/design/merge-fields'
+import { trackedLink } from './click-links'
 import { emailBrand, renderEmailHtml, renderEmailText, type EmailBrand } from './render-email'
 import { defaultBrandKit } from '@/modules/studio/service'
 import { evaluateSegment, parseDefinition, suppressedEmails } from './audience'
@@ -423,8 +424,7 @@ async function buildMessage(input: {
   // Every author link goes through the click recorder, which redirects to the
   // original. The unsubscribe link deliberately does not — a person leaving
   // should not have their departure counted as engagement.
-  const trackLink = (url: string) =>
-    url.startsWith('#') ? url : `${trackUrl}?u=${encodeURIComponent(url)}`
+  const trackLink = (url: string) => (url.startsWith('#') ? url : trackedLink(trackUrl, url))
 
   return {
     to: recipient.email,

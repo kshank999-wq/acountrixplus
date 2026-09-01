@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { recordOpen, recordClick } from '@/modules/marketing/engagement'
+import { DESTINATION_PARAM, SIGNATURE_PARAM } from '@/modules/marketing/click-links'
 import { truncateIp } from '@/modules/crm/intake'
 
 export const dynamic = 'force-dynamic'
@@ -39,7 +40,8 @@ function pixelResponse() {
 
 export async function GET(request: NextRequest, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params
-  const destination = request.nextUrl.searchParams.get('u')
+  const destination = request.nextUrl.searchParams.get(DESTINATION_PARAM)
+  const signature = request.nextUrl.searchParams.get(SIGNATURE_PARAM)
 
   const meta = {
     ipPrefix: truncateIp(
@@ -49,11 +51,12 @@ export async function GET(request: NextRequest, context: { params: Promise<{ tok
   }
 
   if (destination) {
-    const result = await recordClick(token, destination, meta)
+    const result = await recordClick(token, destination, signature, meta)
 
-    // An unknown token or an unsafe destination lands on the home page rather
-    // than following the URL — a tracking link must never become an open
-    // redirect just because the token did not resolve.
+    // An unknown token, an unsafe destination, or one this application did not
+    // sign lands on the home page rather than being followed. The third of
+    // those is what actually keeps this from being an open redirect, and until
+    // Phase 81 this comment claimed the first two did it.
     return NextResponse.redirect(
       result.ok ? result.destination : new URL('/', request.nextUrl.origin),
       { status: 302 },

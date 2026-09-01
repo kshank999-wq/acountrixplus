@@ -154,6 +154,10 @@ import {
 import { createSegment } from '@/modules/marketing/audience'
 import { addStep, createCampaign, sendStep } from '@/modules/marketing/campaigns'
 import { recordClick, recordOpen } from '@/modules/marketing/engagement'
+import { signDestination } from '@/modules/marketing/click-links'
+
+/** Where the seeded reader clicks through to. */
+const CLICKED_URL = 'https://example.com/book'
 import { updateSettings } from '@/modules/ai/settings'
 import { installDefaultCostCodes, listCostCodes } from '@/modules/jobs/cost-codes'
 import { approveChangeOrder, createChangeOrder, setJobBudget } from '@/modules/jobs/budgets'
@@ -961,9 +965,14 @@ async function main() {
 
   if (firstRecipient && firstRecipient.status === 'sent') {
     await recordOpen(firstRecipient.unsubscribeToken, { ipPrefix: '198.51.100.0/24' })
-    await recordClick(firstRecipient.unsubscribeToken, 'https://example.com/book', {
-      ipPrefix: '198.51.100.0/24',
-    })
+    // Signed, because a click is a link the system sent being followed
+    // (Phase 81). An unsigned one is a forgery and would be refused.
+    await recordClick(
+      firstRecipient.unsubscribeToken,
+      CLICKED_URL,
+      signDestination(CLICKED_URL),
+      { ipPrefix: '198.51.100.0/24' },
+    )
     console.log(`  ${firstRecipient.email} opened and clicked — a follow-up task is waiting.`)
   }
 
@@ -993,9 +1002,12 @@ async function main() {
     .limit(1)
 
   if (nurtureRecipient && nurtureRecipient.status === 'sent') {
-    await recordClick(nurtureRecipient.unsubscribeToken, 'https://example.com/book', {
-      ipPrefix: '203.0.113.0/24',
-    })
+    await recordClick(
+      nurtureRecipient.unsubscribeToken,
+      CLICKED_URL,
+      signDestination(CLICKED_URL),
+      { ipPrefix: '203.0.113.0/24' },
+    )
     console.log(`  ${nurtureRecipient.email} clicked — their lost deal is worth reopening.`)
   }
 

@@ -10,6 +10,7 @@ import {
   tasks,
 } from '@/db/schema'
 import { safeUrl } from '@/modules/design/urls'
+import { destinationWasSent } from './click-links'
 import { suppressEmail } from './audience'
 
 /**
@@ -77,17 +78,33 @@ export type ClickResult = { ok: true; destination: string } | { ok: false }
 /**
  * Records a click and returns where to send the reader.
  *
- * The destination is re-validated through `safeUrl` even though it came from
- * the query string — an attacker who forges a tracking link must not be able
- * to turn it into an open redirect to a phishing page.
+ * Two separate questions, and until Phase 81 only the first was asked.
+ *
+ *  1. **Is this a safe kind of link?** `safeUrl` confines it to `http(s)` and
+ *     `mailto`, which is what stops a `javascript:` destination — stored XSS.
+ *  2. **Is this a link we sent?** The signature, which is what stops an open
+ *     redirect. `safeUrl` never spoke to this and the comment here used to
+ *     claim it did: any `https://` destination was followed, so a recipient
+ *     token — which is in every link of every campaign email that recipient
+ *     received — turned this route into a redirector to anywhere, on the
+ *     company's own domain.
+ *
+ * A link from an email delivered before Phase 81 carries no signature and
+ * lands on the home page, like any other unverifiable one. That is the cost of
+ * closing this, and it is the smaller cost.
  */
 export async function recordClick(
   token: string,
   rawUrl: string,
+  signature: string | null,
   meta: TrackMeta = {},
 ): Promise<ClickResult> {
   const destination = safeUrl(rawUrl)
   if (destination === '#') return { ok: false }
+
+  // Against the destination as sent, which is what was signed — `safeUrl`
+  // normalises, so verifying its output would fail on anything it rewrote.
+  if (!destinationWasSent(rawUrl, signature)) return { ok: false }
 
   const recipient = await recipientByToken(token)
   if (!recipient) return { ok: false }

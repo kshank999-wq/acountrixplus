@@ -1,4 +1,4 @@
-import { createHmac, timingSafeEqual } from 'node:crypto'
+import { sign, signatureMatches } from '@/lib/signing'
 
 /**
  * The token that carries "this password was correct" from the first sign-in
@@ -35,15 +35,14 @@ const CHALLENGE_TTL_MS = 5 * 60 * 1000
 
 export const CHALLENGE_COOKIE = 'accountrix_mfa_challenge'
 
-function challengeSecret(): string {
-  const secret = process.env.SESSION_SECRET
-  if (secret) return `${secret}:mfa-challenge`
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('SESSION_SECRET must be set in production.')
-  }
-  return 'dev-only-insecure-session-secret:mfa-challenge'
-}
+/**
+ * This module's slice of the signing secret.
+ *
+ * The `:mfa-challenge` suffix was this file's own good instinct and is the
+ * rule everywhere since Phase 81 — `signingSecret` applies it, so the derived
+ * value is byte-for-byte what it was.
+ */
+const PURPOSE = 'mfa-challenge'
 
 /**
  * A fingerprint of the password hash, rather than the hash itself.
@@ -53,7 +52,7 @@ function challengeSecret(): string {
  * and useless for anything else.
  */
 function passwordBinding(passwordHash: string): string {
-  return createHmac('sha256', challengeSecret()).update(passwordHash).digest('base64url').slice(0, 11)
+  return sign(passwordHash, PURPOSE).slice(0, 11)
 }
 
 export function issueChallenge(opts: {
@@ -63,7 +62,7 @@ export function issueChallenge(opts: {
 }): string {
   const expiresAt = (opts.now?.getTime() ?? Date.now()) + CHALLENGE_TTL_MS
   const payload = [opts.userId, String(expiresAt), passwordBinding(opts.passwordHash)].join('.')
-  const signature = createHmac('sha256', challengeSecret()).update(payload).digest('base64url')
+  const signature = sign(payload, PURPOSE)
 
   return `${payload}.${signature}`
 }
@@ -89,12 +88,7 @@ export function readChallenge(
   const [userId, expiresAtRaw, binding, signature] = parts
   const payload = [userId, expiresAtRaw, binding].join('.')
 
-  const expected = createHmac('sha256', challengeSecret()).update(payload).digest('base64url')
-  const provided = Buffer.from(signature)
-  const expectedBuffer = Buffer.from(expected)
-
-  if (provided.length !== expectedBuffer.length) return null
-  if (!timingSafeEqual(provided, expectedBuffer)) return null
+  if (!signatureMatches(payload, signature, PURPOSE)) return null
 
   const expiresAt = Number(expiresAtRaw)
   if (!Number.isFinite(expiresAt)) return null

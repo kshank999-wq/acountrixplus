@@ -3696,10 +3696,50 @@ now, and the caption comes from the same registry the picker renders, because
 naming the column beside a field labelled "Heading font" is the same defect one
 level down.
 
-**A correction to the section above.** The default brand kit was written out
-seven times, not six. `DEFAULT_EMAIL_BRAND` is the same three colours again, in
+**A correction to the section above (Phase 80).** The default brand kit was
+written out seven times, not six. `DEFAULT_EMAIL_BRAND` is the same three colours again, in
 a different type in a different module, which is how the Phase 79 sweep went
 past it.
+
+### The open redirect three comments said was not one (Phase 81)
+
+ADR 0080 nominated this phase on a theory that turned out to be wrong — the
+tracking round trip re-validates properly and always did. Checking the
+nomination before building on it is the point. The defect was one layer up.
+
+Every link in a campaign email is rewritten to `/api/track/:token?u=<url>`, and
+`recordClick` put the destination through `safeUrl` before following it, under
+three assurances that this closed an open redirect: one in the service, one on
+the route, and **one as the name of the test for it** — *"re-validates the click
+destination, so a forged link is not an open redirect."*
+
+`safeUrl` confines a link to `http(s)` and `mailto`. That stops a `javascript:`
+target, which is stored XSS and a different problem. It says nothing about
+*which* https destination, and an open redirect is entirely a question of which.
+`?u=https://phishing.test` satisfied all three. The test asserted only that
+`javascript:alert(1)` is refused and called that open-redirect safety — scheme
+safety read as destination safety, and the name made the mistake durable.
+
+It took a recipient token, which is in the URL of every link in every campaign
+email that recipient received. So anyone on a company's mailing list could mint
+a link beginning with that company's real domain and ending anywhere.
+
+The destination is now signed when the link is built and verified when it is
+followed: a URL nobody sent is a URL nobody signed. **A link in an email already
+delivered carries no signature and lands on the home page instead** — the same
+treatment as a forged one, and the smaller cost.
+
+**And a fourth copy of the signing secret was about to be written.**
+`auth/session`, `auth/challenge` and `auth/secret-box` each read one from the
+environment the same way, and `secret-box`'s comment says so. `lib/signing` names
+the shape once, makes `challenge`'s `:mfa-challenge` domain separation the rule
+for everything new, and keeps the session cookie on the bare secret — a suffix
+would invalidate every cookie in a browser, and a refactor is not a logout.
+
+`safeUrl` also now returns something that is a URL. `BARE_DOMAIN`'s tail is `.*`,
+so `evil.com/x" onmouseover=` was prefixed rather than refused. Both sinks escape,
+so it was never exploitable — but it is the Phase 80 shape again: a promise wider
+than the guarantee kept.
 
 ## Deploying
 
@@ -5799,6 +5839,14 @@ Gaps within the phases already built:
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not
   restyle existing documents: right for sent proposals, arguably surprising for drafts.
+- **Tracked links in emails sent before Phase 81 no longer follow.** They carry no signature, so
+  the click redirect treats them exactly as it treats a forged one and lands the reader on the home
+  page. The alternative was leaving a live open redirect on the tenant's own domain. A deployment
+  with real campaigns already in inboxes would want a grace window instead of this.
+- **Anyone holding a recipient token can inflate that recipient's opens.** The tracking pixel takes
+  a token and nothing else, by design — a failed analytic must never break a rendered email — but
+  nothing distinguishes a mail client fetching the pixel from somebody replaying the URL. It moves
+  engagement figures a salesperson acts on.
 - **Stored fonts predating Phase 80 are not swept.** `heading_font` and `body_font` had no
   validation until then, so the gate is on the way in and a row written before it is only checked
   when it is next saved. Every existing value came out of the Design Center's own picker, and

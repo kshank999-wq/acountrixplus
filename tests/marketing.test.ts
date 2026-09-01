@@ -38,6 +38,11 @@ import {
 import { campaignStats, marketingOverview, openTasks } from '@/modules/marketing/analytics'
 import { renderEmailHtml, renderEmailText, escapeHtml } from '@/modules/marketing/render-email'
 import { safeUrl, safeQrValue } from '@/modules/design/urls'
+import { signDestination } from '@/modules/marketing/click-links'
+
+/** Two destinations the tests click through to, signed as a real link would be. */
+const READ = 'https://example.com/read'
+const OTHER = 'https://example.com/other'
 import { createMarketingDocument, saveDocument } from '@/modules/design/documents'
 import { changeStage, createContact, createOpportunity, createOrganization } from '@/modules/crm/opportunities'
 import { parseBlocks, type Block } from '@/modules/design/blocks'
@@ -513,22 +518,33 @@ describe('engagement tracking', () => {
     await expect(recordOpen('not-a-real-token')).resolves.toBeUndefined()
   })
 
-  it('re-validates the click destination, so a forged link is not an open redirect', async () => {
+  /**
+   * Renamed in Phase 81, because the old name was the defect. It read
+   * "re-validates the click destination, so a forged link is not an open
+   * redirect" and asserted only that `javascript:` is refused — which is
+   * scheme safety, not destination safety. `tests/click-links.test.ts` covers
+   * the open redirect itself.
+   */
+  it('refuses a destination whose scheme could execute', async () => {
     const { recipient } = await sentCampaign()
 
-    expect(await recordClick(recipient.unsubscribeToken, 'javascript:alert(1)')).toEqual({
-      ok: false,
-    })
-    expect(await recordClick(recipient.unsubscribeToken, 'https://example.com/read')).toEqual({
-      ok: true,
-      destination: 'https://example.com/read',
-    })
+    expect(
+      await recordClick(
+        recipient.unsubscribeToken,
+        'javascript:alert(1)',
+        signDestination('javascript:alert(1)'),
+      ),
+    ).toEqual({ ok: false })
+
+    expect(
+      await recordClick(recipient.unsubscribeToken, READ, signDestination(READ)),
+    ).toEqual({ ok: true, destination: READ })
   })
 
   it('counts a click as an open, since you cannot click what you did not see', async () => {
     const { ctx, campaign, recipient } = await sentCampaign()
 
-    await recordClick(recipient.unsubscribeToken, 'https://example.com/read')
+    await recordClick(recipient.unsubscribeToken, READ, signDestination(READ))
 
     const stats = await campaignStats(ctx, campaign.id)
     expect(stats.clicked).toBe(1)
@@ -538,8 +554,8 @@ describe('engagement tracking', () => {
   it('raises one follow-up task per organization however many links are clicked', async () => {
     const { ctx, recipient } = await sentCampaign()
 
-    await recordClick(recipient.unsubscribeToken, 'https://example.com/read')
-    await recordClick(recipient.unsubscribeToken, 'https://example.com/other')
+    await recordClick(recipient.unsubscribeToken, READ, signDestination(READ))
+    await recordClick(recipient.unsubscribeToken, OTHER, signDestination(OTHER))
 
     const tasks = await openTasks(ctx)
     expect(tasks).toHaveLength(1)
@@ -559,7 +575,7 @@ describe('engagement tracking', () => {
     })
     await changeStage(ctx, deal.id, { stage: 'lost', lossReason: 'price' })
 
-    await recordClick(recipient.unsubscribeToken, 'https://example.com/read')
+    await recordClick(recipient.unsubscribeToken, READ, signDestination(READ))
 
     const overview = await marketingOverview(ctx)
     expect(overview.openTasks).toBeGreaterThan(0)

@@ -1,4 +1,5 @@
-import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
+import { sign, signatureMatches } from '@/lib/signing'
 import { eq, and, gt } from 'drizzle-orm'
 import { db } from '@/db'
 import {
@@ -16,27 +17,15 @@ export const SESSION_COOKIE = 'accountrix_session'
 export const SESSION_TTL_DAYS = 30
 
 /**
- * Session secret. A fixed development fallback keeps local setup friction-free,
- * but production must supply a real secret — a predictable signing key would
- * let anyone mint a session cookie.
- */
-function sessionSecret(): string {
-  const secret = process.env.SESSION_SECRET
-  if (secret) return secret
-
-  if (process.env.NODE_ENV === 'production') {
-    throw new Error('SESSION_SECRET must be set in production.')
-  }
-  return 'dev-only-insecure-session-secret'
-}
-
-/**
  * Signs a session id so a tampered or guessed cookie is rejected before it
  * ever reaches the database.
+ *
+ * With the **bare** secret rather than a purpose-separated one (Phase 81):
+ * every cookie currently in a browser was signed that way, and a refactor is
+ * not a logout. Everything minted since separates by purpose.
  */
 export function signSessionId(sessionId: string): string {
-  const signature = createHmac('sha256', sessionSecret()).update(sessionId).digest('base64url')
-  return `${sessionId}.${signature}`
+  return `${sessionId}.${sign(sessionId)}`
 }
 
 /** Returns the session id if the signature is valid, otherwise null. */
@@ -45,13 +34,7 @@ export function verifySessionCookie(cookieValue: string): string | null {
   if (separator <= 0) return null
 
   const sessionId = cookieValue.slice(0, separator)
-  const provided = Buffer.from(cookieValue.slice(separator + 1))
-  const expected = Buffer.from(
-    createHmac('sha256', sessionSecret()).update(sessionId).digest('base64url'),
-  )
-
-  if (provided.length !== expected.length) return null
-  return timingSafeEqual(provided, expected) ? sessionId : null
+  return signatureMatches(sessionId, cookieValue.slice(separator + 1)) ? sessionId : null
 }
 
 export async function createSession(

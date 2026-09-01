@@ -14,15 +14,37 @@ const SAFE_SCHEME = /^(https?:\/\/|mailto:)/i
 /** What people actually type when they mean a website. */
 const BARE_DOMAIN = /^[\w-]+(\.[\w-]+)+([/?#].*)?$/
 
-/** A link target confined to http(s) and mailto. Anything else becomes `#`. */
+/**
+ * A link target confined to http(s) and mailto. Anything else becomes `#`.
+ *
+ * **Normalised through the URL parser since Phase 81.** `BARE_DOMAIN`'s tail is
+ * `.*`, so `evil.com/x" onmouseover=` matched it and came back as
+ * `https://evil.com/x" onmouseover=` — prefixed rather than refused, and not a
+ * URL. Both sinks escape today, so it was never exploitable; but a function
+ * whose whole job is to return a safe link target should not return something
+ * that is not a link, and the next sink might not escape.
+ *
+ * The parser percent-encodes what does not belong in a URL, so the quote comes
+ * back as `%22` whatever the sink does with it. Anything it cannot parse at all
+ * is refused rather than repaired.
+ */
 export function safeUrl(url: string): string {
   const trimmed = url.trim()
   if (!trimmed) return '#'
 
-  if (SAFE_SCHEME.test(trimmed)) return trimmed
-  if (BARE_DOMAIN.test(trimmed)) return `https://${trimmed}`
+  const candidate = SAFE_SCHEME.test(trimmed)
+    ? trimmed
+    : BARE_DOMAIN.test(trimmed)
+      ? `https://${trimmed}`
+      : null
 
-  return '#'
+  if (!candidate) return '#'
+
+  try {
+    return new URL(candidate).href
+  } catch {
+    return '#'
+  }
 }
 
 /**
