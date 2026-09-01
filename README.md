@@ -3612,6 +3612,47 @@ through to `audit:view` — which `sales` does not hold. A salesperson could mov
 an opportunity, send a proposal and correct a client, then read the history of
 none of it. All six are `crm:view` now.
 
+### The teal that outlived the design (Phase 79)
+
+An audit of every page against the Phase 70 palette came back clean, and that
+was the interesting part. All 181 components under `src/app` and
+`src/components` paint exclusively in design tokens — **not one raw Tailwind
+palette class in the tree**, 348 uses of `.card`, 702 of `.btn`, and zero
+hand-expanded copies of either. Sixty-six of the eighty-six pages sit in
+`AppShell`; every one of the twenty that does not is deliberate.
+
+The teal was in the frames around it. `#0d6e60` — the colour this application
+stopped using nine phases ago — survived in eight places, every one somewhere a
+stylesheet cannot reach: the `<meta name="theme-color">` a browser paints behind
+its address bar, the offline page the service worker serves when the signal
+drops, five column defaults, three separately-written default brand kits, a
+form's nine fallbacks, and three float triples in the PDF writer.
+
+**Phase 73 thought it had fixed the first one.** It repainted the icon and the
+manifest, and the manifest loses: a browser prefers the meta tag for the page it
+is on, so nothing anybody could see while the app was open had changed.
+
+`modules/brand/palette` now mirrors all nineteen tokens in both schemes, and
+`tests/palette.test.ts` reads `globals.css` and fails if one value disagrees —
+which is what makes the copy safe, since the surfaces that need it are a meta
+tag, a web manifest and a page that has to render with no stylesheet at all. The
+offline page keeps an inline copy of the five tokens it uses; the two it
+declared and never read are gone, because a value nothing reads is a value
+nothing can notice going stale.
+
+**The document default stays teal on purpose.** Those are the customer's
+letterhead colours, not our chrome, and repainting them would change the
+proposals of every company that never chose one. It is now written once, in
+`DEFAULT_BRAND_KIT`.
+
+**And a real bug fell out of counting the copies.** The sixth was three float
+triples in `pdf/layout`, a hand conversion of the same hexes, all three drifted
+by a digit. They fire when a stored brand colour will not parse — which looked
+unreachable and was not: `isHexColor`, the guard on the only path a brand colour
+takes into the database, accepts three-digit hex and `parseColor` took only six.
+A company whose kit said `#fff` got a white document on screen and three
+slightly-wrong teals on paper. `parseColor` now expands `#abc` to `#aabbcc`.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5710,6 +5751,11 @@ Gaps within the phases already built:
   facing documents read the organization, so they stay correct — but the accounting record drifts.
 - A document's brand kit is captured when the document is composed. Changing the kit does not
   restyle existing documents: right for sent proposals, arguably surprising for drafts.
+- **The default brand kit is a colour nobody chose.** `#0d6e60` was copied from the application's
+  own palette back when that palette was teal, and it outlived it by nine phases. Phase 79 made it
+  one constant rather than six and deliberately left the value alone — changing it repaints the
+  documents of every company that never picked one, which is a design decision about somebody
+  else's letterhead rather than a refactor.
 - **Brand assets still use the Phase 4 `AssetStore`**, which is a separate adapter from Phase 20's
   content-addressed object store and still gives every duplicate its own copy. Fine for logos, and
   one of the two should eventually absorb the other.

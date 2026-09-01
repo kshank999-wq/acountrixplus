@@ -3,6 +3,7 @@
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { formatCents } from '@/lib/money'
+import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import {
   createClauseAction,
   createServiceItemAction,
@@ -248,16 +249,24 @@ function BrandTab({
   const [pending, startTransition] = useTransition()
   const existing = kits[0] ?? null
 
+  /*
+    The form opens on the kit the documents already render in (Phase 79).
+
+    These nine `??` were the same default written out a fourth time, so the
+    swatches a person saw before touching anything were not necessarily the
+    colours their proposals were coming out in — the two were only equal
+    because nobody had edited one of them since.
+  */
   const [kit, setKit] = useState({
     name: existing?.name ?? 'Default',
-    primaryColor: existing?.primaryColor ?? '#0d6e60',
-    accentColor: existing?.accentColor ?? '#0f766e',
-    textColor: existing?.textColor ?? '#0f172a',
-    mutedColor: existing?.mutedColor ?? '#64748b',
-    surfaceColor: existing?.surfaceColor ?? '#ffffff',
-    headingFont: existing?.headingFont ?? 'Georgia, serif',
-    bodyFont: existing?.bodyFont ?? 'system-ui, sans-serif',
-    baseSizePt: existing?.baseSizePt ?? 11,
+    primaryColor: existing?.primaryColor ?? DEFAULT_BRAND_KIT.primaryColor,
+    accentColor: existing?.accentColor ?? DEFAULT_BRAND_KIT.accentColor,
+    textColor: existing?.textColor ?? DEFAULT_BRAND_KIT.textColor,
+    mutedColor: existing?.mutedColor ?? DEFAULT_BRAND_KIT.mutedColor,
+    surfaceColor: existing?.surfaceColor ?? DEFAULT_BRAND_KIT.surfaceColor,
+    headingFont: existing?.headingFont ?? DEFAULT_BRAND_KIT.headingFont,
+    bodyFont: existing?.bodyFont ?? DEFAULT_BRAND_KIT.bodyFont,
+    baseSizePt: existing?.baseSizePt ?? DEFAULT_BRAND_KIT.baseSizePt,
     logoAssetId: existing?.logoAssetId ?? null,
   })
 

@@ -1,4 +1,5 @@
 import type { Metadata, Viewport } from 'next'
+import { themeColorMeta } from '@/modules/brand/palette'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -35,10 +36,16 @@ export const viewport: Viewport = {
   // who needs to enlarge them, and a ledger is exactly where that matters.
   maximumScale: 5,
   viewportFit: 'cover',
-  themeColor: [
-    { media: '(prefers-color-scheme: light)', color: '#0d6e60' },
-    { media: '(prefers-color-scheme: dark)', color: '#091420' },
-  ],
+  /**
+   * From the palette rather than written out (Phase 79).
+   *
+   * These two were a **teal** `#0d6e60` — the colour scheme this application
+   * stopped using at Phase 70. The meta tag Next writes from here takes
+   * precedence over the manifest's `theme_color`, so every browser that paints
+   * a band behind its address bar painted it in a design nine phases dead,
+   * while the app underneath it was near-black.
+   */
+  themeColor: themeColorMeta(),
 }
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

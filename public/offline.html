@@ -16,27 +16,33 @@
       occurred" — the framework failing to load its own error page.
 
       No script, no stylesheet, no font. Everything it needs is in these bytes.
+
+      Which is why the colours below are written out. They are a copy of the
+      five tokens this page uses from `src/app/globals.css`, and
+      `tests/palette.test.ts` fails if they drift from it — because they had
+      drifted: until Phase 79 this whole block was the teal palette the
+      application stopped using at Phase 70. A page nobody sees until their
+      signal drops is a page nobody looks at.
+
+      `--surface` and `--line` were declared here and used by nothing. Gone: a
+      value nothing reads is a value nothing can notice going stale.
     -->
     <style>
       :root {
         color-scheme: light dark;
-        --ink: #0f172a;
-        --muted: #475569;
-        --canvas: #f8fafc;
-        --surface: #ffffff;
-        --line: #e2e8f0;
-        --brand: #0d6e60;
-        --brand-ink: #ffffff;
+        --canvas: #fafbfc;
+        --ink: #0d1117;
+        --muted: #5b6672;
+        --action: #1f5fd9;
+        --action-ink: #ffffff;
       }
       @media (prefers-color-scheme: dark) {
         :root {
-          --ink: #e2e8f0;
-          --muted: #94a3b8;
-          --canvas: #090c14;
-          --surface: #111621;
-          --line: #2a3446;
-          --brand: #2dbfa5;
-          --brand-ink: #061412;
+          --canvas: #0d1117;
+          --ink: #f4f6f8;
+          --muted: #a8b1bd;
+          --action: #6096ff;
+          --action-ink: #080e1a;
         }
       }
       * { box-sizing: border-box; }
@@ -64,8 +70,14 @@
         margin-top: 1.5rem;
         padding: 0 1rem;
         border-radius: 0.5rem;
-        background: var(--brand);
-        color: var(--brand-ink);
+        /*
+          The action blue, not the lime. The lime is the design's one loud
+          colour and it is used on the dark chrome; this button sits on the
+          light canvas, where a primary action is `.btn-primary` — which is
+          `bg-action text-action-ink`, the same two tokens.
+        */
+        background: var(--action);
+        color: var(--action-ink);
         font-size: 0.875rem;
         font-weight: 500;
         text-decoration: none;

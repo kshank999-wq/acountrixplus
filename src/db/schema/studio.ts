@@ -99,6 +99,16 @@ export const brandKits = pgTable(
     name: text('name').notNull(),
     isDefault: boolean('is_default').notNull().default(false),
 
+    /*
+      These five and the three below are `DEFAULT_BRAND_KIT` in
+      `modules/design/brand`, written out rather than imported: a column default
+      is baked into a migration when it is generated, so it has to be a literal
+      the schema reader can see without resolving a path alias.
+
+      `tests/palette.test.ts` reads this file and fails if they drift, which is
+      how `scripts/render-brand-icons.mjs` keeps the mark honest for the same
+      reason.
+    */
     primaryColor: text('primary_color').notNull().default('#0d6e60'),
     accentColor: text('accent_color').notNull().default('#0f766e'),
     textColor: text('text_color').notNull().default('#0f172a'),

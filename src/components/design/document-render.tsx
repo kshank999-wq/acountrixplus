@@ -1,4 +1,5 @@
 import { formatCents } from '@/lib/money'
+import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import type { Block } from '@/modules/design/blocks'
 import { safeUrl } from '@/modules/design/urls'
 
@@ -25,16 +26,15 @@ export type BrandTokens = {
   baseSizePt: number
 }
 
-export const DEFAULT_BRAND: BrandTokens = {
-  primaryColor: '#0d6e60',
-  accentColor: '#0f766e',
-  textColor: '#0f172a',
-  mutedColor: '#64748b',
-  surfaceColor: '#ffffff',
-  headingFont: 'Georgia, serif',
-  bodyFont: 'system-ui, sans-serif',
-  baseSizePt: 11,
-}
+/**
+ * The kit a company that has never opened the Design Center gets.
+ *
+ * One constant, in `modules/design/brand`, since Phase 79 — it was written out
+ * here, in `pdf/service`, in `pdf/invoice`, in the Design Center's form, in the
+ * column defaults, and a sixth time in `pdf/layout` as hand-converted floats
+ * that had drifted a digit. Re-exported under the name callers already use.
+ */
+export const DEFAULT_BRAND: BrandTokens = DEFAULT_BRAND_KIT
 
 export type RenderItem = {
   id: string

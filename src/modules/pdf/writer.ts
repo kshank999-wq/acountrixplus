@@ -33,12 +33,31 @@ import { toWinAnsi, widthOf, type StandardFont } from './metrics'
 
 export type Rgb = { r: number; g: number; b: number }
 
-/** `#0d6e60` → components in 0–1, which is what PDF operators take. */
+/**
+ * `#0d6e60` → components in 0–1, which is what PDF operators take.
+ *
+ * Three-digit hex counts, since Phase 79. `isHexColor` in `studio/service` —
+ * the guard on the only way a brand colour gets stored — accepts `#fff` and
+ * always has, and CSS understands it, so the Design Center took it, the
+ * browser drew the document in it, and the PDF writer silently rejected it and
+ * fell through to a default. Two answers to "what is a hex colour", with the
+ * disagreement landing on paper.
+ */
 export function parseColor(hex: string, fallback: Rgb = { r: 0, g: 0, b: 0 }): Rgb {
-  const match = /^#?([0-9a-f]{6})$/i.exec(hex.trim())
+  const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(hex.trim())
   if (!match) return fallback
 
-  const value = parseInt(match[1], 16)
+  // `#abc` is `#aabbcc`, which is a doubling rather than a padding: `#abc` is
+  // not `#0a0b0c`.
+  const digits =
+    match[1].length === 3
+      ? match[1]
+          .split('')
+          .map((digit) => digit + digit)
+          .join('')
+      : match[1]
+
+  const value = parseInt(digits, 16)
   return {
     r: ((value >> 16) & 255) / 255,
     g: ((value >> 8) & 255) / 255,

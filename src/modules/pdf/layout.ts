@@ -1,4 +1,5 @@
 import type { Block } from '@/modules/design/blocks'
+import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { resolveMergeFields, type MergeContext } from '@/modules/design/merge-fields'
 import {
   PageCanvas,
@@ -955,9 +956,21 @@ export function renderDocumentPdf(input: RenderInput): Buffer {
   const heading = familyFor(input.brand.headingFont, true)
   const headingBold = familyFor(input.brand.bodyFont, true)
 
-  const text = parseColor(input.brand.textColor, { r: 0.06, g: 0.09, b: 0.16 })
-  const muted = parseColor(input.brand.mutedColor, { r: 0.39, g: 0.45, b: 0.55 })
-  const primary = parseColor(input.brand.primaryColor, { r: 0.05, g: 0.43, b: 0.38 })
+  /*
+    The fallback is the default kit put through the same conversion, not a
+    float triple typed alongside it (Phase 79).
+
+    These three were `{ r: 0.06, g: 0.09, b: 0.16 }` and two like it —
+    somebody's hand conversion of the same hex the rest of the application
+    uses, and all three were a digit out. `#0f172a` is `0.0588 0.0902 0.1647`.
+
+    Reached whenever a stored brand colour will not parse, which until Phase 79
+    included any three-digit one, since `isHexColor` accepts `#fff` and this
+    did not. `parseColor` does the conversion correctly and always did.
+  */
+  const text = parseColor(input.brand.textColor, parseColor(DEFAULT_BRAND_KIT.textColor))
+  const muted = parseColor(input.brand.mutedColor, parseColor(DEFAULT_BRAND_KIT.mutedColor))
+  const primary = parseColor(input.brand.primaryColor, parseColor(DEFAULT_BRAND_KIT.primaryColor))
   const accent = parseColor(input.brand.accentColor, primary)
 
   const composer = new Composer(

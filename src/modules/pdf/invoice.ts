@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { companies, companyProfiles, customers, invoiceLines, invoices } from '@/db/schema'
 import { contactLines, letterheadFor } from '@/modules/brand/letterhead'
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
+import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { renderDocumentPdf, type BrandTokens } from './layout'
 import type { Block } from '@/modules/design/blocks'
 import { DomainError } from '@/modules/errors'
@@ -24,15 +25,16 @@ import { DomainError } from '@/modules/errors'
  * phase refusing.
  */
 
-const INVOICE_BRAND: BrandTokens = {
-  primaryColor: '#0d6e60',
-  accentColor: '#0f766e',
-  textColor: '#0f172a',
-  mutedColor: '#64748b',
-  headingFont: 'Georgia, serif',
-  bodyFont: 'system-ui, sans-serif',
-  baseSizePt: 11,
-}
+/**
+ * An invoice is drawn in the default kit rather than the company's.
+ *
+ * Not an oversight and not a copy: the brand kit is the *proposal* document's,
+ * chosen in the Design Center for the things a company sends to win work. A
+ * demand for payment is a different register. It reads the same constant as
+ * everything else since Phase 79, where it used to be a third hand-written
+ * copy of it under a different name.
+ */
+const INVOICE_BRAND: BrandTokens = DEFAULT_BRAND_KIT
 
 export class NoInvoiceError extends DomainError {
   readonly status = 404

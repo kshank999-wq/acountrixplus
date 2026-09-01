@@ -11,6 +11,7 @@ import { parseBlocks } from '@/modules/design/blocks'
 import { proposalRenderContext } from '@/modules/design/documents'
 import { storeDocument, attachDocument } from '@/modules/evidence/service'
 import { scoped, requirePermission, type ActorContext } from '@/modules/tenancy/context'
+import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { renderDocumentPdf, type BrandTokens, type RenderInput } from './layout'
 import { DomainError } from '@/modules/errors'
 
@@ -25,15 +26,8 @@ import { DomainError } from '@/modules/errors'
  * line items subtly wrong.
  */
 
-const DEFAULT_BRAND: BrandTokens = {
-  primaryColor: '#0d6e60',
-  accentColor: '#0f766e',
-  textColor: '#0f172a',
-  mutedColor: '#64748b',
-  headingFont: 'Georgia, serif',
-  bodyFont: 'system-ui, sans-serif',
-  baseSizePt: 11,
-}
+/** The one default (Phase 79). `surfaceColor` is on the kit and not on a PDF. */
+const DEFAULT_BRAND: BrandTokens = DEFAULT_BRAND_KIT
 
 async function brandFor(
   companyId: string,
