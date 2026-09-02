@@ -42,6 +42,7 @@ import {
   notify,
   nudgeReviewQueue,
   preferences,
+  record,
   REVIEW_NUDGE_THRESHOLD,
   setPreference,
   subscribe,
@@ -802,6 +803,67 @@ describe('notifications', () => {
     // "Why did I not get told about that" has an answer.
     expect(rows).toHaveLength(1)
     expect(rows[0].outcome).toBe('no_subscription')
+
+    // Phase 90. A company notification still names its company and no
+    // practice, and it still travels by push — the two columns the log gained
+    // when the firm's brief needed to reach it.
+    expect(rows[0].companyId).toBe(fixture.companyId)
+    expect(rows[0].practiceId).toBeNull()
+    expect(rows[0].channel).toBe('push')
+  })
+
+  /**
+   * Phase 90. A push message's text lives nowhere else, so the log keeps it —
+   * the opposite of the firm's brief, whose text is already in
+   * `transactional_messages`.
+   */
+  it('keeps a push body, which no other table holds', async () => {
+    const fixture = await createCompanyFixture()
+    await subscribe(fixture.ctx, subscription('https://push.example/keeps/abc'))
+
+    await notify({
+      companyId: fixture.companyId,
+      userId: fixture.userId,
+      topic: 'invoice_paid',
+      message: { title: 'Paid', body: 'Invoice INV-0042.' },
+    })
+
+    const [row] = await db
+      .select()
+      .from(notificationLog)
+      .where(eq(notificationLog.companyId, fixture.companyId))
+
+    expect(row.outcome).toBe('sent')
+    expect(row.body).toBe('Invoice INV-0042.')
+  })
+
+  /**
+   * Phase 90. The log's writer is the only place these rows are made, and it
+   * swallows its own failures deliberately: losing a log row is a smaller
+   * failure than losing the notification it describes.
+   */
+  it('does not fail a send because the row could not be written', async () => {
+    const fixture = await createCompanyFixture()
+
+    await expect(
+      record({
+        // A company topic filed against a practice — a programming error, and
+        // one `decisionFor` refuses. It must not escape into the caller.
+        audience: { kind: 'practice', practiceId: fixture.companyId },
+        userId: fixture.userId,
+        topic: 'invoice_paid',
+        channel: 'push',
+        outcome: 'sent',
+        title: 'Paid',
+        provider: 'mock',
+      }),
+    ).resolves.toBeUndefined()
+
+    const rows = await db
+      .select()
+      .from(notificationLog)
+      .where(eq(notificationLog.companyId, fixture.companyId))
+    expect(rows).toHaveLength(0)
   })
 
   it('drops a subscription the push service says is gone', async () => {

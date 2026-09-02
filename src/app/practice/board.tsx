@@ -69,6 +69,22 @@ type Member = {
 }
 
 /**
+ * One morning's decision about the brief, for this person (Phase 90).
+ *
+ * Already worded on the server: `explain()` in `mobile/decision` is the single
+ * place that turns an outcome into a sentence, so two screens cannot invent two
+ * different answers to the same question.
+ */
+type BriefRecord = {
+  id: string
+  on: string
+  title: string
+  explanation: string
+  /** True when nothing arrived, whichever of the three reasons it was. */
+  silent: boolean
+}
+
+/**
  * The firm's own workspace: who they act for, what is waiting, and who works
  * there.
  *
@@ -84,6 +100,7 @@ export function PracticeBoard({
   isOwner,
   selfUserId,
   briefEnabled,
+  briefHistory,
 }: {
   practice: Practice
   practices: Practice[]
@@ -94,6 +111,8 @@ export function PracticeBoard({
   selfUserId: string
   /** Whether this person still wants the firm's morning brief (Phase 89). */
   briefEnabled: boolean
+  /** What the brief decided about this person lately (Phase 90). */
+  briefHistory: BriefRecord[]
 }) {
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -285,6 +304,32 @@ export function PracticeBoard({
             {briefEnabled ? 'Stop sending it' : 'Send it to me'}
           </button>
         </div>
+
+        {/*
+          What the switch above actually did, on the mornings since (Phase 90).
+
+          A switch with no record of its effect is how somebody silences a
+          channel in March and, in July, cannot work out why they hear nothing.
+          Every morning the brief decided something about this person appears
+          here — sent, or held back, and which — which is the question ADR 0008
+          built `notification_log` to answer and which this channel could not be
+          recorded in until now.
+        */}
+        {briefHistory.length > 0 && (
+          <div className="border-t border-line px-4 py-3">
+            <p className="text-xs font-medium text-muted">What arrived, and what did not</p>
+            <ul className="mt-2 space-y-1">
+              {briefHistory.map((entry) => (
+                <li key={entry.id} className="flex items-baseline justify-between gap-3 text-xs">
+                  <span className={entry.silent ? 'text-faint' : ''}>{entry.title}</span>
+                  <span className="shrink-0 text-faint">
+                    {entry.on} — {entry.explanation}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </Card>
 
       {live.length > 0 && isOwner && (

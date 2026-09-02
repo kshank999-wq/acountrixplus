@@ -194,24 +194,47 @@ export const notificationPreferences = pgTable(
 )
 
 /**
- * Every notification attempt, delivered or not.
+ * Every notification **decision**, delivered or not.
  *
  * The same reasoning as the AI usage ledger: "why did I not get told about
  * that" is a question a support conversation starts with, and it needs an
  * answer that is not a guess.
+ *
+ * The word is *decision* rather than *attempt* since Phase 90, because the
+ * boundary against `transactional_messages` had become load-bearing and was
+ * nowhere written down. That table records a transmission — this address, this
+ * provider, did the hop succeed. This one records a choice: we told this person,
+ * or we chose not to, and here is why. A suppression has no transmission at all,
+ * which is exactly why it belongs here and not there. See `mobile/decision`.
  */
 export const notificationLog = pgTable(
   'notification_log',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id')
-      .notNull()
-      .references(() => companies.id, { onDelete: 'cascade' }),
+    /**
+     * Exactly one of these two, never both and never neither (Phase 90), the
+     * same shape `notification_preferences` took in Phase 89 and for the same
+     * reason: the firm's brief is about no single company, and filing it under
+     * one would put a firm's business on that client's record.
+     */
+    companyId: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
+    practiceId: uuid('practice_id').references(() => practices.id, { onDelete: 'cascade' }),
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     subscriptionId: uuid('subscription_id'),
 
     topic: notificationTopicEnum('topic').notNull(),
+    /** push | mail — see below, and `mobile/decision`. */
+    channel: text('channel').notNull().default('push'),
     title: text('title').notNull(),
+    /**
+     * The message text, for push only.
+     *
+     * A mail-backed notification's text is already rendered and stored in
+     * `transactional_messages`; a second copy here is the two-answers-to-one-
+     * question defect, where an edit to the wording fixes one and leaves the
+     * other lying. `channel` is what tells a reader that a null body means
+     * "the text is in the other table" rather than "there was no text".
+     */
     body: text('body'),
     url: text('url'),
 
@@ -224,5 +247,6 @@ export const notificationLog = pgTable(
   },
   (t) => ({
     companyIdx: index('notification_log_company_idx').on(t.companyId, t.createdAt),
+    practiceIdx: index('notification_log_practice_idx').on(t.practiceId, t.createdAt),
   }),
 )

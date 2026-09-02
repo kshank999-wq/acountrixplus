@@ -15,6 +15,7 @@ import {
   topicsFor,
   type Audience,
 } from './audience'
+import { decisionFor, type DecisionInput, type Outcome } from './decision'
 
 /**
  * Notifications (spec §3 "bookkeeping as a continuous habit").
@@ -426,28 +427,45 @@ export async function notify(
 async function log(
   input: { companyId: string; userId: string; topic: NotificationTopic; message: PushMessage },
   outcome: {
-    outcome: string
+    outcome: Outcome
     detail?: string
     provider: string
     subscriptionId?: string
   },
 ): Promise<void> {
+  await record({
+    audience: { kind: 'company', companyId: input.companyId },
+    userId: input.userId,
+    topic: input.topic,
+    channel: 'push',
+    outcome: outcome.outcome,
+    title: input.message.title,
+    body: input.message.body,
+    url: input.message.url ?? null,
+    detail: outcome.detail ?? null,
+    subscriptionId: outcome.subscriptionId ?? null,
+    provider: outcome.provider,
+  })
+}
+
+/**
+ * Files one decision (Phase 90).
+ *
+ * The only writer of `notification_log`, and it takes an `Audience` rather than
+ * a company so the firm's brief can reach it at all — which was the whole hole
+ * Phase 88 opened and this phase closes.
+ *
+ * Swallows its own failure, deliberately and unchanged from Phase 8: losing a
+ * log row is a smaller failure than losing the notification it describes. Same
+ * call as `meter()` in the AI gateway. The shape checks in `decisionFor` run
+ * *inside* the try for that reason — a programming error in a caller must not
+ * take down the send it was only trying to describe.
+ */
+export async function record(input: DecisionInput): Promise<void> {
   try {
-    await db.insert(notificationLog).values({
-      companyId: input.companyId,
-      userId: input.userId,
-      subscriptionId: outcome.subscriptionId ?? null,
-      topic: input.topic,
-      title: input.message.title,
-      body: input.message.body,
-      url: input.message.url ?? null,
-      outcome: outcome.outcome,
-      detail: outcome.detail?.slice(0, 500) ?? null,
-      provider: outcome.provider,
-    })
+    await db.insert(notificationLog).values(decisionFor(input))
   } catch {
-    // Losing a log row is a smaller failure than losing the notification.
-    // Same call as `meter()` in the AI gateway.
+    // See above.
   }
 }
 
@@ -459,6 +477,36 @@ export async function recentNotifications(ctx: ActorContext, limit = 25) {
     .select()
     .from(notificationLog)
     .where(and(scoped(ctx, notificationLog), eq(notificationLog.userId, ctx.userId)))
+    .orderBy(desc(notificationLog.createdAt))
+    .limit(limit)
+}
+
+/**
+ * One person's history for one firm (Phase 90).
+ *
+ * Not `scoped()`, which resolves a company and would find nothing here: these
+ * rows have a null company by construction. Scoped instead by the two things
+ * that matter — the firm the rows belong to, and the person reading them.
+ *
+ * The caller is responsible for proving membership of the firm before calling;
+ * `setBriefPreferenceAction` already does it through `practicesFor`, and the
+ * server component that renders this reads the same list.
+ */
+export async function practiceNotifications(
+  practiceId: string,
+  userId: string,
+  limit = 10,
+) {
+  return db
+    .select()
+    .from(notificationLog)
+    .where(
+      and(
+        eq(notificationLog.practiceId, practiceId),
+        isNull(notificationLog.companyId),
+        eq(notificationLog.userId, userId),
+      ),
+    )
     .orderBy(desc(notificationLog.createdAt))
     .limit(limit)
 }

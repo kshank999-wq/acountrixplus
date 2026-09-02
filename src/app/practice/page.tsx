@@ -5,7 +5,8 @@ import {
   practicesFor,
 } from '@/modules/practice/service'
 import { practiceWorkQueue } from '@/modules/practice/switching'
-import { preferencesFor } from '@/modules/mobile/notifications'
+import { practiceNotifications, preferencesFor } from '@/modules/mobile/notifications'
+import { explain, isSilence, type Channel, type Outcome } from '@/modules/mobile/decision'
 import { PracticeBoard } from './board'
 import { NewPracticeForm } from './new-practice'
 
@@ -42,11 +43,15 @@ export default async function PracticePage({
   const practice =
     practices.find((entry) => entry.practiceId === params.p) ?? practices[0]
 
-  const [queue, engagements, members, briefTopics] = await Promise.all([
+  const [queue, engagements, members, briefTopics, briefLog] = await Promise.all([
     practiceWorkQueue(actor.userId, practice.practiceId),
     engagementsForPractice(practice.practiceId, actor.userId),
     listPracticeMembers(practice.practiceId, actor.userId),
     preferencesFor({ kind: 'practice', practiceId: practice.practiceId }, actor.userId),
+    // Safe without a further permission check: `practicesFor` above already
+    // proved this person is a member of this firm, and the reader is scoped to
+    // their own rows within it.
+    practiceNotifications(practice.practiceId, actor.userId),
   ])
 
   return (
@@ -88,6 +93,18 @@ export default async function PracticePage({
         briefEnabled={
           briefTopics.find((topic) => topic.topic === 'practice_brief')?.enabled ?? true
         }
+        briefHistory={briefLog.map((row) => ({
+          id: row.id,
+          on: row.createdAt.toISOString().slice(0, 10),
+          title: row.title,
+          // Worded once, on the server, by the core that owns the vocabulary.
+          explanation: explain({
+            channel: row.channel as Channel,
+            outcome: row.outcome as Outcome,
+            detail: row.detail,
+          }),
+          silent: isSilence(row.outcome as Outcome),
+        }))}
       />
     </Frame>
   )

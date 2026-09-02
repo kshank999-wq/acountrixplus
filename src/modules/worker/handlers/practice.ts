@@ -5,7 +5,8 @@ import { briefFor, type Brief } from '@/modules/practice/brief'
 import { practiceWorkQueue } from '@/modules/practice/switching'
 import type { Rung } from '@/modules/practice/triage'
 import { sendTransactional } from '@/modules/notify/service'
-import { topicEnabled } from '@/modules/mobile/notifications'
+import { record, topicEnabled } from '@/modules/mobile/notifications'
+import { SWITCHED_OFF } from '@/modules/mobile/decision'
 import { appBaseUrl } from '@/modules/notify/transactional'
 import { registerHandler, type JobContext } from '../registry'
 
@@ -113,6 +114,8 @@ registerHandler({
       if (!brief) continue
       briefed++
 
+      const audience = { kind: 'practice', practiceId: firm.id } as const
+
       for (const person of staff) {
         /*
           Phase 89. The brief arrived in Phase 88 with no way to switch it off,
@@ -124,8 +127,25 @@ registerHandler({
           Checked per person rather than per firm: one member wanting out is
           not the firm wanting out.
         */
-        if (!(await topicEnabled({ kind: 'practice', practiceId: firm.id }, person.userId, 'practice_brief'))) {
+        if (!(await topicEnabled(audience, person.userId, 'practice_brief'))) {
           quieted++
+          /*
+            Phase 90. The suppression is the row that matters most and was the
+            one nowhere recorded: a send at least left a letter in
+            `transactional_messages`, while a person who switched the brief off
+            in March had, in July, no way to find out that they had. A counter
+            in a job result is not an answer to that question.
+          */
+          await record({
+            audience,
+            userId: person.userId,
+            topic: 'practice_brief',
+            channel: 'mail',
+            outcome: 'suppressed',
+            title: brief.subject,
+            detail: SWITCHED_OFF,
+            provider: 'none',
+          })
           continue
         }
 
@@ -145,6 +165,25 @@ registerHandler({
         })
 
         if (result.ok) sent++
+
+        /*
+          The send is recorded here too, and carries no body: the letter's own
+          text is in `transactional_messages`, and a second copy in a second
+          table is the defect this project keeps finding. `channel: 'mail'` is
+          what tells a reader that the null body means "the text is over there"
+          rather than "there was nothing to say" — see `mobile/decision`.
+        */
+        await record({
+          audience,
+          userId: person.userId,
+          topic: 'practice_brief',
+          channel: 'mail',
+          outcome: result.ok ? 'sent' : 'failed',
+          title: brief.subject,
+          url: '/practice',
+          detail: result.ok ? null : result.error,
+          provider: 'mail',
+        })
       }
     }
 

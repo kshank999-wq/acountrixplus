@@ -4022,6 +4022,37 @@ person set it and believes they are covered.
 The switch is checked per person rather than per firm: one member wanting out is
 not the firm wanting out.
 
+### The decision nobody recorded (Phase 90)
+
+Phase 8 built `notification_log` because **"why did I not get told about that"
+needs an answer that is not a guess** — so every path writes a row, including the
+suppressed one. Phase 88 broke the promise: the firm's brief travels by mail
+rather than push, so a *sent* one left a letter in `transactional_messages` and a
+*suppressed* one left nothing but a counter in a job result. Somebody who
+switched the brief off in March and forgot could not, in July, find out that they
+were the cause.
+
+The tempting fix is to merge the two logs, and it is wrong. **They answer
+different questions.** `transactional_messages` records a *transmission* — this
+address, this provider, did the hop succeed. `notification_log` records a
+*decision* — we chose to tell this person or chose not to, and here is why. A
+suppression has no transmission at all, which is precisely why it fits in one and
+not the other. So the boundary stays and is written down instead of assumed.
+
+A log row now names an **audience**, the same exactly-one-owner shape Phase 89
+gave preferences, so a firm-wide letter lands on no client's record. Two readers
+share the table and neither can see the other's rows.
+
+**The body is stored only when nothing else stores it.** A push message's text
+exists nowhere else, so the row keeps it; a letter's text is already rendered in
+`transactional_messages`, and a second copy is the two-answers-to-one-question
+defect this project keeps finding — an edit to the wording would fix one and
+leave the other lying. A `channel` column sits beside it so a reader can tell
+*why* a body is null rather than assuming there was nothing to say.
+
+The sentence a person reads lives in the core rather than a template, because two
+screens now ask the same question and two templates is how they come to disagree.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5749,11 +5780,16 @@ Gaps within the phases already built:
   about clients that got worse than the last thing said about them.
 - ~~**The brief cannot be switched off.**~~ Since Phase 89 it is a topic like any other, with the
   switch on the practice roster and checked per person.
-- **The brief is invisible to the notification log.** `notification_log` still has a non-null
-  company, so a channel that is a notification by every meaning except its transport does not
-  appear in the one table built to answer "why did I not get told about that". The letter is in
-  `transactional_messages`; a suppression is nowhere at all, so somebody who switched the brief off
-  and forgot cannot find out that they did.
+- ~~**The brief is invisible to the notification log.**~~ Since Phase 90 both outcomes are
+  recorded against the firm, and the roster shows each person what arrived and what did not.
+- **The letter itself cannot be opened.** The brief's letters sit in `transactional_messages` with
+  `reference` set to the practice, and nothing reads them back — `recordOutboundMail` files a
+  letter on a contact's timeline only when there is a company, and a firm-wide letter has none. So
+  a firm can see that a letter was decided on and still cannot read the one that was sent.
+- **A silent morning records nothing.** When the brief says nothing there is no decision about a
+  person to record, so the history has gaps rather than a row saying "nothing to say". Which
+  client was seen on which morning is `practice_brief_state`'s job, and a second copy of it here
+  would be the defect this phase exists to avoid.
 - **One practice topic, so one line rather than a settings page.** `preferencesFor` already returns
   every practice topic; the roster shows the only one there is.
 - **The brief is the firm's, not each person's.** The roster is read once, through the first

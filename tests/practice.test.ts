@@ -12,7 +12,17 @@ import {
   transactionalMessages,
 } from '@/db/schema'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
-import { setPreferenceFor } from '@/modules/mobile/notifications'
+import {
+  practiceNotifications,
+  recentNotifications,
+  setPreferenceFor,
+} from '@/modules/mobile/notifications'
+import {
+  SWITCHED_OFF,
+  explain,
+  type Channel,
+  type Outcome,
+} from '@/modules/mobile/decision'
 import { createCompanyFixture, type Fixture } from './helpers'
 import {
   addPracticeMember,
@@ -974,6 +984,170 @@ describe('the work queue', () => {
 
         expect(rows).toHaveLength(1)
         expect(rows[0].companyId).toBeNull()
+      })
+
+      /**
+       * Phase 90. ADR 0008 built `notification_log` so that "why did I not get
+       * told about that" has an answer that is not a guess. The brief could not
+       * be recorded there — `company_id` was `NOT NULL` and a firm's brief is
+       * about no single client — so a *sent* one left a letter behind and a
+       * *suppressed* one left nothing at all but a counter in a job result.
+       */
+      describe('the decision, recorded', () => {
+        async function decisions(practiceId: string, userId: string) {
+          return practiceNotifications(practiceId, userId, 50)
+        }
+
+        it('records a send against the firm and no company', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          const rows = await decisions(shop.practiceId, shop.ownerId)
+          expect(rows).toHaveLength(1)
+          expect(rows[0].outcome).toBe('sent')
+          expect(rows[0].channel).toBe('mail')
+          expect(rows[0].practiceId).toBe(shop.practiceId)
+          expect(rows[0].companyId).toBeNull()
+          expect(rows[0].title).toBe('Zebra Ltd needs a look')
+        })
+
+        it('stores no body, because the letter already holds the text', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          const [row] = await decisions(shop.practiceId, shop.ownerId)
+          // Two copies of one text is the defect this project keeps finding:
+          // an edit to the wording would fix one and leave the other lying.
+          expect(row.body).toBeNull()
+
+          const letters = await db
+            .select({ subject: transactionalMessages.subject })
+            .from(transactionalMessages)
+            .where(eq(transactionalMessages.kind, 'practice_brief'))
+          expect(letters).toHaveLength(1)
+          expect(letters[0].subject).toBe(row.title)
+        })
+
+        /** The row that mattered most and was nowhere written down. */
+        it('records the suppression of somebody who switched it off', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          const hire = await accountant('Prefers Silence')
+          await addPracticeMember(
+            { userId: shop.ownerId, userName: shop.ownerName },
+            { practiceId: shop.practiceId, userId: hire.id },
+          )
+          await setPreferenceFor(
+            { kind: 'practice', practiceId: shop.practiceId },
+            hire.id,
+            'practice_brief',
+            false,
+          )
+
+          mail.reset()
+          await fire(NOW)
+
+          const quiet = await decisions(shop.practiceId, hire.id)
+          expect(quiet).toHaveLength(1)
+          expect(quiet[0].outcome).toBe('suppressed')
+          // The whole point: in July, this is how they find out it was them.
+          expect(
+            explain({
+              channel: quiet[0].channel as Channel,
+              outcome: quiet[0].outcome as Outcome,
+              detail: quiet[0].detail,
+            }),
+          ).toBe(SWITCHED_OFF)
+
+          // The person who did get it has the other kind of row.
+          const heard = await decisions(shop.practiceId, shop.ownerId)
+          expect(heard).toHaveLength(1)
+          expect(heard[0].outcome).toBe('sent')
+        })
+
+        /** Silence is only informative if it is recorded on the quiet mornings too. */
+        it('records nothing on a morning when nothing changed', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+          await fire(new Date(NOW.getTime() + 86_400_000))
+
+          // The second morning said nothing to anybody, so there is no
+          // decision about a person to record — the brief itself was never
+          // written. That is `practice_brief_state`'s job, not this table's.
+          const rows = await decisions(shop.practiceId, shop.ownerId)
+          expect(rows).toHaveLength(1)
+        })
+
+        it('keeps one firm’s decisions out of another firm’s history', async () => {
+          const mine = await createCompanyFixture({ name: 'My Client' })
+          const theirs = await createCompanyFixture({ name: 'Their Client' })
+          const ours = await firm('Hartley & Co')
+          const rival = await firm('Rival Books')
+          await engaged(mine, ours)
+          await engaged(theirs, rival)
+          await checked(mine, 2)
+          await checked(theirs, 4)
+
+          mail.reset()
+          await fire(NOW)
+
+          const ourRows = await decisions(ours.practiceId, ours.ownerId)
+          expect(ourRows).toHaveLength(1)
+          expect(ourRows[0].title).toContain('My Client')
+          // Reading the rival's firm as ourselves finds nothing, because the
+          // reader is scoped by both the firm and the person.
+          expect(await decisions(rival.practiceId, ours.ownerId)).toHaveLength(0)
+        })
+
+        /**
+         * The company history and the firm history are separate readers over
+         * one table, and neither may show the other's rows.
+         */
+        it('keeps the firm’s rows out of the company settings screen', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          // The firm's owner, reading the client's own settings screen. They
+          // have a real membership there through the engagement, so this is the
+          // person most likely to see the wrong rows.
+          const asAccountant: ActorContext = {
+            userId: shop.ownerId,
+            userName: shop.ownerName,
+            companyId: client.companyId,
+            role: 'accountant',
+          }
+
+          const companyRows = await recentNotifications(asAccountant, 50)
+          // `scoped()` compares against a company id, and these rows have none.
+          expect(companyRows).toHaveLength(0)
+
+          // And the firm's own reader still finds them, so the row is not just
+          // lost — it is filed somewhere else on purpose.
+          expect(await decisions(shop.practiceId, shop.ownerId)).toHaveLength(1)
+        })
       })
     })
 
