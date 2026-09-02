@@ -131,6 +131,8 @@ type Integrity = {
     error: string | null
     meaning: string
     compares: string
+    /** Whether the two numbers are money (Phase 94). */
+    unit: 'money' | 'count'
   }>
 } | null
 
@@ -887,13 +889,33 @@ function IntegritySection({ integrity }: { integrity: Integrity }) {
 function Verdict({
   row,
 }: {
-  row: { agrees: boolean; error: string | null; severity: string; differenceCents: number }
+  row: {
+    agrees: boolean
+    error: string | null
+    severity: string
+    differenceCents: number
+    unit: 'money' | 'count'
+  }
 }) {
   if (row.error) {
     return <span className="text-xs text-danger">could not be checked</span>
   }
   if (row.agrees) {
     return <span className="text-xs text-success">agrees</span>
+  }
+
+  /*
+    A check that counts things has no amount, and saying "$0.01 apart" for two
+    customers on one email address is not merely unhelpful — it is false, in a
+    register whose whole job is telling somebody the truth about their books.
+    The `detail` line beneath already says what was found, in words.
+  */
+  if (row.unit === 'count') {
+    return row.severity === 'position' ? (
+      <span className="text-xs text-muted">worth a look</span>
+    ) : (
+      <span className="text-xs text-danger">does not agree</span>
+    )
   }
 
   const amount = formatCents(Math.abs(row.differenceCents))

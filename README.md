@@ -4153,6 +4153,39 @@ both a customer's and a supplier's. On the customers and suppliers screen the
 post gets its own **Post** panel beside Phase 71's **History**, because what we
 *sent* a party is not what *changed* about their record.
 
+### The address two customers share (Phase 94)
+
+Phase 93's refusal to file when two parties of one kind share an address is
+right, and silent. So the application detects a real data-quality problem and
+tells nobody — the shape Phase 33's register exists to fix, whose own words are
+that **a check nobody runs is not a check**. The lost filing is not the worst of
+it: both accounts are chased at that inbox, both statements arrive there, and the
+person reading them cannot tell which account either refers to.
+
+**Across the sides is business; within a side is a defect.** Phase 93's insight
+inverted, and easy to get backwards. One inbox that is both a customer and a
+supplier is a firm that buys from you and sells to you, and flagging it would
+raise an alarm on every such firm — which the register already warns is how an
+alarm gets switched off before the day it matters. So the grouping is by side
+*and* address together, in the core rather than as a filter afterwards.
+
+Normalisation stops at case and whitespace, which are typing. Plus-addressing is
+deliberately not collapsed: `accounts+ridgeline@` and `accounts+kestrel@` are
+somebody splitting their post by account on purpose, and merging them would
+report the tidy arrangement as the mess.
+
+It is a **position**, not a fault — a parent and its subsidiary genuinely may
+share an inbox — and it names the parties rather than counting them, because a
+number with no name in it is a number nobody can act on.
+
+**And a check that counts things no longer reports money.** Found in the browser:
+the operations page rendered every disagreement as an amount, so two customers on
+one email address displayed as *"$0.01 apart"* — not merely unhelpful but false,
+in a register whose whole job is telling the truth about the books. A check now
+declares its `unit`; counting checks say "worth a look" and leave the specifics
+to their detail line. `banking.shared_ledger_accounts` had the same problem
+unnoticed since Phase 40 and is fixed with it.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5889,10 +5922,16 @@ Gaps within the phases already built:
   somebody typed.
 - ~~**A letter only lands on a timeline when the address belongs to a CRM contact.**~~ Since Phase
   93 it is filed against the customer or supplier it was about, decided from what the letter is.
-- **Nothing says when a letter went unfiled.** `recordOutboundMail` returns null for a stranger,
-  for a duplicate address and for a letter with no honest party, and all three look identical from
-  outside. The duplicate case is a data-quality problem this application can now detect and does
-  not report.
+- ~~**Nothing says when a letter went unfiled.**~~ Since Phase 94 the duplicate-address case is
+  reported nightly by the integrity register. The other two silences remain indistinguishable from
+  outside `recordOutboundMail`, which is honest: a letter to a stranger is the ordinary case.
+- **The finding names duplicates and nothing acts on them.** Somebody reading "2 customers share
+  one address" has to go to another page, find both records by hand and decide which one the
+  invoices should have gone to. The register found the problem; the screen where it would be fixed
+  does not know about it.
+- **Nothing merges two customers.** The check reports; a person decides whether two records are
+  one business. Merging has real consequences for the ledger, and inventing it inside a nightly
+  reconciliation would be the opposite of this register\'s design.
 - **No backfill.** Letters sent before Phase 93 have no communications row and do not get one:
   which party they were about was never decided, and inventing it now would be a guess dressed as
   a record.

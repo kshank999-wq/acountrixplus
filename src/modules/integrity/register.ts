@@ -17,6 +17,8 @@ import { authorisationsAgree } from '@/modules/vehicles/reporting'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
 import { heldCredits } from '@/modules/receivables/customer-credit'
 import { duplicateExposure } from '@/modules/payables/duplicates'
+import { sharedAddresses } from '@/modules/parties/service'
+import { summarise } from '@/modules/parties/addresses'
 import { unbilledReceiptValue } from '@/modules/payables/receipt-billing'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { accountByNumber } from '@/modules/coa/service'
@@ -117,6 +119,17 @@ export type IntegrityCheck = {
    */
   module: IndustryModule | null
   severity: CheckSeverity
+  /**
+   * What the two numbers are (Phase 94).
+   *
+   * Almost every check compares money, so money is the default. Two do not:
+   * `banking.shared_ledger_accounts` counts accounts against ledger lines, and
+   * `parties.shared_addresses` counts parties against addresses. Rendering
+   * either as currency produces "$0.01 apart" for two customers on one email —
+   * a sentence that is not merely unhelpful but false, in a register whose
+   * whole job is telling somebody the truth about their books.
+   */
+  unit?: 'money' | 'count'
   /** Why a difference here means what it means. Shown next to the number. */
   meaning: string
   run: (ctx: ActorContext, asOf: string) => Promise<CheckOutcome>
@@ -168,6 +181,9 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
   },
   {
     key: 'banking.shared_ledger_accounts',
+    // Counts, not money — and said so since Phase 94, which is when the page
+    // stopped rendering them as currency.
+    unit: 'count',
     label: 'Bank accounts that share one ledger account',
     compares: 'Bank accounts against the ledger accounts they post to',
     module: null,
@@ -315,6 +331,44 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
             : `${exposure.pairs} pair${exposure.pairs === 1 ? '' : 's'} worth a look, ` +
               `${formatCents(exposure.totalCents)} in total — ` +
               `${formatCents(exposure.unpaidCents)} of it not yet paid.`,
+      }
+    },
+  },
+  {
+    key: 'parties.shared_addresses',
+    label: 'Two customers, or two suppliers, on one email address',
+    compares: 'Parties sharing an address against the addresses they share',
+    module: null,
+    unit: 'count',
+    /*
+      A position rather than a fault, on the same reasoning as the duplicate
+      bills above. Two customers on one address is not proof of anything — a
+      parent company and its subsidiary genuinely may share an accounts inbox —
+      and calling a suspicion a broken book is how a check gets ignored. What it
+      says is "the post to this address is ambiguous", which is true.
+    */
+    severity: 'position',
+    meaning:
+      'Phase 93 refuses to file a letter when two parties of one kind share an address, ' +
+      'because an entry on the wrong customer is evidence about the wrong party. That refusal ' +
+      'is silent, so the application detects a real problem and tells nobody. It is worse than ' +
+      'the filing: both accounts are chased at that inbox, both statements arrive there, and ' +
+      'the person reading them cannot tell which account either refers to. A customer sharing ' +
+      'with a supplier is deliberately not reported — that is one firm that buys from you and ' +
+      'sells to you, which is ordinary business.',
+    run: async (ctx) => {
+      const clashes = await sharedAddresses(ctx)
+
+      return {
+        agrees: clashes.length === 0,
+        // Counts, not money — the same shape `banking.shared_accounts` uses,
+        // and for the same reason: there is no ledger figure to compare
+        // against, because the books balance perfectly with two customers on
+        // one address. The number that matters is how many parties are hidden
+        // behind how few addresses.
+        leftCents: clashes.reduce((sum, clash) => sum + clash.parties.length, 0),
+        rightCents: clashes.length,
+        detail: summarise(clashes),
       }
     },
   },

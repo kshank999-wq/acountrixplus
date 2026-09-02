@@ -4,6 +4,7 @@ import { bills, creditNotes, customers, invoices, payments, vendors } from '@/db
 import { DomainError } from '@/modules/errors'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { clashesAmong, type Clash } from './addresses'
 import { functionalCurrency } from '@/modules/fx/service'
 import { comparableHoldings } from '@/modules/fx/holdings'
 import { deactivationCheck } from './changes'
@@ -466,4 +467,37 @@ export async function setVendorActive(
 
   const updated = await updateVendor(ctx, vendorId, { isActive })
   return { name: updated.name, isActive: updated.isActive }
+}
+
+/**
+ * Every email address shared by two parties on the same side (Phase 94).
+ *
+ * Reads both registers and hands them to `clashesAmong`, which does the
+ * deciding. The grouping is deliberately *not* pushed into SQL: the rule that
+ * separates a defect from ordinary business — same side, not merely same
+ * address — is the whole judgement of this phase, and it belongs where it can
+ * be read and tested rather than inside a `group by`.
+ *
+ * Active parties only. An archived customer sharing an address with a live one
+ * is the *result* of somebody already having tidied the duplicate up, and
+ * reporting it would mean the fix never clears the finding.
+ */
+export async function sharedAddresses(ctx: ActorContext): Promise<Clash[]> {
+  requirePermission(ctx, 'accounting:view')
+
+  const [asCustomers, asVendors] = await Promise.all([
+    db
+      .select({ id: customers.id, name: customers.name, email: customers.email })
+      .from(customers)
+      .where(scoped(ctx, customers, eq(customers.isActive, true))),
+    db
+      .select({ id: vendors.id, name: vendors.name, email: vendors.email })
+      .from(vendors)
+      .where(scoped(ctx, vendors, eq(vendors.isActive, true))),
+  ])
+
+  return clashesAmong([
+    ...asCustomers.map((row) => ({ side: 'customer' as const, ...row })),
+    ...asVendors.map((row) => ({ side: 'vendor' as const, ...row })),
+  ])
 }

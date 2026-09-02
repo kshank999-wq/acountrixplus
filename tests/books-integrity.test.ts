@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { db } from '@/db'
-import { integrityFindings, integrityRuns } from '@/db/schema'
+import { customers, integrityFindings, integrityRuns, vendors } from '@/db/schema'
 import { eq } from 'drizzle-orm'
 import { createCompanyFixture, type Fixture } from './helpers'
 import { PermissionError } from '@/modules/permissions'
@@ -117,6 +117,10 @@ describe('the register names every check there is (Phase 33)', () => {
       // rows still in the inbox have not posted (Phase 40).
       'banking.cash_tie_out',
       'funds.untagged_contributions',
+      // A parent company and its subsidiary genuinely may share an accounts
+      // inbox, so two customers on one address is ambiguous rather than broken
+      // (Phase 94).
+      'parties.shared_addresses',
       // Two bills for the same amount a week apart is how a weekly delivery
       // looks. Nothing here is provably wrong, and reporting a suspicion as a
       // broken book is how a check gets ignored (Phase 47).
@@ -195,6 +199,9 @@ describe('running the checks (Phase 33)', () => {
       'fx.conversions',
       'ledger.payables',
       'ledger.receivables',
+      // Ungated: any company can enter the same customer twice, and the check
+      // finds nothing until one does (Phase 94).
+      'parties.shared_addresses',
       // Ungated: every company that enters a bill can enter it twice, and the
       // check finds nothing until one does (Phase 47).
       'payables.duplicate_bills',
@@ -555,5 +562,120 @@ describe('the machine runs it (Phase 33)', () => {
       .where(eq(integrityRuns.companyId, fixture.companyId))
 
     expect(runs).toHaveLength(2)
+  })
+})
+
+/**
+ * Two parties on one address (Phase 94).
+ *
+ * Phase 93 taught the filing to refuse when two parties of one kind share an
+ * address, because an entry on the wrong customer is evidence about the wrong
+ * party. That refusal is silent — so the application detects a real problem and
+ * tells nobody, which is the shape this register exists to fix.
+ */
+describe('shared addresses', () => {
+  async function books() {
+    return createCompanyFixture({ name: 'Shared Address Co' })
+  }
+
+  async function findingFor(fixture: Fixture) {
+    const run = await runIntegrityChecks(fixture.ctx)
+    return run.findings.find((finding) => finding.key === 'parties.shared_addresses')
+  }
+
+  it('says nothing about clean books', async () => {
+    const fixture = await books()
+    await db.insert(customers).values([
+      { companyId: fixture.companyId, name: 'One Ltd', email: 'one@x.test' },
+      { companyId: fixture.companyId, name: 'Two Ltd', email: 'two@x.test' },
+    ])
+
+    const finding = await findingFor(fixture)
+    expect(finding?.agrees).toBe(true)
+    expect(finding?.detail).toBeNull()
+  })
+
+  it('reports two customers on one address, and names them', async () => {
+    const fixture = await books()
+    await db.insert(customers).values([
+      { companyId: fixture.companyId, name: 'One Ltd', email: 'accounts@shared.test' },
+      { companyId: fixture.companyId, name: 'Two Ltd', email: 'ACCOUNTS@Shared.test' },
+    ])
+
+    const finding = await findingFor(fixture)
+    expect(finding?.agrees).toBe(false)
+    // Counts, not money: two parties behind one address.
+    expect(finding?.leftCents).toBe(2)
+    expect(finding?.rightCents).toBe(1)
+    expect(finding?.detail).toContain('One Ltd')
+    expect(finding?.detail).toContain('Two Ltd')
+  })
+
+  /** The rule that keeps the alarm worth hearing. */
+  it('says nothing about a firm that both buys and sells', async () => {
+    const fixture = await books()
+    const shared = 'accounts@bothways.test'
+
+    await db
+      .insert(customers)
+      .values({ companyId: fixture.companyId, name: 'Both Ways', email: shared })
+    await db
+      .insert(vendors)
+      .values({ companyId: fixture.companyId, name: 'Both Ways', email: shared })
+
+    const finding = await findingFor(fixture)
+    expect(finding?.agrees).toBe(true)
+  })
+
+  it('does not report a duplicate somebody has already archived', async () => {
+    // Archiving is how the duplicate gets tidied up, so counting the archived
+    // one would mean the fix never clears the finding.
+    const fixture = await books()
+    await db.insert(customers).values([
+      { companyId: fixture.companyId, name: 'One Ltd', email: 'accounts@shared.test' },
+      {
+        companyId: fixture.companyId,
+        name: 'Two Ltd',
+        email: 'accounts@shared.test',
+        isActive: false,
+      },
+    ])
+
+    expect((await findingFor(fixture))?.agrees).toBe(true)
+  })
+
+  it('keeps one company’s duplicates out of another’s report', async () => {
+    const ours = await books()
+    const theirs = await createCompanyFixture({ name: 'Nosy Co' })
+
+    await db.insert(customers).values([
+      { companyId: theirs.companyId, name: 'One Ltd', email: 'accounts@shared.test' },
+      { companyId: theirs.companyId, name: 'Two Ltd', email: 'accounts@shared.test' },
+    ])
+
+    expect((await findingFor(ours))?.agrees).toBe(true)
+    expect((await findingFor(theirs))?.agrees).toBe(false)
+  })
+
+  /** A position, so it is recorded and shown without being called a fault. */
+  it('is recorded as a position rather than a broken book', async () => {
+    const fixture = await books()
+    await db.insert(customers).values([
+      { companyId: fixture.companyId, name: 'One Ltd', email: 'accounts@shared.test' },
+      { companyId: fixture.companyId, name: 'Two Ltd', email: 'accounts@shared.test' },
+    ])
+
+    const run = await runIntegrityChecks(fixture.ctx)
+    const [finding] = await db
+      .select()
+      .from(integrityFindings)
+      .where(eq(integrityFindings.checkKey, 'parties.shared_addresses'))
+
+    expect(finding.severity).toBe('position')
+    // A parent company and its subsidiary genuinely may share an inbox, so
+    // this must not raise the fault count that wakes somebody up.
+    expect(
+      run.findings.find((entry) => entry.key === 'parties.shared_addresses')?.agrees,
+    ).toBe(false)
   })
 })

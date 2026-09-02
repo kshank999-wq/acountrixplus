@@ -178,6 +178,7 @@ export default async function OperationsPage() {
               ...finding,
               compares: checkByKey(finding.key)?.compares ?? '',
               meaning: checkByKey(finding.key)?.meaning ?? '',
+              unit: checkByKey(finding.key)?.unit ?? 'money',
             })),
           }
         }
