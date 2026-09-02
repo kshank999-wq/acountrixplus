@@ -77,6 +77,15 @@ export const customers = pgTable(
     paymentTermsDays: integer('payment_terms_days').notNull().default(30),
     notes: text('notes'),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * The record this one was merged into (Phase 96).
+     *
+     * Set only on the losing side of a merge, which is always archived — a
+     * database constraint says so, because a merged record still appearing in
+     * pickers is exactly the duplicate Phase 94 exists to report. Null on every
+     * record that has not been merged away, which is nearly all of them.
+     */
+    mergedIntoId: uuid('merged_into_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -112,6 +121,15 @@ export const vendors = pgTable(
     is1099Vendor: boolean('is_1099_vendor').notNull().default(false),
     notes: text('notes'),
     isActive: boolean('is_active').notNull().default(true),
+    /**
+     * The record this one was merged into (Phase 96).
+     *
+     * Set only on the losing side of a merge, which is always archived — a
+     * database constraint says so, because a merged record still appearing in
+     * pickers is exactly the duplicate Phase 94 exists to report. Null on every
+     * record that has not been merged away, which is nearly all of them.
+     */
+    mergedIntoId: uuid('merged_into_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

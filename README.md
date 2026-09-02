@@ -4217,6 +4217,43 @@ this one* is a conclusion they would have to take on trust. No second query and
 no second action: `PartySummary` has carried the whole footprint since Phase 56,
 and archiving already lives on the row with Phase 56's refusal behind it.
 
+### The merge that has to move everything (Phase 96)
+
+Phase 95 said **merge** for two records that had both traded, and the
+application had no merge. Honest, and a dead end on the case most worth fixing.
+
+**A merge that misses a table is worse than no merge.** Twenty-two places refer
+to a party — fourteen to a customer, eight to a supplier — arriving one phase at
+a time across ninety-five phases. Repointing twenty-one of them leaves a
+document attached to a record the screens have hidden: not a visible failure but
+an invoice that has quietly stopped existing, found months later by somebody
+reconciling a balance that will not tie, and irreversible because the record it
+came from was archived by the same operation.
+
+So `PARTY_REFERENCES` names every one, and a test reads `pg_constraint` and
+fails when it finds a foreign key the list does not mention. The list is written
+by hand deliberately: deriving it from the catalogue would never be wrong and
+would also never involve a person, so a new column would join the merge without
+anybody deciding it should. The tripwire was checked by deleting an entry and
+watching it fail with the column named.
+
+**A correction that cannot be undone must say why.** Phase 70's rule asked what
+a correction reaches — money, somebody outside, or only our own screens — and a
+merge is the third, so no reason would have been asked for. That is the rule
+reaching its edge rather than the merge being an exception: every other
+correction can be taken back, and the reason is the only surviving record of why
+somebody believed two records were one business. `Reach` gains a fourth value.
+
+The losing record is archived, not deleted, pointing at the one that absorbed
+it — two database constraints enforce that, because a merged record still in the
+pickers would be exactly the duplicate Phase 94 reports, manufactured by the
+thing meant to fix it. The merge is recorded on both records; the survivor needs
+it most, or its history begins mid-story with documents never raised against it.
+
+And it shows its work first: *"5 records (4 invoices, 1 recurring invoice) will
+move to Bremen Hafenbau GmbH, and Meridian Facilities Ltd will be archived. This
+cannot be undone."*
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5958,10 +5995,14 @@ Gaps within the phases already built:
   outside `recordOutboundMail`, which is honest: a letter to a stranger is the ordinary case.
 - ~~**The finding names duplicates and nothing acts on them.**~~ Since Phase 95 the customers and
   suppliers screen shows the clash, what each record carries, and which of them can be archived.
-- **Nothing merges two customers.** The check reports, the screen explains, a person decides. Two
-  live customers on one inbox is the case most worth fixing and the only one the screen answers
-  with a shrug — what a merge would mean for the documents, the audit trail on both records and
-  whether the losing record survives as an alias is unbuilt and undecided.
+- ~~**Nothing merges two customers.**~~ Since Phase 96 two records of one business can be put
+  together, with every one of the twenty-two references repointed under a tripwire that fails when
+  a new one is added and not registered.
+- **A merge cannot be undone.** It is the only correction in the vocabulary with no way back. The
+  audit trail records enough to explain it — who, when, why, and how many rows moved per table —
+  but not the ids, so nothing could reverse it. Whether an unmerge is a feature a bookkeeping
+  system should have, given what may have been posted against the combined record since, is
+  undecided.
 - **No backfill.** Letters sent before Phase 93 have no communications row and do not get one:
   which party they were about was never decided, and inventing it now would be a guess dressed as
   a record.

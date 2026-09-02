@@ -56,6 +56,7 @@ export type CorrectionKind =
   | 'document.void'
   | 'deposit.void'
   | 'approval.withdraw'
+  | 'party.merge'
 
 /**
  * What a correction actually disturbs, which is what decides the rule above.
@@ -71,6 +72,20 @@ export type Reach =
   | 'reached_somebody'
   /** Only our own records move; nothing outside changes. */
   | 'internal'
+  /**
+   * Only our own records move, and this application cannot move them back
+   * (Phase 96).
+   *
+   * Added because a merge is none of the other three and the rule above needed
+   * a clause rather than an exception. Nothing leaves the business and no
+   * letter goes out, so `internal` was the literal answer — and `internal`
+   * means no reason is asked for, which would have left the only record of
+   * *why somebody believed two records were one business* nowhere at all.
+   *
+   * Every other correction here can be taken back by the person who made it.
+   * This one cannot, and afterwards there is only one record to read.
+   */
+  | 'cannot_be_undone'
 
 export type Correction = {
   kind: CorrectionKind
@@ -127,6 +142,15 @@ const CORRECTIONS: Record<CorrectionKind, Correction> = {
     done: 'Approval withdrawn',
     reasonPrompt: null,
   },
+  'party.merge': {
+    kind: 'party.merge',
+    reach: 'cannot_be_undone',
+    // No other verb here is "Merge", and no other screen may take it.
+    verb: 'Merge the records',
+    title: 'Merge these records',
+    done: 'Records merged',
+    reasonPrompt: 'Why are these one business? Nothing here can take this back.',
+  },
 }
 
 export function correction(kind: CorrectionKind): Correction {
@@ -137,7 +161,17 @@ export function everyCorrection(): Correction[] {
   return Object.values(CORRECTIONS)
 }
 
-/** The rule, applied. */
+/**
+ * The rule, applied.
+ *
+ * > A correction that moved money, that reached somebody outside the business,
+ * > **or that cannot be taken back** must say why. One that only rearranges
+ * > what is on our own screens need not.
+ *
+ * The last clause is Phase 96's. It is written as `=== 'internal'` rather than
+ * a list of the three that require one, so a fifth reach added later has to be
+ * argued into silence rather than falling into it.
+ */
 export function mustSayWhy(kind: CorrectionKind): boolean {
   return CORRECTIONS[kind].reach !== 'internal'
 }

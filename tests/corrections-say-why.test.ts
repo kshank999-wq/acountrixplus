@@ -9,7 +9,12 @@ import {
   updatePayablesPolicy,
   withdrawApproval,
 } from '@/modules/payables/approvals-service'
-import { everyCorrection, mustSayWhy } from '@/modules/corrections/vocabulary'
+import {
+  correction,
+  everyCorrection,
+  mustSayWhy,
+  reasonFor,
+} from '@/modules/corrections/vocabulary'
 
 /**
  * Every correction says why, and says what it is (Phase 70).
@@ -131,7 +136,7 @@ describe('a correction that only moves our own records', () => {
   })
 })
 
-describe('the rule the five now share', () => {
+describe('the rule the six now share', () => {
   /** The defect: one phrase meaning four things across the screens. */
   it('gives every correction its own verb', () => {
     const verbs = everyCorrection().map((row) => row.verb)
@@ -142,7 +147,22 @@ describe('the rule the five now share', () => {
     const must = everyCorrection().filter((row) => mustSayWhy(row.kind)).map((r) => r.kind).sort()
     const neednt = everyCorrection().filter((row) => !mustSayWhy(row.kind)).map((r) => r.kind).sort()
 
-    expect(must).toEqual(['document.void', 'payment.void', 'refund.void'])
+    expect(must).toEqual(['document.void', 'party.merge', 'payment.void', 'refund.void'])
     expect(neednt).toEqual(['approval.withdraw', 'deposit.void'])
+  })
+
+  /**
+   * Phase 96's clause, pinned on its own.
+   *
+   * A merge moves no money and sends no letter, so under the rule as Phase 70
+   * wrote it the answer was `internal` — and `internal` means nobody is asked
+   * why. The reason a merge is asked for is that it is the only surviving
+   * record of why somebody believed two records were one business: afterwards
+   * there is one record, and the question cannot be put again.
+   */
+  it('asks why for the one correction that cannot be taken back', () => {
+    expect(correction('party.merge').reach).toBe('cannot_be_undone')
+    expect(mustSayWhy('party.merge')).toBe(true)
+    expect(reasonFor({ kind: 'party.merge', reason: '  ' }).ok).toBe(false)
   })
 })

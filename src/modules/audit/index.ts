@@ -113,6 +113,8 @@ export type AuditAction =
   // over a delete and recreate.
   | 'customer.update'
   | 'vendor.update'
+  /** Two records of one business put together, on both of them (Phase 96). */
+  | 'party.merge'
   // Time and expense billing (spec §5, Phase 15)
   | 'time.log'
   | 'time.approve'

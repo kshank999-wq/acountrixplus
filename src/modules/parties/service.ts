@@ -4,7 +4,16 @@ import { bills, creditNotes, customers, invoices, payments, vendors } from '@/db
 import { DomainError } from '@/modules/errors'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
-import { clashesAmong, type Clash } from './addresses'
+import { clashesAmong, type Clash, type PartySide } from './addresses'
+import {
+  describeMerge,
+  EXCLUSIVE_REFERENCES,
+  mergeCheck,
+  PARTY_REFERENCES,
+  type MergeTally,
+} from './merge'
+import { reasonFor } from '@/modules/corrections/vocabulary'
+import { recordAudit } from '@/modules/audit'
 import { functionalCurrency } from '@/modules/fx/service'
 import { comparableHoldings } from '@/modules/fx/holdings'
 import { deactivationCheck } from './changes'
@@ -500,4 +509,186 @@ export async function sharedAddresses(ctx: ActorContext): Promise<Clash[]> {
     ...asCustomers.map((row) => ({ side: 'customer' as const, ...row })),
     ...asVendors.map((row) => ({ side: 'vendor' as const, ...row })),
   ])
+}
+
+/**
+ * Puts two records of one business together (Phase 96).
+ *
+ * Everything on the loser moves to the winner, the loser is archived pointing
+ * at the winner, and both records' histories say so. One transaction: a merge
+ * that committed half its tables would be exactly the silent data loss the
+ * reference registry exists to prevent, and there is no undo to reach for.
+ *
+ * The tables are driven off `PARTY_REFERENCES` rather than written out here, so
+ * the list a test verifies against the database catalogue is the same list this
+ * function walks. Two lists would mean the verified one could be right while
+ * the used one was wrong.
+ *
+ * `sql.raw` on the table and column: they come from that module-level constant,
+ * never from a caller, and the tripwire test proves every entry names something
+ * the database actually has. The party ids are still bound, as ids from a
+ * request always must be.
+ */
+export async function mergeParties(
+  ctx: ActorContext,
+  input: { side: PartySide; winnerId: string; loserId: string; reason?: string | null },
+): Promise<{ winnerName: string; loserName: string; moved: MergeTally[] }> {
+  requirePermission(ctx, input.side === 'customer' ? 'crm:manage' : 'accounting:journal')
+
+  const verdict = reasonFor({ kind: 'party.merge', reason: input.reason })
+  if (!verdict.ok) throw new DomainError(verdict.why)
+
+  const table = input.side === 'customer' ? customers : vendors
+  const references = PARTY_REFERENCES[input.side]
+
+  const [winner, loser] = await Promise.all(
+    [input.winnerId, input.loserId].map(async (id) => {
+      const [row] = await db
+        .select({ id: table.id, name: table.name, isActive: table.isActive })
+        .from(table)
+        .where(scoped(ctx, table, eq(table.id, id)))
+      return row
+    }),
+  )
+
+  if (!winner || !loser) {
+    throw new DomainError('One of those records no longer exists. Reload the page and try again.')
+  }
+
+  /**
+   * The tables where both already hold a row that must be unique.
+   *
+   * Asked before the merge rather than caught afterwards: the database would
+   * refuse with a constraint name, and "subcontractors_vendor_unique" is not a
+   * sentence anybody can act on (Phase 47).
+   */
+  const collisions: string[] = []
+  for (const ref of EXCLUSIVE_REFERENCES) {
+    if (!references.some((one) => one.table === ref.table && one.column === ref.column)) continue
+
+    const [row] = await db.execute(
+      sql`select count(*)::int as n from ${sql.raw(`"${ref.table}"`)}
+          where ${sql.raw(`"${ref.column}"`)} in (${winner.id}, ${loser.id})`,
+    )
+    if (Number((row as { n: number }).n) > 1) collisions.push(ref.table.replace(/_/g, ' '))
+  }
+
+  const check = mergeCheck({
+    side: input.side,
+    winner: { ...winner, standing: 'trading' },
+    loser: { ...loser, standing: 'trading' },
+    collisions,
+  })
+  if (!check.ok) throw new DomainError(check.why)
+
+  return db.transaction(async (tx) => {
+    const moved: MergeTally[] = []
+
+    for (const ref of references) {
+      const result = await tx.execute(
+        sql`update ${sql.raw(`"${ref.table}"`)}
+            set ${sql.raw(`"${ref.column}"`)} = ${winner.id}
+            where ${sql.raw(`"${ref.column}"`)} = ${loser.id}
+              and "company_id" = ${ctx.companyId}`,
+      )
+      const rows = (result as unknown as { count?: number }).count ?? 0
+      if (rows > 0) moved.push({ table: ref.table, rows })
+    }
+
+    await tx
+      .update(table)
+      .set({ isActive: false, mergedIntoId: winner.id })
+      .where(and(eq(table.companyId, ctx.companyId), eq(table.id, loser.id)))
+
+    /**
+     * Recorded on **both** records, not once.
+     *
+     * Somebody opening the surviving record months later needs to know it
+     * absorbed another — otherwise its history begins mid-story with documents
+     * that were never raised against it. Phase 71 renders both.
+     */
+    const shared = {
+      side: input.side,
+      reason: verdict.reason,
+      moved,
+      winner: { id: winner.id, name: winner.name },
+      loser: { id: loser.id, name: loser.name },
+    }
+    const entityType = input.side === 'customer' ? 'customer' : 'vendor'
+
+    await recordAudit(
+      ctx,
+      { action: 'party.merge', entityType, entityId: winner.id, after: { ...shared, role: 'absorbed' } },
+      tx,
+    )
+    await recordAudit(
+      ctx,
+      {
+        action: 'party.merge',
+        entityType,
+        entityId: loser.id,
+        before: { isActive: true },
+        after: { ...shared, role: 'merged_away', isActive: false },
+      },
+      tx,
+    )
+
+    return { winnerName: winner.name, loserName: loser.name, moved }
+  })
+}
+
+/**
+ * What a merge would move, before anybody commits to it (Phase 96).
+ *
+ * `merge.ts` says an operation that cannot be undone should show its work
+ * first, and this is what makes that true rather than aspirational: the same
+ * counts, from the same registry, that the merge itself will walk.
+ *
+ * Counting rows rather than moving them, so it is safe to call on opening a
+ * panel. It reads slightly stale by the time somebody presses the button — a
+ * colleague may raise an invoice in between — which is honest for a preview and
+ * is why the merge recounts as it goes rather than trusting these numbers.
+ */
+export async function mergePreview(
+  ctx: ActorContext,
+  input: { side: PartySide; winnerId: string; loserId: string },
+): Promise<{ tally: MergeTally[]; line: string }> {
+  requirePermission(ctx, input.side === 'customer' ? 'crm:manage' : 'accounting:journal')
+
+  const table = input.side === 'customer' ? customers : vendors
+
+  const [winner, loser] = await Promise.all(
+    [input.winnerId, input.loserId].map(async (id) => {
+      const [row] = await db
+        .select({ id: table.id, name: table.name })
+        .from(table)
+        .where(scoped(ctx, table, eq(table.id, id)))
+      return row
+    }),
+  )
+
+  if (!winner || !loser) {
+    throw new DomainError('One of those records no longer exists. Reload the page and try again.')
+  }
+
+  const tally: MergeTally[] = []
+  for (const ref of PARTY_REFERENCES[input.side]) {
+    const [row] = await db.execute(
+      sql`select count(*)::int as n from ${sql.raw(`"${ref.table}"`)}
+          where ${sql.raw(`"${ref.column}"`)} = ${loser.id}
+            and "company_id" = ${ctx.companyId}`,
+    )
+    const rows = Number((row as { n: number }).n)
+    if (rows > 0) tally.push({ table: ref.table, rows })
+  }
+
+  return {
+    tally,
+    line: describeMerge({
+      side: input.side,
+      winnerName: winner.name,
+      loserName: loser.name,
+      tally,
+    }),
+  }
 }

@@ -23,6 +23,7 @@ const ALL: CorrectionKind[] = [
   'document.void',
   'deposit.void',
   'approval.withdraw',
+  'party.merge',
 ]
 
 describe('one phrase, one meaning', () => {

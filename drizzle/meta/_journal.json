@@ -477,6 +477,13 @@
       "when": 1788740000000,
       "tag": "0067_phase93_communication_parties",
       "breakpoints": true
+    },
+    {
+      "idx": 68,
+      "version": "7",
+      "when": 1788740001000,
+      "tag": "0068_phase96_party_merge",
+      "breakpoints": true
     }
   ]
 }

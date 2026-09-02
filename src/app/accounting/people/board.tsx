@@ -3,6 +3,8 @@
 import { Fragment, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
+  mergePartiesAction,
+  mergePreviewAction,
   setCustomerActiveAction,
   setVendorActiveAction,
   updateCustomerAction,
@@ -12,6 +14,7 @@ import {
 import { formatCents } from '@/lib/money'
 import { partyStanding } from '@/modules/parties/standing'
 import type { Resolution } from '@/modules/parties/duplicates'
+import { correction } from '@/modules/corrections/vocabulary'
 import { RecordHistory } from '@/components/record-history'
 import { PartyPost } from '@/components/party-post'
 
@@ -47,6 +50,14 @@ type Party = {
 type Vendor = Party & { taxId: string | null; is1099Vendor: boolean }
 
 type Draft = Record<string, string | boolean>
+
+/**
+ * The words for a merge, from the one list that owns them (Phase 70).
+ *
+ * Read here rather than typed into the JSX, so this screen cannot drift into
+ * calling it something no other screen calls it.
+ */
+const MERGE = correction('party.merge')
 
 /**
  * Every customer and supplier, and the form that corrects one.
@@ -94,6 +105,20 @@ export function PeopleBoard({
   const [postId, setPostId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft>({})
   const [showArchived, setShowArchived] = useState(false)
+
+  /**
+   * The clash being merged, which record is to survive, and why (Phase 96).
+   *
+   * Kept in one piece of state rather than three: a half-filled merge form
+   * belonging to a different address than the one on screen is exactly the
+   * confusion this panel exists to end.
+   */
+  const [merging, setMerging] = useState<{
+    address: string
+    keepId: string
+    reason: string
+    preview: string | null
+  } | null>(null)
 
   const isVendors = side === 'vendors'
   const canEdit = isVendors ? canEditVendors : canEditCustomers
@@ -277,6 +302,114 @@ export function PeopleBoard({
                   ))}
                 </ul>
                 <p className="mt-1 text-muted">{clash.because}</p>
+
+                {/*
+                  Offered only where Phase 95 had no answer, and only for two
+                  records. Three on one address is a sequence of decisions, and
+                  a control that quietly merged all of them would be making two
+                  of those decisions on somebody's behalf.
+                */}
+                {clash.advice === 'merge' && clash.dispositions.length === 2 && canEdit && (
+                  merging?.address === clash.address ? (
+                    <div className="mt-2 space-y-2 rounded border border-line p-2">
+                      <p className="font-medium">Which record survives?</p>
+                      {clash.dispositions.map((one) => (
+                        <label key={one.id} className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name={`keep-${clash.address}`}
+                            checked={merging.keepId === one.id}
+                            onChange={() =>
+                              setMerging({ ...merging, keepId: one.id, preview: null })
+                            }
+                          />
+                          <span>Keep {one.name}</span>
+                        </label>
+                      ))}
+
+                      {merging.preview && <p className="text-muted">{merging.preview}</p>}
+
+                      <label className="block">
+                        <span className="text-muted">
+                          {MERGE.reasonPrompt}
+                        </span>
+                        <textarea
+                          className="input mt-1 w-full text-xs"
+                          rows={2}
+                          value={merging.reason}
+                          onChange={(event) =>
+                            setMerging({ ...merging, reason: event.target.value })
+                          }
+                        />
+                      </label>
+
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="btn btn-primary text-xs"
+                          disabled={pending}
+                          onClick={() => {
+                            const loser = clash.dispositions.find(
+                              (one) => one.id !== merging.keepId,
+                            )!
+                            act(
+                              () =>
+                                mergePartiesAction({
+                                  side: clash.side,
+                                  winnerId: merging.keepId,
+                                  loserId: loser.id,
+                                  reason: merging.reason,
+                                }),
+                              () => setMerging(null),
+                            )
+                          }}
+                        >
+                          {MERGE.verb}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn text-xs"
+                          onClick={() => setMerging(null)}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="mt-1 text-xs underline"
+                      onClick={() => {
+                        const [first, second] = clash.dispositions
+                        setNotice(null)
+                        setMerging({
+                          address: clash.address,
+                          keepId: first.id,
+                          reason: '',
+                          preview: null,
+                        })
+                        // What it would move, from the same registry the merge
+                        // walks. An irreversible act shows its work first.
+                        startTransition(async () => {
+                          const result = await mergePreviewAction({
+                            side: clash.side,
+                            winnerId: first.id,
+                            loserId: second.id,
+                          })
+                          if (result.ok) {
+                            setMerging((current) =>
+                              current?.address === clash.address
+                                ? { ...current, preview: result.line }
+                                : current,
+                            )
+                          }
+                        })
+                      }}
+                    >
+                      {MERGE.title}
+                    </button>
+                  )
+                )}
               </li>
             ))}
           </ul>

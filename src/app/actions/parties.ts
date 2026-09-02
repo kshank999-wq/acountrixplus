@@ -6,6 +6,8 @@ import { requireActor } from '@/lib/current-user'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import {
   customerById,
+  mergeParties,
+  mergePreview,
   setCustomerActive,
   setVendorActive,
   vendorById,
@@ -112,4 +114,50 @@ export async function setVendorActiveAction(input: unknown): Promise<ActionResul
       ? `${result.name} is active again.`
       : `${result.name} archived. Their history stays; they no longer appear when you enter a bill.`
   })
+}
+
+/**
+ * Puts two records of one business together (Phase 96).
+ *
+ * The reason is not optional and is not defaulted here. `mergeParties` refuses
+ * a blank one with Phase 70's own prompt, so the sentence somebody reads when
+ * they are stopped is the sentence that asked them in the first place — and
+ * putting a fallback in this layer would quietly answer the one question the
+ * merge exists to have answered.
+ */
+const mergeSchema = z.object({
+  side: z.enum(['customer', 'vendor']),
+  winnerId: z.string().uuid(),
+  loserId: z.string().uuid(),
+  reason: z.string().optional(),
+})
+
+export async function mergePartiesAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = mergeSchema.parse(input)
+    const result = await mergeParties(actor, parsed)
+
+    const total = result.moved.reduce((sum, one) => sum + one.rows, 0)
+
+    return total === 0
+      ? `${result.loserName} merged into ${result.winnerName}. It had nothing on it.`
+      : `${result.loserName} merged into ${result.winnerName}. ${total} record${
+          total === 1 ? '' : 's'
+        } moved across.`
+  })
+}
+
+/** What the merge would move, for the panel to show before anybody commits. */
+export async function mergePreviewAction(
+  input: unknown,
+): Promise<{ ok: true; line: string } | { ok: false; error: string }> {
+  try {
+    const actor = await requireActor()
+    const parsed = mergeSchema.omit({ reason: true }).parse(input)
+    const { line } = await mergePreview(actor, parsed)
+    return { ok: true, line }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'Could not work out what would move.') }
+  }
 }
