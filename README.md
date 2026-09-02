@@ -4186,6 +4186,37 @@ declares its `unit`; counting checks say "worth a look" and leave the specifics
 to their detail line. `banking.shared_ledger_accounts` had the same problem
 unnoticed since Phase 40 and is fixed with it.
 
+### The duplicate the screen could not see (Phase 95)
+
+Phase 94's finding named the problem on a page somebody reads, and then stopped.
+The person reading *"2 customers share accounts@cascade.test"* went to the
+customers screen, found both records by hand, and decided which one the invoices
+should have gone to with nothing in front of them but two names that look alike.
+A finding nobody can act on decays into a finding nobody reads.
+
+**A record with a document on it is history, and history is merged, not
+retired.** One rule, deliberately not a ladder of cases. A customer nobody has
+ever invoiced is a mistake — retiring it loses nothing. A customer with one
+settled invoice from four years ago is evidence: archiving it does not delete it,
+but the history stays attached to a separate identity, so *"what did this
+business buy from us"* still has two answers. So `resolve` says **retire the
+empty ones** when exactly one record has traded, **merge** when two or more have,
+and **choose** when none has. Under `merge` nothing is offered — not even the
+settled record Phase 56 would happily deactivate, because offering it would be
+the application recommending somebody hide half a customer's history.
+
+**It never says the two records are the same business.** They share an inbox;
+that is all anybody knows, and it is why Phase 94 made this a position rather
+than a fault. A test asserts the wording never reaches for *duplicate* or *the
+same customer* — a claim that would be wrong exactly when getting it wrong
+matters most.
+
+The panel shows each record's standing above the advice, because *never invoiced*
+is a fact somebody can check against the row two inches below it while *archive
+this one* is a conclusion they would have to take on trust. No second query and
+no second action: `PartySummary` has carried the whole footprint since Phase 56,
+and archiving already lives on the row with Phase 56's refusal behind it.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5925,13 +5956,12 @@ Gaps within the phases already built:
 - ~~**Nothing says when a letter went unfiled.**~~ Since Phase 94 the duplicate-address case is
   reported nightly by the integrity register. The other two silences remain indistinguishable from
   outside `recordOutboundMail`, which is honest: a letter to a stranger is the ordinary case.
-- **The finding names duplicates and nothing acts on them.** Somebody reading "2 customers share
-  one address" has to go to another page, find both records by hand and decide which one the
-  invoices should have gone to. The register found the problem; the screen where it would be fixed
-  does not know about it.
-- **Nothing merges two customers.** The check reports; a person decides whether two records are
-  one business. Merging has real consequences for the ledger, and inventing it inside a nightly
-  reconciliation would be the opposite of this register\'s design.
+- ~~**The finding names duplicates and nothing acts on them.**~~ Since Phase 95 the customers and
+  suppliers screen shows the clash, what each record carries, and which of them can be archived.
+- **Nothing merges two customers.** The check reports, the screen explains, a person decides. Two
+  live customers on one inbox is the case most worth fixing and the only one the screen answers
+  with a shrug — what a merge would mean for the documents, the audit trail on both records and
+  whether the losing record survives as an alias is unbuilt and undecided.
 - **No backfill.** Letters sent before Phase 93 have no communications row and do not get one:
   which party they were about was never decided, and inventing it now would be a guess dressed as
   a record.

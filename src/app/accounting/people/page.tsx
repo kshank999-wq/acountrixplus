@@ -1,7 +1,12 @@
 import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
-import { listCustomerSummaries, listVendorSummaries } from '@/modules/parties/service'
+import {
+  listCustomerSummaries,
+  listVendorSummaries,
+  sharedAddresses,
+} from '@/modules/parties/service'
+import { resolveAll } from '@/modules/parties/duplicates'
 import { functionalCurrency } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { PeopleBoard } from './board'
@@ -31,11 +36,29 @@ export default async function PeoplePage() {
     )
   }
 
-  const [customers, vendors, homeCurrency] = await Promise.all([
+  const [customers, vendors, homeCurrency, clashes] = await Promise.all([
     can(actor, 'crm:view') ? listCustomerSummaries(actor) : Promise.resolve([]),
     listVendorSummaries(actor),
     functionalCurrency(actor.companyId),
+    sharedAddresses(actor),
   ])
+
+  /**
+   * What the nightly register found, resolved against what is already loaded
+   * (Phase 95).
+   *
+   * No extra query: `PartySummary` has carried the whole footprint since Phase
+   * 56 — every document ever, what is open, what is held. Asking the database
+   * again for facts already on this page would be a second answer to one
+   * question, and the two would disagree the moment somebody raised an invoice
+   * between the queries.
+   *
+   * A reader without `crm:view` gets an empty customer list above, so a
+   * customer clash here would name records they cannot see. Resolutions are
+   * filtered to the sides they are allowed to read.
+   */
+  const visible = can(actor, 'crm:view') ? clashes : clashes.filter((c) => c.side === 'vendor')
+  const resolutions = resolveAll(visible, [...customers, ...vendors])
 
   return (
     <AppShell
@@ -50,6 +73,7 @@ export default async function PeoplePage() {
         canEditCustomers={can(actor, 'crm:manage')}
         canEditVendors={can(actor, 'accounting:journal')}
         homeCurrency={homeCurrency}
+        sharedAddresses={resolutions}
         // Decided here rather than in the browser: an age computed from the
         // reader's own clock is one two people disagree about (Phase 56).
         asOf={new Date().toISOString().slice(0, 10)}

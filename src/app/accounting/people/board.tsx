@@ -11,6 +11,7 @@ import {
 } from '@/app/actions/parties'
 import { formatCents } from '@/lib/money'
 import { partyStanding } from '@/modules/parties/standing'
+import type { Resolution } from '@/modules/parties/duplicates'
 import { RecordHistory } from '@/components/record-history'
 import { PartyPost } from '@/components/party-post'
 
@@ -62,6 +63,7 @@ export function PeopleBoard({
   canEditVendors,
   asOf,
   homeCurrency,
+  sharedAddresses,
 }: {
   customers: Party[]
   vendors: Vendor[]
@@ -70,6 +72,15 @@ export function PeopleBoard({
   /** Today, decided on the server so every reader sees the same ages. */
   asOf: string
   homeCurrency: string
+  /**
+   * What the nightly register found, resolved (Phase 95).
+   *
+   * The finding has existed since Phase 94 and lived only on the operations
+   * page. This is the screen where somebody would actually fix it, so the
+   * problem is put in front of them here rather than leaving them to carry it
+   * across from another page and match the names up by eye.
+   */
+  sharedAddresses: Resolution[]
 }) {
   const router = useRouter()
   const [side, setSide] = useState<'customers' | 'vendors'>('customers')
@@ -89,6 +100,23 @@ export function PeopleBoard({
   const all: Array<Party | Vendor> = isVendors ? vendors : customers
   const rows = all.filter((row) => showArchived || row.isActive)
   const archivedCount = all.filter((row) => !row.isActive).length
+
+  /** The clashes on the side being looked at. A supplier's is not a customer's. */
+  const clashes = sharedAddresses.filter(
+    (one) => one.side === (isVendors ? 'vendor' : 'customer'),
+  )
+
+  /**
+   * Which rows are caught in one, so a long list can be scanned for them.
+   *
+   * The panel names them, but on four hundred customers "Cascade Joinery" is
+   * still a thing to go and find. The mark is what connects the two.
+   */
+  const flagged = new Map(
+    clashes.flatMap((clash) =>
+      clash.dispositions.map((one) => [one.id, clash] as const),
+    ),
+  )
 
   function act(fn: () => Promise<ActionResult>, onOk?: () => void) {
     startTransition(async () => {
@@ -210,6 +238,50 @@ export function PeopleBoard({
           </button>
         )}
       </div>
+
+      {clashes.length > 0 && (
+        <section className="card border-warning/40 px-4 py-3">
+          <h2 className="text-sm font-semibold">
+            {clashes.length === 1
+              ? 'One address is shared'
+              : `${clashes.length} addresses are shared`}
+          </h2>
+          <p className="mt-1 text-xs text-muted">
+            When {isVendors ? 'suppliers' : 'customers'} share an inbox, all of them are chased
+            there and no letter says which account it refers to. Sharing an address does not make
+            them the same business — that part is your call.
+          </p>
+
+          <ul className="mt-3 space-y-3">
+            {clashes.map((clash) => (
+              <li key={`${clash.side} ${clash.address}`} className="text-xs">
+                <p className="font-medium">{clash.address}</p>
+                <ul className="mt-1 space-y-0.5">
+                  {clash.dispositions.map((one) => (
+                    <li key={one.id} className="text-muted">
+                      <span className="font-medium text-fg">{one.name}</span>{' '}
+                      {/*
+                        The evidence, not just the conclusion. "Never invoiced"
+                        is a fact somebody can check; "archive this one" is
+                        something they would have to take on trust.
+                      */}
+                      {one.standing === 'untouched'
+                        ? '— never invoiced'
+                        : one.standing === 'settled'
+                          ? '— has documents, nothing outstanding'
+                          : '— open documents or money held'}
+                      {one.retirable && (
+                        <span className="ml-1 text-faint">can be archived</span>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-1 text-muted">{clash.because}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
 
       {rows.length === 0 ? (
         <section className="card px-4 py-8 text-center">
@@ -339,6 +411,14 @@ export function PeopleBoard({
                       </td>
                       <td className="px-4 py-2 text-muted">
                         {row.email ?? <span className="text-faint">none</span>}
+                        {flagged.has(row.id) && (
+                          <span
+                            className="ml-2 text-xs text-warning"
+                            title={flagged.get(row.id)?.because}
+                          >
+                            shared
+                          </span>
+                        )}
                       </td>
                       <td className="px-4 py-2 text-muted">
                         {[row.city, row.postalCode].filter(Boolean).join(' ') || (
