@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import { logCommunication } from '@/modules/engagement/communications'
 import { organizationTimeline } from '@/modules/engagement/timeline'
+import { partsOf, type Part } from '@/modules/engagement/entry'
 import {
   assignTask,
   cancelTask,
@@ -37,6 +38,14 @@ export type TimelineView = {
   at: string
   title: string
   detail: string | null
+  /**
+   * The labelled parts of a communication entry (Phase 92).
+   *
+   * A note somebody typed and a letter this company sent are different kinds of
+   * evidence, and a screen must not render them as one unlabelled block — see
+   * `engagement/entry`. Empty for tasks and activities, which have neither.
+   */
+  parts: Part[]
   who: string | null
   tone: 'inbound' | 'outbound' | 'internal' | 'system' | 'open' | 'closed'
 }
@@ -59,7 +68,14 @@ export async function organizationTimelineAction(
         kind: 'communication' as const,
         at: entry.at.toISOString().slice(0, 10),
         title: entry.data.summary,
+        // Kept for callers that want one line; `parts` is what the timeline
+        // renders, because a note and a letter must stay told apart.
         detail: entry.data.body,
+        parts: partsOf({
+          note: entry.data.body,
+          letter: entry.data.letter,
+          sentByTheSystem: entry.data.wasSentByTheSystem,
+        }),
         who: entry.data.contactName ?? entry.data.actorName,
         tone: entry.data.wasSentByTheSystem ? ('system' as const) : entry.data.direction,
       }
@@ -71,6 +87,7 @@ export async function organizationTimelineAction(
         at: entry.at.toISOString().slice(0, 10),
         title: entry.data.title,
         detail: entry.data.outcome ?? entry.data.detail,
+        parts: [],
         who: entry.data.assigneeName,
         tone: entry.data.completedAt ? ('closed' as const) : ('open' as const),
       }
@@ -81,6 +98,7 @@ export async function organizationTimelineAction(
       at: entry.at.toISOString().slice(0, 10),
       title: entry.data.summary,
       detail: null,
+      parts: [],
       who: entry.data.actorName,
       tone: 'system' as const,
     }

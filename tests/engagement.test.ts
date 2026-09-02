@@ -31,6 +31,8 @@ import {
 } from '@/modules/engagement/tasks'
 import { organizationTimeline } from '@/modules/engagement/timeline'
 import { recordOutboundMail } from '@/modules/engagement/outbound'
+import { partsOf } from '@/modules/engagement/entry'
+import { holdsALink } from '@/modules/notify/keeping'
 import { inviteToCompany } from '@/modules/notify/invitations'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
 
@@ -257,6 +259,128 @@ describe('letters the system sends', () => {
     const [row] = await communicationsForOrganization(fixture.ctx, organization.id)
     expect(row.summary).toContain('did not arrive')
     expect(row.body).toContain('Nobody has been told')
+  })
+
+  /**
+   * Phase 92. `transactional_message_id` has been on the row since Phase 22 and
+   * was only ever read as a boolean; Phase 91 gave the letter a body. This is
+   * the phase that reads one through the other, so the timeline can say what
+   * the letter said rather than only that one went.
+   */
+  describe('the letter the timeline points at', () => {
+    it('reads the words through the link it already had', async () => {
+      const { fixture, organization } = await client()
+
+      await inviteToCompany(fixture.ctx, {
+        email: 'dana@harborview.test',
+        name: 'Dana Reeve',
+        role: 'readonly',
+      })
+
+      const [row] = await communicationsForOrganization(fixture.ctx, organization.id)
+      expect(row.wasSentByTheSystem).toBe(true)
+      expect(row.letter).toContain('invited you')
+
+      // Followed, not copied: the entry keeps no body of its own on a delivered
+      // letter, and a second copy would be the defect Phase 91 is named after.
+      expect(row.body).toBeNull()
+    })
+
+    it('resolves to one labelled part for a letter that arrived', async () => {
+      const { fixture, organization } = await client()
+
+      await inviteToCompany(fixture.ctx, {
+        email: 'dana@harborview.test',
+        name: 'Dana Reeve',
+        role: 'readonly',
+      })
+
+      const [row] = await communicationsForOrganization(fixture.ctx, organization.id)
+      const parts = partsOf({
+        note: row.body,
+        letter: row.letter,
+        sentByTheSystem: row.wasSentByTheSystem,
+      })
+
+      expect(parts).toHaveLength(1)
+      expect(parts[0].source).toBe('letter')
+    })
+
+    /** The case both halves matter: it failed, and here is what nobody read. */
+    it('shows the failure and the letter on a bounce', async () => {
+      const { fixture, organization } = await client()
+      mock.failing.add('dana@harborview.test')
+
+      await inviteToCompany(fixture.ctx, { email: 'dana@harborview.test', role: 'readonly' })
+
+      const [row] = await communicationsForOrganization(fixture.ctx, organization.id)
+      const parts = partsOf({
+        note: row.body,
+        letter: row.letter,
+        sentByTheSystem: row.wasSentByTheSystem,
+      })
+
+      expect(parts.map((part) => part.source)).toEqual(['note', 'letter'])
+      expect(parts[0].text).toContain('Nobody has been told')
+      expect(parts[1].text).toContain('invited you')
+    })
+
+    it('leaves a hand-logged call with no letter', async () => {
+      const { fixture, organization } = await client()
+
+      await logCommunication(fixture.ctx, {
+        organizationId: organization.id,
+        channel: 'call',
+        direction: 'inbound',
+        summary: 'Rang about the March invoice.',
+        body: 'Will pay Friday.',
+      })
+
+      const [row] = await communicationsForOrganization(fixture.ctx, organization.id)
+      expect(row.wasSentByTheSystem).toBe(false)
+      expect(row.letter).toBeNull()
+    })
+
+    /**
+     * The subquery is correlated rather than a join in the from-clause, so
+     * adding it cannot multiply rows. These readers already `or` three matches
+     * across two left joins, which is exactly the shape that goes wrong.
+     */
+    it('adds no rows to the timeline', async () => {
+      const { fixture, organization } = await client()
+
+      await inviteToCompany(fixture.ctx, {
+        email: 'dana@harborview.test',
+        name: 'Dana Reeve',
+        role: 'readonly',
+      })
+      await logCommunication(fixture.ctx, {
+        organizationId: organization.id,
+        channel: 'call',
+        direction: 'inbound',
+        summary: 'Rang about the March invoice.',
+      })
+
+      const rows = await communicationsForOrganization(fixture.ctx, organization.id)
+      expect(rows).toHaveLength(2)
+      expect(new Set(rows.map((row) => row.id)).size).toBe(2)
+    })
+
+    /** Phase 91 keeps the words but never the link the letter carried. */
+    it('keeps no link in what it shows', async () => {
+      const { fixture, organization } = await client()
+
+      await inviteToCompany(fixture.ctx, {
+        email: 'dana@harborview.test',
+        name: 'Dana Reeve',
+        role: 'readonly',
+      })
+
+      const [row] = await communicationsForOrganization(fixture.ctx, organization.id)
+      expect(holdsALink(row.letter)).toBe(false)
+      // The delivered letter did carry one, so this is a real strip.
+      expect(mock.sent[0].text).toContain('http')
+    })
   })
 
   it('records nothing for an address the CRM does not know', async () => {

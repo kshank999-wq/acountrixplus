@@ -4088,6 +4088,34 @@ and *"we told you, and the letter has since expired"* is a true answer while the
 row vanishing is not. A suppression is refused a letter outright: it composed
 none, so an id there would open somebody else's.
 
+### The letter the timeline never read (Phase 92)
+
+Phase 22 built the communications log to answer what `transactional_messages`
+cannot: *what have we said to this client?* When a letter goes to an address the
+CRM knows it lands on that contact's timeline, and the row has stored the
+letter's id ever since. **Nothing ever followed the link.** Both readers used
+that column as a boolean, and the entry's own body is null for a letter that
+arrived — so the timeline could say "we sent them an invoice on the 3rd" and not
+what the invoice said. Honest until Phase 91 kept the words; after that, just an
+unfollowed join.
+
+**Follow the link, never copy the text.** Writing the letter's body onto the
+communications row would work and would be the exact defect Phase 91 is named
+after. The reader follows the foreign key instead, as a correlated subquery
+rather than another table in the from-clause — these readers already `or`
+together three matches across two left joins, and a fourth table in that shape is
+how a timeline quietly starts showing an entry twice.
+
+**Two sources, never blended.** An entry can carry a *note*, what somebody here
+wrote down, and a *letter*, what this company sent. One `body` field falling back
+from the first to the second is wrong for a reason beyond tidiness: in a dispute
+— the case a communications log exists for — those are different kinds of
+evidence, and only one is something the customer also holds a copy of. So an
+entry resolves to labelled parts, and a screen cannot render one without saying
+which it is. A bounce shows both, note first, because the failure changes what
+the letter below it means; a letter shows only on a system send, so words are
+never attributed to a company that did not send them.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5819,9 +5847,14 @@ Gaps within the phases already built:
   recorded against the firm, and the roster shows each person what arrived and what did not.
 - ~~**The letter itself cannot be opened.**~~ Since Phase 91 the letter keeps its words, the
   decision row names it, and the roster opens it in place.
-- **The company side still cannot open its letters.** Invoices, statements and remittances now
-  keep their words too, but only the practice roster reads a stored body back. Phase 22's
-  communications timeline shows that a letter was sent and links to nothing.
+- ~~**The company side still cannot open its letters.**~~ Since Phase 92 the CRM timeline follows
+  the link it has held since Phase 22 and shows what the letter said, labelled apart from any note
+  somebody typed.
+- **A letter only lands on a timeline when the address belongs to a CRM contact.** An invoice sent
+  to a customer whose email lives on the `customers` row rather than a contact — the normal case
+  for a business that bills people it never courted — is recorded in `transactional_messages` and
+  on nobody's timeline. The words are kept and the join works; the entry that would carry them is
+  never written.
 - **No backfill, and no HTML.** Letters sent before Phase 91 have a null body because their words
   are genuinely gone, and only the text part is kept — the HTML is a rendering of the same
   paragraphs, and keeping both would be the two-copies defect committed twice.

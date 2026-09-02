@@ -1,6 +1,12 @@
 import { and, desc, eq, inArray, or, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
-import { communications, contacts, opportunities, organizations } from '@/db/schema'
+import {
+  communications,
+  contacts,
+  opportunities,
+  organizations,
+  transactionalMessages,
+} from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DomainError } from '@/modules/errors'
 
@@ -148,6 +154,35 @@ export type CommunicationRow = {
   actorName: string
   contactName: string | null
   wasSentByTheSystem: boolean
+  /**
+   * The words of the letter this entry records, when it records one (Phase 92).
+   *
+   * Followed rather than copied. `transactional_message_id` has been on the
+   * row since Phase 22 and was read as a boolean; Phase 91 gave the letter a
+   * body; this joins the two rather than storing the text twice, which is the
+   * defect Phase 91 is named after.
+   *
+   * Null for an entry somebody logged by hand, for a letter sent before Phase
+   * 91 kept the words, and for one swept by retention at a year. `entry.ts`
+   * tells those apart for a reader.
+   */
+  letter: string | null
+}
+
+/**
+ * The letter's words, joined from the row this entry already points at.
+ *
+ * A correlated subquery rather than a join in the from-clause, so adding it
+ * cannot change how many rows a query returns. These readers already `or`
+ * together three matches across two left joins, and a fourth table in that
+ * shape is how a timeline quietly starts showing an entry twice.
+ */
+function letterBody() {
+  return sql<string | null>`(
+    select ${transactionalMessages.body}
+    from ${transactionalMessages}
+    where ${transactionalMessages.id} = ${communications.transactionalMessageId}
+  )`
 }
 
 function contactName() {
@@ -202,6 +237,7 @@ export async function communicationsForOrganization(
       actorName: communications.actorName,
       contactName: contactName(),
       wasSentByTheSystem: sql<boolean>`${communications.transactionalMessageId} is not null`,
+      letter: letterBody(),
     })
     .from(communications)
     .leftJoin(contacts, eq(contacts.id, communications.contactId))
@@ -229,6 +265,7 @@ export async function communicationsForOpportunity(
       actorName: communications.actorName,
       contactName: contactName(),
       wasSentByTheSystem: sql<boolean>`${communications.transactionalMessageId} is not null`,
+      letter: letterBody(),
     })
     .from(communications)
     .leftJoin(contacts, eq(contacts.id, communications.contactId))

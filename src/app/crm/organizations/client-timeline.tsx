@@ -115,9 +115,25 @@ export function ClientTimeline({
                   </span>{' '}
                   <span className={entry.tone === 'open' ? 'text-warning' : ''}>{entry.title}</span>
                   {entry.who && <span className="text-xs text-faint"> · {entry.who}</span>}
-                  {entry.detail && (
-                    <span className="block pl-14 text-xs text-muted">{entry.detail}</span>
-                  )}
+                  {/*
+                    Phase 92. A communication resolves to labelled parts rather
+                    than one block of body text, because a note somebody typed
+                    and a letter this company sent are different kinds of
+                    evidence — and in a dispute only one of them is something
+                    the other side also holds a copy of.
+
+                    Tasks and activities have no parts and keep `detail`.
+                  */}
+                  {entry.parts.length > 0
+                    ? entry.parts.map((part) => (
+                        <span key={part.source} className="block pl-14 text-xs">
+                          <span className="text-faint">{part.label}:</span>{' '}
+                          <span className="whitespace-pre-wrap text-muted">{part.text}</span>
+                        </span>
+                      ))
+                    : entry.detail && (
+                        <span className="block pl-14 text-xs text-muted">{entry.detail}</span>
+                      )}
                 </li>
               ))}
             </ul>
