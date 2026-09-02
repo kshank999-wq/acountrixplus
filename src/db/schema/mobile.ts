@@ -12,6 +12,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { companies, devices, users } from './tenancy'
 import { practices } from './practice'
+import { transactionalMessages } from './notify'
 
 /**
  * The mobile app (spec §3 mobile workflow, §18 responsive/PWA before native,
@@ -222,6 +223,21 @@ export const notificationLog = pgTable(
     userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
     subscriptionId: uuid('subscription_id'),
 
+    /**
+     * The letter this decision produced (Phase 91).
+     *
+     * The join Phase 90 left unmade: that phase separated the decision from the
+     * transmission and then had no way to get from one to the other. Null for a
+     * suppression, which has no letter by construction, and for every push row.
+     *
+     * `ON DELETE SET NULL`, because retention sweeps letters at a year and the
+     * record of the decision must outlive the letter. "We told you, and the
+     * letter has since expired" is a true answer; the row vanishing is not.
+     */
+    messageId: uuid('message_id').references(() => transactionalMessages.id, {
+      onDelete: 'set null',
+    }),
+
     topic: notificationTopicEnum('topic').notNull(),
     /** push | mail — see below, and `mobile/decision`. */
     channel: text('channel').notNull().default('push'),
@@ -229,11 +245,15 @@ export const notificationLog = pgTable(
     /**
      * The message text, for push only.
      *
-     * A mail-backed notification's text is already rendered and stored in
-     * `transactional_messages`; a second copy here is the two-answers-to-one-
+     * A mail-backed notification's words belong to the letter rather than to
+     * the decision about it; a second copy here is the two-answers-to-one-
      * question defect, where an edit to the wording fixes one and leaves the
      * other lying. `channel` is what tells a reader that a null body means
      * "the text is in the other table" rather than "there was no text".
+     *
+     * Phase 90 said the text was already in `transactional_messages`. It was
+     * not — that table kept no body until Phase 91 gave it one, so for one
+     * phase this comment described a place that did not exist.
      */
     body: text('body'),
     url: text('url'),

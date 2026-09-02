@@ -13,6 +13,7 @@ import {
   type TransactionalMessage,
 } from './transactional'
 import { recordOutboundMail } from '@/modules/engagement/outbound'
+import { keptBodyFor } from './keeping'
 import { DomainError } from '@/modules/errors'
 
 /**
@@ -23,9 +24,16 @@ import { DomainError } from '@/modules/errors'
  * whole point rather than an oversight.
  */
 
+/**
+ * `messageId` is the *provider's* id; `recordId` is our own row.
+ *
+ * Both, since Phase 91, and on both branches: a failed send is still a record,
+ * and a caller that wants to point at "the letter we tried to send" needs the
+ * row rather than a provider id that does not exist for a failure.
+ */
 export type SendOutcome =
-  | { ok: true; messageId: string }
-  | { ok: false; error: string; retryable: boolean }
+  | { ok: true; messageId: string; recordId: string }
+  | { ok: false; error: string; retryable: boolean; recordId: string }
 
 export type SendInput = {
   to: string
@@ -136,6 +144,10 @@ export async function sendTransactional(
       kind: input.kind,
       email,
       subject: input.subject,
+      // What the letter said, minus what it granted (Phase 91). Never
+      // `message.text`, which ends with the action URL — a reset token, a join
+      // token, a signed document link — and this row is kept for a year.
+      body: keptBodyFor(input),
       outcome: result.ok ? 'sent' : 'failed',
       providerKey: provider.key,
       providerMessageId: result.ok ? result.providerMessageId : null,
@@ -162,8 +174,8 @@ export async function sendTransactional(
   }
 
   return result.ok
-    ? { ok: true, messageId: result.providerMessageId }
-    : { ok: false, error: result.error, retryable: result.retryable }
+    ? { ok: true, messageId: result.providerMessageId, recordId: record.id }
+    : { ok: false, error: result.error, retryable: result.retryable, recordId: record.id }
 }
 
 /**

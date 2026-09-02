@@ -33,16 +33,24 @@ import type { NotificationTopic } from './notifications'
  * and not the other. So the boundary stays, and this module makes it explicit
  * rather than accidental.
  *
- * ## The body is stored only when nothing else stores it
+ * ## The body belongs to the letter, not to the decision
  *
  * A push notification's text exists nowhere but the log row, so the row keeps
- * it. A mail-backed notification's text is already in `transactional_messages`,
- * rendered, with the address it went to — and a second copy in a second table is
- * the two-answers-to-one-question defect this project keeps finding. An edit to
- * the brief's wording would fix one copy and leave the other lying.
+ * it. A mail-backed one's does not belong here: the letter is its own record,
+ * and a second copy of the same words in a second table is the
+ * two-answers-to-one-question defect this project keeps finding — an edit to the
+ * wording would fix one copy and leave the other lying.
  *
  * So `body` is null for mail, and `channel` is stored beside it so that a reader
  * can tell *why* it is null rather than guessing that there was nothing to say.
+ *
+ * **Corrected in Phase 91.** This paragraph originally said the text was
+ * "already in `transactional_messages`". It was not: that table held the
+ * subject, the address, the outcome and the provider's id, and the rendered body
+ * was handed to the provider and discarded. Keeping no body *here* was right,
+ * but for the reason above rather than the one given — and until Phase 91 gave
+ * the letter a body of its own, the consequence was that the words were kept
+ * nowhere at all. See `notify/keeping`.
  *
  * Nothing here touches the database or the clock.
  */
@@ -85,6 +93,8 @@ export type DecisionInput = {
   url?: string | null
   detail?: string | null
   subscriptionId?: string | null
+  /** The letter this decision produced, when it produced one (Phase 91). */
+  messageId?: string | null
   provider: string
 }
 
@@ -101,6 +111,7 @@ export type Decision = {
   url: string | null
   detail: string | null
   subscriptionId: string | null
+  messageId: string | null
   provider: string
 }
 
@@ -145,8 +156,27 @@ export function decisionFor(input: DecisionInput): Decision {
     url: input.url ?? null,
     detail: truncateDetail(input.detail ?? null),
     subscriptionId: input.subscriptionId ?? null,
+    messageId: letterFor(input),
     provider: input.provider,
   }
+}
+
+/**
+ * The letter a decision points at, if it made one (Phase 91).
+ *
+ * A suppression has no letter by construction — nothing was composed — so a
+ * message id on one would name somebody else's letter. Refusing it here rather
+ * than trusting callers, because the mistake is silent: the row would look
+ * complete and open the wrong text.
+ */
+function letterFor(input: DecisionInput): string | null {
+  if (!input.messageId) return null
+
+  if (input.outcome === 'suppressed') {
+    throw new Error('A suppressed notification has no letter to point at.')
+  }
+
+  return input.messageId
 }
 
 /**

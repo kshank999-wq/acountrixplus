@@ -182,6 +182,11 @@ registerHandler({
           title: brief.subject,
           url: '/practice',
           detail: result.ok ? null : result.error,
+          // Phase 91: the join Phase 90 left unmade. The decision row now names
+          // the letter it produced, so "what did it say" is one hop rather than
+          // a guess from a subject and a date. Carried on a failure too — a
+          // letter that did not arrive is still the letter we tried to send.
+          messageId: result.recordId,
           provider: 'mail',
         })
       }

@@ -132,6 +132,19 @@ export const transactionalMessages = pgTable(
     email: text('email').notNull(),
     subject: text('subject').notNull(),
 
+    /**
+     * What the letter said (Phase 91).
+     *
+     * Not the rendered text. `notify/keeping` strips the action URL first,
+     * because that URL is a capability in every kind this application sends —
+     * a reset token, a join token, a signed document link — and this table is
+     * kept for a year and read by more people than were sent the letter.
+     *
+     * Null for a letter composed before Phase 91, and for one that said
+     * nothing.
+     */
+    body: text('body'),
+
     outcome: deliveryOutcomeEnum('outcome').notNull(),
     providerKey: text('provider_key').notNull(),
     providerMessageId: text('provider_message_id'),

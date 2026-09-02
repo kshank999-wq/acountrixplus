@@ -4053,6 +4053,41 @@ leave the other lying. A `channel` column sits beside it so a reader can tell
 The sentence a person reads lives in the core rather than a template, because two
 screens now ask the same question and two templates is how they come to disagree.
 
+### The letter nobody kept (Phase 91)
+
+**A correction first.** The section above originally said a mail-backed
+notification's text was "already rendered in `transactional_messages`". That was
+false: the table held the subject, the address, the outcome and the provider's
+id, and no body at all. `sendTransactional` composed the text, handed it to the
+provider, and kept neither. The conclusion — no body on the log's mail rows —
+survives on a better footing, *the body belongs to the letter rather than to the
+decision about it*, but the argument given for it named a place that did not
+exist. A wrong reason written down is more dangerous than none, because the next
+person builds on it instead of checking it.
+
+Nobody noticed for eighteen phases because every question asked of that table was
+a delivery question — *did the mail go* — which the subject answers. Phase 90
+made it a different question by telling somebody, on their own roster, that a
+letter had been sent; the obvious next thing to ask is what it said.
+
+**The body is what was said; the link is what it granted.** Keeping a letter
+verbatim is not free, and the reason is in the renderer: it appends the action
+URL to the text, and that URL is a capability in every kind this application
+sends — a reset token, a join token, a signed invoice link. Storing the rendered
+text would turn a year-long delivery log, readable by more people than were sent
+the letter, into a store of live credentials. So the paragraphs and the footnote
+are kept, the URL never is, and the action's **label** stands in its place.
+
+Deliberately one rule rather than an allow-list of kinds that may be stored: an
+allow-list is a thing to forget, and forgetting either loses a letter or stores a
+token. A rule that holds for every kind has nothing to forget.
+
+The decision row now names the letter it produced — the join Phase 90 left
+unmade — with `ON DELETE SET NULL`, because retention sweeps letters at a year
+and *"we told you, and the letter has since expired"* is a true answer while the
+row vanishing is not. A suppression is refused a letter outright: it composed
+none, so an id there would open somebody else's.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5782,10 +5817,14 @@ Gaps within the phases already built:
   switch on the practice roster and checked per person.
 - ~~**The brief is invisible to the notification log.**~~ Since Phase 90 both outcomes are
   recorded against the firm, and the roster shows each person what arrived and what did not.
-- **The letter itself cannot be opened.** The brief's letters sit in `transactional_messages` with
-  `reference` set to the practice, and nothing reads them back — `recordOutboundMail` files a
-  letter on a contact's timeline only when there is a company, and a firm-wide letter has none. So
-  a firm can see that a letter was decided on and still cannot read the one that was sent.
+- ~~**The letter itself cannot be opened.**~~ Since Phase 91 the letter keeps its words, the
+  decision row names it, and the roster opens it in place.
+- **The company side still cannot open its letters.** Invoices, statements and remittances now
+  keep their words too, but only the practice roster reads a stored body back. Phase 22's
+  communications timeline shows that a letter was sent and links to nothing.
+- **No backfill, and no HTML.** Letters sent before Phase 91 have a null body because their words
+  are genuinely gone, and only the text part is kept — the HTML is a rendering of the same
+  paragraphs, and keeping both would be the two-copies defect committed twice.
 - **A silent morning records nothing.** When the brief says nothing there is no decision about a
   person to record, so the history has gaps rather than a row saying "nothing to say". Which
   client was seen on which morning is `practice_brief_state`'s job, and a second copy of it here

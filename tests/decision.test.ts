@@ -146,6 +146,41 @@ describe('decisionFor: defaults', () => {
   })
 })
 
+describe('decisionFor: the letter the decision produced (Phase 91)', () => {
+  const LETTER = '55555555-5555-4555-8555-555555555555'
+
+  it('names the letter a send produced', () => {
+    // The join Phase 90 left unmade: it separated the decision from the
+    // transmission and then had no way to get from one to the other.
+    expect(decisionFor(mailInput({ messageId: LETTER })).messageId).toBe(LETTER)
+  })
+
+  it('names it on a failure too', () => {
+    // A letter that did not arrive is still the letter we tried to send, and
+    // its row is what says what we tried to say.
+    expect(
+      decisionFor(mailInput({ outcome: 'failed', detail: '550 rejected', messageId: LETTER }))
+        .messageId,
+    ).toBe(LETTER)
+  })
+
+  it('refuses a letter on a suppression', () => {
+    // A suppression composed nothing, so an id on one names somebody else's
+    // letter — and the row would look complete while opening the wrong text.
+    expect(() =>
+      decisionFor(mailInput({ outcome: 'suppressed', messageId: LETTER })),
+    ).toThrow(/no letter/)
+  })
+
+  it('leaves a suppression with no letter at all', () => {
+    expect(decisionFor(mailInput({ outcome: 'suppressed' })).messageId).toBeNull()
+  })
+
+  it('is null for a push notification, which composes no letter', () => {
+    expect(decisionFor(pushInput()).messageId).toBeNull()
+  })
+})
+
 describe('truncateDetail', () => {
   it('keeps a short complaint whole', () => {
     expect(truncateDetail('410 Gone')).toBe('410 Gone')

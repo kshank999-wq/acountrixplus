@@ -5,6 +5,7 @@ import {
   notificationPreferences,
   notificationTopicEnum,
   pushSubscriptions,
+  transactionalMessages,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -498,8 +499,30 @@ export async function practiceNotifications(
   limit = 10,
 ) {
   return db
-    .select()
+    .select({
+      id: notificationLog.id,
+      companyId: notificationLog.companyId,
+      practiceId: notificationLog.practiceId,
+      topic: notificationLog.topic,
+      channel: notificationLog.channel,
+      title: notificationLog.title,
+      /** Null for mail by design — see `mobile/decision`. */
+      body: notificationLog.body,
+      outcome: notificationLog.outcome,
+      detail: notificationLog.detail,
+      messageId: notificationLog.messageId,
+      createdAt: notificationLog.createdAt,
+      // Phase 91. The decision names the letter; the letter keeps the words.
+      // A left join because a suppression never had one, and because retention
+      // sweeps letters at a year while the decision outlives them — both are
+      // rows that should still read as "we told you", with nothing to open.
+      letter: transactionalMessages.body,
+    })
     .from(notificationLog)
+    .leftJoin(
+      transactionalMessages,
+      eq(transactionalMessages.id, notificationLog.messageId),
+    )
     .where(
       and(
         eq(notificationLog.practiceId, practiceId),

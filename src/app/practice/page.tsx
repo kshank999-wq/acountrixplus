@@ -104,6 +104,10 @@ export default async function PracticePage({
             detail: row.detail,
           }),
           silent: isSilence(row.outcome as Outcome),
+          // Phase 91. Null for a suppression, which composed no letter, and for
+          // one swept by retention — both still read as "we told you", with
+          // nothing left to open.
+          letter: row.letter,
         }))}
       />
     </Frame>

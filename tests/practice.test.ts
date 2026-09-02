@@ -23,6 +23,7 @@ import {
   type Channel,
   type Outcome,
 } from '@/modules/mobile/decision'
+import { OMITTED_LINK, holdsALink } from '@/modules/notify/keeping'
 import { createCompanyFixture, type Fixture } from './helpers'
 import {
   addPracticeMember,
@@ -1147,6 +1148,128 @@ describe('the work queue', () => {
           // And the firm's own reader still finds them, so the row is not just
           // lost — it is filed somewhere else on purpose.
           expect(await decisions(shop.practiceId, shop.ownerId)).toHaveLength(1)
+        })
+      })
+
+      /**
+       * Phase 91. Phase 90 told a person that a letter had been sent and left
+       * the obvious next question — *what did it say* — with no answer
+       * anywhere: `sendTransactional` rendered the text, handed it to the
+       * provider and kept only the subject.
+       */
+      describe('the letter, kept', () => {
+        async function briefLetter(practiceId: string, userId: string) {
+          const [row] = await practiceNotifications(practiceId, userId, 1)
+          return row
+        }
+
+        it('keeps what the brief said, and joins it to the decision', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          const row = await briefLetter(shop.practiceId, shop.ownerId)
+          expect(row.outcome).toBe('sent')
+          expect(row.messageId).not.toBeNull()
+          expect(row.letter).toContain('Zebra Ltd')
+          expect(row.letter).toContain('2 checks disagree with the ledger')
+        })
+
+        it('keeps the words the recipient actually read', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          // A stored letter that reads differently from the delivered one is
+          // worse than none: a person comparing them would conclude that one
+          // had been tampered with.
+          const row = await briefLetter(shop.practiceId, shop.ownerId)
+          const delivered = mail.sent[0].text
+
+          for (const paragraph of row.letter!.split('\n\n')) {
+            if (paragraph.includes(OMITTED_LINK)) continue
+            expect(delivered).toContain(paragraph)
+          }
+        })
+
+        /** The rule the whole core exists for. */
+        it('keeps no link, though the letter carried one', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          const row = await briefLetter(shop.practiceId, shop.ownerId)
+          expect(holdsALink(row.letter)).toBe(false)
+          // The delivered letter did carry one, so this is a real strip rather
+          // than a letter that never had a link.
+          expect(mail.sent[0].text).toContain('http')
+          expect(row.letter).toContain('Open the roster')
+        })
+
+        it('gives a suppression no letter to open', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          const hire = await accountant('Prefers Silence')
+          await addPracticeMember(
+            { userId: shop.ownerId, userName: shop.ownerName },
+            { practiceId: shop.practiceId, userId: hire.id },
+          )
+          await setPreferenceFor(
+            { kind: 'practice', practiceId: shop.practiceId },
+            hire.id,
+            'practice_brief',
+            false,
+          )
+
+          mail.reset()
+          await fire(NOW)
+
+          // Nothing was composed, so there is nothing to point at — and the
+          // row still says why, which is Phase 90's whole point.
+          const quiet = await briefLetter(shop.practiceId, hire.id)
+          expect(quiet.outcome).toBe('suppressed')
+          expect(quiet.messageId).toBeNull()
+          expect(quiet.letter).toBeNull()
+        })
+
+        /**
+         * The letter expires before the decision does — retention sweeps
+         * `transactional_messages` at a year. "We told you, and the letter has
+         * since expired" is a true answer; the row vanishing is not.
+         */
+        it('keeps the decision when the letter is swept', async () => {
+          const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+          const shop = await firm('Hartley & Co')
+          await engaged(client, shop)
+          await checked(client, 2)
+
+          mail.reset()
+          await fire(NOW)
+
+          await db
+            .delete(transactionalMessages)
+            .where(eq(transactionalMessages.kind, 'practice_brief'))
+
+          const row = await briefLetter(shop.practiceId, shop.ownerId)
+          expect(row.outcome).toBe('sent')
+          expect(row.title).toBe('Zebra Ltd needs a look')
+          expect(row.messageId).toBeNull()
+          expect(row.letter).toBeNull()
         })
       })
     })

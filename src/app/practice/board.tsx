@@ -82,6 +82,11 @@ type BriefRecord = {
   explanation: string
   /** True when nothing arrived, whichever of the three reasons it was. */
   silent: boolean
+  /**
+   * What the letter said (Phase 91), or null when there is nothing to open —
+   * a suppression composed none, and retention sweeps them at a year.
+   */
+  letter: string | null
 }
 
 /**
@@ -320,11 +325,34 @@ export function PracticeBoard({
             <p className="text-xs font-medium text-muted">What arrived, and what did not</p>
             <ul className="mt-2 space-y-1">
               {briefHistory.map((entry) => (
-                <li key={entry.id} className="flex items-baseline justify-between gap-3 text-xs">
-                  <span className={entry.silent ? 'text-faint' : ''}>{entry.title}</span>
-                  <span className="shrink-0 text-faint">
-                    {entry.on} — {entry.explanation}
-                  </span>
+                <li key={entry.id} className="text-xs">
+                  <div className="flex items-baseline justify-between gap-3">
+                    <span className={entry.silent ? 'text-faint' : ''}>{entry.title}</span>
+                    <span className="shrink-0 text-faint">
+                      {entry.on} — {entry.explanation}
+                    </span>
+                  </div>
+                  {/*
+                    The letter itself (Phase 91). A <details> rather than a link
+                    to a page: this is the whole of what was said, it is short,
+                    and a person checking what they were told should not have to
+                    leave the roster they are checking it against.
+
+                    The link the letter carried is not here and never was —
+                    `keptBodyFor` drops the URL and keeps the label, because a
+                    year-long record of letters is not a place for live
+                    capabilities.
+                  */}
+                  {entry.letter && (
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-faint">
+                        Read what it said
+                      </summary>
+                      <p className="mt-1 whitespace-pre-wrap border-l-2 border-line pl-3 text-faint">
+                        {entry.letter}
+                      </p>
+                    </details>
+                  )}
                 </li>
               ))}
             </ul>
