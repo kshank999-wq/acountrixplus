@@ -3993,6 +3993,35 @@ sentence and belongs on a phone, a firm's morning list belongs in an inbox. The
 letter is filed against **no company at all**, because a letter about twelve
 clients does not belong on one client's record.
 
+### The preference that assumed a company (Phase 89)
+
+Phase 8 gave every notification topic a per-person switch, because **a channel
+nobody can quiet is a channel that gets filtered to a folder** — and then the one
+message that mattered is filtered with it. That switch is keyed on
+`(user, company, topic)` with a non-null company, and every function that touches
+it takes an actor naming exactly one company. The premise held for eight phases
+because every notification belonged to a company.
+
+Phase 88 made it false. The firm's brief belongs to a *practice*, so the one
+channel arriving unannounced in an inbox was the one with no switch — and the
+machinery could not be pointed at it, because there was nowhere to put the row.
+
+**A preference names an audience**, exactly one of a company or a practice. Not a
+nullable company: that makes "no company" a missing value rather than a different
+owner, and two null-company rows are *distinct* to an ordinary unique constraint
+— the trap `installGlobalSchedules` already documents for schedules, survivable
+there only because it runs at deploy time. So the check constraint says exactly
+one owner and the unique index is **`NULLS NOT DISTINCT`**, and the upsert stays
+an upsert.
+
+**A topic belongs to one kind of audience**, listed exhaustively as named data so
+the next one has to choose deliberately. A company topic stored against a
+practice is a row nothing ever reads — worse than no preference, because the
+person set it and believes they are covered.
+
+The switch is checked per person rather than per firm: one member wanting out is
+not the firm wanting out.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5718,10 +5747,15 @@ Gaps within the phases already built:
   named data a person can change.
 - ~~**The roster is not a notification.**~~ Since Phase 88 a firm gets one letter a day, and only
   about clients that got worse than the last thing said about them.
-- **The brief cannot be switched off.** Phase 8 gave every notification topic a per-person
-  subscription and a settings screen; this new channel has no topic, no preference, and no way for
-  a member of a firm to say "not me" short of leaving. The machinery exists and the brief does not
-  use it.
+- ~~**The brief cannot be switched off.**~~ Since Phase 89 it is a topic like any other, with the
+  switch on the practice roster and checked per person.
+- **The brief is invisible to the notification log.** `notification_log` still has a non-null
+  company, so a channel that is a notification by every meaning except its transport does not
+  appear in the one table built to answer "why did I not get told about that". The letter is in
+  `transactional_messages`; a suppression is nowhere at all, so somebody who switched the brief off
+  and forgot cannot find out that they did.
+- **One practice topic, so one line rather than a settings page.** `preferencesFor` already returns
+  every practice topic; the roster shows the only one there is.
 - **The brief is the firm's, not each person's.** The roster is read once, through the first
   member, and the same letter goes to everybody. Under `assigned_only` staffing two members
   legitimately see different clients, so somebody can be told about a client they are not on. A
