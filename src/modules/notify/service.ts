@@ -167,6 +167,8 @@ export async function sendTransactional(
         email,
         subject: input.subject,
         transactionalMessageId: record.id,
+        // Phase 93: what the letter is decides whose record it lands on.
+        kind: input.kind,
         delivered: result.ok,
       },
       exec,

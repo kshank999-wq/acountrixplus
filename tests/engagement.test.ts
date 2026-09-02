@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { communications, tasks } from '@/db/schema'
+import { communications, customers, tasks, vendors } from '@/db/schema'
 import { addUserWithRole, createCompanyFixture } from './helpers'
 import { PermissionError } from '@/modules/permissions'
 import {
@@ -13,6 +13,7 @@ import {
   CommunicationError,
   communicationsForOpportunity,
   communicationsForOrganization,
+  communicationsForParty,
   lastContactedAt,
   logCommunication,
 } from '@/modules/engagement/communications'
@@ -34,6 +35,7 @@ import { recordOutboundMail } from '@/modules/engagement/outbound'
 import { partsOf } from '@/modules/engagement/entry'
 import { holdsALink } from '@/modules/notify/keeping'
 import { inviteToCompany } from '@/modules/notify/invitations'
+import { sendInvoiceEmail, sendRemittanceEmail } from '@/modules/notify/service'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
 
 /**
@@ -366,6 +368,195 @@ describe('letters the system sends', () => {
       expect(new Set(rows.map((row) => row.id)).size).toBe(2)
     })
 
+    /**
+     * Phase 93. `recordOutboundMail` resolved an address through `contacts`
+     * alone. An invoice goes to the address on the `customers` row, and a
+     * business that bills people it never courted has no contact for any of
+     * them — so every invoice, statement and reminder landed on nobody's
+     * timeline at all.
+     */
+    describe('a letter to somebody who is not a CRM contact', () => {
+      async function customerOnly(email = 'accounts@nocontact.test') {
+        const fixture = await createCompanyFixture({ name: 'Billing Co' })
+        const [customer] = await db
+          .insert(customers)
+          .values({ companyId: fixture.companyId, name: 'No Contact Ltd', email })
+          .returning()
+        return { fixture, customer, email }
+      }
+
+      it('files an invoice on the customer’s own record', async () => {
+        const { fixture, customer, email } = await customerOnly()
+
+        await sendInvoiceEmail({
+          to: email,
+          toName: 'No Contact Ltd',
+          companyId: fixture.companyId,
+          companyName: 'Billing Co',
+          invoiceNumber: 'INV-0042',
+          amountDue: '$1,200.00',
+          dueDate: '2026-04-01',
+          token: 'tok_invoice_93',
+          isReminder: false,
+          reference: 'inv-93',
+        })
+
+        const rows = await communicationsForParty(fixture.ctx, {
+          kind: 'customer',
+          id: customer.id,
+        })
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0].wasSentByTheSystem).toBe(true)
+        expect(rows[0].summary).toContain('INV-0042')
+        // And Phase 91's words came through the Phase 92 join.
+        expect(rows[0].letter).toContain('INV-0042')
+      })
+
+      it('is invisible on nobody’s timeline before the party existed', async () => {
+        // The regression this phase closes: the same send with no customer row
+        // still files nothing, because there is nobody to file it against.
+        const fixture = await createCompanyFixture({ name: 'Billing Co' })
+
+        await sendInvoiceEmail({
+          to: 'stranger@nowhere.test',
+          toName: 'A Stranger',
+          companyId: fixture.companyId,
+          companyName: 'Billing Co',
+          invoiceNumber: 'INV-0043',
+          amountDue: '$10.00',
+          dueDate: '2026-04-01',
+          token: 'tok_invoice_93b',
+          isReminder: false,
+          reference: 'inv-93b',
+        })
+
+        expect(await db.select().from(communications)).toHaveLength(0)
+      })
+
+      /**
+       * The harm the filing core exists to prevent: one shared inbox that is
+       * both a customer and a supplier.
+       */
+      it('does not file our payment advice against somebody’s debt to us', async () => {
+        const shared = 'accounts@bothways.test'
+        const fixture = await createCompanyFixture({ name: 'Both Ways Co' })
+
+        const [customer] = await db
+          .insert(customers)
+          .values({ companyId: fixture.companyId, name: 'Both Ways', email: shared })
+          .returning()
+        const [vendor] = await db
+          .insert(vendors)
+          .values({ companyId: fixture.companyId, name: 'Both Ways', email: shared })
+          .returning()
+
+        await sendRemittanceEmail({
+          to: shared,
+          toName: 'Both Ways',
+          companyId: fixture.companyId,
+          companyName: 'Both Ways Co',
+          amount: '$500.00',
+          summary: 'One bill settled.',
+          token: 'tok_remit_93',
+          isResend: false,
+          reference: 'rem-93',
+        })
+
+        // On the supplier's record, because a remittance is a payables
+        // document — and on nobody's debt to us.
+        expect(
+          await communicationsForParty(fixture.ctx, { kind: 'vendor', id: vendor.id }),
+        ).toHaveLength(1)
+        expect(
+          await communicationsForParty(fixture.ctx, { kind: 'customer', id: customer.id }),
+        ).toHaveLength(0)
+      })
+
+      it('files an invoice to that same inbox on the customer instead', async () => {
+        const shared = 'accounts@bothways2.test'
+        const fixture = await createCompanyFixture({ name: 'Both Ways Co' })
+
+        const [customer] = await db
+          .insert(customers)
+          .values({ companyId: fixture.companyId, name: 'Both Ways', email: shared })
+          .returning()
+        const [vendor] = await db
+          .insert(vendors)
+          .values({ companyId: fixture.companyId, name: 'Both Ways', email: shared })
+          .returning()
+
+        await sendInvoiceEmail({
+          to: shared,
+          toName: 'Both Ways',
+          companyId: fixture.companyId,
+          companyName: 'Both Ways Co',
+          invoiceNumber: 'INV-0044',
+          amountDue: '$99.00',
+          dueDate: '2026-04-01',
+          token: 'tok_invoice_93c',
+          isReminder: false,
+          reference: 'inv-93c',
+        })
+
+        expect(
+          await communicationsForParty(fixture.ctx, { kind: 'customer', id: customer.id }),
+        ).toHaveLength(1)
+        expect(
+          await communicationsForParty(fixture.ctx, { kind: 'vendor', id: vendor.id }),
+        ).toHaveLength(0)
+      })
+
+      /** A timeline that is quietly wrong is worse than one quietly short. */
+      it('files nothing when two customers share an address', async () => {
+        const shared = 'accounts@duplicated.test'
+        const fixture = await createCompanyFixture({ name: 'Duplicate Co' })
+
+        await db.insert(customers).values([
+          { companyId: fixture.companyId, name: 'One Ltd', email: shared },
+          { companyId: fixture.companyId, name: 'Two Ltd', email: shared },
+        ])
+
+        await sendInvoiceEmail({
+          to: shared,
+          toName: 'Which One',
+          companyId: fixture.companyId,
+          companyName: 'Duplicate Co',
+          invoiceNumber: 'INV-0045',
+          amountDue: '$10.00',
+          dueDate: '2026-04-01',
+          token: 'tok_invoice_93d',
+          isReminder: false,
+          reference: 'inv-93d',
+        })
+
+        expect(await db.select().from(communications)).toHaveLength(0)
+      })
+
+      it('keeps one company’s post out of another’s', async () => {
+        const { fixture, customer, email } = await customerOnly('accounts@isolated.test')
+        const other = await createCompanyFixture({ name: 'Nosy Co' })
+
+        await sendInvoiceEmail({
+          to: email,
+          toName: 'No Contact Ltd',
+          companyId: fixture.companyId,
+          companyName: 'Billing Co',
+          invoiceNumber: 'INV-0046',
+          amountDue: '$1.00',
+          dueDate: '2026-04-01',
+          token: 'tok_invoice_93e',
+          isReminder: false,
+          reference: 'inv-93e',
+        })
+
+        // Naming the party is not enough — the reader is scoped by company.
+        expect(
+          await communicationsForParty(other.ctx, { kind: 'customer', id: customer.id }),
+        ).toHaveLength(0)
+      })
+    })
+
     /** Phase 91 keeps the words but never the link the letter carried. */
     it('keeps no link in what it shows', async () => {
       const { fixture, organization } = await client()
@@ -400,6 +591,7 @@ describe('letters the system sends', () => {
       email: 'anyone@example.test',
       subject: 'Anything',
       transactionalMessageId: '00000000-0000-0000-0000-000000000000',
+      kind: 'company_invitation',
       delivered: true,
     })
 
@@ -422,6 +614,7 @@ describe('letters the system sends', () => {
           subject: 'Anything',
           // No such message — the foreign key refuses it.
           transactionalMessageId: '00000000-0000-0000-0000-000000000000',
+          kind: 'company_invitation',
           delivered: true,
         },
         tx,

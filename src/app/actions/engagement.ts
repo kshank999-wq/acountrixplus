@@ -3,7 +3,10 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
-import { logCommunication } from '@/modules/engagement/communications'
+import {
+  communicationsForParty,
+  logCommunication,
+} from '@/modules/engagement/communications'
 import { organizationTimeline } from '@/modules/engagement/timeline'
 import { partsOf, type Part } from '@/modules/engagement/entry'
 import {
@@ -103,6 +106,37 @@ export async function organizationTimelineAction(
       tone: 'system' as const,
     }
   })
+}
+
+/**
+ * What this application has sent one customer or supplier (Phase 93).
+ *
+ * Fetched when the panel is opened rather than with the page, for the reason
+ * `RecordHistory` gives: a history nobody asks for is a query nobody needed,
+ * and every row on a busy screen would run one.
+ */
+export async function partyPostAction(
+  kind: unknown,
+  partyId: unknown,
+): Promise<TimelineView[]> {
+  const actor = await requireActor()
+  const party = z.enum(['customer', 'vendor']).parse(kind)
+
+  const rows = await communicationsForParty(actor, { kind: party, id: uuid.parse(partyId) })
+
+  return rows.map((row) => ({
+    kind: 'communication' as const,
+    at: row.occurredAt.toISOString().slice(0, 10),
+    title: row.summary,
+    detail: row.body,
+    parts: partsOf({
+      note: row.body,
+      letter: row.letter,
+      sentByTheSystem: row.wasSentByTheSystem,
+    }),
+    who: row.contactName ?? row.actorName,
+    tone: row.wasSentByTheSystem ? ('system' as const) : row.direction,
+  }))
 }
 
 export async function logCommunicationAction(input: unknown): Promise<ActionResult> {

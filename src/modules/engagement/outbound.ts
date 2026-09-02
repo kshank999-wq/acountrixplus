@@ -1,8 +1,10 @@
 import { and, eq, isNotNull, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
-import { communications, contacts } from '@/db/schema'
+import { communications, contacts, customers, vendors } from '@/db/schema'
 import { OUR_NAME } from '@/modules/brand/voice'
 import type { CommunicationChannel } from './communications'
+import { columnsFor, filingFor } from './filing'
+import type { TransactionalKind } from '@/modules/notify/transactional'
 
 /**
  * Recording the letters this application sends (spec §6, §16).
@@ -33,6 +35,14 @@ export type OutboundMail = {
   email: string
   subject: string
   transactionalMessageId: string
+  /**
+   * What the letter is (Phase 93).
+   *
+   * Not decoration: it is what decides *whose* record the letter belongs on
+   * when one address is more than one party. A remittance and an invoice to the
+   * same shared inbox go to opposite sides of the books.
+   */
+  kind: TransactionalKind
   /** Whether it actually went. A bounce is worth seeing on the timeline. */
   delivered: boolean
 }
@@ -62,26 +72,70 @@ export async function recordOutboundMail(
     return await exec.transaction(async (tx) => {
       const email = input.email.trim().toLowerCase()
 
-      const [contact] = await tx
-        .select({ id: contacts.id, organizationId: contacts.organizationId })
-        .from(contacts)
-        .where(
-          and(
-            eq(contacts.companyId, input.companyId),
-            isNotNull(contacts.email),
-            sql`lower(${contacts.email}) = ${email}`,
-          ),
-        )
-        .limit(1)
+      /*
+        Every party this address could be (Phase 93), not the first one found.
 
-      if (!contact) return null
+        Phase 22 looked in `contacts` alone, which was right for its letters —
+        invitations and password resets go to people somebody had met. It is
+        wrong for an invoice, whose address is on the `customers` row: a
+        business that bills people it never courted has no contact for any of
+        them, and every such letter landed on nobody's timeline.
+
+        No `limit(1)` anywhere here on purpose. `filingFor` needs to *see* a
+        duplicate in order to refuse it, and a query that quietly returned the
+        first of two would file on a coin flip instead.
+      */
+      const [asContacts, asCustomers, asVendors] = await Promise.all([
+        tx
+          .select({ id: contacts.id, organizationId: contacts.organizationId })
+          .from(contacts)
+          .where(
+            and(
+              eq(contacts.companyId, input.companyId),
+              isNotNull(contacts.email),
+              sql`lower(${contacts.email}) = ${email}`,
+            ),
+          ),
+        tx
+          .select({ id: customers.id, organizationId: customers.organizationId })
+          .from(customers)
+          .where(
+            and(
+              eq(customers.companyId, input.companyId),
+              isNotNull(customers.email),
+              sql`lower(${customers.email}) = ${email}`,
+            ),
+          ),
+        tx
+          .select({ id: vendors.id, organizationId: vendors.organizationId })
+          .from(vendors)
+          .where(
+            and(
+              eq(vendors.companyId, input.companyId),
+              isNotNull(vendors.email),
+              sql`lower(${vendors.email}) = ${email}`,
+            ),
+          ),
+      ])
+
+      const party = filingFor(input.kind, [
+        ...asContacts.map((row) => ({ kind: 'contact' as const, ...row })),
+        ...asCustomers.map((row) => ({ kind: 'customer' as const, ...row })),
+        ...asVendors.map((row) => ({ kind: 'vendor' as const, ...row })),
+      ])
+
+      // Nobody, or nobody it would be honest to name. Not a failure — a letter
+      // to a stranger is the ordinary case.
+      if (!party) return null
 
       const [row] = await tx
         .insert(communications)
         .values({
           companyId: input.companyId,
-          organizationId: contact.organizationId,
-          contactId: contact.id,
+          // Exactly one party named, and the organization alongside it when the
+          // party has one — so a letter to a customer who is also a CRM client
+          // still appears on that client's timeline.
+          ...columnsFor(party),
           channel: 'email' satisfies CommunicationChannel,
           direction: 'outbound',
           summary: input.delivered

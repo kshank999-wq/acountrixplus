@@ -4116,6 +4116,43 @@ which it is. A bounce shows both, note first, because the failure changes what
 the letter below it means; a letter shows only on a system send, so words are
 never attributed to a company that did not send them.
 
+### The letter filed against nobody (Phase 93)
+
+`recordOutboundMail` resolved an address through `contacts` — right for Phase
+22's invitations and password resets, wrong for the letters this application
+mostly sends. An invoice goes to the address on the `customers` row, and a
+business that bills people it never courted has no contact for any of them. On
+this repository's own seed data, **none of the five customers with an email
+matches a contact**, so every invoice, statement and reminder appeared on
+nobody's timeline. Phase 91 kept the words and Phase 92 read them; neither helps
+a letter that never gets an entry.
+
+**An address is not an identity.** One inbox can be a contact somebody met, a
+customer who owes money and a supplier who invoices for plant hire — a firm that
+both buys from you and sells to you. Resolving an address gives candidates, not
+an answer, and the queries carry no `limit(1)` on purpose: the core has to *see*
+a duplicate to refuse it.
+
+**What the letter is says which party it concerns.** A fixed precedence would
+file a remittance advice on a customer's record — evidence about a payables
+relationship stored against a receivables one, which the next person to open that
+customer reads as something we sent them about their own debt. `KIND_CONCERNS`
+writes the mapping down exhaustively, so the next kind chooses rather than
+inherits.
+
+**The fallback never crosses the divide.** When the concerned party is absent it
+falls back to a contact and nothing else, because a contact is a person rather
+than a side of the books. Filing nothing loses an entry — the lesser harm,
+because it is not *wrong*. The same reasoning settles a duplicate address: two
+customers sharing one means filing on either is a coin flip, so nothing is filed.
+A timeline that is quietly wrong is worse than one quietly short.
+
+The database holds the shape too: Phase 22's "an exchange is with somebody" check
+is widened rather than dropped, and a second check refuses a row that is somehow
+both a customer's and a supplier's. On the customers and suppliers screen the
+post gets its own **Post** panel beside Phase 71's **History**, because what we
+*sent* a party is not what *changed* about their record.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5850,11 +5887,15 @@ Gaps within the phases already built:
 - ~~**The company side still cannot open its letters.**~~ Since Phase 92 the CRM timeline follows
   the link it has held since Phase 22 and shows what the letter said, labelled apart from any note
   somebody typed.
-- **A letter only lands on a timeline when the address belongs to a CRM contact.** An invoice sent
-  to a customer whose email lives on the `customers` row rather than a contact — the normal case
-  for a business that bills people it never courted — is recorded in `transactional_messages` and
-  on nobody's timeline. The words are kept and the join works; the entry that would carry them is
-  never written.
+- ~~**A letter only lands on a timeline when the address belongs to a CRM contact.**~~ Since Phase
+  93 it is filed against the customer or supplier it was about, decided from what the letter is.
+- **Nothing says when a letter went unfiled.** `recordOutboundMail` returns null for a stranger,
+  for a duplicate address and for a letter with no honest party, and all three look identical from
+  outside. The duplicate case is a data-quality problem this application can now detect and does
+  not report.
+- **No backfill.** Letters sent before Phase 93 have no communications row and do not get one:
+  which party they were about was never decided, and inventing it now would be a guess dressed as
+  a record.
 - **No backfill, and no HTML.** Letters sent before Phase 91 have a null body because their words
   are genuinely gone, and only the text part is kept — the HTML is a rendering of the same
   paragraphs, and keeping both would be the two-copies defect committed twice.

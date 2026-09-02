@@ -12,6 +12,7 @@ import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { contacts, opportunities, organizations } from './crm'
 import { transactionalMessages } from './notify'
+import { customers, vendors } from './receivables'
 
 /**
  * Communications (spec §16 `Communication`, §6, §17 "Notification/Task
@@ -84,6 +85,24 @@ export const communications = pgTable(
       onDelete: 'cascade',
     }),
 
+    /**
+     * The trading party a letter was about (Phase 93).
+     *
+     * Phase 22 could only file against the CRM's people, which was right for
+     * invitations and password resets. An invoice goes to the address on the
+     * `customers` row, and a business that bills people it never courted has no
+     * contact for any of them — so those letters landed on nobody's timeline.
+     *
+     * At most one of these two is set, and never both: `filingFor` decides which
+     * party a letter is about from what the letter *is*, so a remittance advice
+     * cannot be filed against somebody's debt to us. See `engagement/filing`.
+     *
+     * `set null` rather than cascade, matching `contact_id`: deleting a customer
+     * must not delete the record of what we sent them.
+     */
+    customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
+    vendorId: uuid('vendor_id').references(() => vendors.id, { onDelete: 'set null' }),
+
     channel: communicationChannelEnum('channel').notNull(),
     direction: communicationDirectionEnum('direction').notNull(),
 
@@ -127,6 +146,10 @@ export const communications = pgTable(
       t.occurredAt,
     ),
     contactIdx: index('communications_contact_idx').on(t.contactId, t.occurredAt),
+    // Phase 93. "What have we sent this customer?" is the question the
+    // customers screen asks, newest first.
+    customerIdx: index('communications_customer_idx').on(t.customerId, t.occurredAt),
+    vendorIdx: index('communications_vendor_idx').on(t.vendorId, t.occurredAt),
 
     /**
      * An exchange is with somebody. A row naming no party at all belongs to no
@@ -135,7 +158,18 @@ export const communications = pgTable(
      */
     hasParty: check(
       'communications_has_party',
-      sql`${t.organizationId} IS NOT NULL OR ${t.contactId} IS NOT NULL OR ${t.opportunityId} IS NOT NULL`,
+      sql`${t.organizationId} IS NOT NULL OR ${t.contactId} IS NOT NULL OR ${t.opportunityId} IS NOT NULL OR ${t.customerId} IS NOT NULL OR ${t.vendorId} IS NOT NULL`,
+    ),
+    /**
+     * A letter is about one trading party, never two (Phase 93).
+     *
+     * `filingFor` decides which from what the letter is; this is the database
+     * refusing to hold the shape that decision exists to prevent — a row that
+     * is somehow both a customer's and a supplier's.
+     */
+    oneTradingParty: check(
+      'communications_one_trading_party',
+      sql`${t.customerId} IS NULL OR ${t.vendorId} IS NULL`,
     ),
     summaryNotEmpty: check(
       'communications_summary_not_empty',

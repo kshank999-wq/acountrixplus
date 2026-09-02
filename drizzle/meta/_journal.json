@@ -470,6 +470,13 @@
       "when": 1788730000000,
       "tag": "0066_phase91_letter_body",
       "breakpoints": true
+    },
+    {
+      "idx": 67,
+      "version": "7",
+      "when": 1788740000000,
+      "tag": "0067_phase93_communication_parties",
+      "breakpoints": true
     }
   ]
 }

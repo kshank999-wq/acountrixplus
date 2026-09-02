@@ -275,6 +275,47 @@ export async function communicationsForOpportunity(
 }
 
 /**
+ * Everything sent to one trading party, newest first (Phase 93).
+ *
+ * The question the customers and suppliers screen asks — *what have we sent
+ * this customer?* — which until this phase had no answer at all for anybody
+ * without a CRM contact.
+ *
+ * One reader for both sides rather than two that would drift, taking the column
+ * to match on. Scoped by company as everything here is, so naming a party from
+ * another tenant returns nothing rather than somebody else's post.
+ */
+export async function communicationsForParty(
+  ctx: ActorContext,
+  party: { kind: 'customer' | 'vendor'; id: string },
+  limit = 50,
+): Promise<CommunicationRow[]> {
+  requirePermission(ctx, 'crm:view')
+
+  const column =
+    party.kind === 'customer' ? communications.customerId : communications.vendorId
+
+  return db
+    .select({
+      id: communications.id,
+      channel: communications.channel,
+      direction: communications.direction,
+      summary: communications.summary,
+      body: communications.body,
+      occurredAt: communications.occurredAt,
+      actorName: communications.actorName,
+      contactName: contactName(),
+      wasSentByTheSystem: sql<boolean>`${communications.transactionalMessageId} is not null`,
+      letter: letterBody(),
+    })
+    .from(communications)
+    .leftJoin(contacts, eq(contacts.id, communications.contactId))
+    .where(scoped(ctx, communications, eq(column, party.id)))
+    .orderBy(desc(communications.occurredAt))
+    .limit(limit)
+}
+
+/**
  * When each client was last spoken to.
  *
  * The question a sales list is opened to answer, and one query rather than one

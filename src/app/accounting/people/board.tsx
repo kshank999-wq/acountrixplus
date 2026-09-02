@@ -12,6 +12,7 @@ import {
 import { formatCents } from '@/lib/money'
 import { partyStanding } from '@/modules/parties/standing'
 import { RecordHistory } from '@/components/record-history'
+import { PartyPost } from '@/components/party-post'
 
 type Party = {
   id: string
@@ -78,6 +79,8 @@ export function PeopleBoard({
 
   /** Which row has its history open (Phase 71). */
   const [historyId, setHistoryId] = useState<string | null>(null)
+  /** What we have *sent* them, which is not what *changed* (Phase 93). */
+  const [postId, setPostId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft>({})
   const [showArchived, setShowArchived] = useState(false)
 
@@ -425,6 +428,15 @@ export function PeopleBoard({
                         >
                           {historyId === row.id ? 'Hide history' : 'History'}
                         </button>
+                        <button
+                          type="button"
+                          className="btn btn-ghost text-xs"
+                          onClick={() =>
+                            setPostId((current) => (current === row.id ? null : row.id))
+                          }
+                        >
+                          {postId === row.id ? 'Hide post' : 'Post'}
+                        </button>
                         {canEdit && (
                           <button
                             type="button"
@@ -438,6 +450,20 @@ export function PeopleBoard({
                     </>
                   )}
                 </tr>
+
+                {postId === row.id && editing !== row.id && (
+                  <tr className="border-t border-line bg-raised/40">
+                    <td colSpan={7} className="px-4 py-3">
+                      <p className="mb-2 text-xs font-medium text-muted">
+                        What we have sent them
+                      </p>
+                      <PartyPost
+                        kind={isVendors ? 'vendor' : 'customer'}
+                        partyId={row.id}
+                      />
+                    </td>
+                  </tr>
+                )}
 
                 {historyId === row.id && editing !== row.id && (
                   <tr className="border-t border-line bg-raised/40">
