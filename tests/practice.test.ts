@@ -12,6 +12,7 @@ import {
   transactionalMessages,
 } from '@/db/schema'
 import { mockTransactionalProvider } from '@/modules/notify/transactional'
+import { setPreferenceFor } from '@/modules/mobile/notifications'
 import { createCompanyFixture, type Fixture } from './helpers'
 import {
   addPracticeMember,
@@ -865,6 +866,76 @@ describe('the work queue', () => {
         await fire(NOW)
 
         expect(mail.sent).toHaveLength(2)
+      })
+
+      /**
+       * Phase 89. The brief arrived in Phase 88 with no way to switch it off,
+       * in an application that has given every other topic a per-person switch
+       * since Phase 8 — because a channel nobody can quiet gets filtered to a
+       * folder, and the one message that mattered is filtered with it.
+       */
+      it('does not write to somebody who switched it off', async () => {
+        const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(client, shop)
+        await checked(client, 2)
+
+        const hire = await accountant('Prefers Silence')
+        await addPracticeMember(
+          { userId: shop.ownerId, userName: shop.ownerName },
+          { practiceId: shop.practiceId, userId: hire.id },
+        )
+
+        await setPreferenceFor(
+          { kind: 'practice', practiceId: shop.practiceId },
+          hire.id,
+          'practice_brief',
+          false,
+        )
+
+        mail.reset()
+        const result = await fire(NOW)
+
+        // One member wanting out is not the firm wanting out.
+        expect(result.briefed).toBe(1)
+        expect(result.quieted).toBe(1)
+        expect(mail.sent).toHaveLength(1)
+        expect(mail.sent[0].to).not.toBe(hire.email)
+      })
+
+      /** A preference for one firm must not silence another firm's brief. */
+      it('silences one firm without silencing the other', async () => {
+        const mine = await createCompanyFixture({ name: 'My Client' })
+        const theirs = await createCompanyFixture({ name: 'Their Client' })
+        const ours = await firm('Hartley & Co')
+        const rival = await firm('Rival Books')
+        await engaged(mine, ours)
+        await engaged(theirs, rival)
+        await checked(mine, 2)
+        await checked(theirs, 2)
+
+        // The same person works at both firms, and wants out of one.
+        await addPracticeMember(
+          { userId: rival.ownerId, userName: rival.ownerName },
+          { practiceId: rival.practiceId, userId: ours.ownerId },
+        )
+        await setPreferenceFor(
+          { kind: 'practice', practiceId: ours.practiceId },
+          ours.ownerId,
+          'practice_brief',
+          false,
+        )
+
+        mail.reset()
+        await fire(NOW)
+
+        const theirLetters = mail.sent.filter((message) => message.text.includes('Their Client'))
+        const ourLetters = mail.sent.filter((message) => message.text.includes('My Client'))
+
+        // Still hears from the firm they did not silence.
+        expect(theirLetters.length).toBeGreaterThan(0)
+        // And not from the one they did — the rival's owner still gets theirs.
+        expect(ourLetters.every((message) => message.to !== ours.ownerId)).toBe(true)
       })
 
       it('keeps one firm’s trouble out of another firm’s post', async () => {

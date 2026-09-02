@@ -5,6 +5,7 @@ import { briefFor, type Brief } from '@/modules/practice/brief'
 import { practiceWorkQueue } from '@/modules/practice/switching'
 import type { Rung } from '@/modules/practice/triage'
 import { sendTransactional } from '@/modules/notify/service'
+import { topicEnabled } from '@/modules/mobile/notifications'
 import { appBaseUrl } from '@/modules/notify/transactional'
 import { registerHandler, type JobContext } from '../registry'
 
@@ -52,6 +53,7 @@ registerHandler({
 
     let sent = 0
     let briefed = 0
+    let quieted = 0
 
     for (const firm of firms) {
       const staff = await db
@@ -112,6 +114,21 @@ registerHandler({
       briefed++
 
       for (const person of staff) {
+        /*
+          Phase 89. The brief arrived in Phase 88 with no way to switch it off,
+          in an application that has given every other topic a per-person
+          switch since Phase 8 — because a channel nobody can quiet is a
+          channel that gets filtered to a folder, and then the one message that
+          mattered is filtered with it.
+
+          Checked per person rather than per firm: one member wanting out is
+          not the firm wanting out.
+        */
+        if (!(await topicEnabled({ kind: 'practice', practiceId: firm.id }, person.userId, 'practice_brief'))) {
+          quieted++
+          continue
+        }
+
         const result = await sendTransactional({
           to: person.email,
           toName: person.name,
@@ -131,7 +148,7 @@ registerHandler({
       }
     }
 
-    return { asOf: seenOn, firms: firms.length, briefed, sent }
+    return { asOf: seenOn, firms: firms.length, briefed, sent, quieted }
   },
 })
 

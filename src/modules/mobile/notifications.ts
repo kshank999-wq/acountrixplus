@@ -9,6 +9,12 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { getPushProvider, type PushMessage } from './push-provider'
+import {
+  assertTopicBelongs,
+  columnsFor,
+  topicsFor,
+  type Audience,
+} from './audience'
 
 /**
  * Notifications (spec §3 "bookkeeping as a continuous habit").
@@ -42,6 +48,7 @@ export const TOPIC_LABELS: Record<NotificationTopic, string> = {
   follow_up_due: 'A follow-up you promised is late',
   background_failures: 'Scheduled work failed, or a letter did not arrive',
   books_disagree: 'The books stopped agreeing with themselves',
+  practice_brief: 'A client of your firm needs a look',
 }
 
 export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
@@ -59,6 +66,8 @@ export const TOPIC_DESCRIPTIONS: Record<NotificationTopic, string> = {
     'A daily digest of scheduled work that gave up and letters that bounced. Silence means there is nothing to see, which is the point.',
   books_disagree:
     'When a nightly reconciliation stops holding — the stock against the balance sheet, the deposits against what is owed to tenants, the invoices against the control account. Sent the night a difference appears, and not again while it is still there.',
+  practice_brief:
+    'One letter a day to everybody at your firm, naming the clients that got worse since the last one. Nothing arrives on a morning when nothing changed.',
 }
 
 /** How many transactions have to be waiting before a nudge is worth sending. */
@@ -157,25 +166,79 @@ export type TopicPreference = {
   enabled: boolean
 }
 
-export async function preferences(ctx: ActorContext): Promise<TopicPreference[]> {
+/**
+ * The switches one person can see for one audience (Phase 89).
+ *
+ * Only the topics that *belong* to this audience. A company screen listing the
+ * firm's brief would offer a switch that nothing reads, and a person who set it
+ * would believe they were covered — which is worse than having no switch at
+ * all, and is why `TOPIC_AUDIENCE` exists.
+ */
+export async function preferencesFor(
+  audience: Audience,
+  userId: string,
+): Promise<TopicPreference[]> {
+  const owner =
+    audience.kind === 'company'
+      ? and(
+          eq(notificationPreferences.companyId, audience.companyId),
+          isNull(notificationPreferences.practiceId),
+        )
+      : and(
+          eq(notificationPreferences.practiceId, audience.practiceId),
+          isNull(notificationPreferences.companyId),
+        )
+
   const rows = await db
     .select()
     .from(notificationPreferences)
-    .where(
-      and(
-        eq(notificationPreferences.companyId, ctx.companyId),
-        eq(notificationPreferences.userId, ctx.userId),
-      ),
-    )
+    .where(and(owner, eq(notificationPreferences.userId, userId)))
 
   const off = new Map(rows.map((row) => [row.topic, row.enabled]))
 
-  return notificationTopicEnum.enumValues.map((topic) => ({
+  return topicsFor(audience.kind, notificationTopicEnum.enumValues).map((topic) => ({
     topic,
     label: TOPIC_LABELS[topic],
     description: TOPIC_DESCRIPTIONS[topic],
     enabled: off.get(topic) ?? true,
   }))
+}
+
+/** The company screen's switches, for the company the actor is in. */
+export async function preferences(ctx: ActorContext): Promise<TopicPreference[]> {
+  return preferencesFor({ kind: 'company', companyId: ctx.companyId }, ctx.userId)
+}
+
+/**
+ * Switch one topic on or off for one audience (Phase 89).
+ *
+ * `assertTopicBelongs` first: a company topic stored against a practice is a
+ * row nothing ever reads, and the person who set it believes they are covered.
+ *
+ * The conflict target names all four columns because the unique index does, and
+ * that index is `NULLS NOT DISTINCT` — without which two rows with the same null
+ * owner are distinct to Postgres and this upsert silently becomes an insert.
+ */
+export async function setPreferenceFor(
+  audience: Audience,
+  userId: string,
+  topic: NotificationTopic,
+  enabled: boolean,
+): Promise<void> {
+  assertTopicBelongs(topic, audience)
+
+  await db
+    .insert(notificationPreferences)
+    .values({ ...columnsFor(audience), userId, topic, enabled })
+    .onConflictDoUpdate({
+      target: [
+        notificationPreferences.userId,
+        notificationPreferences.companyId,
+        notificationPreferences.practiceId,
+        notificationPreferences.topic,
+      ],
+      set: { enabled, updatedAt: new Date() },
+    })
 }
 
 export async function setPreference(
@@ -184,6 +247,8 @@ export async function setPreference(
   enabled: boolean,
 ): Promise<void> {
   await db.transaction(async (tx) => {
+    assertTopicBelongs(topic, { kind: 'company', companyId: ctx.companyId })
+
     await tx
       .insert(notificationPreferences)
       .values({ companyId: ctx.companyId, userId: ctx.userId, topic, enabled })
@@ -191,6 +256,7 @@ export async function setPreference(
         target: [
           notificationPreferences.userId,
           notificationPreferences.companyId,
+          notificationPreferences.practiceId,
           notificationPreferences.topic,
         ],
         set: { enabled, updatedAt: new Date() },
@@ -208,23 +274,39 @@ export async function setPreference(
   })
 }
 
-async function topicEnabled(
-  companyId: string,
+/**
+ * Whether this person still wants this topic, for this audience.
+ *
+ * Takes an `Audience` rather than a company id since Phase 89: a preference
+ * belongs to a company *or* to a practice, and the firm's brief belongs to the
+ * second. `eq` cannot match a null, so the owner that is null is matched with
+ * `isNull` — a `where` built from `eq(column, null)` silently matches nothing
+ * and would have made every practice preference look unset.
+ */
+export async function topicEnabled(
+  audience: Audience,
   userId: string,
   topic: NotificationTopic,
 ): Promise<boolean> {
+  const owner =
+    audience.kind === 'company'
+      ? and(
+          eq(notificationPreferences.companyId, audience.companyId),
+          isNull(notificationPreferences.practiceId),
+        )
+      : and(
+          eq(notificationPreferences.practiceId, audience.practiceId),
+          isNull(notificationPreferences.companyId),
+        )
+
   const [row] = await db
     .select({ enabled: notificationPreferences.enabled })
     .from(notificationPreferences)
-    .where(
-      and(
-        eq(notificationPreferences.companyId, companyId),
-        eq(notificationPreferences.userId, userId),
-        eq(notificationPreferences.topic, topic),
-      ),
-    )
+    .where(and(owner, eq(notificationPreferences.userId, userId), eq(notificationPreferences.topic, topic)))
     .limit(1)
 
+  // Absent means on, which is Phase 8's rule and unchanged: somebody who
+  // installed the app has already opted in once.
   return row?.enabled ?? true
 }
 
@@ -257,7 +339,13 @@ export async function notify(
 ): Promise<NotifyResult> {
   const provider = getPushProvider()
 
-  if (!(await topicEnabled(input.companyId, input.userId, input.topic))) {
+  if (
+    !(await topicEnabled(
+      { kind: 'company', companyId: input.companyId },
+      input.userId,
+      input.topic,
+    ))
+  ) {
     await log(input, { outcome: 'suppressed', detail: 'Topic switched off.', provider: provider.key })
     return { sent: 0, suppressed: true, failed: 0 }
   }

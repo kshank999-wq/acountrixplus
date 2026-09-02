@@ -11,6 +11,7 @@ import {
   pushSubscriptions,
   sessions,
 } from '@/db/schema'
+import { topicsFor } from '@/modules/mobile/audience'
 import { createCompanyFixture, insertTransaction, addUserWithRole } from './helpers'
 import {
   fingerprint,
@@ -898,10 +899,17 @@ describe('notifications', () => {
     // was the only thing that broke. What the test is actually for is that
     // *every* topic is offered and every one starts on: a topic the settings
     // screen forgets is a notification nobody can switch off.
+    //
+    // Narrowed to the company's own topics in Phase 89, when a topic first
+    // belonged to a practice instead. This screen offering the firm's brief
+    // would be a switch nothing reads, which is worse than no switch — so the
+    // property is now "every topic appears on exactly one screen", asserted
+    // across both in `audience.test.ts`.
     expect(topics.map((topic) => topic.topic).sort()).toEqual(
-      [...notificationTopicEnum.enumValues].sort(),
+      topicsFor('company', notificationTopicEnum.enumValues).sort(),
     )
     expect(topics.every((topic) => topic.enabled)).toBe(true)
+    expect(topics.map((topic) => topic.topic)).not.toContain('practice_brief')
   })
 })
 

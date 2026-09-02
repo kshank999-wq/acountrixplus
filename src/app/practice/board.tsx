@@ -9,6 +9,7 @@ import {
   removePracticeMemberAction,
   inviteStaffAction,
   respondToEngagementAction,
+  setBriefPreferenceAction,
   type ActionResult,
 } from '@/app/actions/practice'
 
@@ -82,6 +83,7 @@ export function PracticeBoard({
   members,
   isOwner,
   selfUserId,
+  briefEnabled,
 }: {
   practice: Practice
   practices: Practice[]
@@ -90,6 +92,8 @@ export function PracticeBoard({
   members: Member[]
   isOwner: boolean
   selfUserId: string
+  /** Whether this person still wants the firm's morning brief (Phase 89). */
+  briefEnabled: boolean
 }) {
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -252,6 +256,35 @@ export function PracticeBoard({
             </tbody>
           </table>
         )}
+
+        {/*
+          The switch Phase 88 shipped without (Phase 89). Phase 8 gave every
+          topic one for a reason: a channel nobody can quiet is a channel that
+          gets filtered to a folder, and then the one message that mattered is
+          filtered with it.
+
+          Per person, not per firm — one member wanting out is not the firm
+          wanting out — which is why it sits here rather than under the owner's
+          controls below.
+        */}
+        <div className="flex items-center justify-between border-t border-line px-4 py-3 text-sm">
+          <div>
+            <p>{briefEnabled ? 'You get the morning brief' : 'You do not get the morning brief'}</p>
+            <p className="mt-0.5 text-xs text-faint">
+              One letter a day naming the clients that got worse. Nothing arrives on a morning
+              when nothing changed.
+            </p>
+          </div>
+          <button
+            className="btn btn-ghost text-xs"
+            disabled={pending}
+            onClick={() =>
+              act(() => setBriefPreferenceAction(practice.practiceId, !briefEnabled))
+            }
+          >
+            {briefEnabled ? 'Stop sending it' : 'Send it to me'}
+          </button>
+        </div>
       </Card>
 
       {live.length > 0 && isOwner && (

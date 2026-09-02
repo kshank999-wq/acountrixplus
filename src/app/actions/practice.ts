@@ -10,6 +10,7 @@ import {
   createPractice,
   endEngagement,
   offerEngagement,
+  practicesFor,
   requestEngagement,
   respondToEngagement,
   removePracticeMember,
@@ -19,6 +20,7 @@ import {
   unassignFromEngagement,
 } from '@/modules/practice/service'
 import { switchCompany } from '@/modules/practice/switching'
+import { setPreferenceFor } from '@/modules/mobile/notifications'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { companies } from '@/db/schema'
@@ -42,6 +44,36 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
 }
 
 const uuid = z.string().uuid()
+
+/**
+ * Switch the firm's morning brief on or off, for the person asking (Phase 89).
+ *
+ * Membership is checked before the write: a practice id somebody guessed must
+ * not let them write a preference row against a firm they do not work at. The
+ * same gate `practiceWorkQueue` applies, for the same reason.
+ */
+export async function setBriefPreferenceAction(
+  practiceId: unknown,
+  enabled: unknown,
+): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const id = uuid.parse(practiceId)
+    const wanted = z.boolean().parse(enabled)
+
+    const mine = await practicesFor(actor.userId)
+    if (!mine.some((entry) => entry.practiceId === id)) {
+      throw new Error('You do not work at that firm.')
+    }
+
+    await setPreferenceFor({ kind: 'practice', practiceId: id }, actor.userId, 'practice_brief', wanted)
+
+    revalidatePath('/practice')
+    return wanted
+      ? 'You will get the firm’s morning brief again.'
+      : 'You will not get the firm’s morning brief.'
+  })
+}
 
 export async function switchCompanyAction(companyId: unknown): Promise<ActionResult> {
   return run(async () => {

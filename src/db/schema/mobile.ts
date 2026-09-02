@@ -11,6 +11,7 @@ import {
   pgEnum,
 } from 'drizzle-orm/pg-core'
 import { companies, devices, users } from './tenancy'
+import { practices } from './practice'
 
 /**
  * The mobile app (spec §3 mobile workflow, §18 responsive/PWA before native,
@@ -140,6 +141,11 @@ export const notificationTopicEnum = pgEnum('notification_topic', [
   // "the machinery stopped", the other is "the numbers are wrong", and
   // somebody who silences a noisy queue must not thereby silence the ledger.
   'books_disagree',
+  // Added in Phase 89, for the message Phase 88 introduced with no way to
+  // switch it off. The first topic here that belongs to a *practice* rather
+  // than a company, and the reason `notification_preferences` had to learn
+  // that a preference names an audience — see `modules/mobile/audience`.
+  'practice_brief',
 ])
 
 /**
@@ -154,9 +160,17 @@ export const notificationPreferences = pgTable(
   'notification_preferences',
   {
     id: uuid('id').primaryKey().defaultRandom(),
-    companyId: uuid('company_id')
-      .notNull()
-      .references(() => companies.id, { onDelete: 'cascade' }),
+    /**
+     * Exactly one of these two, never both and never neither (Phase 89).
+     *
+     * A preference belongs to an **audience**, and this application has two
+     * kinds: a company, and — since Phase 88's firm brief — a practice. The
+     * check constraint in the migration enforces the exclusivity, and the
+     * unique index is declared `NULLS NOT DISTINCT` so that two rows with the
+     * same null column cannot both exist and turn an upsert into an insert.
+     */
+    companyId: uuid('company_id').references(() => companies.id, { onDelete: 'cascade' }),
+    practiceId: uuid('practice_id').references(() => practices.id, { onDelete: 'cascade' }),
     userId: uuid('user_id')
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
@@ -165,7 +179,17 @@ export const notificationPreferences = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    topicUnique: unique('notification_preferences_unique').on(t.userId, t.companyId, t.topic),
+    /**
+     * Declared here for drizzle's benefit; the migration creates it with
+     * `NULLS NOT DISTINCT`, which drizzle's builder cannot express and which is
+     * the whole reason this works.
+     */
+    topicUnique: unique('notification_preferences_unique').on(
+      t.userId,
+      t.companyId,
+      t.practiceId,
+      t.topic,
+    ),
   }),
 )
 
