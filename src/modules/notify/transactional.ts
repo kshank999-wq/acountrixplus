@@ -29,6 +29,16 @@ import { buildTransactionalProvider } from './providers'
 
 export type TransactionalKind =
   | 'password_reset'
+  /**
+   * A firm's morning brief about its own clients (Phase 88).
+   *
+   * The only kind here addressed to somebody about *other people's* books, and
+   * the only one with no company behind it — a practice is not a company, and
+   * a letter about twelve clients belongs to none of them. Transactional
+   * rather than marketing: it is the working relationship a firm was engaged
+   * for, not an offer anybody can decline.
+   */
+  | 'practice_brief'
   | 'company_invitation'
   | 'practice_invitation'
   | 'security_alert'

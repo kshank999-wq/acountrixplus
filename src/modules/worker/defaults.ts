@@ -167,6 +167,18 @@ export const GLOBAL_SCHEDULES: ScheduleDefault[] = [
     hourUtc: 3,
     why: 'Everything the retention policy no longer keeps. Nine tables, one ranged delete each.',
   },
+  // --- Phase 88 -------------------------------------------------------------
+  {
+    kind: 'practice.morning_brief',
+    cadence: 'daily',
+    hourUtc: 6,
+    why:
+      'Global rather than per company because a practice is not a company — the third kind of ' +
+      'owner in this application, and pretending a firm’s letter belongs to one of its clients ' +
+      'would put it on that client’s record. An hour before the per-company digest, so a firm ' +
+      'reading at seven has already been told which client to open. One letter a firm, and only ' +
+      'when a client got worse than the last thing said about it.',
+  },
 ]
 
 /** Installs the standard schedules for one company. Safe to call repeatedly. */

@@ -53,6 +53,15 @@ const HOURLY_LIMIT: Record<TransactionalKind, number> = {
   password_reset: 5,
   company_invitation: 20,
   practice_invitation: 20,
+  /**
+   * One a day is the design; five an hour is the guard rail (Phase 88).
+   *
+   * The firm's brief is scheduled rather than triggered by anything a stranger
+   * can do, so this bounds a worker restart looping rather than an abuse this
+   * limit exists to stop — and it is per address, so a firm of six is six
+   * letters and not one over the limit.
+   */
+  practice_brief: 5,
   security_alert: 20,
   // Higher, because this one is a business doing its job rather than a
   // credential being handled: a builder sending out Friday's invoices can

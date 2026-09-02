@@ -9,7 +9,9 @@ import {
   memberships,
   practiceEngagements,
   sendingSnapshots,
+  transactionalMessages,
 } from '@/db/schema'
+import { mockTransactionalProvider } from '@/modules/notify/transactional'
 import { createCompanyFixture, type Fixture } from './helpers'
 import {
   addPracticeMember,
@@ -46,6 +48,8 @@ import { accountByNumber } from '@/modules/coa/service'
 import type { ActorContext } from '@/modules/tenancy/context'
 import { createSession, resolveSession, signSessionId } from '@/modules/auth/session'
 import { registerUser } from '@/modules/tenancy/onboarding'
+import { getHandler } from '@/modules/worker/registry'
+import '@/modules/worker/handlers'
 
 /**
  * Accountant practice mode (spec §14, Phase 18).
@@ -736,6 +740,170 @@ describe('the work queue', () => {
 
       expect(queue[0].triage.rung).toBe('unchecked')
       expect(queue[0].triage.headline).toBe('The books have never been checked')
+    })
+
+    /**
+     * Phase 88. Phase 24's digest reaches the memberships holding
+     * `company:manage`, and that permission belongs to `owner` alone — an
+     * engagement grants `accountant` and is capped by the client. So the firm
+     * engaged to keep the books is told nothing, and the person who *is* told
+     * is the one least equipped to act.
+     */
+    describe('the morning brief', () => {
+      const mail = mockTransactionalProvider()
+
+      async function fire(asOf: Date) {
+        const handler = getHandler('practice.morning_brief')!
+        return (await handler.handler({
+          actor: undefined as never,
+          companyId: null as never,
+          payload: { asOf: asOf.toISOString() },
+          attempt: 1,
+          jobId: 'test',
+        })) as Record<string, number | string>
+      }
+
+      it('writes to the firm, once, about the client that got worse', async () => {
+        const broken = await createCompanyFixture({ name: 'Zebra Ltd' })
+        const fine = await createCompanyFixture({ name: 'Alpha Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(broken, shop)
+        await engaged(fine, shop)
+        await checked(broken, 2)
+        await checked(fine, 0)
+
+        mail.reset()
+        const result = await fire(NOW)
+
+        expect(result.briefed).toBe(1)
+        // One letter per person at the firm, not one per client.
+        expect(mail.sent).toHaveLength(1)
+        expect(mail.sent[0].subject).toBe('Zebra Ltd needs a look')
+        expect(mail.sent[0].text).toContain('2 checks disagree with the ledger')
+        // Alpha is fine, so it is not in the letter at all.
+        expect(mail.sent[0].text).not.toContain('Alpha Ltd')
+      })
+
+      /**
+       * A daily message that never changes is a daily message nobody reads —
+       * the same failure ADR 0024 named, by a slower route.
+       */
+      it('says nothing the second morning about the same trouble', async () => {
+        const broken = await createCompanyFixture({ name: 'Zebra Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(broken, shop)
+        await checked(broken, 2)
+
+        mail.reset()
+        await fire(NOW)
+        expect(mail.sent).toHaveLength(1)
+
+        mail.reset()
+        const second = await fire(new Date(NOW.getTime() + 86_400_000))
+
+        expect(second.briefed).toBe(0)
+        expect(mail.sent).toHaveLength(0)
+      })
+
+      it('speaks again when the same client slides another rung', async () => {
+        const client = await createCompanyFixture({ name: 'Slide Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(client, shop)
+        // Night one: nobody has ever checked these books.
+        mail.reset()
+        await fire(NOW)
+        expect(mail.sent).toHaveLength(1)
+
+        // Night two: they have been checked, and they disagree.
+        await checked(client, 3)
+        mail.reset()
+        const second = await fire(new Date(NOW.getTime() + 86_400_000))
+
+        expect(second.briefed).toBe(1)
+        expect(mail.sent[0].text).toContain('3 checks disagree with the ledger')
+      })
+
+      /** The memory must hold a recovery, or the relapse cannot be told from a standing problem. */
+      it('goes quiet on a recovery and speaks again on the relapse', async () => {
+        const client = await createCompanyFixture({ name: 'Wobble Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(client, shop)
+        await checked(client, 2)
+
+        mail.reset()
+        await fire(NOW)
+        expect(mail.sent).toHaveLength(1)
+
+        // Fixed. Nothing is said about getting better.
+        await db.delete(integrityRuns).where(eq(integrityRuns.companyId, client.companyId))
+        await checked(client, 0)
+        mail.reset()
+        await fire(new Date(NOW.getTime() + 86_400_000))
+        expect(mail.sent).toHaveLength(0)
+
+        // Broken again. That is news, because the memory recorded the recovery.
+        await db.delete(integrityRuns).where(eq(integrityRuns.companyId, client.companyId))
+        await checked(client, 1)
+        mail.reset()
+        await fire(new Date(NOW.getTime() + 2 * 86_400_000))
+        expect(mail.sent).toHaveLength(1)
+      })
+
+      it('writes to everybody at the firm', async () => {
+        const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(client, shop)
+        await checked(client, 2)
+
+        const hire = await accountant('Second Pair Of Hands')
+        await addPracticeMember(
+          { userId: shop.ownerId, userName: shop.ownerName },
+          { practiceId: shop.practiceId, userId: hire.id },
+        )
+
+        mail.reset()
+        await fire(NOW)
+
+        expect(mail.sent).toHaveLength(2)
+      })
+
+      it('keeps one firm’s trouble out of another firm’s post', async () => {
+        const mine = await createCompanyFixture({ name: 'My Client' })
+        const theirs = await createCompanyFixture({ name: 'Their Client' })
+        const ours = await firm('Hartley & Co')
+        const rival = await firm('Rival Books')
+        await engaged(mine, ours)
+        await engaged(theirs, rival)
+        await checked(mine, 0)
+        await checked(theirs, 4)
+
+        mail.reset()
+        await fire(NOW)
+
+        // Only the rival hears about their own broken client.
+        const toUs = mail.sent.filter((message) => message.text.includes('My Client'))
+        expect(toUs).toHaveLength(0)
+        expect(mail.sent.every((message) => !message.to.includes('hartley'))).toBe(true)
+      })
+
+      /** A firm-wide letter is about no single company, so it is on no client's record. */
+      it('files the letter against no company at all', async () => {
+        const client = await createCompanyFixture({ name: 'Zebra Ltd' })
+        const shop = await firm('Hartley & Co')
+        await engaged(client, shop)
+        await checked(client, 2)
+
+        mail.reset()
+        await fire(NOW)
+
+        const rows = await db
+          .select({ companyId: transactionalMessages.companyId, kind: transactionalMessages.kind })
+          .from(transactionalMessages)
+          .where(eq(transactionalMessages.kind, 'practice_brief'))
+
+        expect(rows).toHaveLength(1)
+        expect(rows[0].companyId).toBeNull()
+      })
     })
 
     it('still keeps one firm’s clients out of another’s triage', async () => {

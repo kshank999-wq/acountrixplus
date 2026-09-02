@@ -4,6 +4,7 @@ import {
   text,
   timestamp,
   boolean,
+  date,
   index,
   unique,
   pgEnum,
@@ -228,5 +229,62 @@ export const engagementAssignments = pgTable(
     // role does Dana have here", and the second would silently win.
     once: unique('engagement_assignments_unique').on(t.engagementId, t.userId),
     userIdx: index('engagement_assignments_user_idx').on(t.userId),
+  }),
+)
+
+/**
+ * What a firm was last told about each of its clients (Phase 88).
+ *
+ * Phase 24's daily digest reaches the memberships holding `company:manage`, and
+ * that permission belongs to `owner` alone. A practice engagement grants
+ * `accountant` by default and is capped by the client, never above it — so the
+ * digest goes to the client's owner and never to the firm engaged to keep those
+ * books. The person told is the one least equipped to act on it.
+ *
+ * This table is what makes the firm's brief **news rather than state**. A client
+ * that was broken yesterday and is broken today is not news; one that slid a
+ * rung is. The rung last *observed* is written for every client on every run —
+ * including the ones nothing was said about — because a memory holding only bad
+ * news cannot tell a relapse from a standing problem.
+ *
+ * There is no run log beside it. What was actually sent is already in
+ * `transactional_messages`, and a second record of the same fact is the defect
+ * this project keeps finding.
+ */
+export const practiceBriefState = pgTable(
+  'practice_brief_state',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    practiceId: uuid('practice_id')
+      .notNull()
+      .references(() => practices.id, { onDelete: 'cascade' }),
+    /**
+     * Cascades here too: a company that leaves takes its memory with it, so
+     * re-engaging later starts fresh rather than comparing against a rung from
+     * a relationship that ended.
+     */
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+
+    /**
+     * One of the Phase 87 rungs.
+     *
+     * Text rather than an enum: the ladder is named data in TypeScript, and
+     * giving it a second home in the database would be two places to change and
+     * one of them would be forgotten.
+     */
+    rung: text('rung').notNull(),
+    seenOn: date('seen_on').notNull(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    /**
+     * One memory per firm per client.
+     *
+     * The database arbitrates rather than a read-then-write in the handler,
+     * because the brief is scheduled and a worker restart can run it twice.
+     */
+    once: unique('practice_brief_state_unique').on(t.practiceId, t.companyId),
   }),
 )
