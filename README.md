@@ -4613,9 +4613,11 @@ because calling it `customer` would be a plausible-looking wrong answer.
 **Spent rows stay in the file; the tally counts only what is left.** Reconciling
 the liability account wants what is outstanding; *"was this card already used?"*
 wants the row to exist at all. Filtering serves the first and silently fails the
-second. The manifest therefore totals the remaining balance, which makes it the
-figure that ties to the ledger — and a test asserts that correspondence rather
-than trusting it.
+second. The manifest therefore totals the remaining balance, which is the figure
+that *would* tie to the ledger. The test beside it asserts that the manifest
+agrees with the table it was computed from, which is nearly a tautology; nothing
+in this phase checked it against the ledger account. Phase 105 does that, for
+retainers.
 
 **One declaration of what a dataset is.** `DatasetName`, `DATASETS` and
 `DATASET_LABELS` were three parallel hand-written structures and only the record
@@ -4635,6 +4637,56 @@ are fixed, and the count is now of what was actually saved. And `summarise` said
 *"holds no money columns"* for a file with four money columns and no rows —
 introduced in Phase 103, invisible until this phase added a dataset that could
 legitimately be empty.
+
+### The client money nobody checked (Phase 105)
+
+The integrity register checks every other kind of money the company holds for
+somebody else. Gift cards against 2590. Tenant deposits against 2580. Customer
+overpayments against 2520. Practitioner earnings against 2320. **Retainers —
+a client's money, taken before the work is done — had nothing.**
+
+Phase 53 had already written down why that matters, when it added the
+overpayment check: *"Added with the account rather than after it, because Phase
+48 found a clearing account with no check on it and $28,700 in it that nothing
+in the application could clear. Once is enough to learn that."* Retainers were
+built in Phase 15 with their own liability account and never got one. Phase 104
+then *exported* them, which is when the gap became visible: the manifest tallies
+what the table says, and until now nothing asked whether the ledger agreed.
+
+**The verdict is not simply "are these equal", and that is the whole design.**
+`retainerAccount` resolves `2550 Client Retainers Held`, **or falls back to
+`2500 Unearned Revenue` where the industry pack did not install it** — and the
+fallback is the common case, not the rare one: six of the seven companies in the
+development database have no 2550. On a shared account equality is not true and
+never was, because 2500 legitimately holds every other kind of deferred revenue.
+A check demanding equality there would cry wolf on most companies, and a check
+that cries wolf is a check somebody turns off.
+
+So there are two claims, and **which one was made is part of the answer**:
+
+- **dedicated** — the two must be equal, because nothing else posts there;
+- **shared** — the retainers must not *exceed* the account, because unearned
+  revenue cannot legitimately be negative, so client money exceeding all
+  deferred revenue means a ledger half is missing.
+
+Both are faults; the weaker one is still something nothing legitimate can break,
+which is the line the register draws between a fault and a position. The finding
+says out loud when it checked the weaker thing, and turns the limitation into an
+instruction: *"Installing 2550 Client Retainers Held would let this compare
+exactly."* **A check that quietly downgrades what it asserts is worse than one
+that is absent, because the screen shows a tick either way.**
+
+**It sums the company's own money, not the money that arrived.** A retainer
+carries the currency it came in (Phase 66); the ledger is in the company's own.
+`functional_remaining_cents` is the column, and adding the other one across
+currencies is the sum Phase 65 was named for eliminating — doing it *inside an
+integrity check* would be worse than doing it anywhere else.
+
+**`retainerAccount` was two answers to one question.** It resolved the account
+and threw away which of the two it had found, so the caller could not tell a
+dedicated account from a fallback. `resolveRetainerAccount` now returns the
+account *and* the holding; the old function is a two-line wrapper over it, so
+billing and the check cannot disagree about where a retainer's money went.
 
 ## Deploying
 
@@ -4758,6 +4810,8 @@ Coverage matches what spec §21 asks for:
 | `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
 | `tests/export-held-money.test.ts` | **The dataset list derived from the labels**, so a dataset cannot exist and be silently absent from the default export, with a file for every one of them; **whose retainer it is, in the currency it arrived in**, with what it was booked at and the rate beside it; **a gift card's purchaser named as a purchaser and not as an owner**, blank where nobody left a name, and its balance in the company's own currency because the table has no other; **a spent card kept in the file and out of the total**, so the manifest figure ties to the liability account rather than to what was issued; which side of the books a credit note is on; **an empty money file told apart from one with no money in it**; and one company's held money kept out of another's export |\n| `tests/exported-money.test.ts` | **A money column never written without its currency**, and the functional figure stated as equal rather than left blank when it is; the header names generated from the same place as the values, so the two lists cannot drift apart; per-currency totals for a file, sorted so an export can be diffed, and a sentence saying **when a file holds two currencies and has no single total**; against the database, **a euro invoice and a dollar one coming out distinguishable** with what each was booked at, the manifest naming both currencies, **a foreign invoice not restated when the rate later moves**, the ledger and bank files naming the company's own currency so no money column anywhere is bare, the manifest counted as a file but not as rows of books, a customer whose name holds a comma still quoted, **every row carrying the same number of cells as its header** (checked with a quote-aware splitter, because the naive one trips on a chart-account description), and **the copies somebody took listed newest first** |
+| `tests/retainer-position.test.ts` | **A dedicated account checked for equality and a shared one only for "not more than"**, because 2500 legitimately holds other deferred revenue and a check that cries wolf on six of seven companies is a check somebody turns off; the ledger being the *larger* of the two still failing on a dedicated account, because there an excess is as wrong as a shortfall; **the claim returned beside the verdict**, so a reader can tell which question was answered rather than seeing the same tick either way; the shared caveat riding along even when the check passes, and turning the limitation into an instruction; a negative liability balance surviving into the wording rather than coming out unsigned; and **one retainer reading "1 retainer holds" and not "1 retainers hold ... between them"** — noun, verb and the whole clause built in one place, because Phase 96 shipped "1 recurring invoices" by pluralising one of two |
+| `tests/retainer-integrity.test.ts` | **A retainer whose ledger half never happened caught on a dedicated account**, and caught on a shared one too once it exceeds everything deferred; the fallback to 2500 reported as the fallback rather than silently passed off as the real account; **the company's own money summed rather than the money that arrived**, so an integrity check is not itself the cross-currency sum Phase 65 was named for eliminating; only retainers with something left on them counted; the check gated on `time_billing` so a company that takes no retainers is not told about an account it does not use; and the register's own entry naming both accounts it compares against, since the fallback is part of what it checked |
 | `tests/retention-attribution.test.ts` | **One company's letters never counted into another's total** — the defect stated as a number, with the unscoped version reading three where one is right; the deployment given every count because a total is only true for it; **a count described as this company's share where some rows belong to a firm or a person**, with the caveat saying which rather than just that the number is partial; **a reason rather than a blank** where no row has a company, and the policy's days and reason still shown to a viewer who gets no number; **a letter belonging to no company counted for the deployment and for nobody else**, so scoping does not make it invisible to everybody; the expiring count scoped the same way as the total; **every company swept however narrow the report was**, because scoping the delete would mean retention only removed rows belonging to whoever last loaded a page; every attribution checked against `information_schema` for whether the column exists **and whether it is nullable**; every policy that cannot name a company arguing for itself in prose; and **each sweep touching the table its policy names**, without which Phase 24's allowlist guarantee is asserted against a string nothing ties to the query |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; **the number of tables in the database written down, so adding one fails here with a message naming the two ways to answer**, `guard_attempts` swept on a year with the sign-in record's window asserted shorter, **an old guard attempt deleted while one inside the fifteen-minute cool-off is left where the guard can still read it**, and **`pruneExpiredTokens` gone from `tokens.ts` so thirty days has one answer**; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day** and nothing said about a sending reputation nobody has the volume to judge, **the digest speaking when the mail is bouncing though nothing failed**, **the send that did it named** and **nobody named when every campaign is as bad as the rest**, **which way it is going once two readings sit a window apart** with nothing claimed on one reading, **the day's reading written down on a quiet day too** and once however often the digest fires, one company's readings out of another's trend, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |

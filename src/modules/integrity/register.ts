@@ -13,6 +13,8 @@ import { tipsPosition } from '@/modules/pos/service'
 import { drawerPosition } from '@/modules/drawer/service'
 import { conversionsAgree } from '@/modules/fx/reporting'
 import { depositsHeld } from '@/modules/properties/deposits'
+import { retainerPosition } from '@/modules/timebilling/billing'
+import { verdictFor, weakerBecauseShared } from '@/modules/timebilling/retainer-position'
 import { authorisationsAgree } from '@/modules/vehicles/reporting'
 import { paymentsInTransitPosition } from '@/modules/payments/reporting'
 import { heldCredits } from '@/modules/receivables/customer-credit'
@@ -669,6 +671,49 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
         leftCents: result.registerCents,
         rightCents: result.ledgerCents,
         detail: `${result.leases.length} lease${result.leases.length === 1 ? '' : 's'} holding money`,
+      }
+    },
+  },
+  {
+    key: 'timebilling.retainers',
+    label: 'Client money we are holding, against what we owe on it',
+    compares: 'Σ retainer balances against 2550, or 2500 where that is all there is',
+    module: 'time_billing',
+    /**
+     * A fault, in both of the shapes this check comes in.
+     *
+     * Taking a retainer and drawing on it each post in the same transaction
+     * that maintains the balance, so on a dedicated account nothing can move
+     * the two apart. On a shared account only the weaker claim is available —
+     * see `retainer-position.ts` — but it is still one that nothing legitimate
+     * can break, which is where this register draws the line.
+     *
+     * Added late, and the register already knew better: `receivables.
+     * customer_credit` says "Added with the account rather than after it,
+     * because Phase 48 found a clearing account with no check on it and
+     * $28,700 in it that nothing in the application could clear. Once is
+     * enough to learn that." Retainers arrived in Phase 15 with an account of
+     * their own and no check until Phase 105.
+     */
+    severity: 'fault',
+    meaning:
+      'Money a client handed over before the work was done. A firm that cannot show the ' +
+      'retainers it holds against the liability on its balance sheet has the same problem a ' +
+      'landlord has with deposits, and in most places where professionals take money on ' +
+      'account the rules about it are stricter.',
+    run: async (ctx, asOf) => {
+      const position = await retainerPosition(ctx, { asOf })
+      const verdict = verdictFor(position)
+      const caveat = weakerBecauseShared(position)
+
+      return {
+        agrees: verdict.agrees,
+        leftCents: position.heldCents,
+        rightCents: position.ledgerCents,
+        // The caveat rides along even when the check passes: on a shared
+        // account the tick means less than it looks like, and a check that
+        // quietly weakens what it asserts is worse than one that is absent.
+        detail: [verdict.detail, caveat].filter(Boolean).join(' ') || undefined,
       }
     },
   },

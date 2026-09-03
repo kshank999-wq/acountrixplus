@@ -70,8 +70,18 @@ const money = (cents: number): string => {
   return negative ? `-${text}` : text
 }
 
-const retainerWord = (count: number): string =>
-  `${count} retainer${count === 1 ? '' : 's'}`
+/**
+ * "1 retainer holds 3200.00", "2 retainers hold 3200.00 between them".
+ *
+ * The whole clause is built in one place because it has three things that have
+ * to agree on the count — the noun, the verb, and whether "between them" means
+ * anything — and Phase 96 shipped "1 recurring invoices" by pluralising one of
+ * two. Splitting them is what makes them drift.
+ */
+const heldClause = (count: number, cents: number): string =>
+  count === 1
+    ? `1 retainer holds ${money(cents)}`
+    : `${count} retainers hold ${money(cents)} between them`
 
 /**
  * What the register should say about this position.
@@ -93,7 +103,7 @@ export function verdictFor(position: Position): Verdict {
       claim: `Σ retainers equals ${account}`,
       detail: agrees
         ? undefined
-        : `${retainerWord(openCount)} hold ${money(heldCents)} between them; ` +
+        : `${heldClause(openCount, heldCents)}; ` +
           `${account} carries ${money(ledgerCents)}. ` +
           'Taking a retainer and drawing on it both post in the same transaction ' +
           'that maintains the balance, so a difference means one half happened ' +
@@ -109,7 +119,7 @@ export function verdictFor(position: Position): Verdict {
     claim: `Σ retainers does not exceed ${account}`,
     detail: agrees
       ? undefined
-      : `${retainerWord(openCount)} hold ${money(heldCents)} between them, which is more ` +
+      : `${heldClause(openCount, heldCents)}, which is more ` +
         `than the ${money(ledgerCents)} on ${account} — and that account holds every other ` +
         'kind of deferred revenue too, so it should be the larger of the two. ' +
         'A ledger half is missing.',

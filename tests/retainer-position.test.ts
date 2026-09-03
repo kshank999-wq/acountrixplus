@@ -106,9 +106,21 @@ describe('a shared account', () => {
 })
 
 describe('the sentence a person reads', () => {
-  it('counts one retainer as one', () => {
+  it('counts one retainer as one, verb and all', () => {
+    // Phase 96 shipped "1 recurring invoices" by pluralising the noun and
+    // hardcoding the rest of the clause. The same sentence has three things
+    // that must agree on the count, so all three are asserted.
     const verdict = verdictFor(position({ openCount: 1, ledgerCents: 0 }))
-    expect(verdict.detail).toContain('1 retainer hold')
+
+    expect(verdict.detail).toContain('1 retainer holds 3200.00')
+    expect(verdict.detail).not.toContain('retainers')
+    // One retainer holds its money on its own, not "between them".
+    expect(verdict.detail).not.toContain('between them')
+  })
+
+  it('says "between them" only when there is more than one', () => {
+    const verdict = verdictFor(position({ openCount: 2, ledgerCents: 0 }))
+    expect(verdict.detail).toContain('2 retainers hold 3200.00 between them')
   })
 
   it('renders money the way the rest of the register does', () => {

@@ -101,6 +101,28 @@ sentence is corrected there, and the claim it made is what this phase actually
 builds — in the integrity register, which is where ADR 0104 itself said
 reconciliation belongs.
 
+## Decision 5: the whole clause agrees with its own count
+
+Browser verification of this check rendered *"1 retainer hold 3200.00 between
+them"* — the noun pluralised, the verb hardcoded, and "between them" referring
+to one thing. Exactly the defect Phase 96 shipped as *"1 recurring invoices"*.
+
+The fix is not a second conditional. The clause has **three** parts that have to
+agree on the count, and splitting them across a helper and a template literal is
+what let them drift in the first place, so one function builds the whole thing:
+
+```ts
+const heldClause = (count: number, cents: number): string =>
+  count === 1
+    ? `1 retainer holds ${money(cents)}`
+    : `${count} retainers hold ${money(cents)} between them`
+```
+
+The test that existed asserted `toContain('1 retainer hold')`, which passes on
+the broken string — it was the assertion that locked the wrong wording in. It
+now asserts the singular form **and** that neither `retainers` nor `between
+them` appears, because a `toContain` on a fragment cannot catch a suffix.
+
 ## What this does not do
 
 **It does not install `2550` for the six companies that lack it.** Adding an

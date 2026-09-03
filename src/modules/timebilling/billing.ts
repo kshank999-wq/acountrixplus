@@ -26,6 +26,8 @@ import { drawableAgainst } from '@/modules/fx/denomination'
 import { mayUse } from '@/modules/receivables/overpayment'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { DomainError } from '@/modules/errors'
+import { balanceForAccount } from '@/modules/ledger/balances'
+import { type Position } from './retainer-position'
 
 /**
  * Turning recorded work into an invoice (spec §5).
@@ -781,12 +783,67 @@ async function applyRetainerWithin(
  * never happened.
  */
 async function retainerAccount(companyId: string, exec: Executor = db) {
+  return (await resolveRetainerAccount(companyId, exec)).account
+}
+
+/**
+ * The same resolution, saying **which** of the two it landed on (Phase 105).
+ *
+ * The integrity check has to know: on 2550 nothing else posts, so the retainers
+ * and the account must be equal; on 2500 the account also holds every other
+ * kind of deferred revenue, so only "not more than" can be claimed. Deriving
+ * that a second time from the account number would be two answers to "where do
+ * retainers live", and the posting path and the check disagreeing about that is
+ * exactly how a check ends up reconciling the wrong account.
+ */
+export async function resolveRetainerAccount(companyId: string, exec: Executor = db) {
   const held = await accountByNumber(companyId, INDUSTRY_ACCOUNTS.clientRetainers, exec)
-  if (held) return held
+  if (held) return { account: held, holding: 'dedicated' as const }
 
   const unearned = await accountByNumber(companyId, '2500', exec)
   if (!unearned) throw new Error('No account is set up to hold client retainers.')
-  return unearned
+  return { account: unearned, holding: 'shared' as const }
+}
+
+/**
+ * What the retainers say, against what the ledger says (Phase 105).
+ *
+ * Summed on `functional_remaining_cents` rather than `remaining_cents`: a
+ * retainer carries the currency the money arrived in (Phase 66) and the ledger
+ * is in the company's own money, so adding the second across a firm holding
+ * both euros and dollars would produce the number Phase 65 was named for
+ * eliminating — inside a check whose whole purpose is noticing when numbers
+ * disagree.
+ *
+ * The verdict is `verdictFor` in `retainer-position.ts`; this only fetches.
+ */
+export async function retainerPosition(
+  ctx: ActorContext,
+  opts: { asOf?: string } = {},
+): Promise<Position> {
+  requirePermission(ctx, 'reports:view')
+
+  const [totals] = await db
+    .select({
+      held: sql<string>`coalesce(sum(${retainers.functionalRemainingCents}), 0)`,
+      open: sql<string>`count(*) filter (where ${retainers.remainingCents} > 0)`,
+    })
+    .from(retainers)
+    .where(scoped(ctx, retainers))
+
+  const { account, holding } = await resolveRetainerAccount(ctx.companyId)
+
+  return {
+    heldCents: Number(totals?.held ?? 0),
+    // Signed in the account's normal direction, so a liability carrying a
+    // credit balance comes back positive — already what "how much of other
+    // people's money are we holding" means.
+    ledgerCents: await balanceForAccount(ctx, account.id, { endDate: opts.asOf }),
+    holding,
+    accountNumber: account.number,
+    accountName: account.name,
+    openCount: Number(totals?.open ?? 0),
+  }
 }
 
 export async function listRetainers(
