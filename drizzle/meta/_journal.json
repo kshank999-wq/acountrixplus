@@ -512,6 +512,13 @@
       "when": 1788740005000,
       "tag": "0072_phase112_retainer_application_carried",
       "breakpoints": true
+    },
+    {
+      "idx": 73,
+      "version": "7",
+      "when": 1788740006000,
+      "tag": "0073_phase113_payment_application_dated",
+      "breakpoints": true
     }
   ]
 }

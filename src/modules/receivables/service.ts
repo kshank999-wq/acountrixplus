@@ -1268,7 +1268,14 @@ export async function recordPayment(
     let carriedCents = 0
 
     for (const application of input.applications) {
-      const applied = await applyToDocument(ctx, payment.id, application, input.kind, tx)
+      const applied = await applyToDocument(
+        ctx,
+        payment.id,
+        application,
+        input.kind,
+        input.paymentDate,
+        tx,
+      )
       if (applied.settled) settlements.push(applied)
       carriedCents += applied.functionalCents
     }
@@ -1450,6 +1457,15 @@ async function applyToDocument(
   paymentId: string,
   application: PaymentApplicationInput,
   kind: 'receipt' | 'disbursement',
+  /**
+   * The day this application happened (Phase 113).
+   *
+   * Here it is the payment's own date, because the money and the document are
+   * being joined in the same act. `applyCredit` passes the day the credit was
+   * spent instead, and the difference between those two is what this parameter
+   * exists to keep.
+   */
+  appliedOn: string,
   tx: Executor,
 ): Promise<{
   settled: boolean
@@ -1502,6 +1518,7 @@ async function applyToDocument(
     invoiceId: isInvoice ? documentId : null,
     billId: isInvoice ? null : documentId,
     amountCents: application.amountCents,
+    appliedOn,
   })
 
   return {

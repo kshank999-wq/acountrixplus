@@ -716,11 +716,28 @@ export const paymentApplications = pgTable(
     invoiceId: uuid('invoice_id').references(() => invoices.id, { onDelete: 'cascade' }),
     billId: uuid('bill_id').references(() => bills.id, { onDelete: 'cascade' }),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /**
+     * The day the money and the document were joined (Phase 113).
+     *
+     * Not the day the money arrived. For an application made when the payment
+     * was recorded the two are the same, and for **held credit spent later**
+     * they are months apart — which is the whole reason this column exists.
+     *
+     * Until Phase 113 the row carried a payment, a document and an amount and
+     * nothing else, not even a `created_at`, so every reader that needed a date
+     * substituted `payments.payment_date`. On a cash basis — where this codebase
+     * recognises revenue *through the document a payment settles* — that put a
+     * July credit's revenue in March, and made re-running March after the fact
+     * return a larger number than it had before.
+     */
+    appliedOn: date('applied_on').notNull(),
   },
   (t) => ({
     paymentIdx: index('payment_applications_payment_idx').on(t.paymentId),
     invoiceIdx: index('payment_applications_invoice_idx').on(t.invoiceId),
     billIdx: index('payment_applications_bill_idx').on(t.billId),
+    // The query this column exists for: one company's applications up to a date.
+    datedIdx: index('payment_applications_dated_idx').on(t.companyId, t.appliedOn),
     // Applies to exactly one document.
     oneTargetCheck: check(
       'payment_applications_one_target',

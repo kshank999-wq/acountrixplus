@@ -72,7 +72,11 @@ export async function settlementsAfter(
     db
       .select({
         documentId: documentColumn(paymentApplications),
-        on: payments.paymentDate,
+        // The day the application happened, not the day the money arrived
+        // (Phase 113). They differ whenever held credit is spent later, and
+        // using the payment's date undid a July application when asked about a
+        // date in June — putting a balance back that had already been settled.
+        on: paymentApplications.appliedOn,
         cents: paymentApplications.amountCents,
       })
       .from(paymentApplications)
@@ -83,7 +87,7 @@ export async function settlementsAfter(
           paymentApplications,
           and(
             isNotNull(documentColumn(paymentApplications)),
-            gt(payments.paymentDate, asOf),
+            gt(paymentApplications.appliedOn, asOf),
             // A voided payment put the balance back, so it never reduced it.
             sql`${payments.status} <> 'void'`,
           ),

@@ -129,6 +129,14 @@ possible at all.
 
 ## What this does not do
 
+> **Corrected by Phase 113.** "Those rows do not exist at all" is false:
+> `payment_applications` has been in the schema since Phase 2. It was simply
+> undated — which turned out to matter far more than this check's reach, because
+> cash-basis reporting and Phase 108's `settlementsAfter` both substituted
+> `payments.payment_date` for the missing one. Phase 113 added `applied_on`. The
+> *functional* figure this paragraph is otherwise right about is still missing,
+> so the check remains `today_only`.
+
 **It does not repair the remaining eight.** `receivables.customer_credit` is the
 one that cannot be: held credit is a running column on the payment with no dated
 record of its consumption, which is the same defect this phase fixed — and fixing

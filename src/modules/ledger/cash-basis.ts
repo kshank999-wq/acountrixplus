@@ -553,6 +553,19 @@ export async function cashBasisBalances(
     linesByDocument.set(line.documentId, existing)
   }
 
+  /**
+   * Dated by when the application happened, not when the money arrived
+   * (Phase 113).
+   *
+   * This module recognises through the document a payment settles — its own
+   * caveat below says so — so the period an application belongs to is the
+   * period it was made in. Held credit spent months later is the case where
+   * the two dates differ, and until `payment_applications` had a date of its
+   * own the only one available was `payments.payment_date`. A March
+   * overpayment applied to a July invoice was reported as March revenue, and
+   * re-running March afterwards returned more than it had before — a closed
+   * period changing because of something somebody did today.
+   */
   const applications = await db
     .select({
       amountCents: paymentApplications.amountCents,
@@ -569,8 +582,8 @@ export async function cashBasisBalances(
         // worst place for a void to be forgotten.
         eq(payments.status, 'posted'),
         ...([
-          range.startDate ? gte(payments.paymentDate, range.startDate) : undefined,
-          range.endDate ? lte(payments.paymentDate, range.endDate) : undefined,
+          range.startDate ? gte(paymentApplications.appliedOn, range.startDate) : undefined,
+          range.endDate ? lte(paymentApplications.appliedOn, range.endDate) : undefined,
         ].filter(Boolean) as SQL[]),
       ),
     )

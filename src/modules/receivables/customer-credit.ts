@@ -167,6 +167,11 @@ export async function applyCredit(
       invoiceId: invoice.id,
       billId: null,
       amountCents,
+      // The day the credit was spent, which is the day the journal entry above
+      // is dated and — months after the money arrived — not the payment's own
+      // date (Phase 113). Writing the payment's date here is what put a July
+      // credit's revenue into a closed March on a cash basis.
+      appliedOn: input.appliedOn,
     })
 
     /**
