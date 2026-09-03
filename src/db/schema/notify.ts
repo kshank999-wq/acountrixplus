@@ -26,6 +26,14 @@ export const actionTokenPurposeEnum = pgEnum('action_token_purpose', [
   'password_reset',
   'company_invitation',
   'practice_invitation',
+  /**
+   * A claim on a new sign-in address (Phase 98).
+   *
+   * `email` on the row is the address being **claimed**, not one already
+   * proved — which is the whole point: it becomes the user's only when this
+   * token is redeemed from it.
+   */
+  'email_change',
 ])
 
 /**

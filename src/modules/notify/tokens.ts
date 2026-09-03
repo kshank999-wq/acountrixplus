@@ -25,7 +25,11 @@ import { DomainError } from '@/modules/errors'
  *    an inbox over a weekend.
  */
 
-export type TokenPurpose = 'password_reset' | 'company_invitation' | 'practice_invitation'
+export type TokenPurpose =
+  | 'password_reset'
+  | 'company_invitation'
+  | 'practice_invitation'
+  | 'email_change'
 
 export const TOKEN_TTL_MINUTES: Record<TokenPurpose, number> = {
   // Long enough to walk to another device and find the email; short enough
@@ -33,6 +37,15 @@ export const TOKEN_TTL_MINUTES: Record<TokenPurpose, number> = {
   password_reset: 60,
   company_invitation: 7 * 24 * 60,
   practice_invitation: 7 * 24 * 60,
+  /**
+   * The same hour a reset gets, for the same reason (Phase 98).
+   *
+   * Long enough to walk to another device and find the letter; short enough
+   * that a claim left in a shared inbox stops mattering by lunchtime. This is
+   * the only place the number lives — `lettersFor` is handed it rather than
+   * declaring a second one that would have to agree.
+   */
+  email_change: 60,
 }
 
 /**

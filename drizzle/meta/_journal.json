@@ -484,6 +484,13 @@
       "when": 1788740001000,
       "tag": "0068_phase96_party_merge",
       "breakpoints": true
+    },
+    {
+      "idx": 69,
+      "version": "7",
+      "when": 1788740002000,
+      "tag": "0069_phase98_email_change_token",
+      "breakpoints": true
     }
   ]
 }
