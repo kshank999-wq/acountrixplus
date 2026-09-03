@@ -1,9 +1,16 @@
 import { and, eq, inArray, ne, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { bills, customers, invoices, vendors } from '@/db/schema'
+import { bills, creditNotes, customers, invoices, vendors } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { balanceForAccount } from './balances'
 import { accountByNumber } from '@/modules/coa/service'
+import {
+  composition,
+  reconcile,
+  type ControlAccount,
+  type DocumentKind,
+  type PartyAmount,
+} from './control-account'
 
 /**
  * Does the balance sheet agree with the people it names? (spec §13, §19)
@@ -29,6 +36,19 @@ import { accountByNumber } from '@/modules/coa/service'
  * detector.
  *
  * The same argument applies to Accounts Payable, so both are here.
+ *
+ * ## What Phase 106 corrected
+ *
+ * The subledger side was summed from open **invoices** alone, and invoices are
+ * not the only document that posts to `1100`. A credit note credits it the
+ * moment it is issued — `applyCredit` posts no entry, because the money already
+ * moved — so between issuing a credit and applying it this check reported a
+ * *fault* on a state the application fully supports. `2000` had the same hole
+ * from the other side, via vendor credits.
+ *
+ * Which document moves which account, and in which direction, now lives in
+ * `control-account.ts` as declared data, so the next document type to post at a
+ * control account has to answer the question rather than default to invisible.
  */
 
 export type ControlAccountCheck = {
@@ -59,6 +79,14 @@ export type ControlAccountCheck = {
    * as a discrepancy the moment they were invoiced.
    */
   parties: Array<{ id: string; name: string; balanceCents: number }>
+  /**
+   * What the subledger figure is made of (Phase 106).
+   *
+   * "2 invoices worth $1,000.00, 1 credit note less $300.00". Carried even when
+   * the two agree, because the figure is no longer just the invoices and a
+   * reader who remembers when it was should be able to see why it differs.
+   */
+  composition: string
 }
 
 export type ControlAccountReport = {
@@ -101,6 +129,93 @@ export async function controlAccounts(
 /** Statuses that still owe something. A void document owes nothing by definition. */
 const OPEN_INVOICE_STATUSES = ['open', 'partial', 'written_off'] as const
 
+/**
+ * Credit notes with something still on them, by party.
+ *
+ * `party` rather than a separate table: customer credit notes and vendor
+ * credits are the same row shape in `credit_notes`, told apart by that column,
+ * which is why both control accounts read from here.
+ *
+ * `functional_remaining_cents` for the same reason the document sides use
+ * `functional_balance_cents` — the ledger half of this comparison is always in
+ * the company's own money, and summing a euro credit's face value against a
+ * dollar control account would report every foreign customer as a discrepancy
+ * (Phase 35, Phase 65).
+ */
+async function openCredits(
+  ctx: ActorContext,
+  party: 'customer' | 'vendor',
+): Promise<Array<{ partyId: string | null; cents: number; documents: number }>> {
+  const partyColumn = party === 'customer' ? creditNotes.customerId : creditNotes.vendorId
+
+  const rows = await db
+    .select({
+      partyId: partyColumn,
+      cents: sql<string>`coalesce(sum(${creditNotes.functionalRemainingCents}), 0)`,
+      documents: sql<string>`count(${creditNotes.id})`,
+    })
+    .from(creditNotes)
+    .where(
+      scoped(
+        ctx,
+        creditNotes,
+        and(
+          eq(creditNotes.party, party),
+          ne(creditNotes.status, 'void'),
+          sql`${creditNotes.remainingCents} > 0`,
+        ),
+      ),
+    )
+    .groupBy(partyColumn)
+
+  return rows.map((row) => ({
+    partyId: row.partyId,
+    cents: Number(row.cents),
+    documents: Number(row.documents),
+  }))
+}
+
+/**
+ * Turns one control account's documents into the shape the core reconciles.
+ *
+ * The two sides differ only in which tables they read, so the assembly and
+ * every decision about signs, netting and wording is shared — which is the
+ * point: the payables hole existed because the two functions were written twice
+ * and only one of them was ever revisited.
+ */
+function toAmounts(
+  kind: DocumentKind,
+  rows: Array<{ id: string; name: string; cents: number; documents: number }>,
+): PartyAmount[] {
+  return rows.map((row) => ({ ...row, kind }))
+}
+
+function assemble(
+  account: ControlAccount,
+  accountNumber: string,
+  accountName: string,
+  ledgerCents: number,
+  amounts: PartyAmount[],
+): ControlAccountCheck {
+  const result = reconcile(account, ledgerCents, amounts)
+
+  return {
+    accountNumber,
+    accountName,
+    ledgerCents: result.ledgerCents,
+    subledgerCents: result.subledgerCents,
+    differenceCents: result.differenceCents,
+    agrees: result.agrees,
+    documents: result.documents,
+    parties: result.parties.map((party) => ({
+      id: party.id,
+      name: party.name,
+      balanceCents: party.balanceCents,
+    })),
+    composition: composition(result),
+  }
+}
+
 async function receivablesCheck(
   ctx: ActorContext,
   asOf?: string,
@@ -109,46 +224,67 @@ async function receivablesCheck(
 
   const ledgerCents = account ? await balanceForAccount(ctx, account.id, { endDate: asOf }) : 0
 
-  const rows = await db
-    .select({
-      id: customers.id,
-      name: customers.name,
-      balanceCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
-      documents: sql<string>`count(${invoices.id})`,
-    })
-    .from(invoices)
-    .innerJoin(customers, eq(customers.id, invoices.customerId))
-    .where(
-      scoped(
-        ctx,
-        invoices,
-        and(
-          inArray(invoices.status, [...OPEN_INVOICE_STATUSES]),
-          ne(invoices.balanceCents, 0),
+  const [invoiceRows, creditRows] = await Promise.all([
+    db
+      .select({
+        id: customers.id,
+        name: customers.name,
+        cents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
+        documents: sql<string>`count(${invoices.id})`,
+      })
+      .from(invoices)
+      .innerJoin(customers, eq(customers.id, invoices.customerId))
+      .where(
+        scoped(
+          ctx,
+          invoices,
+          and(
+            inArray(invoices.status, [...OPEN_INVOICE_STATUSES]),
+            ne(invoices.balanceCents, 0),
+          ),
         ),
-      ),
-    )
-    .groupBy(customers.id, customers.name)
-    .orderBy(sql`coalesce(sum(${invoices.functionalBalanceCents}), 0) desc`)
+      )
+      .groupBy(customers.id, customers.name),
+    openCredits(ctx, 'customer'),
+  ])
 
-  const parties = rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    balanceCents: Number(row.balanceCents),
-  }))
+  // The credit rows carry an id and no name, because they were grouped on the
+  // foreign key. Named from the invoice rows where possible, and from the
+  // customer table where the only document a party has is a credit.
+  const names = await partyNames(
+    ctx,
+    'customer',
+    creditRows.map((row) => row.partyId),
+  )
 
-  const subledgerCents = parties.reduce((sum, row) => sum + row.balanceCents, 0)
-
-  return {
-    accountNumber: '1100',
-    accountName: account?.name ?? 'Accounts Receivable',
+  return assemble(
+    'receivables',
+    '1100',
+    account?.name ?? 'Accounts Receivable',
     ledgerCents,
-    subledgerCents,
-    differenceCents: ledgerCents - subledgerCents,
-    agrees: ledgerCents === subledgerCents,
-    documents: rows.reduce((sum, row) => sum + Number(row.documents), 0),
-    parties,
-  }
+    [
+      ...toAmounts(
+        'invoice',
+        invoiceRows.map((row) => ({
+          id: row.id,
+          name: row.name,
+          cents: Number(row.cents),
+          documents: Number(row.documents),
+        })),
+      ),
+      ...toAmounts(
+        'credit_note',
+        creditRows
+          .filter((row): row is typeof row & { partyId: string } => row.partyId !== null)
+          .map((row) => ({
+            id: row.partyId,
+            name: names.get(row.partyId) ?? 'Unknown customer',
+            cents: row.cents,
+            documents: row.documents,
+          })),
+      ),
+    ],
+  )
 }
 
 async function payablesCheck(ctx: ActorContext, asOf?: string): Promise<ControlAccountCheck> {
@@ -158,41 +294,71 @@ async function payablesCheck(ctx: ActorContext, asOf?: string): Promise<ControlA
   // money is owed and the comparison is between two numbers of the same sign.
   const ledgerCents = account ? await balanceForAccount(ctx, account.id, { endDate: asOf }) : 0
 
+  const [billRows, creditRows] = await Promise.all([
+    db
+      .select({
+        id: vendors.id,
+        name: vendors.name,
+        cents: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)`,
+        documents: sql<string>`count(${bills.id})`,
+      })
+      .from(bills)
+      .innerJoin(vendors, eq(vendors.id, bills.vendorId))
+      .where(
+        scoped(
+          ctx,
+          bills,
+          and(inArray(bills.status, ['open', 'partial']), ne(bills.balanceCents, 0)),
+        ),
+      )
+      .groupBy(vendors.id, vendors.name),
+    openCredits(ctx, 'vendor'),
+  ])
+
+  const names = await partyNames(
+    ctx,
+    'vendor',
+    creditRows.map((row) => row.partyId),
+  )
+
+  return assemble('payables', '2000', account?.name ?? 'Accounts Payable', ledgerCents, [
+    ...toAmounts(
+      'bill',
+      billRows.map((row) => ({
+        id: row.id,
+        name: row.name,
+        cents: Number(row.cents),
+        documents: Number(row.documents),
+      })),
+    ),
+    ...toAmounts(
+      'vendor_credit',
+      creditRows
+        .filter((row): row is typeof row & { partyId: string } => row.partyId !== null)
+        .map((row) => ({
+          id: row.partyId,
+          name: names.get(row.partyId) ?? 'Unknown supplier',
+          cents: row.cents,
+          documents: row.documents,
+        })),
+    ),
+  ])
+}
+
+/** Names for parties known only by id, so a credit-only party is still named. */
+async function partyNames(
+  ctx: ActorContext,
+  party: 'customer' | 'vendor',
+  ids: Array<string | null>,
+): Promise<Map<string, string>> {
+  const wanted = ids.filter((id): id is string => id !== null)
+  if (wanted.length === 0) return new Map()
+
+  const table = party === 'customer' ? customers : vendors
   const rows = await db
-    .select({
-      id: vendors.id,
-      name: vendors.name,
-      balanceCents: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)`,
-      documents: sql<string>`count(${bills.id})`,
-    })
-    .from(bills)
-    .innerJoin(vendors, eq(vendors.id, bills.vendorId))
-    .where(
-      scoped(
-        ctx,
-        bills,
-        and(inArray(bills.status, ['open', 'partial']), ne(bills.balanceCents, 0)),
-      ),
-    )
-    .groupBy(vendors.id, vendors.name)
-    .orderBy(sql`coalesce(sum(${bills.functionalBalanceCents}), 0) desc`)
+    .select({ id: table.id, name: table.name })
+    .from(table)
+    .where(scoped(ctx, table, inArray(table.id, wanted)))
 
-  const parties = rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    balanceCents: Number(row.balanceCents),
-  }))
-
-  const subledgerCents = parties.reduce((sum, row) => sum + row.balanceCents, 0)
-
-  return {
-    accountNumber: '2000',
-    accountName: account?.name ?? 'Accounts Payable',
-    ledgerCents,
-    subledgerCents,
-    differenceCents: ledgerCents - subledgerCents,
-    agrees: ledgerCents === subledgerCents,
-    documents: rows.reduce((sum, row) => sum + Number(row.documents), 0),
-    parties,
-  }
+  return new Map(rows.map((row) => [row.id, row.name]))
 }

@@ -148,36 +148,40 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
   {
     key: 'ledger.receivables',
     label: 'What is owed to us, against who owes it',
-    compares: 'Accounts Receivable against open invoices',
+    compares: 'Accounts Receivable against the open invoices and credit notes behind it',
     module: null,
     severity: 'fault',
     meaning:
       'Nothing legitimately moves a control account except a document. A difference means an ' +
-      'entry was posted straight at 1100, or an invoice exists that the ledger never heard about.',
+      'entry was posted straight at 1100, or a document exists that the ledger never heard about. ' +
+      'Credit notes count on the same side of that sentence as invoices: a credit posts to 1100 ' +
+      'when it is issued, not when somebody decides which invoice it belongs to.',
     run: async (ctx, asOf) => {
       const result = await controlAccounts(ctx, { asOf })
       return {
         agrees: result.receivables.agrees,
         leftCents: result.receivables.subledgerCents,
         rightCents: result.receivables.ledgerCents,
-        detail: named(result.receivables.parties),
+        detail: madeOf(result.receivables),
       }
     },
   },
   {
     key: 'ledger.payables',
     label: 'What we owe, against who we owe it to',
-    compares: 'Accounts Payable against open bills',
+    compares: 'Accounts Payable against the open bills and vendor credits behind it',
     module: null,
     severity: 'fault',
-    meaning: 'The same rule as receivables, on the other side of the balance sheet.',
+    meaning:
+      'The same rule as receivables, on the other side of the balance sheet — vendor credits ' +
+      'included, since one debits 2000 the moment it is raised.',
     run: async (ctx, asOf) => {
       const result = await controlAccounts(ctx, { asOf })
       return {
         agrees: result.payables.agrees,
         leftCents: result.payables.subledgerCents,
         rightCents: result.payables.ledgerCents,
-        detail: named(result.payables.parties),
+        detail: madeOf(result.payables),
       }
     },
   },
@@ -753,6 +757,21 @@ export function checkByKey(key: string): IntegrityCheck | undefined {
  * Capped, because the point is to give somebody a place to start rather than
  * to reproduce the aging report in a notification.
  */
+/**
+ * A control account's finding: what the figure is made of, then who is in it.
+ *
+ * The composition leads because the subledger side stopped being "the open
+ * invoices" in Phase 106, and a reader looking at a number that no longer
+ * matches the aging report needs the reason before the names.
+ */
+function madeOf(check: {
+  composition: string
+  parties: Array<{ name: string }>
+}): string | undefined {
+  const who = named(check.parties)
+  return [check.composition, who].filter(Boolean).join(' — ') || undefined
+}
+
 function named(parties: Array<{ name: string }>): string | undefined {
   if (parties.length === 0) return undefined
   const shown = parties.slice(0, 3).map((party) => party.name)

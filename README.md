@@ -4688,6 +4688,64 @@ dedicated account from a fallback. `resolveRetainerAccount` now returns the
 account *and* the holding; the old function is a two-line wrapper over it, so
 billing and the check cannot disagree about where a retainer's money went.
 
+### The document that moved the control account (Phase 106)
+
+Phase 31 built the check that proves Accounts Receivable against the documents
+behind it, and summed the subledger side from **open invoices**. Invoices are not
+the only document that posts to `1100`. **A credit note credits it the moment it
+is issued** — `applyCredit` posts no journal entry at all, and says why:
+*"the credit note already moved the receivable when it was issued."*
+
+So the ledger moves at issue and the subledger moved at application, and between
+those two moments the check reported a **fault** — its highest severity — on a
+state the application fully supports. `2000` had the same hole via vendor
+credits. Measured before the fix rather than reasoned about:
+
+```
+AR after raising a 30000 credit:  ledger=70000  subledger=100000  agrees=false
+AP after raising a 20000 credit:  ledger=60000  subledger=80000   agrees=false
+```
+
+This is **Phase 105's argument arriving from the opposite direction**. There the
+worry was a check too weak to mean anything; here it is one that cries wolf —
+and a check that cries wolf is a check somebody turns off, taking the genuine
+split Phase 31 exists to catch out with it.
+
+**Why it survived seventy-five phases.** Both controls on the receivables board
+pass `applyImmediately: true`, so the screen anybody actually clicks never leaves
+a credit outstanding. Everything underneath does: the server action defaults the
+flag to **false**, and `invoiceId` is **optional** on it — a standalone credit
+note, *"a goodwill gesture before the next invoice exists"*, has no invoice to be
+applied to and so cannot be anything *but* unapplied. The seed data has no
+unapplied credit either, which is why nothing since Phase 31 tripped over it.
+
+**The claim is narrow: a control account's subledger is every document that
+posts to that control account.** Not "the invoices". An overpayment is correctly
+*absent* — Phase 53 sent held credit to `2520`, its own liability with its own
+check, and it never touches `1100`. A credit note is not like that.
+
+**This is not netting credits into the aging report**, which Phase 54 refused for
+reasons that still hold: an unapplied credit has no *age*, because nobody has yet
+decided which invoice it belongs to. The honest consequence is that the aging
+total and the `1100` balance can now legitimately differ, by exactly the
+unapplied credits — a difference between two questions rather than a discrepancy,
+but a real one, and ADR 0106 says so rather than leaving it implicit.
+
+**A sign that nobody declared is an exception, not a zero.** `POSTINGS` names
+each document kind, the account it moves, the direction and *why*, and `signFor`
+throws on anything absent — because a silent zero is exactly how the credit note
+stayed out of this sum for seventy-five phases.
+
+**The per-party list nets too, and keeps a negative.** Netting only the total
+would leave the check agreeing while naming $1,000 against a customer who owes
+$700. A party who nets to nothing is dropped; a party whose credits *exceed*
+their invoices is kept and shown signed, because that is money the business owes
+them and hiding it is the same failure pointing the other way.
+
+The finding now says what the figure is made of — *"11 invoices worth
+$50,000.69, 1 credit note less $600.00"* — whether or not it passes, since the
+subledger figure stopped being "the open invoices" in this phase.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -4810,6 +4868,8 @@ Coverage matches what spec §21 asks for:
 | `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
 | `tests/export-held-money.test.ts` | **The dataset list derived from the labels**, so a dataset cannot exist and be silently absent from the default export, with a file for every one of them; **whose retainer it is, in the currency it arrived in**, with what it was booked at and the rate beside it; **a gift card's purchaser named as a purchaser and not as an owner**, blank where nobody left a name, and its balance in the company's own currency because the table has no other; **a spent card kept in the file and out of the total**, so the manifest figure ties to the liability account rather than to what was issued; which side of the books a credit note is on; **an empty money file told apart from one with no money in it**; and one company's held money kept out of another's export |\n| `tests/exported-money.test.ts` | **A money column never written without its currency**, and the functional figure stated as equal rather than left blank when it is; the header names generated from the same place as the values, so the two lists cannot drift apart; per-currency totals for a file, sorted so an export can be diffed, and a sentence saying **when a file holds two currencies and has no single total**; against the database, **a euro invoice and a dollar one coming out distinguishable** with what each was booked at, the manifest naming both currencies, **a foreign invoice not restated when the rate later moves**, the ledger and bank files naming the company's own currency so no money column anywhere is bare, the manifest counted as a file but not as rows of books, a customer whose name holds a comma still quoted, **every row carrying the same number of cells as its header** (checked with a quote-aware splitter, because the naive one trips on a chart-account description), and **the copies somebody took listed newest first** |
+| `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |
+| `tests/control-account-credits.test.ts` | **Both control accounts agreeing while a credit sits unapplied** — the measured failure was ledger 70000 against a subledger of 100000 — and still agreeing once it is applied, with nothing double-counted, since applying posts no entry and moves both sides by the same amount; **a customer whose only document is a credit note still named**, because the credit rows are grouped on the foreign key rather than joined to the invoices, and shown owed money rather than clamped to zero; a customer whose credit covers everything they owe dropped from the list; **an entry posted straight at 1100 still caught**, which is what Phase 31 exists for; the composition sentence reaching the register's finding; the register naming credit notes in what it compares and saying "when it is issued" in why it matters; and one company's credit notes kept out of another's control account |
 | `tests/retainer-position.test.ts` | **A dedicated account checked for equality and a shared one only for "not more than"**, because 2500 legitimately holds other deferred revenue and a check that cries wolf on six of seven companies is a check somebody turns off; the ledger being the *larger* of the two still failing on a dedicated account, because there an excess is as wrong as a shortfall; **the claim returned beside the verdict**, so a reader can tell which question was answered rather than seeing the same tick either way; the shared caveat riding along even when the check passes, and turning the limitation into an instruction; a negative liability balance surviving into the wording rather than coming out unsigned; and **one retainer reading "1 retainer holds" and not "1 retainers hold ... between them"** — noun, verb and the whole clause built in one place, because Phase 96 shipped "1 recurring invoices" by pluralising one of two |
 | `tests/retainer-integrity.test.ts` | **A retainer whose ledger half never happened caught on a dedicated account**, and caught on a shared one too once it exceeds everything deferred; the fallback to 2500 reported as the fallback rather than silently passed off as the real account; **the company's own money summed rather than the money that arrived**, so an integrity check is not itself the cross-currency sum Phase 65 was named for eliminating; only retainers with something left on them counted; the check gated on `time_billing` so a company that takes no retainers is not told about an account it does not use; and the register's own entry naming both accounts it compares against, since the fallback is part of what it checked |
 | `tests/retention-attribution.test.ts` | **One company's letters never counted into another's total** — the defect stated as a number, with the unscoped version reading three where one is right; the deployment given every count because a total is only true for it; **a count described as this company's share where some rows belong to a firm or a person**, with the caveat saying which rather than just that the number is partial; **a reason rather than a blank** where no row has a company, and the policy's days and reason still shown to a viewer who gets no number; **a letter belonging to no company counted for the deployment and for nobody else**, so scoping does not make it invisible to everybody; the expiring count scoped the same way as the total; **every company swept however narrow the report was**, because scoping the delete would mean retention only removed rows belonging to whoever last loaded a page; every attribution checked against `information_schema` for whether the column exists **and whether it is nullable**; every policy that cannot name a company arguing for itself in prose; and **each sweep touching the table its policy names**, without which Phase 24's allowlist guarantee is asserted against a string nothing ties to the query |
