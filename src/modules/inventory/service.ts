@@ -728,6 +728,32 @@ export async function reconcileInventory(
     .from(inventoryLots)
     .where(and(eq(inventoryLots.companyId, ctx.companyId), gt(inventoryLots.remainingMilli, 0)))
 
+  /**
+   * What moved since the date asked about (Phase 109).
+   *
+   * `remaining_value_cents` is a running column: it says what the lots are
+   * worth *now*. Compared against a ledger walked back with `entry_date <=
+   * asOfDate`, that reported a difference on correct books for every date but
+   * today — measured at $28,559.20 for 31 March on the development database,
+   * as a **fault**. This file's own comment names the cost of that: "a
+   * reconciliation that cries wolf is one people learn to ignore."
+   *
+   * `stock_movements.cost_cents` is already signed — a receipt is positive and
+   * an issue negative — so subtracting everything dated after the day gives
+   * what the lots were worth on it, with no case analysis over movement kinds.
+   */
+  const [moved] = opts.asOfDate
+    ? await db
+        .select({ value: sql<string>`coalesce(sum(${stockMovements.costCents}), 0)` })
+        .from(stockMovements)
+        .where(
+          and(
+            eq(stockMovements.companyId, ctx.companyId),
+            gt(stockMovements.movedOn, opts.asOfDate),
+          ),
+        )
+    : [{ value: '0' }]
+
   const inventoryAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.inventory)
   if (!inventoryAccount) throw new Error('The Inventory account is missing from the chart.')
 
@@ -775,7 +801,7 @@ export async function reconcileInventory(
       ),
     )
 
-  const subledgerCents = Number(lots?.value ?? 0)
+  const subledgerCents = Number(lots?.value ?? 0) - Number(moved?.value ?? 0)
   const ledgerCents = Number(ledger?.value ?? 0)
 
   return {

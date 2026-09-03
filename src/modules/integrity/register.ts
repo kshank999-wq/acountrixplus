@@ -25,6 +25,7 @@ import { unbilledReceiptValue } from '@/modules/payables/receipt-billing'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
+import type { ReachDeclaration } from './reach'
 
 /**
  * Every reconciliation this application has, as named data (spec §19).
@@ -134,6 +135,16 @@ export type IntegrityCheck = {
   unit?: 'money' | 'count'
   /** Why a difference here means what it means. Shown next to the number. */
   meaning: string
+  /**
+   * How far back this check can see (Phase 109).
+   *
+   * Most checks walk their ledger side back to `asOf` and read their subledger
+   * side as it stands now, which reports a difference on correct books for any
+   * date but today. Declared per check, with prose, so a reader can tell a
+   * considered limit from an oversight — and so the register can skip a check
+   * that cannot answer rather than answer wrongly.
+   */
+  asAt: ReachDeclaration
   run: (ctx: ActorContext, asOf: string) => Promise<CheckOutcome>
 }
 
@@ -156,6 +167,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'entry was posted straight at 1100, or a document exists that the ledger never heard about. ' +
       'Credit notes count on the same side of that sentence as invoices: a credit posts to 1100 ' +
       'when it is issued, not when somebody decides which invoice it belongs to.',
+    asAt: { reach: 'any_date', because: "Phase 108 restores both sides to the date: every path that reduces a document balance keeps a dated row, so the subledger walks back with the ledger." },
     run: async (ctx, asOf) => {
       const result = await controlAccounts(ctx, { asOf })
       return {
@@ -175,6 +187,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'The same rule as receivables, on the other side of the balance sheet — vendor credits ' +
       'included, since one debits 2000 the moment it is raised.',
+    asAt: { reach: 'any_date', because: "Phase 108 restores both sides to the date, over bills and vendor credits, on the same dated application records the receivables side uses." },
     run: async (ctx, asOf) => {
       const result = await controlAccounts(ctx, { asOf })
       return {
@@ -199,6 +212,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'both, so it can never say what either holds — which is the only question a bank statement ' +
       'asks, and neither account can be tied out. A unique index refuses new pairs; this catches ' +
       'books that were migrated with one already in place.',
+    asAt: { reach: 'any_date', because: "It counts bank accounts against the ledger accounts they name. That is a fact about how the chart is wired rather than a balance, so it reads the same on any date." },
     run: async (ctx) => {
       const shared = await sharedLedgerAccounts(ctx)
       const accounts = shared.reduce((sum, entry) => sum + entry.names.length, 0)
@@ -233,6 +247,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'ledger without a feed row, and anything still in the inbox has not posted. It is the ' +
       'figure to look at when the balance sheet and the bank disagree, and it is only answerable ' +
       'at all because each account now has a ledger account of its own.',
+    asAt: { reach: 'today_only', because: "It compares each account's ledger balance against its feed, and neither side is filtered by date — the feed is what has arrived, which is a present-tense question." },
     run: async (ctx) => {
       const rows = await cashTieOut(ctx)
       const ledger = rows.reduce((sum, row) => sum + row.ledgerCents, 0)
@@ -281,6 +296,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'counts checkouts that were started and never resolved, which no subtraction can find: ' +
       'a customer who paid and closed the tab leaves both sides reading zero while their ' +
       'money sits at the processor unrecorded (Phase 46).',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. The clearing side is read as it stands now, and until somebody shows the sweep history can be replayed a past date would be answered from today's figures." },
     run: async (ctx, asOf) => {
       const position = await paymentsInTransitPosition(ctx, asOf)
 
@@ -321,6 +337,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'rather than a right. Phase 47 stopped it at the door; this finds the ones already in ' +
       'the books, which is where the one that gets paid twice actually is. Nothing here is ' +
       'proof — it is two documents worth a minute of somebody\'s attention.',
+    asAt: { reach: 'any_date', because: "It looks for two bills carrying one supplier reference, which is a fact about the documents themselves rather than a balance, so it reads the same on any date." },
     run: async (ctx) => {
       const exposure = await duplicateExposure(ctx)
 
@@ -362,6 +379,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'the person reading them cannot tell which account either refers to. A customer sharing ' +
       'with a supplier is deliberately not reported — that is one firm that buys from you and ' +
       'sells to you, which is ordinary business.',
+    asAt: { reach: 'any_date', because: "It counts parties sharing an email address, which is a fact about the records rather than a balance, so it reads the same on any date." },
     run: async (ctx) => {
       const clashes = await sharedAddresses(ctx)
 
@@ -387,6 +405,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Two comparisons that both have to hold. A difference means an asset was capitalised ' +
       'without being registered, or depreciation was journalled by hand.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. Disposals and revisions change the register in place, and until somebody shows they can be replayed a past date would be answered from today's register." },
     run: async (ctx, asOf) => {
       const result = await reconcileFixedAssets(ctx, { asOf })
       return {
@@ -410,6 +429,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'A home-currency amount is written once, when the document is raised, and never ' +
       'recomputed. A document carrying an amount its own rate cannot produce means something ' +
       'wrote one by hand, or converted at a rate other than the one it stored.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. It reads the unrealised position as it stands now, and a past date would need every rate revision since replayed against it." },
     run: async (ctx) => {
       const result = await conversionsAgree(ctx)
       return {
@@ -432,6 +452,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Selling and redeeming a card both maintain the balance and post in the same transaction, ' +
       'so nothing else can move these apart. A difference means one half happened without the other.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. A card's remaining balance is a running column, and until somebody shows redemptions carry a usable date a past date would be answered from today's balances." },
     run: async (ctx, asOf) => {
       const result = await giftCardPosition(ctx, { asOf })
       return {
@@ -455,6 +476,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'These two are meant to differ: money leaves 2320 through payroll, which this does not ' +
       'control. The gap is what has been paid out, and it is the number somebody wants when a ' +
       'stylist asks what they are owed this month.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. What a practitioner is owed is read as it stands now, and a past date would need every payout since replayed against it." },
     run: async (ctx, asOf) => {
       const result = await payoutPosition(ctx, { asOf })
       return {
@@ -478,6 +500,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'Nothing moves 1060 except opening a shift, taking cash into one, paying out of one, or ' +
       'closing one — and all four maintain both sides in the same transaction. A difference ' +
       'means cash was journalled into a till by hand, or a shift closed without its entry.',
+    asAt: { reach: 'today_only', because: "It counts the drawers open right now, which is what the question means — a shift that closed last week is not an open till, whatever date is asked about." },
     run: async (ctx, asOf) => {
       const result = await drawerPosition(ctx, { asOf })
       return {
@@ -503,6 +526,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Not an error. A charity really does receive unrestricted money with no appeal attached — ' +
       'but that money is outside every figure on the funds report, and somebody should know how much.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. It reads contributions as they stand now, and until somebody shows a retagging keeps a date a past date would be answered from today's tags." },
     run: async (ctx, asOf) => {
       const result = await netAssets(ctx, { asOf })
       return {
@@ -526,6 +550,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'The two are computed by different code from different tables, so agreement is evidence ' +
       'rather than tautology. A difference means stock moved without a posting, or the reverse.',
+    asAt: { reach: 'any_date', because: "Every change to a lot writes a dated row in stock_movements with a signed cost_cents, so the value can be restored to the date by subtracting what moved since." },
     run: async (ctx, asOf) => {
       const result = await reconcileInventory(ctx, { asOfDate: asOf })
       return {
@@ -551,6 +576,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'at all, and a balance of $28,700 that nothing in the application could clear: a bill ' +
       'line could not name 2050, so every delivery was billed to inventory or an expense ' +
       'instead, counting the cost twice.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. The unbilled receipt value is read as it stands now, and a past date would need every later billing replayed against it." },
     run: async (ctx) => {
       const unbilled = await unbilledReceiptValue(ctx)
       const account = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.goodsReceivedNotInvoiced)
@@ -595,6 +621,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'against their next invoice or back to them. The account should equal exactly what is ' +
       'still unapplied on their receipts — an accountant asking "whose money is this" should ' +
       'get a list of customers rather than a number.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. Held credit is a running column on the payment, and until somebody shows its consumption is dated a past date would be answered from today's figures." },
     run: async (ctx) => {
       const rows = await heldCredits(ctx)
       const heldTotal = rows.reduce((sum, row) => sum + row.availableCents, 0)
@@ -627,6 +654,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Cost enters work in process when material is issued and leaves when a run finishes. A ' +
       'difference means a run consumed something the ledger did not see, or finished twice.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. Work in process is read from the open runs as they stand now, and a past date would need every completion since replayed against it." },
     run: async (ctx, asOf) => {
       const result = await wipPosition(ctx, { asOf })
       return {
@@ -646,6 +674,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Expected to differ once tips have been paid out, which is payroll doing its job. The gap ' +
       'answers whether last month’s tips actually went out.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. What is still owed to staff is read as it stands now, and a past date would need every payout since replayed against it." },
     run: async (ctx, asOf) => {
       const result = await tipsPosition(ctx, { asOf })
       return {
@@ -668,6 +697,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'A landlord who cannot show that the deposits they hold match the liability on their ' +
       'balance sheet has a problem no report will fix, and in most places a legal one.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. A deposit held is a running column on the lease, and until somebody shows returns carry a usable date a past date would be answered from today's holdings." },
     run: async (ctx, asOf) => {
       const result = await depositsHeld(ctx, { asOf })
       return {
@@ -705,6 +735,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'retainers it holds against the liability on its balance sheet has the same problem a ' +
       'landlord has with deposits, and in most places where professionals take money on ' +
       'account the rules about it are stricter.',
+    asAt: { reach: 'today_only', because: "Not verified to reach back. Phase 105 sums functional_remaining_cents as it stands now; retainer_applications is dated, so this is a candidate for the treatment Phase 108 gave the control accounts." },
     run: async (ctx, asOf) => {
       const position = await retainerPosition(ctx, { asOf })
       const verdict = verdictFor(position)
@@ -731,6 +762,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'The cached total is what the billing ceiling is computed from, so a drift here is a bill ' +
       'somebody could not defend. Totals can net out while individual orders are wrong, so the ' +
       'offender list decides rather than the difference.',
+    asAt: { reach: 'any_date', because: "It compares what a repair order was authorised for against what it was billed, both of which are facts recorded on the order rather than running balances." },
     run: async (ctx) => {
       const result = await authorisationsAgree(ctx)
       return {

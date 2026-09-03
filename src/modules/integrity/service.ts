@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { integrityFindings, integrityRuns } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { enabledModules } from '@/modules/industry/modules'
+import { runnableAt } from './reach'
 import { INTEGRITY_CHECKS, checkByKey, type CheckSeverity } from './register'
 
 /**
@@ -65,6 +66,14 @@ export type IntegrityRun = {
   findings: Finding[]
   /** The keys of every check skipped, so the page can say which. */
   skipped: string[]
+  /**
+   * The keys of every check the date put out of reach (Phase 109).
+   *
+   * Separate from `skipped`: that is a check that does not apply, and this is
+   * one that applies but can only speak for today. Reporting them as one number
+   * would leave somebody thinking a check they rely on had been switched off.
+   */
+  outOfReach: string[]
 }
 
 /**
@@ -81,19 +90,34 @@ export async function runIntegrityChecks(
 ): Promise<IntegrityRun> {
   requirePermission(ctx, 'reports:financial')
 
-  const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10)
+  // The clock is read once, here, and `today` is what tells a past date from
+  // the present one. Every check below is a function of its arguments.
+  const today = new Date().toISOString().slice(0, 10)
+  const asOf = opts.asOf ?? today
   const persist = opts.persist ?? true
   const modules = await enabledModules(ctx.companyId)
 
   const startedAt = new Date()
   const findings: Finding[] = []
   const skipped: string[] = []
+  // Kept apart from `skipped` because the two mean different things: a module
+  // switched off is a check that does not apply, and this is one that applies
+  // but cannot answer the date asked about (Phase 109).
+  const outOfReach: string[] = []
   let faults = 0
   let errors = 0
 
   for (const check of INTEGRITY_CHECKS) {
     if (check.module && !modules.has(check.module)) {
       skipped.push(check.key)
+      continue
+    }
+
+    // A check whose subledger side cannot be restored to `asOf` would compare a
+    // ledger as at that date against figures as they stand now, and report a
+    // difference on books that are correct. Skipped instead (Phase 109).
+    if (!runnableAt(check, asOf, today).run) {
+      outOfReach.push(check.key)
       continue
     }
 
@@ -185,6 +209,7 @@ export async function runIntegrityChecks(
     errors,
     findings,
     skipped,
+    outOfReach,
   }
 }
 
@@ -225,7 +250,11 @@ export async function latestRun(ctx: ActorContext): Promise<IntegrityRun | null>
     faults: run.faults,
     errors: run.errors,
     findings: rows.map(toFinding),
+    // Reading a stored run back cannot tell a module-gated skip from a
+    // date-gated one — the row records a count, not which. Reported as skipped,
+    // which is what it was, rather than guessed at.
     skipped: INTEGRITY_CHECKS.filter((check) => !found.has(check.key)).map((check) => check.key),
+    outOfReach: [],
   }
 }
 
