@@ -1,6 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNotNull, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
+  chartAccounts,
   inventoryLots,
   invoiceCostings,
   journalEntries,
@@ -15,6 +16,7 @@ import { requireModule } from '@/modules/industry/modules'
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
+import { creditableByReceipt } from './receipt-credit'
 import {
   applyConsumption,
   consume,
@@ -216,6 +218,13 @@ export type ReceiveStockInput = {
  * The shared path for a goods receipt, an opening balance, and a customer
  * return — they differ only in what gets credited, which is why that is a
  * parameter rather than three near-copies of this function.
+ *
+ * **And why that parameter is checked (Phase 117).** Naming three legitimate
+ * values without naming what is illegitimate is how the fourth gets in, and it
+ * did: this repository's own seed credited `2000 Accounts Payable` on four
+ * receipts, leaving two demo companies owing money on the balance sheet with no
+ * bill, no supplier and no due date behind it. `receipt-credit.ts` holds the one
+ * class that is refused, and why.
  */
 export async function receiveStock(
   ctx: ActorContext,
@@ -228,6 +237,19 @@ export async function receiveStock(
 
     if (input.quantityMilli <= 0) throw new Error('A receipt has to bring something in.')
     if (input.unitCostCents < 0) throw new Error('A negative cost is a mistake, not a discount.')
+
+    // Where the other side of the entry goes is the caller's to choose, except
+    // for one class it may never be (Phase 117).
+    const [creditAccount] = await tx
+      .select({ number: chartAccounts.number, name: chartAccounts.name })
+      .from(chartAccounts)
+      .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, input.creditAccountId)))
+      .limit(1)
+
+    if (!creditAccount) throw new Error('That account is not on this chart.')
+
+    const verdict = creditableByReceipt(creditAccount)
+    if (!verdict.ok) throw new Error(verdict.why)
 
     const costCents = extend(input.quantityMilli, input.unitCostCents)
 

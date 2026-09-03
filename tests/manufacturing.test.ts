@@ -116,13 +116,20 @@ async function buyIn(
   unitCostCents: number,
   receivedOn = '2026-03-01',
 ) {
-  const payable = await fixture.account('2000')
+  // Goods Received Not Invoiced, not `2000` (Phase 117).
+  //
+  // This helper credited Accounts Payable, which meant every set of books it
+  // built had a payable with no bill behind it — the split ADR 0031 exists to
+  // catch, manufactured by the fixture that then asserted reconciliations on
+  // it. `receiveStock` refuses a control account outright now, so this failed
+  // loudly rather than quietly, which is the refusal doing its job.
+  const grni = await fixture.account('2050')
   return receiveStock(fixture.ctx, {
     itemId,
     quantityMilli,
     unitCostCents,
     receivedOn,
-    creditAccountId: payable.id,
+    creditAccountId: grni.id,
   })
 }
 

@@ -799,6 +799,24 @@ async function insertOpeningInvoice(
       taxCents: 0,
       totalCents: parsed.amountCents,
       balanceCents: parsed.amountCents,
+      /**
+       * What the books carry it at (Phase 117).
+       *
+       * These two were never set, so every invoice the migration wizard ever
+       * created defaulted to **zero** — and the functional figure is what the
+       * rest of the system reads. The control-account check sums it (Phase 35),
+       * the aging report ages it (Phase 107), statements and chasing quote it.
+       * A migrated company therefore had receivables on its balance sheet, an
+       * aging report showing nothing, a nightly fault, and statements telling
+       * customers they owed nothing — ADR 0031's failure exactly, produced by
+       * the first screen a new customer uses.
+       *
+       * An opening balance carries no currency of its own: it is what the old
+       * system said was owed, in the money these books are kept in. So the rate
+       * is one and the functional figure *is* the face figure.
+       */
+      functionalTotalCents: parsed.amountCents,
+      functionalBalanceCents: parsed.amountCents,
       memo: parsed.memo,
       journalEntryId,
     })
@@ -840,6 +858,11 @@ async function insertOpeningBill(
       taxCents: 0,
       totalCents: parsed.amountCents,
       balanceCents: parsed.amountCents,
+      // The payables side of the same omission (Phase 117). See the invoice
+      // above: an opening balance is in the money these books are kept in, so
+      // the rate is one and the functional figure is the face figure.
+      functionalTotalCents: parsed.amountCents,
+      functionalBalanceCents: parsed.amountCents,
       memo: parsed.memo,
       journalEntryId,
     })

@@ -2352,7 +2352,25 @@ async function main() {
     ])
     .returning()
 
-  const workshopPayable = await accountByNumber(workshop.company.id, '2000')
+  /**
+   * Where the steel came from (Phase 117).
+   *
+   * This was `2000 Accounts Payable` for three receipts, which put $3,030 on
+   * this company's balance sheet with no bill, no supplier and no due date
+   * behind it — the payables report showed nothing owed while the balance sheet
+   * said otherwise, which is ADR 0031's failure exactly. `receiveStock` now
+   * refuses a control account outright, so this cannot come back.
+   *
+   * The steel was paid for on the card when it was collected, so the money
+   * left the bank and nobody is owed anything. Goods Received Not Invoiced
+   * would be the account if a supplier were going to invoice for it — but that
+   * wants a `goods_receipts` row for the check to reconcile against, which is
+   * the purchase-order path rather than a bare receipt.
+   */
+  const workshopBankAccount = await accountByNumber(
+    workshop.company.id,
+    SYSTEM_ACCOUNTS.defaultChecking,
+  )
 
   // Bought at two different prices, so the run's cost comes from the lots
   // rather than from the item's planning figure.
@@ -2361,21 +2379,21 @@ async function main() {
     quantityMilli: 40_000,
     unitCostCents: 4_000,
     receivedOn: '2026-02-10',
-    creditAccountId: workshopPayable!.id,
+    creditAccountId: workshopBankAccount!.id,
   })
   await receiveStock(workshopCtx, {
     itemId: steel.id,
     quantityMilli: 20_000,
     unitCostCents: 4_600,
     receivedOn: '2026-03-02',
-    creditAccountId: workshopPayable!.id,
+    creditAccountId: workshopBankAccount!.id,
   })
   await receiveStock(workshopCtx, {
     itemId: hinge.id,
     quantityMilli: 60_000,
     unitCostCents: 850,
     receivedOn: '2026-02-10',
-    creditAccountId: workshopPayable!.id,
+    creditAccountId: workshopBankAccount!.id,
   })
 
   const cabinetBom = await createBom(workshopCtx, {
@@ -2794,7 +2812,8 @@ async function main() {
   // comes from the lots rather than from a price list.
   const shopParts = await accountByNumber(shop.company.id, '1480')
   const shopPartsRevenue = await accountByNumber(shop.company.id, '4610')
-  const shopPayable = await accountByNumber(shop.company.id, '2000')
+  /** The same repair on the garage's brake pads, bought over the counter. */
+  const shopBank = await accountByNumber(shop.company.id, SYSTEM_ACCOUNTS.defaultChecking)
 
   const [brakePads] = await db
     .insert(serviceItems)
@@ -2816,7 +2835,7 @@ async function main() {
     quantityMilli: 6_000,
     unitCostCents: 3_000,
     receivedOn: '2026-04-20',
-    creditAccountId: shopPayable!.id,
+    creditAccountId: shopBank!.id,
   })
 
   const golf = await addVehicle(shopCtx, {

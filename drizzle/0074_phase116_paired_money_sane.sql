@@ -13,14 +13,50 @@
 -- same constraint, in the same shape, so there is one answer to the question
 -- rather than five.
 --
--- ## If this migration fails
+-- ## The backfill in front of it (added in Phase 117)
 --
--- It fails on a row where one side is zero and the other is not. That row is
--- the defect the constraint exists to prevent, and it wants a bookkeeper rather
--- than a backfill: the functional side is money the ledger is carrying against
--- a document that says it is settled, so writing it to zero here would silently
--- unbalance the control account. Find it with the query in each block's comment,
--- correct it with a journal entry that says why, then re-run.
+-- As first written, this migration would have failed on any database that had
+-- used the migration wizard. `insertOpeningInvoice` and `insertOpeningBill`
+-- never set the functional columns, so every document the wizard created had a
+-- face balance and a functional balance of **zero** — which is precisely what
+-- the constraint below refuses. It did not fail here because neither local
+-- database happened to hold an imported document at the time.
+--
+-- Those rows are repairable arithmetic rather than a bookkeeper's decision, and
+-- exactly so: an opening balance carries no currency of its own — it is what
+-- the old system said was owed, in the money these books are kept in — so the
+-- rate is one and the functional figure is the face figure. The four statements
+-- below say only that, and touch nothing whose rate is not one.
+--
+-- ## If it still fails
+--
+-- It fails on a row where one side is zero and the other is not, and the
+-- backfill did not reach it — a foreign document, so the two figures are not
+-- each other. That one wants a bookkeeper rather than a backfill: the
+-- functional side is money the ledger carries against a document that says it
+-- is settled, and writing it to zero would silently unbalance the control
+-- account. Find it with the query in each block's comment, correct it with a
+-- journal entry that says why, then re-run.
+
+--> statement-breakpoint
+UPDATE "invoices" SET "functional_total_cents" = "total_cents",
+                      "functional_balance_cents" = "balance_cents"
+ WHERE "exchange_rate_millionths" = 1000000
+   AND "functional_balance_cents" = 0 AND "balance_cents" <> 0;
+--> statement-breakpoint
+UPDATE "bills" SET "functional_total_cents" = "total_cents",
+                   "functional_balance_cents" = "balance_cents"
+ WHERE "exchange_rate_millionths" = 1000000
+   AND "functional_balance_cents" = 0 AND "balance_cents" <> 0;
+--> statement-breakpoint
+UPDATE "credit_notes" SET "functional_total_cents" = "total_cents",
+                          "functional_remaining_cents" = "remaining_cents"
+ WHERE "exchange_rate_millionths" = 1000000
+   AND "functional_remaining_cents" = 0 AND "remaining_cents" <> 0;
+--> statement-breakpoint
+UPDATE "payments" SET "functional_unapplied_cents" = "unapplied_cents"
+ WHERE "exchange_rate_millionths" = 1000000
+   AND "functional_unapplied_cents" = 0 AND "unapplied_cents" <> 0;
 
 --> statement-breakpoint
 -- SELECT id, number, balance_cents, functional_balance_cents FROM invoices

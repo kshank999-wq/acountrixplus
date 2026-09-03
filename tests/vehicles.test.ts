@@ -636,7 +636,7 @@ describe('parts, labour and sublet are three different things (Phase 30)', () =>
 
     const partsAccount = await accountByNumber(fixture.companyId, '1480')
     const revenue = await accountByNumber(fixture.companyId, REPAIR_ACCOUNTS.partsRevenue)
-    const payable = await accountByNumber(fixture.companyId, '2000')
+    const grni = await accountByNumber(fixture.companyId, '2050')
 
     const [pads] = await db
       .insert(serviceItems)
@@ -652,12 +652,15 @@ describe('parts, labour and sublet are three different things (Phase 30)', () =>
       })
       .returning()
 
+    // Goods Received Not Invoiced rather than `2000` (Phase 117): a receipt
+    // is not a bill, and crediting the payables control account put money on
+    // this garage's balance sheet that its payables report knew nothing about.
     await receiveStock(fixture.ctx, {
       itemId: pads.id,
       quantityMilli: 4_000,
       unitCostCents: 3_000,
       receivedOn: '2026-04-01',
-      creditAccountId: payable!.id,
+      creditAccountId: grni!.id,
     })
 
     return { fixture, pads }
