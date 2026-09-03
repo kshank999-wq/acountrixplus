@@ -166,6 +166,12 @@ describe('the register names every check there is (Phase 33)', () => {
       // until it goes against their next invoice or back to them, and nothing
       // else posts there — so a difference is a fault, not a timing artefact.
       'receivables.customer_credit',
+      // Phase 105. A client's money taken before the work is done — the one
+      // kind of held money that had no check, though gift cards, deposits,
+      // overpayments and practitioner earnings all did. A fault under either
+      // of its two claims: equality on a dedicated 2550, and "not more than"
+      // on a shared 2500, since unearned revenue cannot go negative.
+      'timebilling.retainers',
       'vehicles.authorisations',
     ])
   })
