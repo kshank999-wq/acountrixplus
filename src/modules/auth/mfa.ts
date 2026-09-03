@@ -6,7 +6,9 @@ import { recordAudit } from '@/modules/audit'
 import { OUR_NAME } from '@/modules/brand/voice'
 import type { ActorContext } from '@/modules/tenancy/context'
 import { hashPassword, verifyPassword } from './password'
-import { guardVerdict, WRONG_PASSWORD } from './reauthentication'
+import { WRONG_PASSWORD } from './reauthentication'
+import { guardAct } from './guard-service'
+import { sendGuardWarning } from '@/modules/notify/guard-warning'
 import { DomainError } from '@/modules/errors'
 import { decryptSecret, encryptSecret } from './secret-box'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp'
@@ -272,10 +274,12 @@ export async function disableMfa(
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!user) return { ok: false, error: 'User not found' }
 
-  const guard = guardVerdict({
+  const guard = await guardAct({
+    userId,
     act: 'mfa.disable',
     given: currentPassword,
-    matches: await verifyPassword(currentPassword, user.passwordHash),
+    passwordHash: user.passwordHash,
+    sendWarning: sendGuardWarning,
   })
   if (!guard.ok) return { ok: false, error: guard.why }
 
@@ -303,10 +307,12 @@ export async function regenerateRecoveryCodes(
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!user) throw new DomainError(WRONG_PASSWORD)
 
-  const guard = guardVerdict({
+  const guard = await guardAct({
+    userId,
     act: 'mfa.recovery_codes',
     given: currentPassword,
-    matches: await verifyPassword(currentPassword, user.passwordHash),
+    passwordHash: user.passwordHash,
+    sendWarning: sendGuardWarning,
   })
   if (!guard.ok) throw new DomainError(guard.why)
 
@@ -373,10 +379,13 @@ export async function changePassword(
   const [user] = await db.select().from(users).where(eq(users.id, ctx.userId)).limit(1)
   if (!user) return { ok: false, error: 'User not found' }
 
-  const guard = guardVerdict({
+  const guard = await guardAct({
+    userId: ctx.userId,
     act: 'password.change',
     given: input.currentPassword,
-    matches: await verifyPassword(input.currentPassword, user.passwordHash),
+    passwordHash: user.passwordHash,
+    ipAddress: ctx.ipAddress,
+    sendWarning: sendGuardWarning,
   })
   if (!guard.ok) return { ok: false, error: guard.why }
 

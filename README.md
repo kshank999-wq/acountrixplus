@@ -4365,6 +4365,39 @@ password and an account with none. The guard runs **before** anything else, so a
 refusal cannot leak that the address typed was already yours — and before the
 letters, so a wrong password cannot post mail at somebody.
 
+### The guard nobody counted (Phase 100)
+
+Phase 99 made four acts ask for the password, refuses a wrong one, and does
+nothing else — no record, no limit, no word to the owner. Meanwhile
+`login_attempts` has bounded the sign-in form at ten failures in fifteen minutes
+since Phase 13, one page away. That is the wrong way round: somebody typing into
+the sign-in form might be the owner on a new laptop, while somebody typing into
+the security page already holds a live session, which is a *stronger* signal
+that something is wrong.
+
+**A table of its own, because the shortcut is a weapon.** The obvious move is a
+`wrong_reauth` row in `login_attempts` — and `lockoutState` counts every row in
+its window that is not `success` and not `locked_out`, so five fumbles on the
+security page would lock the account out of the sign-in form. That hands
+somebody who already has a session, the exact person this guard exists to stop,
+a way to lock the real owner out of their own books. So a failed
+re-authentication bounds **the act**, for a cool-off, and touches signing in not
+at all — asserted as zero rows in `login_attempts` after nine failures.
+
+They are keyed differently too: `login_attempts` on an email, because at sign-in
+time that is all anybody knows; this on the user and the act, because the
+session says exactly who is asking.
+
+**Refused attempts are not recorded**, or the oldest failure would move forward
+on every retry and the block would never lift — `lockoutState`'s own bug met
+from the other side. The corollary is deliberate: once blocked, the *right*
+password is refused too, because a correct guess is still a guess.
+
+**Each act is counted separately**, so five wrong at the address claim do not
+shut somebody out of changing their password — which is what the real owner
+would do next if the warning was true. And the owner is told **once**, as the
+count crosses, with no link in the letter, on Phase 98's rule.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -6058,10 +6091,16 @@ Gaps within the phases already built:
   that has never amortized a prepayment gets it left on the balance sheet with a caveat naming the
   amount. Matching per item needs the accrual linked to its settlement the way
   `payment_applications` links a payment to its invoice.
-- **A refused password is silent.** Somebody guessing at an unattended laptop can try all four
-  guarded acts as often as they like: nothing is recorded, nothing is rate limited, and the owner
-  is never told — while `login_attempts` has counted exactly this since Phase 13 for the sign-in
-  form one page away.
+- ~~**A refused password is silent.**~~ Since Phase 100 each guarded act counts its own failures,
+  stops accepting them after five in fifteen minutes, and tells the owner once.
+- **Guard failures are not on a screen.** `recentFailuresForCompany` puts sign-in failures on the
+  security page; there is no equivalent for the four guarded acts. The letter reaches the one
+  person who most needs it, which is the larger half.
+- **`guard_attempts` is never swept.** The second table here that grows with every request and has
+  no retention rule — `login_attempts` got a sweep in Phase 24 for exactly this reason.
+- **The guard's limit is not configurable.** `securityPolicy` lets a company set its own lockout
+  threshold for signing in; five and fifteen are fixed. Whether a company should be able to loosen
+  a guard on its own people's accounts is not obviously yes.
 - **The guard does not remember.** The password is typed once per act, every time. A "recently
   authenticated" window is the usual next step and needs its own decision about how long, what
   refreshes it, and what happens when it is open on a machine somebody walked away from.

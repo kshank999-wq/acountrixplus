@@ -242,3 +242,40 @@ export const dataExports = pgTable(
     companyIdx: index('data_exports_company_idx').on(t.companyId, t.createdAt),
   }),
 )
+
+/**
+ * A password typed at one of Phase 99's guarded acts (Phase 100).
+ *
+ * Its own table rather than a `login_outcome` on `login_attempts`, because
+ * `lockoutState` counts every row in its window that is not 'success' and not
+ * 'locked_out'. A re-authentication failure recorded there would be counted as
+ * a failed sign-in, so five fumbles on the security page would lock the account
+ * out of signing in — handing somebody who already holds a session a way to
+ * lock the real owner out. The guard would become a weapon.
+ *
+ * Keyed on the user rather than an email: `login_attempts` uses an email
+ * because at sign-in time that is all anybody knows, and here the session says
+ * exactly who is asking.
+ */
+export const guardAttempts = pgTable(
+  'guard_attempts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    userId: uuid('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    /**
+     * A `GuardedAct` from the register in `reauthentication.ts`, as text.
+     *
+     * ADR 0033's reasoning for integrity check keys: the register is code, and
+     * a foreign key to a table of names pointing at functions is a foreign key
+     * to something that may not exist.
+     */
+    act: text('act').notNull(),
+    ok: boolean('ok').notNull(),
+    /** Truncated as `login_attempts` truncates it, so the two agree. */
+    ipAddress: text('ip_address'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index('guard_attempts_user_act_idx').on(t.userId, t.act, t.createdAt)],
+)

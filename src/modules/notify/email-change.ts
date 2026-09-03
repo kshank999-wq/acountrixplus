@@ -8,8 +8,8 @@ import {
   normaliseLogin,
   redemptionCheck,
 } from '@/modules/auth/address-change'
-import { guardVerdict } from '@/modules/auth/reauthentication'
-import { verifyPassword } from '@/modules/auth/password'
+import { guardAct } from '@/modules/auth/guard-service'
+import { sendGuardWarning } from './guard-warning'
 import { issueToken, lookupToken, redeemToken, TOKEN_TTL_MINUTES } from './tokens'
 import { addressChangeUrl, sendTransactional } from './service'
 import type { ActorContext } from '@/modules/tenancy/context'
@@ -67,10 +67,13 @@ export async function requestAddressChange(
    * without asking for the password would answer a question on behalf of
    * whoever is holding the session.
    */
-  const guard = guardVerdict({
+  const guard = await guardAct({
+    userId: ctx.userId,
     act: 'address.claim',
     given: input.currentPassword,
-    matches: await verifyPassword(input.currentPassword ?? '', me.passwordHash),
+    passwordHash: me.passwordHash,
+    ipAddress: ctx.ipAddress,
+    sendWarning: sendGuardWarning,
   })
   if (!guard.ok) return { accepted: false, error: guard.why }
 
