@@ -151,11 +151,43 @@ export async function applyCredit(
 
     const balanceAfter = invoice.balanceCents - amountCents
 
+    /**
+     * The settlement, in the company's own money (Phase 114).
+     *
+     * Two balances are being moved and they are carried at **two different
+     * rates**: the invoice at the rate it was raised at, the held credit at the
+     * rate the money arrived at. `settleHeld` is the rule Phase 68 wrote for
+     * exactly this, and `refundCredit` a few hundred lines below has used it
+     * since — while this function converted both sides at the invoice's rate
+     * and posted no difference at all.
+     *
+     * The rates need not be different currencies to differ: a euro receipt in
+     * January and a euro invoice in June are the same currency at two rates,
+     * which is the ordinary case.
+     */
+    const relief = relieveFunctional(invoice, amountCents)
+    const release = relieveFunctional(
+      {
+        balanceCents: payment.unappliedCents,
+        exchangeRateMillionths: payment.exchangeRateMillionths,
+        functionalBalanceCents: payment.functionalUnappliedCents,
+      },
+      amountCents,
+    )
+    const settlement = settleHeld({
+      releasedCents: release.functionalCents,
+      relievedCents: relief.functionalCents,
+    })
+
     await tx
       .update(invoices)
       .set({
         balanceCents: balanceAfter,
-        functionalBalanceCents: convert(balanceAfter, invoice.exchangeRateMillionths),
+        // What `relieveFunctional` worked out above, not a second conversion:
+        // computing it twice is two answers to what this invoice gives up, and
+        // its rule that the last relief takes the whole remaining functional
+        // balance is the one that stops a stranded cent.
+        functionalBalanceCents: relief.functionalBalanceCents,
         status: balanceAfter === 0 ? 'paid' : 'partial',
         updatedAt: new Date(),
       })
@@ -188,14 +220,12 @@ export async function applyCredit(
         // invoice and the credit note already use: the last draw takes whatever
         // functional remainder is left, so the two columns reach zero on the
         // same movement and neither strands a cent behind the other.
-        functionalUnappliedCents: relieveFunctional(
-          {
-            balanceCents: payment.unappliedCents,
-            exchangeRateMillionths: payment.exchangeRateMillionths,
-            functionalBalanceCents: payment.functionalUnappliedCents,
-          },
-          amountCents,
-        ).functionalBalanceCents,
+        //
+        // `release` from above rather than the same call written again
+        // (Phase 114): it is the same question — what does the held credit give
+        // up — and the entry now debits the liability by exactly this, so a
+        // second call is a second place for the two to drift apart.
+        functionalUnappliedCents: release.functionalBalanceCents,
       })
       .where(
         and(
@@ -213,7 +243,7 @@ export async function applyCredit(
     const control = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable)
     if (!control) throw new DocumentError('The Accounts Receivable account is missing.')
 
-    const functionalCents = convert(amountCents, invoice.exchangeRateMillionths)
+    const fxAccount = settlement.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
     await createJournalEntry(
       ctx,
@@ -224,8 +254,27 @@ export async function applyCredit(
         sourceType: 'payment',
         sourceId: payment.id,
         lines: [
-          { chartAccountId: held.id, debitCents: functionalCents },
-          { chartAccountId: control.id, creditCents: functionalCents },
+          // The liability at what it has been carried at since the money came
+          // in, the receivable at what the invoice was raised at, and the
+          // difference where a difference belongs: it is a rate movement
+          // between two dates, not revenue, because nothing more was sold.
+          { chartAccountId: held.id, debitCents: settlement.releasedCents },
+          { chartAccountId: control.id, creditCents: settlement.relievedCents },
+          ...(fxAccount
+            ? [
+                settlement.realisedCents > 0
+                  ? {
+                      chartAccountId: fxAccount,
+                      creditCents: settlement.realisedCents,
+                      memo: 'Exchange gain',
+                    }
+                  : {
+                      chartAccountId: fxAccount,
+                      debitCents: -settlement.realisedCents,
+                      memo: 'Exchange loss',
+                    },
+              ]
+            : []),
         ],
       },
       tx,

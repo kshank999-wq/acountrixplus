@@ -99,6 +99,13 @@ payment rather than the application.
 
 ## What this does not do
 
+> **Superseded in part by Phase 114.** Verifying this nomination found the
+> settlement itself wrong: `applyCredit` relieved the held account at the
+> *invoice's* rate while relieving the subledger at the *payment's*, leaving a
+> residue on 2520 and recognising no gain or loss at all. Promoting the check
+> would have been reconstructing a wrong number carefully. That is fixed; the
+> column this paragraph asks for is still outstanding.
+
 **It does not promote `receivables.customer_credit` to `any_date`.** That needs a
 second column — the functional amount an application took off the held credit,
 the same `carried_cents` Phase 112 added to retainer draws — and this phase is
