@@ -40,6 +40,7 @@ export type RetentionKind =
   | 'domain_events'
   | 'orphaned_blobs'
   | 'integrity_runs'
+  | 'guard_attempts'
 
 export type RetentionPolicy = {
   kind: RetentionKind
@@ -57,7 +58,18 @@ export type RetentionPolicy = {
 }
 
 /**
- * Every table this application lets grow with traffic.
+ * The tables somebody has decided grow with traffic.
+ *
+ * That wording is load-bearing, and it replaces an earlier claim to name *every*
+ * such table. The catalogue cannot tell you which tables grow with traffic —
+ * `documents` and `domain_events` look identical to it and belong on opposite
+ * sides of this list — so the honest statement is that this list is exactly as
+ * complete as the last person to think about it. `guard_attempts` spent a phase
+ * missing from it, under a docstring that read as authoritative.
+ *
+ * `tests/retention.test.ts` therefore counts the tables in the database and
+ * fails when the number changes, so adding one is also the moment of deciding
+ * whether it belongs here or in `NEVER_SWEPT`.
  *
  * The days are deliberately generous where the row still answers a question
  * somebody asks — a bounced invitation is worth seeing weeks later — and short
@@ -171,6 +183,27 @@ export const RETENTION_POLICIES: readonly RetentionPolicy[] = [
       'A year of nightly results (Phase 33), kept so a difference discovered at a year end can ' +
       'be dated. Findings hang off the run and go with it — one policy, one table, and the ' +
       'foreign key does the rest.',
+  },
+  {
+    kind: 'guard_attempts',
+    table: 'guard_attempts',
+    label: 'Wrong passwords at a guarded act',
+    // A year, and longer than `login_attempts` above, which reads backwards
+    // until you notice what ninety is doing there: the sign-in table is short
+    // because anybody on the internet can write to it at a rate they choose,
+    // and ninety days throws away the part that is only a bill for disk.
+    //
+    // Nothing here is written by a stranger. Reaching a guarded act needs a
+    // live session, so the ceiling is one signed-in person's typing speed —
+    // which leaves only the question the rows answer, and that one is asked
+    // late. Same argument `integrity_runs` makes for its year.
+    days: 365,
+    publicallyWritten: false,
+    why:
+      'A wrong password at one of the four guarded acts (Phase 100), which only somebody already ' +
+      'signed in can reach. A year, because the question is "was somebody at my session in March" ' +
+      'and it is asked by somebody who has just found out something else is wrong — often with ' +
+      'nothing to go on but a warning letter they half remember.',
   },
 ] as const
 

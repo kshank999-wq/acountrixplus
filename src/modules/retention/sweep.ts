@@ -5,6 +5,7 @@ import {
   campaignEvents,
   documentBlobs,
   domainEvents,
+  guardAttempts,
   integrityRuns,
   leadSubmissions,
   loginAttempts,
@@ -254,6 +255,27 @@ const SWEEPS: Record<RetentionKind, Sweep> = {
       return removed.length
     },
   },
+
+  guard_attempts: {
+    // Every row, right and wrong alike. The successful ones are what clear a
+    // run of failures inside the cool-off window, and a sweep on a year-old
+    // cutoff cannot reach anything the fifteen-minute window is still reading.
+    count: (cutoff, exec) =>
+      tally(exec, {
+        expired: exec
+          .select({ n: N })
+          .from(guardAttempts)
+          .where(lt(guardAttempts.createdAt, cutoff!)),
+        held: exec.select({ n: N }).from(guardAttempts),
+      }),
+    remove: async (cutoff, exec) => {
+      const removed = await exec
+        .delete(guardAttempts)
+        .where(lt(guardAttempts.createdAt, cutoff!))
+        .returning({ id: guardAttempts.id })
+      return removed.length
+    },
+  },
 }
 
 /**
@@ -310,8 +332,8 @@ export async function sweepOne(
  * Runs every policy.
  *
  * One at a time rather than in parallel: this is housekeeping, it runs at 3am,
- * and nine concurrent ranged deletes competing for the same connection pool is
- * a way to make a quiet job noisy.
+ * and a pile of concurrent ranged deletes competing for the same connection
+ * pool is a way to make a quiet job noisy.
  */
 export async function sweepAll(
   asOf: Date = new Date(),

@@ -23,7 +23,6 @@ import { failedDeliveries, RateLimitedError, sendTransactional } from '@/modules
 import {
   issueToken,
   lookupToken,
-  pruneExpiredTokens,
   redeemToken,
   TOKEN_TTL_MINUTES,
 } from '@/modules/notify/tokens'
@@ -233,24 +232,11 @@ describe('single-use tokens', () => {
     expect(TOKEN_TTL_MINUTES.company_invitation).toBe(7 * 24 * 60)
   })
 
-  it('prunes what expired long ago and keeps what has not', async () => {
-    const stale = await resetTokenFor('stale')
-    await db
-      .update(actionTokens)
-      .set({ expiresAt: new Date(Date.now() - 90 * 24 * 60 * 60 * 1000) })
-      .where(eq(actionTokens.id, stale.id))
-
-    const live = await resetTokenFor('live')
-
-    await pruneExpiredTokens(30)
-
-    const rows = await db
-      .select({ id: actionTokens.id })
-      .from(actionTokens)
-      .where(eq(actionTokens.id, stale.id))
-    expect(rows).toHaveLength(0)
-    expect((await lookupToken('password_reset', live.token)).ok).toBe(true)
-  })
+  // Pruning expired tokens is asserted in `tests/retention.test.ts` ("keeps a
+  // token until well past its expiry"), against the sweep the worker actually
+  // runs. This file used to assert it against `pruneExpiredTokens`, which no
+  // production code called — so the test passed and the behaviour it described
+  // was somebody else's (Phase 101).
 })
 
 describe('password reset', () => {

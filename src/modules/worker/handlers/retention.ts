@@ -4,10 +4,13 @@ import { sweepAll } from '@/modules/retention/sweep'
 /**
  * Retention (spec §19).
  *
- * Global, and one job for all nine policies rather than nine jobs. They are
- * ranged deletes measured in milliseconds; splitting them would put nine rows
- * a night on the operations page saying "0 removed" and bury the one night
+ * Global, and one job for every policy rather than a job each. They are ranged
+ * deletes measured in milliseconds; splitting them would put a row a night per
+ * policy on the operations page saying "0 removed" and bury the one night
  * something is worth reading.
+ *
+ * No count in that sentence, deliberately: it said "nine" for three phases
+ * while the answer was ten (Phase 101).
  *
  * ## What this closes
  *

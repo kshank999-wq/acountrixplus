@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { and, eq, isNull, gt, lt, sql } from 'drizzle-orm'
+import { and, eq, isNull, gt, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { actionTokens } from '@/db/schema'
 import { hashPassword, verifyPassword } from '@/modules/auth/password'
@@ -257,27 +257,15 @@ export async function revokeTokensFor(
 }
 
 /**
- * Deletes tokens that expired a while ago.
+ * Expired tokens are swept by the `action_tokens` retention policy, not here.
  *
- * The retention job the Phase 13 notes asked for, applied to a table with the
- * same problem `login_attempts` has: it grows with every request from the
- * internet and an attacker controls the rate. Spent and expired rows are worth
- * keeping briefly — "was this link already used" is a real support question —
- * and worth nothing after a month.
+ * This module used to carry its own `pruneExpiredTokens(olderThanDays = 30)`.
+ * It had no production caller and was kept looking alive by one test that
+ * called it directly, while the sweep `sweepAll` actually runs lived in
+ * `modules/retention`. Two answers to "how long is an expired token kept", and
+ * the reachable one was the one a reader would not find: changing the number
+ * here would have done nothing at all (Phase 101).
  */
-export async function pruneExpiredTokens(
-  olderThanDays = 30,
-  exec: Executor = db,
-): Promise<number> {
-  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000)
-
-  const removed = await exec
-    .delete(actionTokens)
-    .where(lt(actionTokens.expiresAt, cutoff))
-    .returning({ id: actionTokens.id })
-
-  return removed.length
-}
 
 /** Live invitations to a company, for the settings screen. */
 export async function pendingInvitations(

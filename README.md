@@ -4398,6 +4398,64 @@ shut somebody out of changing their password — which is what the real owner
 would do next if the warning was true. And the owner is told **once**, as the
 count crosses, with no link in the letter, on Phase 98's rule.
 
+### The list that said "every table" (Phase 101)
+
+`RETENTION_POLICIES` opened by claiming to name **every table this application
+lets grow with traffic**. It named ten, and `guard_attempts` — added the phase
+before, by this codebase's own most recent work — was not among them.
+
+Nothing noticed, and nothing could have. The retention test asserted that the
+swept and never-swept lists did not *overlap*, and never that either covered
+what it said it covered. A list nothing checks is a list that drifts, and the
+drift is invisible exactly because the list reads as authoritative.
+
+**The claim is narrowed to one that can be true.** There are 178 tables. Ten
+were swept, sixteen named as never-swept, and the other 152 are the business —
+customers, invoices, chart accounts, leases — rows a person deliberately
+created, bounded by the size of the company rather than by traffic. Demanding a
+retention decision for those would turn `NEVER_SWEPT` from a statement about the
+books into a dumping ground. So the docstring now says what is actually so:
+these are the tables **somebody has decided** grow with traffic, and the list is
+only as complete as the last person to think about it.
+
+**A new table has to answer the question.** Phase 96's tripwire is the good
+shape — `PARTY_REFERENCES` is checked against `pg_constraint`, so adding a table
+with a `customer_id` fails *with the column named* — but it works because *what
+points at `customers`* is a fact the catalogue holds. "Grows with traffic" is
+not: `documents` and `domain_events` are indistinguishable to the catalogue and
+belong on opposite sides of this list. So the crude shape instead, the one
+`filing.test.ts` uses for transactional kinds: **the number of tables is written
+down, and adding one fails the test**, with a message naming the two ways to
+answer — a policy, or a line in `NEVER_SWEPT`. It costs a one-line edit per
+migration, and buys the moment where somebody decides.
+
+**`guard_attempts` keeps a year**, longer than `login_attempts`' ninety days.
+That reads backwards until you look at why ninety is the number there: the
+sign-in table is short because *anybody on the internet can write to it at a
+rate they choose*, and the policy says as much — ninety days "throws away the
+part that is only ever a bill for disk". It is a compromise forced by volume,
+not a judgement that a sign-in failure matters less. Reaching a guarded act
+needs a live session, so the ceiling here is one signed-in person's typing
+speed, and what is left is the question the rows answer: *was somebody at my
+session in March* — asked late, by somebody who has just found out something
+else is wrong. The same argument `integrity_runs` already makes for its year.
+
+**One answer to when an expired token goes.** `pruneExpiredTokens(30)` in
+`tokens.ts` and the `action_tokens` policy (`days: 30`) were the same rule
+written twice. The registry's is the one `sweepAll` runs; the other had **no
+production caller at all** and was kept looking alive by a single test that
+called it directly. That is worse than dead code — a reader finding it would
+reasonably change the number *there*, where it does nothing, while the sweep
+carried on at thirty days. It is deleted, and its test with it, because the
+behaviour it claimed is covered by the retention tests that exercise the real
+path.
+
+Two stale counts went the same way. The retention handler said "one job for all
+**nine** policies rather than nine jobs", and `sweepAll`'s docstring said "nine
+concurrent ranged deletes"; the answer had been ten for three phases and is
+eleven now. Both lost the number rather than gaining a new one — a count in
+prose is the thing that drifts.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -4519,7 +4577,7 @@ Coverage matches what spec §21 asks for:
 | `tests/control-accounts.test.ts` | **What the balance sheet says is owed, against the documents behind it** — the check that would have caught Phases 29 and 30 on their first day. An empty company agreeing; a delivered visit agreeing **and naming who owes it**, with the aging report able to see it too; a billed repair order agreeing against its keeper; **a walk-in billed to one house account** however many of them there are, rather than to nobody; **a hand-written journal entry against 1100 caught** with the difference named, because that is the one thing that genuinely breaks the agreement; payables checked the same way **without blaming receivables for one fault**; one company's control accounts out of another's; and **a gift card settling the invoice and not just the ledger**, so the two sides still agree at £15 after a £50 card is spent on a £65 visit |
 | `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
-| `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day** and nothing said about a sending reputation nobody has the volume to judge, **the digest speaking when the mail is bouncing though nothing failed**, **the send that did it named** and **nobody named when every campaign is as bad as the rest**, **which way it is going once two readings sit a window apart** with nothing claimed on one reading, **the day's reading written down on a quiet day too** and once however often the digest fires, one company's readings out of another's trend, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
+| `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; **the number of tables in the database written down, so adding one fails here with a message naming the two ways to answer**, `guard_attempts` swept on a year with the sign-in record's window asserted shorter, **an old guard attempt deleted while one inside the fifteen-minute cool-off is left where the guard can still read it**, and **`pruneExpiredTokens` gone from `tokens.ts` so thirty days has one answer**; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day** and nothing said about a sending reputation nobody has the volume to judge, **the digest speaking when the mail is bouncing though nothing failed**, **the send that did it named** and **nobody named when every campaign is as bad as the rest**, **which way it is going once two readings sit a window apart** with nothing claimed on one reading, **the day's reading written down on a quiet day too** and once however often the digest fires, one company's readings out of another's trend, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
 
 ```bash
@@ -6096,8 +6154,9 @@ Gaps within the phases already built:
 - **Guard failures are not on a screen.** `recentFailuresForCompany` puts sign-in failures on the
   security page; there is no equivalent for the four guarded acts. The letter reaches the one
   person who most needs it, which is the larger half.
-- **`guard_attempts` is never swept.** The second table here that grows with every request and has
-  no retention rule — `login_attempts` got a sweep in Phase 24 for exactly this reason.
+- ~~**`guard_attempts` is never swept.**~~ Since Phase 101 it is a retention policy like any other,
+  keeping a year — longer than `login_attempts`, because that table is short from volume rather
+  than from the rows mattering less.
 - **The guard's limit is not configurable.** `securityPolicy` lets a company set its own lockout
   threshold for signing in; five and fifteen are fixed. Whether a company should be able to loosen
   a guard on its own people's accounts is not obviously yes.

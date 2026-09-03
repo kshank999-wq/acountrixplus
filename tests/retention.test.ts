@@ -9,6 +9,7 @@ import {
   campaigns,
   documentBlobs,
   domainEvents,
+  guardAttempts,
   journalLines,
   leadSubmissions,
   loginAttempts,
@@ -98,6 +99,68 @@ describe('the retention policy', () => {
 
   it('refuses to describe a policy that does not exist', () => {
     expect(() => policyFor('nonsense' as never)).toThrow(/No retention policy/)
+  })
+
+  /**
+   * The tripwire (Phase 101).
+   *
+   * `RETENTION_POLICIES` opened with a claim to name every table that grows
+   * with traffic. It named ten, and `guard_attempts` — added by the phase
+   * immediately before — was not among them. Nothing here noticed, because the
+   * only assertion about the two lists was that they did not overlap.
+   *
+   * The catalogue cannot close that gap the way Phase 96's `pg_constraint`
+   * check closes the merge registry's: *what points at `customers`* is a fact
+   * the database holds, and *grows with traffic* is not. `documents` and
+   * `domain_events` are indistinguishable to the catalogue and belong on
+   * opposite sides of this list.
+   *
+   * So the crude one, which works: the number is written down, and adding a
+   * table fails here. Yes, that means a one-line edit on every migration. That
+   * is the price of the moment where somebody decides.
+   */
+  const TABLE_COUNT = 178
+
+  const HOW_TO_ANSWER = [
+    'The number of tables changed, so a table was added or dropped.',
+    'Decide which this new one is and then update TABLE_COUNT:',
+    '  - it grows with traffic  -> give it a policy in RETENTION_POLICIES',
+    '  - it is the business, or evidence -> add it to NEVER_SWEPT',
+    'Neither is a formality: guard_attempts spent a phase in the gap.',
+  ].join('\n')
+
+  it('makes a new table answer whether it needs a retention policy', async () => {
+    const rows = (await db.execute(
+      sql`select count(*)::int as n
+          from information_schema.tables
+          where table_schema = 'public' and table_type = 'BASE TABLE'`,
+    )) as unknown as Array<{ n: number }>
+
+    expect(Number(rows[0].n), HOW_TO_ANSWER).toBe(TABLE_COUNT)
+  })
+
+  it('sweeps the table the phase before this one added', async () => {
+    // The specific miss that produced the tripwire above, asserted by name so
+    // that deleting the policy is loud rather than quiet.
+    const policy = policyFor('guard_attempts')
+
+    expect(policy.table).toBe('guard_attempts')
+    // Longer than the sign-in record deliberately: `login_attempts` is short
+    // because strangers write it at a rate they choose, not because it matters
+    // less. Reaching a guarded act needs a live session.
+    expect(policy.days).toBe(365)
+    expect(policyFor('login_attempts').days).toBeLessThan(policy.days!)
+    expect(policy.publicallyWritten).toBe(false)
+  })
+
+  it('has one answer to how long an expired token is kept', async () => {
+    // `tokens.ts` used to carry its own `pruneExpiredTokens(30)` with no
+    // production caller, duplicating this policy's thirty days. A reader who
+    // changed the number there would have changed nothing (Phase 101).
+    const tokens = await import('@/modules/notify/tokens')
+
+    expect('pruneExpiredTokens' in tokens).toBe(false)
+    expect(policyFor('action_tokens').days).toBe(30)
   })
 })
 
@@ -275,6 +338,25 @@ describe('sweeping', () => {
     // can check before the delete is a number nobody can dispute after it.
     expect(await db.select({ id: loginAttempts.id }).from(loginAttempts)).toHaveLength(1)
     expect(report.find((row) => row.kind === 'login_attempts')?.expired).toBe(1)
+  })
+
+  it('deletes an old guard attempt and leaves the ones still being counted', async () => {
+    const fixture = await createCompanyFixture({ name: 'Guarded Co' })
+
+    await db.insert(guardAttempts).values([
+      { userId: fixture.userId, act: 'address.claim', ok: false, createdAt: new Date('2020-01-01T00:00:00Z') },
+      { userId: fixture.userId, act: 'address.claim', ok: true, createdAt: new Date('2026-06-14T23:50:00Z') },
+    ])
+
+    const asOf = new Date('2026-06-15T00:00:00Z')
+    expect((await sweepOne('guard_attempts', asOf)).removed).toBe(1)
+
+    // The successful one is ten minutes old, inside the fifteen-minute
+    // cool-off window — and it is the row that clears a run of failures. A
+    // sweep on a year-old cutoff must not be able to reach what the guard is
+    // still reading.
+    const left = await db.select({ ok: guardAttempts.ok }).from(guardAttempts)
+    expect(left.map((row) => row.ok)).toEqual([true])
   })
 
   it('sweeps every policy in one pass', async () => {
