@@ -6646,8 +6646,8 @@ Gaps within the phases already built:
   the same file share a blob, so storage cost is not attributable per company and physical
   separation between tenants is not available with this store. The tenancy guarantee is the
   `documents` row and nothing else.
-- ~~**`sweepOrphanedBlobs` is not scheduled.**~~ Nightly since Phase 24, as one of the nine
-  retention policies — the only one whose question is reachability rather than age.
+- ~~**`sweepOrphanedBlobs` is not scheduled.**~~ Nightly since Phase 24, as one of the retention
+  policies — the only one whose question is reachability rather than age.
 - **No virus scanning.** Uploaded files are served back with `nosniff` and a restrictive CSP, which
   stops a text file becoming a script and does nothing about a malicious PDF.
 - **No previews and no search inside documents.** A receipt is a link that opens in a new tab —
