@@ -4746,6 +4746,59 @@ The finding now says what the figure is made of — *"11 invoices worth
 $50,000.69, 1 credit note less $600.00"* — whether or not it passes, since the
 subledger figure stopped being "the open invoices" in this phase.
 
+### The report that put a dollar sign on a euro (Phase 107)
+
+`arAging` aged `invoices.balance_cents` — the amount the **customer** was
+invoiced — and the reports page rendered every cell through a `formatCents` with
+no currency, which defaults to USD. Phase 61 found this in the statement and
+named this report while fixing that one:
+
+> A customer invoiced €4,000 and $1,200 was told they owed **$5,200.00**: a
+> number in no currency at all, with a dollar sign on it. **The aging buckets
+> added the same way.**
+
+It fixed the statement's buckets and left the standalone report. Measured on the
+development books — Bremen Hafenbau GmbH is invoiced €2,500.00, worth $2,708.75:
+
+```
+AR aging total       : 4979194     ← 250000 of it a euro figure in a dollar column
+AR control subledger : 4940069
+Bremen's aging row   : 250000      ← rendered as "$2,500.00"
+```
+
+Nineteen other modules read `functional_balance_cents` for exactly this reason.
+`reports.ts` was the one that did not.
+
+**Aging takes the opposite answer to a statement, from the same argument.** A
+statement is addressed to one customer and asks them to pay, so the only honest
+figure is the currency they were invoiced in. An aging report is internal, spans
+every customer, and answers *how much of what we are owed is going bad* — which
+has an answer in exactly one currency, the company's own. Split per currency it
+could not be summed, sorted, or compared against the balance sheet, which is
+most of what it is for. One rule, two conclusions: **a total only means something
+when its terms are in one currency, and which currency depends on who is being
+asked to act.**
+
+**Fixing the arithmetic alone would set a new trap.** Once Bremen's row reads
+$2,708.75, somebody can read that off the report and ring Bremen asking for it —
+a figure Bremen has never seen. So a foreign row carries what it was actually
+invoiced, and the screen shows *"Invoiced €2,500.00"* beside the name.
+
+**Unapplied credits now sit beside the total**, closing the gap ADR 0106 left
+open. They are not aged — Phase 54 settled that an unapplied credit has no age —
+but a credit note reduces the control account when it is issued, so the report
+states what the balance sheet should read and why:
+
+> 1 credit note worth $600.00 has been issued and not yet applied to an invoice.
+> It already reduces the control account, so the balance sheet shows $49,400.69;
+> it is not aged here because nobody has decided yet which invoice it belongs to.
+
+That sentence took two attempts. The first read *"1 credit note … **They**
+already reduce … which invoice **each** belongs to"* — Phase 105's "1 retainer
+hold" in a longer sentence, written two phases after fixing it. Six things in
+that passage agree on the count, and interleaving ternaries through one string is
+what lets them drift; it now branches **once** and returns two whole sentences.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -4868,6 +4921,8 @@ Coverage matches what spec §21 asks for:
 | `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
 | `tests/export-held-money.test.ts` | **The dataset list derived from the labels**, so a dataset cannot exist and be silently absent from the default export, with a file for every one of them; **whose retainer it is, in the currency it arrived in**, with what it was booked at and the rate beside it; **a gift card's purchaser named as a purchaser and not as an owner**, blank where nobody left a name, and its balance in the company's own currency because the table has no other; **a spent card kept in the file and out of the total**, so the manifest figure ties to the liability account rather than to what was issued; which side of the books a credit note is on; **an empty money file told apart from one with no money in it**; and one company's held money kept out of another's export |\n| `tests/exported-money.test.ts` | **A money column never written without its currency**, and the functional figure stated as equal rather than left blank when it is; the header names generated from the same place as the values, so the two lists cannot drift apart; per-currency totals for a file, sorted so an export can be diffed, and a sentence saying **when a file holds two currencies and has no single total**; against the database, **a euro invoice and a dollar one coming out distinguishable** with what each was booked at, the manifest naming both currencies, **a foreign invoice not restated when the rate later moves**, the ledger and bank files naming the company's own currency so no money column anywhere is bare, the manifest counted as a file but not as rows of books, a customer whose name holds a comma still quoted, **every row carrying the same number of cells as its header** (checked with a quote-aware splitter, because the naive one trips on a chart-account description), and **the copies somebody took listed newest first** |
+| `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
+| `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |
 | `tests/control-account-credits.test.ts` | **Both control accounts agreeing while a credit sits unapplied** — the measured failure was ledger 70000 against a subledger of 100000 — and still agreeing once it is applied, with nothing double-counted, since applying posts no entry and moves both sides by the same amount; **a customer whose only document is a credit note still named**, because the credit rows are grouped on the foreign key rather than joined to the invoices, and shown owed money rather than clamped to zero; a customer whose credit covers everything they owe dropped from the list; **an entry posted straight at 1100 still caught**, which is what Phase 31 exists for; the composition sentence reaching the register's finding; the register naming credit notes in what it compares and saying "when it is issued" in why it matters; and one company's credit notes kept out of another's control account |
 | `tests/retainer-position.test.ts` | **A dedicated account checked for equality and a shared one only for "not more than"**, because 2500 legitimately holds other deferred revenue and a check that cries wolf on six of seven companies is a check somebody turns off; the ledger being the *larger* of the two still failing on a dedicated account, because there an excess is as wrong as a shortfall; **the claim returned beside the verdict**, so a reader can tell which question was answered rather than seeing the same tick either way; the shared caveat riding along even when the check passes, and turning the limitation into an instruction; a negative liability balance surviving into the wording rather than coming out unsigned; and **one retainer reading "1 retainer holds" and not "1 retainers hold ... between them"** — noun, verb and the whole clause built in one place, because Phase 96 shipped "1 recurring invoices" by pluralising one of two |

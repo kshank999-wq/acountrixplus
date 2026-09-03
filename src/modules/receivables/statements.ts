@@ -25,7 +25,7 @@ import {
   netByCurrency,
   type CurrencyPosition,
 } from './settlement-currency'
-import { agingBucket } from '@/modules/ledger/reports'
+import { agingBucket } from '@/modules/ledger/aging'
 
 /**
  * Customer statements (spec §13: "customers, invoices, credits, payments,

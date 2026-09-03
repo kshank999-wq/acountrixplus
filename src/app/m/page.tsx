@@ -78,12 +78,13 @@ export default async function MobileHome() {
         {receivable && (
           <div className="card p-4">
             <p className="text-xs text-muted">Owed to you</p>
+            {/* The company's own currency, which is what aging is in (Phase 107). */}
             <p className="tnum mt-0.5 text-lg font-semibold">
-              {formatCents(receivable.totals.totalCents)}
+              {formatCents(receivable.totals.totalCents, receivable.currency)}
             </p>
             {overdue > 0 && (
               <p className="mt-0.5 text-xs text-negative">
-                {formatCents(overdue)} past due
+                {formatCents(overdue, receivable.currency)} past due
               </p>
             )}
           </div>

@@ -6,6 +6,7 @@ import { formatCents } from '@/lib/money'
 import { trialBalance } from '@/modules/ledger/balances'
 import { controlAccounts } from '@/modules/ledger/receivables-check'
 import { apAging, arAging, balanceSheet, profitAndLoss } from '@/modules/ledger/reports'
+import { BUCKETS, creditNote, foreignNote } from '@/modules/ledger/aging'
 import {
   BASIS_DESCRIPTIONS,
   BASIS_LABELS,
@@ -815,48 +816,68 @@ async function AgingReport({
   const title = kind === 'ar' ? 'Accounts receivable aging' : 'Accounts payable aging'
   const partyLabel = kind === 'ar' ? 'Customer' : 'Vendor'
 
+  // Every figure below is in the company's own currency (Phase 107). The report
+  // spans every party, so there is exactly one currency in which "how much of
+  // this is going bad" has an answer — and a foreign row says separately what
+  // the other party was actually billed, so nobody quotes this figure at them.
+  const money = (cents: number) => formatCents(cents, report.currency)
+  const reconciliation = creditNote(report)
+
   return (
-    <Card title={title} subtitle={`As of ${end}`}>
+    <Card title={title} subtitle={`As of ${end} · ${report.currency}`}>
       {report.rows.length === 0 ? (
         <p className="px-4 py-8 text-center text-sm text-muted">Nothing outstanding.</p>
       ) : (
-        <table className="w-full text-sm">
-          <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
-            <tr>
-              <th className="px-4 py-2 font-medium">{partyLabel}</th>
-              <th className="px-4 py-2 text-right font-medium">Current</th>
-              <th className="px-4 py-2 text-right font-medium">1–30</th>
-              <th className="px-4 py-2 text-right font-medium">31–60</th>
-              <th className="px-4 py-2 text-right font-medium">61–90</th>
-              <th className="px-4 py-2 text-right font-medium">90+</th>
-              <th className="px-4 py-2 text-right font-medium">Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {report.rows.map((row) => (
-              <tr key={row.partyId} className="border-t border-line">
-                <td className="px-4 py-1.5">{row.partyName}</td>
-                <td className="tnum px-4 py-1.5 text-right">{formatCents(row.current)}</td>
-                <td className="tnum px-4 py-1.5 text-right">{formatCents(row.d1_30)}</td>
-                <td className="tnum px-4 py-1.5 text-right">{formatCents(row.d31_60)}</td>
-                <td className="tnum px-4 py-1.5 text-right">{formatCents(row.d61_90)}</td>
-                <td className="tnum px-4 py-1.5 text-right">{formatCents(row.d90_plus)}</td>
-                <td className="tnum px-4 py-1.5 text-right font-medium">
-                  {formatCents(row.totalCents)}
-                </td>
+        <>
+          <table className="w-full text-sm">
+            <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="px-4 py-2 font-medium">{partyLabel}</th>
+                {BUCKETS.map((bucket) => (
+                  <th key={bucket.key} className="px-4 py-2 text-right font-medium">
+                    {bucket.label}
+                  </th>
+                ))}
+                <th className="px-4 py-2 text-right font-medium">Total</th>
               </tr>
-            ))}
-            <tr className="border-t-2 border-line font-semibold">
-              <td className="px-4 py-2">Total</td>
-              <td className="tnum px-4 py-2 text-right">{formatCents(report.totals.current)}</td>
-              <td className="tnum px-4 py-2 text-right">{formatCents(report.totals.d1_30)}</td>
-              <td className="tnum px-4 py-2 text-right">{formatCents(report.totals.d31_60)}</td>
-              <td className="tnum px-4 py-2 text-right">{formatCents(report.totals.d61_90)}</td>
-              <td className="tnum px-4 py-2 text-right">{formatCents(report.totals.d90_plus)}</td>
-              <td className="tnum px-4 py-2 text-right">{formatCents(report.totals.totalCents)}</td>
-            </tr>
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {report.rows.map((row) => {
+                const invoiced = foreignNote(row)
+                return (
+                  <tr key={row.partyId} className="border-t border-line">
+                    <td className="px-4 py-1.5">
+                      {row.partyName}
+                      {invoiced && (
+                        <span className="ml-2 text-xs text-muted">{invoiced}</span>
+                      )}
+                    </td>
+                    {BUCKETS.map((bucket) => (
+                      <td key={bucket.key} className="tnum px-4 py-1.5 text-right">
+                        {money(row[bucket.key])}
+                      </td>
+                    ))}
+                    <td className="tnum px-4 py-1.5 text-right font-medium">
+                      {money(row.totalCents)}
+                    </td>
+                  </tr>
+                )
+              })}
+              <tr className="border-t-2 border-line font-semibold">
+                <td className="px-4 py-2">Total</td>
+                {BUCKETS.map((bucket) => (
+                  <td key={bucket.key} className="tnum px-4 py-2 text-right">
+                    {money(report.totals[bucket.key])}
+                  </td>
+                ))}
+                <td className="tnum px-4 py-2 text-right">{money(report.totals.totalCents)}</td>
+              </tr>
+            </tbody>
+          </table>
+          {reconciliation && (
+            <p className="border-t border-line px-4 py-3 text-xs text-muted">{reconciliation}</p>
+          )}
+        </>
       )}
     </Card>
   )
