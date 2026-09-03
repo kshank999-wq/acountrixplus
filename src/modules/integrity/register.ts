@@ -405,17 +405,35 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Two comparisons that both have to hold. A difference means an asset was capitalised ' +
       'without being registered, or depreciation was journalled by hand.',
-    asAt: { reach: 'today_only', because: "Verified, and the reason is a half-measure rather than an absence: depreciation_entries is filtered by period_end <= asOf, but the fixed_assets query has no date filter, so an asset bought after the date still counts at cost." },
+    asAt: {
+      reach: 'any_date',
+      because:
+        'Repaired in Phase 111: depreciation_entries was already filtered by period_end <= asOf, ' +
+        'and assetRegister now filters the assets themselves through onBooksAt on acquired_date ' +
+        'and disposed_on — the same two dates the ledger entries carry, so both sides walk back ' +
+        'together. It used to report $101,250 of broken books for a date before the company ' +
+        'owned anything.',
+    },
     run: async (ctx, asOf) => {
       const result = await reconcileFixedAssets(ctx, { asOf })
       return {
         agrees: result.agrees,
         leftCents: result.registerCostCents,
         rightCents: result.ledgerCostCents,
-        detail: result.accumulatedAgrees
-          ? undefined
-          : `Accumulated depreciation also differs: register ${formatCents(result.registerAccumulatedCents)}, ` +
-            `ledger ${formatCents(result.ledgerAccumulatedCents)}`,
+        // Both halves of what a reader needs, and the second one only appears
+        // for a past date: a run for last March counts fewer assets than one
+        // for today, and saying so is the difference between a restored
+        // register and a register somebody thinks has lost records (Phase 111).
+        detail:
+          [
+            result.accumulatedAgrees
+              ? null
+              : `Accumulated depreciation also differs: register ${formatCents(result.registerAccumulatedCents)}, ` +
+                `ledger ${formatCents(result.ledgerAccumulatedCents)}`,
+            result.excludedNote,
+          ]
+            .filter(Boolean)
+            .join(' ') || undefined,
       }
     },
   },
@@ -654,7 +672,15 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     meaning:
       'Cost enters work in process when material is issued and leaves when a run finishes. A ' +
       'difference means a run consumed something the ledger did not see, or finished twice.',
-    asAt: { reach: 'today_only', because: "Verified, and subtly: the ledger side is filtered by entry_date, but the subledger side is work_orders where status = 'released' — a run released in February and finished in May is not released now, so a March report would miss it." },
+    asAt: {
+      reach: 'any_date',
+      because:
+        'Repaired in Phase 111: neither status nor wip_cents is asked any more. A run counts when ' +
+        'onBooksAt says it had started and not yet settled — started_on against completed_on, ' +
+        'which is set on cancellation as well as completion — and it holds the sum of its ' +
+        'work_order_entries dated on or before the day, which is the same date each absorption ' +
+        'posted to the ledger with.',
+    },
     run: async (ctx, asOf) => {
       const result = await wipPosition(ctx, { asOf })
       return {

@@ -12,6 +12,12 @@ import {
   workOrders,
 } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import {
+  heldAt,
+  onBooksAt,
+  type DatedMovement,
+  type Lifespan,
+} from '@/modules/ledger/lifespan'
 import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { explodeBom, componentVariance, unitCostOf, yieldOf, type ComponentVariance, type YieldReport } from './bom'
@@ -53,7 +59,7 @@ export async function wipPosition(
 ): Promise<WipPosition> {
   requirePermission(ctx, 'reports:view')
 
-  const open = await db
+  const runs = await db
     .select({
       id: workOrders.id,
       number: workOrders.number,
@@ -61,11 +67,101 @@ export async function wipPosition(
       plannedMilli: workOrders.plannedMilli,
       wipCents: workOrders.wipCents,
       startedOn: workOrders.startedOn,
+      completedOn: workOrders.completedOn,
+      status: workOrders.status,
     })
     .from(workOrders)
     .innerJoin(serviceItems, eq(serviceItems.id, workOrders.outputItemId))
-    .where(scoped(ctx, workOrders, eq(workOrders.status, 'released')))
+    .where(
+      scoped(
+        ctx,
+        workOrders,
+        // Undated, the question is the present-tense one and `wip_cents` is the
+        // answer: the table's own check constraint says a settled run holds
+        // nothing.
+        opts.asOf ? undefined : eq(workOrders.status, 'released'),
+      ),
+    )
     .orderBy(asc(workOrders.number))
+
+  /**
+   * What each run was holding on `asOf` (Phase 111).
+   *
+   * `status = 'released'` and `wip_cents` are both present tense, and both were
+   * wrong for a past date. A run released in February and finished in May is
+   * not released *now*, so a March report missed it entirely; and a run still
+   * open carries a `wip_cents` that includes material issued after the date. On
+   * the development books the register side never moved at all:
+   *
+   * ```
+   * 2026-03-31: agrees  12600/12600
+   * 2025-12-31: DIFFERS 12600/0
+   * ```
+   *
+   * Both halves are already recorded. `work_order_entries.occurred_on` dates
+   * every absorption and is the same date the journal entry carries, and
+   * `completed_on` is set — with a journal entry dated the same day — whether
+   * the run finished or was cancelled. So the ledger and the subledger walk
+   * back on identical dates rather than merely similar ones.
+   */
+  const absorbed = new Map<string, DatedMovement[]>()
+
+  if (opts.asOf && runs.length > 0) {
+    const entries = await db
+      .select({
+        workOrderId: workOrderEntries.workOrderId,
+        on: workOrderEntries.occurredOn,
+        cents: workOrderEntries.costCents,
+      })
+      .from(workOrderEntries)
+      .where(
+        scoped(
+          ctx,
+          workOrderEntries,
+          inArray(
+            workOrderEntries.workOrderId,
+            runs.map((run) => run.id),
+          ),
+        ),
+      )
+
+    for (const entry of entries) {
+      const list = absorbed.get(entry.workOrderId) ?? []
+      list.push({ on: entry.on, cents: entry.cents })
+      absorbed.set(entry.workOrderId, list)
+    }
+  }
+
+  /**
+   * One lifespan per run, decided once.
+   *
+   * `started_on` is set from the first issue, so a run with movements always
+   * has one. Taking the earliest movement as a fallback means a run that
+   * somehow absorbed cost without a start date is still counted rather than
+   * silently dropped from a figure somebody reconciles against — and it is
+   * computed here, once, because *whether* a run was open and *what* it held
+   * are the same question asked twice, and answering them in two places is how
+   * they come to disagree.
+   */
+  const lifespanOf = (run: (typeof runs)[number]): Lifespan => {
+    const movements = absorbed.get(run.id) ?? []
+    const earliest = movements.reduce<string | null>(
+      (soonest, movement) => (soonest === null || movement.on < soonest ? movement.on : soonest),
+      null,
+    )
+
+    return { openedOn: run.startedOn ?? earliest, closedOn: run.completedOn }
+  }
+
+  const open = opts.asOf
+    ? runs
+        .map((run) => ({ run, life: lifespanOf(run) }))
+        .filter(({ life }) => onBooksAt(life, opts.asOf as string))
+        .map(({ run, life }) => ({
+          ...run,
+          wipCents: heldAt(life, absorbed.get(run.id) ?? [], opts.asOf as string),
+        }))
+    : runs
 
   const wip = await accountByNumber(ctx.companyId, INDUSTRY_ACCOUNTS.workInProcess)
 

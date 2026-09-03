@@ -12,6 +12,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
+import { excludedNote, onBooksAt } from '@/modules/ledger/lifespan'
 import type { DimensionAssignment } from '@/modules/dimensions/service'
 import {
   depreciationSchedule,
@@ -722,17 +723,32 @@ export async function assetRegister(
 ): Promise<FixedAsset[]> {
   requirePermission(ctx, 'accounting:view')
 
-  const assets = await db
+  const all = await db
     .select()
     .from(fixedAssets)
-    .where(
-      scoped(
-        ctx,
-        fixedAssets,
-        opts.includeDisposed ? undefined : sql`${fixedAssets.status} <> 'disposed'`,
-      ),
-    )
+    .where(scoped(ctx, fixedAssets))
     .orderBy(asc(fixedAssets.tag))
+
+  /**
+   * Which assets were on the register on `asOf` (Phase 111).
+   *
+   * `status <> 'disposed'` is present tense, and that was the whole defect: an
+   * asset bought in June still counted at cost in a March report, and one sold
+   * in June was missing from it. Both dates are already here and both match the
+   * ledger exactly — `registerAsset` posts with `entryDate: acquiredDate` and
+   * `disposeAsset` with `entryDate: disposedOn` — so the register can be
+   * restored to the date the ledger is being read at.
+   *
+   * Undated, the question is still the present-tense one, and the answer is the
+   * same: nothing disposed of has a `disposedOn` in the future.
+   */
+  const assets = opts.includeDisposed
+    ? all
+    : all.filter((asset) =>
+        opts.asOf
+          ? onBooksAt({ openedOn: asset.acquiredDate, closedOn: asset.disposedOn }, opts.asOf)
+          : asset.status !== 'disposed',
+      )
 
   if (assets.length === 0) return []
 
@@ -798,6 +814,15 @@ export type AssetReconciliation = {
   /** True only when both halves agree. The figure this module exists for. */
   agrees: boolean
   registerBookValueCents: number
+  /**
+   * Why the register is shorter than it is today, when it is (Phase 111).
+   *
+   * Null for a reconciliation as at today, where nothing is left out. Without
+   * it a past-dated register silently shows fewer assets than the same register
+   * for today, and the reader has to work out whether records went missing or
+   * were simply not there yet.
+   */
+  excludedNote: string | null
 }
 
 /**
@@ -808,8 +833,16 @@ export type AssetReconciliation = {
  *   Σ register cost          === Fixed Assets balance
  *   Σ depreciation charged   === Accumulated Depreciation balance
  *
- * Disposed assets are excluded from the register side and their reversal is
- * already out of the ledger side, so the two stay comparable.
+ * Both sides are restored to `asOf` (Phase 111). The register side used to be
+ * present-tense — every asset not disposed of *now*, at its cost, whatever the
+ * date asked about — while the ledger side walked back with `entry_date`. On
+ * the development books that reported $101,250 of broken books for a date
+ * before the company owned anything:
+ *
+ * ```
+ * 2026-03-31: agrees  cost 10125000/10125000
+ * 2025-12-31: DIFFERS cost 10125000/0
+ * ```
  */
 export async function reconcileFixedAssets(
   ctx: ActorContext,
@@ -819,6 +852,9 @@ export async function reconcileFixedAssets(
 
   const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10)
   const register = await assetRegister(ctx, { asOf })
+  // Everything on the books at some point, so the ones this date leaves out can
+  // be counted rather than silently missing from a shorter list.
+  const everything = await assetRegister(ctx, { asOf, includeDisposed: true })
 
   const registerCostCents = register.reduce((sum, asset) => sum + asset.costCents, 0)
   const registerAccumulatedCents = register.reduce((sum, asset) => sum + asset.accumulatedCents, 0)
@@ -870,6 +906,9 @@ export async function reconcileFixedAssets(
     accumulatedAgrees,
     agrees: costAgrees && accumulatedAgrees,
     registerBookValueCents: registerCostCents - registerAccumulatedCents,
+    excludedNote:
+      excludedNote(everything.length - register.length, { one: 'asset', many: 'assets' }, asOf) ??
+      null,
   }
 }
 

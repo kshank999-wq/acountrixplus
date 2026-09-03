@@ -160,6 +160,12 @@ the impossibility claim does not.
 
 ## What this does not do
 
+> **Both done by Phase 111.** `assets.register` now filters on `acquired_date`
+> and `disposed_on`; `manufacturing.wip` sums dated `work_order_entries` for
+> runs not yet settled. Both are `any_date`, and the boundary they share —
+> opening inclusive, closing exclusive — is named once in
+> `src/modules/ledger/lifespan.ts`. Nine checks remain `today_only`.
+
 **It does not repair the eleven.** `assets.register` and `manufacturing.wip` in
 particular are now understood well enough to fix — the first needs a date filter
 on `fixed_assets`, the second needs a work order's status *as at* the date
@@ -170,3 +176,7 @@ the difference between this and Phase 109's version of the same sentence.
 `any_date` checks against a fixture with no activity in most of their
 subledgers, where 0 is the right answer either way. The two that carry real
 weight are the two the fixture builds activity for.
+
+> **Partly closed by Phase 111.** `assets.register` now has real activity in the
+> fixture too, so three of the ungated checks carry weight rather than two. The
+> rest of the loop is still the weak half.

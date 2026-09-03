@@ -4,6 +4,9 @@ import { INTEGRITY_CHECKS, checkByKey } from '@/modules/integrity/register'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { createCustomer, createInvoice } from '@/modules/receivables/service'
 import { receiveStock } from '@/modules/inventory/service'
+import { registerAsset } from '@/modules/assets/service'
+import { accountByNumber } from '@/modules/coa/service'
+import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { db } from '@/db'
 import { serviceItems } from '@/db/schema'
 
@@ -94,6 +97,27 @@ describe('an any_date check reports nothing before the books began', () => {
     expect(before.agrees).toBe(true)
   })
 
+  it('holds for the asset register, which Phase 111 repaired', async () => {
+    await registerAsset(fixture.ctx, {
+      name: 'Excavator',
+      costCents: 5_000_000,
+      lifeMonths: 48,
+      acquiredDate: '2026-01-10',
+      inServiceDate: '2026-01-10',
+      postAcquisitionCreditAccountId: (
+        await accountByNumber(fixture.companyId, SYSTEM_ACCOUNTS.defaultChecking)
+      )!.id,
+    })
+
+    const check = checkByKey('assets.register')!
+    const today = await check.run(fixture.ctx, '2026-09-03')
+    const before = await check.run(fixture.ctx, LONG_BEFORE)
+
+    expect(today.leftCents).toBe(5_000_000)
+    expect(before.leftCents).toBe(0)
+    expect(before.agrees).toBe(true)
+  })
+
   it('holds for every any_date check every company gets', async () => {
     // Only the ungated ones: a module check wants a chart this company has no
     // reason to carry, and the register skips it for that reason rather than
@@ -127,19 +151,16 @@ describe('what verifying the declarations changed', () => {
     }
   })
 
-  it('keeps the two that looked promotable and are not', () => {
-    // Both would have been promoted by a quick read, and both are wrong for a
-    // reason only the query shows. This is why "not verified" had to be
-    // resolved rather than trusted in either direction.
+  it('repairs the two Phase 110 understood but did not fix', () => {
+    // Phase 110 kept both `today_only` and wrote down exactly what stopped
+    // them. Phase 111 acted on what it had written: neither reason survives.
     const assets = checkByKey('assets.register')!
-    expect(assets.asAt.reach).toBe('today_only')
-    // Depreciation walks back; the asset itself does not.
-    expect(assets.asAt.because).toContain('fixed_assets query has no date filter')
+    expect(assets.asAt.reach).toBe('any_date')
+    expect(assets.asAt.because).not.toContain('no date filter')
 
     const wip = checkByKey('manufacturing.wip')!
-    expect(wip.asAt.reach).toBe('today_only')
-    // Its ledger side *is* dated, which is what makes it look fine.
-    expect(wip.asAt.because).toContain("status = 'released'")
+    expect(wip.asAt.reach).toBe('any_date')
+    expect(wip.asAt.because).not.toContain("status = 'released'")
   })
 
   it('leaves the ones with no dated history alone', () => {
