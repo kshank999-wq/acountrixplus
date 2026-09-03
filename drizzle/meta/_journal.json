@@ -505,6 +505,13 @@
       "when": 1788740004000,
       "tag": "0071_phase110_integrity_out_of_reach",
       "breakpoints": true
+    },
+    {
+      "idx": 72,
+      "version": "7",
+      "when": 1788740005000,
+      "tag": "0072_phase112_retainer_application_carried",
+      "breakpoints": true
     }
   ]
 }

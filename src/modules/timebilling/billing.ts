@@ -27,7 +27,7 @@ import { mayUse } from '@/modules/receivables/overpayment'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
 import { DomainError } from '@/modules/errors'
 import { balanceForAccount } from '@/modules/ledger/balances'
-import { type Position } from './retainer-position'
+import { heldAcrossAt, type Position } from './retainer-position'
 
 /**
  * Turning recorded work into an invoice (spec §5).
@@ -726,6 +726,13 @@ async function applyRetainerWithin(
     retainerId: retainer.id,
     invoiceId: invoice.id,
     amountCents,
+    // The figure that was already worked out and posted a few lines above, kept
+    // rather than dropped (Phase 112). It is the same number the entry debited,
+    // so the row and the ledger cannot say different things about what left the
+    // liability — and it is what lets the held-money position be stated for a
+    // past date at all, since `relieveFunctional`'s stranded-cent rule makes it
+    // underivable after the fact.
+    carriedCents: settlement.releasedCents,
     appliedOn: input.appliedOn,
     journalEntryId: entry.id,
   })
@@ -823,18 +830,93 @@ export async function retainerPosition(
 ): Promise<Position> {
   requirePermission(ctx, 'reports:view')
 
-  const [totals] = await db
+  /**
+   * Walked back to `asOf` rather than read off the running column (Phase 112).
+   *
+   * `functional_remaining_cents` is where the retainer stands *now*, and the
+   * ledger side below has always been filtered by `entry_date` — so asking
+   * about a past date compared a subledger as it stands today against a ledger
+   * as at that day. Measured on the development books before this phase:
+   *
+   * ```
+   * 2026-07-31  held 320000  ledger 320000  agrees
+   * 2026-06-15  held 320000  ledger 500000  DIFFERS
+   * 2026-04-30  held 320000  ledger      0  DIFFERS
+   * ```
+   *
+   * The held figure never moved, and this is a **fault** — so $5,000 of client
+   * money read as broken books in May, and $3,200 read as held a month before
+   * the client had sent anything.
+   */
+  const rows = await db
     .select({
-      held: sql<string>`coalesce(sum(${retainers.functionalRemainingCents}), 0)`,
-      open: sql<string>`count(*) filter (where ${retainers.remainingCents} > 0)`,
+      id: retainers.id,
+      receivedOn: retainers.receivedOn,
+      amountCents: retainers.amountCents,
+      rateMillionths: retainers.exchangeRateMillionths,
     })
     .from(retainers)
     .where(scoped(ctx, retainers))
 
+  const [draws, returns] = await Promise.all([
+    db
+      .select({
+        retainerId: retainerApplications.retainerId,
+        on: retainerApplications.appliedOn,
+        carriedCents: retainerApplications.carriedCents,
+      })
+      .from(retainerApplications)
+      .where(scoped(ctx, retainerApplications)),
+    db
+      .select({
+        subjectId: refunds.subjectId,
+        on: refunds.refundedOn,
+        carriedCents: refunds.carriedCents,
+      })
+      .from(refunds)
+      .where(
+        scoped(
+          ctx,
+          refunds,
+          eq(refunds.subjectType, 'retainer'),
+          // A refund taken back is marked rather than deleted (Phase 69), and
+          // its entry is voided — so the ledger has already put the money back
+          // and the subledger must too.
+          isNull(refunds.voidedAt),
+        ),
+      ),
+  ])
+
+  const drawsBy = new Map<string, Array<{ on: string; carriedCents: number }>>()
+  for (const draw of draws) {
+    drawsBy.set(draw.retainerId, [...(drawsBy.get(draw.retainerId) ?? []), draw])
+  }
+  const returnsBy = new Map<string, Array<{ on: string; carriedCents: number }>>()
+  for (const back of returns) {
+    returnsBy.set(back.subjectId, [...(returnsBy.get(back.subjectId) ?? []), back])
+  }
+
+  const totals = heldAcrossAt(
+    rows.map((row) => ({
+      receivedOn: row.receivedOn,
+      // The opening figure is not stored, and does not need to be: neither the
+      // amount nor the rate ever changes after the money arrives, so converting
+      // them is the same arithmetic `receiveRetainer` did on the day.
+      openingCents: convert(row.amountCents, row.rateMillionths),
+      draws: drawsBy.get(row.id) ?? [],
+      returns: returnsBy.get(row.id) ?? [],
+    })),
+    // Undated means *everything*, which is what the ledger side below already
+    // means: `endDate: undefined` puts no filter on `entry_date`. A date beyond
+    // any movement says that in the same words the dated path uses, rather than
+    // giving this function a second code path or a clock it does not need.
+    opts.asOf ?? '9999-12-31',
+  )
+
   const { account, holding } = await resolveRetainerAccount(ctx.companyId)
 
   return {
-    heldCents: Number(totals?.held ?? 0),
+    heldCents: totals.heldCents,
     // Signed in the account's normal direction, so a liability carrying a
     // credit balance comes back positive — already what "how much of other
     // people's money are we holding" means.
@@ -842,7 +924,10 @@ export async function retainerPosition(
     holding,
     accountNumber: account.number,
     accountName: account.name,
-    openCount: Number(totals?.open ?? 0),
+    // From the same walk as the total, not a second query: "how much are we
+    // holding" and "on how many retainers" are one question asked two ways, and
+    // a past date makes them disagree if they are answered separately.
+    openCount: totals.openCount,
   }
 }
 

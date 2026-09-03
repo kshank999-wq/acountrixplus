@@ -39,12 +39,78 @@
  *
  * No database and no clock: this file decides, and `reporting.ts` fetches.
  */
+import { heldAt } from '@/modules/ledger/lifespan'
 
 /** Whether the liability account holds only retainers, or other things too. */
 export type Holding = 'dedicated' | 'shared'
 
+/**
+ * One retainer's whole dated life, in the company's own money (Phase 112).
+ *
+ * Three things move a retainer's balance and every one of them is dated:
+ * it is **taken** on `received_on`, **drawn** on each application's
+ * `applied_on`, and **given back** on a refund's `refunded_on`. Each carries a
+ * journal entry dated the same day, which is what lets the subledger and the
+ * ledger walk back on identical dates rather than merely similar ones.
+ *
+ * Every figure here is functional — what the liability is carried at — because
+ * the ledger is in the company's own money and Phase 65 was named for
+ * eliminating sums that add currencies together.
+ */
+export type RetainerLife = {
+  receivedOn: string
+  /** `amount_cents` converted at the rate fixed on the day it arrived. */
+  openingCents: number
+  draws: ReadonlyArray<{ on: string; carriedCents: number }>
+  returns: ReadonlyArray<{ on: string; carriedCents: number }>
+}
+
+/**
+ * What one retainer was holding at the close of `asOf`.
+ *
+ * A retainer has no closing date — it does not leave the books when it reaches
+ * zero, it simply holds nothing — so the lifespan handed to `heldAt` is open at
+ * the far end, and running down to zero is something the movements say rather
+ * than something the dates do.
+ */
+export function heldByAt(life: RetainerLife, asOf: string): number {
+  return heldAt(
+    { openedOn: life.receivedOn, closedOn: null },
+    [
+      { on: life.receivedOn, cents: life.openingCents },
+      ...life.draws.map((draw) => ({ on: draw.on, cents: -draw.carriedCents })),
+      ...life.returns.map((back) => ({ on: back.on, cents: -back.carriedCents })),
+    ],
+    asOf,
+  )
+}
+
+/**
+ * The whole firm's client money at a date, and how many retainers held any.
+ *
+ * The count comes from the same walk as the total rather than a second query,
+ * because "how much are we holding" and "on how many retainers" are one
+ * question asked two ways, and Phase 105 already shipped a sentence where the
+ * noun and the verb disagreed about the count.
+ */
+export function heldAcrossAt(
+  lives: readonly RetainerLife[],
+  asOf: string,
+): { heldCents: number; openCount: number } {
+  let heldCents = 0
+  let openCount = 0
+
+  for (const life of lives) {
+    const held = heldByAt(life, asOf)
+    heldCents += held
+    if (held > 0) openCount += 1
+  }
+
+  return { heldCents, openCount }
+}
+
 export type Position = {
-  /** Σ `functional_remaining_cents` — the company's own money, never a mix. */
+  /** What was being held, in the company's own money, never a mix. */
   heldCents: number
   /** The balance on whichever account the retainers were posted to. */
   ledgerCents: number

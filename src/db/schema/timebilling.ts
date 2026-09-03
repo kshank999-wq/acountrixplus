@@ -352,7 +352,24 @@ export const retainerApplications = pgTable(
       .notNull()
       .references(() => invoices.id, { onDelete: 'cascade' }),
 
+    /** In the client's currency — what the retainer itself is denominated in. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /**
+     * Functional, off the liability, at the rate it has been carried at since
+     * the money came in (Phase 112).
+     *
+     * The same fact `refunds.carried_cents` has kept since Phase 68, in the
+     * same words, about the other way a retainer goes down. A draw worked this
+     * out, posted it, and did not write it here — so the money a firm holds for
+     * its clients could be stated for today and for no other day.
+     *
+     * Not derivable from `amount_cents` and the rate: `relieveFunctional` gives
+     * the *final* draw the whole remaining functional balance, so no retainer
+     * is left holding a stranded cent. That makes a draw's functional amount
+     * depend on the functional balance at that moment — which is the history
+     * being reconstructed. Circular, so it is kept.
+     */
+    carriedCents: bigint('carried_cents', { mode: 'number' }).notNull(),
     appliedOn: date('applied_on').notNull(),
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
@@ -362,7 +379,10 @@ export const retainerApplications = pgTable(
   (t) => ({
     retainerIdx: index('retainer_applications_retainer_idx').on(t.retainerId),
     invoiceIdx: index('retainer_applications_invoice_idx').on(t.invoiceId),
+    // The query this column exists for: one company's draws up to a date.
+    datedIdx: index('retainer_applications_dated_idx').on(t.companyId, t.appliedOn),
     amountPositive: check('retainer_applications_amount_positive', sql`${t.amountCents} > 0`),
+    carriedPositive: check('retainer_applications_carried_positive', sql`${t.carriedCents} > 0`),
   }),
 )
 

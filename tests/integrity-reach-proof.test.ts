@@ -171,7 +171,6 @@ describe('what verifying the declarations changed', () => {
       'receivables.customer_credit',
       'inventory.goods_received',
       'fx.conversions',
-      'timebilling.retainers',
     ]) {
       expect(checkByKey(key)!.asAt.reach, key).toBe('today_only')
     }

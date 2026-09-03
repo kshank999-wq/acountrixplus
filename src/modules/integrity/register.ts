@@ -761,7 +761,16 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       'retainers it holds against the liability on its balance sheet has the same problem a ' +
       'landlord has with deposits, and in most places where professionals take money on ' +
       'account the rules about it are stricter.',
-    asAt: { reach: 'today_only', because: "Verified: Phase 105 sums functional_remaining_cents as it stands now. retainer_applications.applied_on dates every draw, so this is the clearest candidate for the treatment Phase 108 gave the control accounts." },
+    asAt: {
+      reach: 'any_date',
+      because:
+        'Repaired in Phase 112: the running functional_remaining_cents is not read any more. A ' +
+        "retainer's balance is rebuilt from its three dated movements — taken on received_on, " +
+        'drawn on each retainer_applications.applied_on, given back on a refund refunded_on — ' +
+        'each of which carries a journal entry dated the same day. The draw needed a new column: ' +
+        'carried_cents, the functional amount off the liability, which the draw worked out and ' +
+        'threw away.',
+    },
     run: async (ctx, asOf) => {
       const position = await retainerPosition(ctx, { asOf })
       const verdict = verdictFor(position)

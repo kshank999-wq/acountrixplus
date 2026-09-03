@@ -140,6 +140,12 @@ own copy of the note would be unreachable and this phase did not write one. The
 note reaches the operations page instead, through a stored run, which is a path
 that genuinely carries past dates.
 
+> **Retainers done by Phase 112.** The nomination was right about the date and
+> wrong about the work: all three movements are dated, but a draw did not record
+> the functional amount it took, and that amount is not derivable afterwards.
+> `retainer_applications` gained `carried_cents`. Eight checks remain
+> `today_only`.
+
 **It does not repair the remaining nine.** `timebilling.retainers` is still the
 clearest candidate — `retainer_applications.applied_on` dates every draw — and
 its declaration still says so. The others are named in their own prose, and

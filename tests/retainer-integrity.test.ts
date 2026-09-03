@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { chartAccounts, retainers } from '@/db/schema'
+import { chartAccounts, invoices, retainerApplications, retainers } from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
 import { INTEGRITY_CHECKS, checkByKey } from '@/modules/integrity/register'
 import { runIntegrityChecks } from '@/modules/integrity/service'
@@ -91,6 +91,54 @@ describe('against the database', () => {
     })
   }
 
+  /**
+   * A retainer taken and then drawn to nothing, with the application row that
+   * says where the money went (Phase 112).
+   *
+   * Straight to the tables rather than through the service, like its sibling
+   * above, so these tests stay about the position rather than about billing —
+   * but *with* the dated row, because a balance that came down with nothing
+   * recording the draw is not a spent retainer, it is a broken one.
+   */
+  const spendRetainer = async (cents: number) => {
+    const customer = await createCustomer(fixture.ctx, { name: 'Spent Chambers' })
+    const [invoice] = await db
+      .insert(invoices)
+      .values({
+        companyId: fixture.companyId,
+        customerId: customer.id,
+        number: `INV-SPENT-${cents}`,
+        issueDate: '2026-02-01',
+        dueDate: '2026-03-01',
+        status: 'paid',
+        subtotalCents: cents,
+        totalCents: cents,
+        balanceCents: 0,
+      })
+      .returning()
+    const [retainer] = await db
+      .insert(retainers)
+      .values({
+        companyId: fixture.companyId,
+        customerId: customer.id,
+        receivedOn: '2026-01-06',
+        currency: 'USD',
+        amountCents: cents,
+        remainingCents: 0,
+        functionalRemainingCents: 0,
+      })
+      .returning()
+
+    await db.insert(retainerApplications).values({
+      companyId: fixture.companyId,
+      retainerId: retainer.id,
+      invoiceId: invoice.id,
+      amountCents: cents,
+      carriedCents: cents,
+      appliedOn: '2026-02-01',
+    })
+  }
+
   it('reports the shared account when the pack installed no 2550', async () => {
     // Six of the seven companies in the development database are in this state,
     // which is why the check cannot simply demand equality.
@@ -112,15 +160,46 @@ describe('against the database', () => {
     // A retainer carries the currency it came in (Phase 66); the ledger is in
     // the company's own. Adding the first across currencies is the sum Phase 65
     // was named for eliminating — and doing it inside a check would be worse.
-    await holdRetainer(400_000, 440_000)
+    //
+    // A real euro retainer rather than a dollar one with a hand-set functional
+    // column (Phase 112): the position is rebuilt from the amount and the rate
+    // beside it, so a row whose functional figure contradicts its own currency
+    // proves nothing about the claim being made here.
+    const customer = await createCustomer(fixture.ctx, { name: 'Rue Vaugirard SARL' })
+    await db.insert(retainers).values({
+      companyId: fixture.companyId,
+      customerId: customer.id,
+      receivedOn: '2026-01-05',
+      currency: 'EUR',
+      exchangeRateMillionths: 1_100_000,
+      amountCents: 400_000,
+      remainingCents: 400_000,
+      functionalRemainingCents: 440_000,
+    })
 
     const position = await retainerPosition(fixture.ctx)
+    // €4,000 at 1.10 — not 400000, which is the money that arrived.
     expect(position.heldCents).toBe(440_000)
   })
 
   it('counts only the retainers with something left on them', async () => {
     await holdRetainer(300_000)
-    const customer = await createCustomer(fixture.ctx, { name: 'Spent Chambers' })
+    // Spent through a draw, which is the only way `remaining_cents` legitimately
+    // comes down — `applyRetainer` writes the application and `refundRetainer`
+    // writes the refund, and there is no third path.
+    await spendRetainer(100_000)
+
+    expect((await retainerPosition(fixture.ctx)).openCount).toBe(1)
+  })
+
+  it('will not take a drawn-down retainer’s word for it (Phase 112)', async () => {
+    // Before this phase the position read `functional_remaining_cents` and a
+    // retainer that said it had been spent was believed, whatever the ledger
+    // knew. Rebuilding from dated movements means a balance that came down
+    // with nothing recording where the money went now shows as still held —
+    // which is a fault, and the honest one: the subledger cannot explain
+    // itself.
+    const customer = await createCustomer(fixture.ctx, { name: 'Unexplained Chambers' })
     await db.insert(retainers).values({
       companyId: fixture.companyId,
       customerId: customer.id,
@@ -131,7 +210,9 @@ describe('against the database', () => {
       functionalRemainingCents: 0,
     })
 
-    expect((await retainerPosition(fixture.ctx)).openCount).toBe(1)
+    const position = await retainerPosition(fixture.ctx)
+    expect(position.heldCents).toBe(100_000)
+    expect(position.openCount).toBe(1)
   })
 
   it('catches a retainer whose ledger half never happened, on a dedicated account', async () => {
