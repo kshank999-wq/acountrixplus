@@ -1,7 +1,8 @@
-import { and, eq, inArray, ne, sql } from 'drizzle-orm'
+import { inArray } from 'drizzle-orm'
 import { db } from '@/db'
-import { bills, creditNotes, customers, invoices, vendors } from '@/db/schema'
+import { customers, vendors } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { openCreditsAsAt, openDocumentsAsAt } from './settlement-history'
 import { balanceForAccount } from './balances'
 import { accountByNumber } from '@/modules/coa/service'
 import {
@@ -103,14 +104,13 @@ export type ControlAccountReport = {
  * application: an accountant checking last month's close needs last month's
  * answer, not today's.
  *
- * One caveat is worth stating rather than hiding. The ledger side is measured
- * **as at a date**, while the subledger side is the balance a document carries
- * **now** — invoices do not keep a history of what they were owed on an
- * arbitrary past date. So an `asOf` in the past compares a historical ledger
- * with a present subledger, and will differ by anything paid since. Left this
- * way deliberately: reconstructing historical document balances means replaying
- * every payment application, which is a bigger machine than this check
- * justifies, and the honest default — today — is the one anybody actually runs.
+ * Both sides are measured **as at the same date** (Phase 108). Until then the
+ * ledger walked back to `asOf` and the documents did not, so any date but today
+ * reported a fault on healthy books — measured at $45,758.75 on the development
+ * database for 31 March. The caveat that stood here said reconstructing a
+ * historical document balance "means replaying every payment application, which
+ * is a bigger machine than this check justifies"; all four paths that reduce a
+ * balance keep a dated row, so it is four sums, and `as-at.ts` does them.
  */
 export async function controlAccounts(
   ctx: ActorContext,
@@ -118,61 +118,17 @@ export async function controlAccounts(
 ): Promise<ControlAccountReport> {
   requirePermission(ctx, 'reports:view')
 
+  // Defaulted in one place so both sides ask about the same day. The clock is
+  // read here and nowhere below, which keeps every function under this one a
+  // function of its arguments.
+  const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10)
+
   const [receivables, payables] = await Promise.all([
-    receivablesCheck(ctx, opts.asOf),
-    payablesCheck(ctx, opts.asOf),
+    receivablesCheck(ctx, asOf),
+    payablesCheck(ctx, asOf),
   ])
 
   return { receivables, payables, agrees: receivables.agrees && payables.agrees }
-}
-
-/** Statuses that still owe something. A void document owes nothing by definition. */
-const OPEN_INVOICE_STATUSES = ['open', 'partial', 'written_off'] as const
-
-/**
- * Credit notes with something still on them, by party.
- *
- * `party` rather than a separate table: customer credit notes and vendor
- * credits are the same row shape in `credit_notes`, told apart by that column,
- * which is why both control accounts read from here.
- *
- * `functional_remaining_cents` for the same reason the document sides use
- * `functional_balance_cents` — the ledger half of this comparison is always in
- * the company's own money, and summing a euro credit's face value against a
- * dollar control account would report every foreign customer as a discrepancy
- * (Phase 35, Phase 65).
- */
-async function openCredits(
-  ctx: ActorContext,
-  party: 'customer' | 'vendor',
-): Promise<Array<{ partyId: string | null; cents: number; documents: number }>> {
-  const partyColumn = party === 'customer' ? creditNotes.customerId : creditNotes.vendorId
-
-  const rows = await db
-    .select({
-      partyId: partyColumn,
-      cents: sql<string>`coalesce(sum(${creditNotes.functionalRemainingCents}), 0)`,
-      documents: sql<string>`count(${creditNotes.id})`,
-    })
-    .from(creditNotes)
-    .where(
-      scoped(
-        ctx,
-        creditNotes,
-        and(
-          eq(creditNotes.party, party),
-          ne(creditNotes.status, 'void'),
-          sql`${creditNotes.remainingCents} > 0`,
-        ),
-      ),
-    )
-    .groupBy(partyColumn)
-
-  return rows.map((row) => ({
-    partyId: row.partyId,
-    cents: Number(row.cents),
-    documents: Number(row.documents),
-  }))
 }
 
 /**
@@ -218,39 +174,23 @@ function assemble(
 
 async function receivablesCheck(
   ctx: ActorContext,
-  asOf?: string,
+  asOf: string,
 ): Promise<ControlAccountCheck> {
   const account = await accountByNumber(ctx.companyId, '1100')
 
   const ledgerCents = account ? await balanceForAccount(ctx, account.id, { endDate: asOf }) : 0
 
-  const [invoiceRows, creditRows] = await Promise.all([
-    db
-      .select({
-        id: customers.id,
-        name: customers.name,
-        cents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
-        documents: sql<string>`count(${invoices.id})`,
-      })
-      .from(invoices)
-      .innerJoin(customers, eq(customers.id, invoices.customerId))
-      .where(
-        scoped(
-          ctx,
-          invoices,
-          and(
-            inArray(invoices.status, [...OPEN_INVOICE_STATUSES]),
-            ne(invoices.balanceCents, 0),
-          ),
-        ),
-      )
-      .groupBy(customers.id, customers.name),
-    openCredits(ctx, 'customer'),
+  // Both sides as at the same date (Phase 108). `openDocumentsAsAt` is shared
+  // with the aging report, so the two cannot disagree about which documents
+  // were obligations then.
+  const [documents, creditRows] = await Promise.all([
+    openDocumentsAsAt(ctx, 'invoice', asOf),
+    openCreditsAsAt(ctx, 'customer', asOf),
   ])
 
   // The credit rows carry an id and no name, because they were grouped on the
-  // foreign key. Named from the invoice rows where possible, and from the
-  // customer table where the only document a party has is a credit.
+  // foreign key. Named from the customer table, which also covers a party
+  // whose only document is a credit.
   const names = await partyNames(
     ctx,
     'customer',
@@ -265,11 +205,11 @@ async function receivablesCheck(
     [
       ...toAmounts(
         'invoice',
-        invoiceRows.map((row) => ({
-          id: row.id,
-          name: row.name,
-          cents: Number(row.cents),
-          documents: Number(row.documents),
+        documents.map((document) => ({
+          id: document.partyId,
+          name: document.partyName,
+          cents: document.functionalBalanceCents,
+          documents: 1,
         })),
       ),
       ...toAmounts(
@@ -287,32 +227,16 @@ async function receivablesCheck(
   )
 }
 
-async function payablesCheck(ctx: ActorContext, asOf?: string): Promise<ControlAccountCheck> {
+async function payablesCheck(ctx: ActorContext, asOf: string): Promise<ControlAccountCheck> {
   const account = await accountByNumber(ctx.companyId, '2000')
 
   // A liability read on its normal side, so both figures here are positive when
   // money is owed and the comparison is between two numbers of the same sign.
   const ledgerCents = account ? await balanceForAccount(ctx, account.id, { endDate: asOf }) : 0
 
-  const [billRows, creditRows] = await Promise.all([
-    db
-      .select({
-        id: vendors.id,
-        name: vendors.name,
-        cents: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)`,
-        documents: sql<string>`count(${bills.id})`,
-      })
-      .from(bills)
-      .innerJoin(vendors, eq(vendors.id, bills.vendorId))
-      .where(
-        scoped(
-          ctx,
-          bills,
-          and(inArray(bills.status, ['open', 'partial']), ne(bills.balanceCents, 0)),
-        ),
-      )
-      .groupBy(vendors.id, vendors.name),
-    openCredits(ctx, 'vendor'),
+  const [documents, creditRows] = await Promise.all([
+    openDocumentsAsAt(ctx, 'bill', asOf),
+    openCreditsAsAt(ctx, 'vendor', asOf),
   ])
 
   const names = await partyNames(
@@ -324,11 +248,11 @@ async function payablesCheck(ctx: ActorContext, asOf?: string): Promise<ControlA
   return assemble('payables', '2000', account?.name ?? 'Accounts Payable', ledgerCents, [
     ...toAmounts(
       'bill',
-      billRows.map((row) => ({
-        id: row.id,
-        name: row.name,
-        cents: Number(row.cents),
-        documents: Number(row.documents),
+      documents.map((document) => ({
+        id: document.partyId,
+        name: document.partyName,
+        cents: document.functionalBalanceCents,
+        documents: 1,
       })),
     ),
     ...toAmounts(

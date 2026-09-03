@@ -108,10 +108,16 @@ credit reduces the payables line the same way — verified, not assumed.
 **It does not revisit `asOf` on the credits.** `unappliedCredits` filters on
 `issue_date <= asOfDate`, which matches how the documents are filtered, but reads
 the credit's *present* `remaining_cents` — the same present-tense caveat
-`receivables-check.ts` has documented since Phase 31. A credit issued in March
-and applied in June shows as unapplied on neither report today, and on both if
-you ask about April. Reconstructing historical remaining balances means replaying
-every application, which is a bigger machine than either report justifies.
+`receivables-check.ts` has documented since Phase 31.
+
+> **Corrected by Phase 108.** The sentence that stood here — "reconstructing
+> historical remaining balances means replaying every application, which is a
+> bigger machine than either report justifies" — repeated a false claim from
+> `receivables-check.ts` without checking it. All four paths that reduce a
+> balance write a dated row, so it is four sums rather than a replay. Believing
+> it cost three different answers to "what was owed on 31 March", with the
+> control-account check reporting a $45,758.75 fault on healthy books for any
+> date but today. Both reports now restore to the date asked about.
 
 **It does not check that the two reports agree.** The relationship is now
 asserted in a test and stated on the page, but the nightly register has no

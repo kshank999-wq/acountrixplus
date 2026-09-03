@@ -15,6 +15,7 @@ import type { AccountType } from '@/modules/coa/standard'
 import { accountBalances, isDebitNormal, type AccountBalance } from './balances'
 import { balancesForBasis, type ReportingBasis } from './cash-basis'
 import { buildAging, type AgingReport, type UnappliedCredits } from './aging'
+import { openCreditsAsAt, openDocumentsAsAt } from './settlement-history'
 import { functionalCurrency } from '@/modules/fx/service'
 
 /**
@@ -286,44 +287,13 @@ export {
 } from './aging'
 
 /**
- * Credits issued and not yet applied, in the company's own money (Phase 106).
- *
- * A credit note reduces the control account when it is issued, so without this
- * the aging total and the balance sheet differ by an amount neither report
- * mentions. It is reported beside the total rather than aged: Phase 54 settled
- * that an unapplied credit has no age.
- */
-async function unappliedCredits(
-  ctx: ActorContext,
-  party: 'customer' | 'vendor',
-  asOfDate: string,
-): Promise<UnappliedCredits> {
-  const [row] = await db
-    .select({
-      count: sql<string>`count(${creditNotes.id})`,
-      functionalCents: sql<string>`coalesce(sum(${creditNotes.functionalRemainingCents}), 0)`,
-    })
-    .from(creditNotes)
-    .where(
-      scoped(
-        ctx,
-        creditNotes,
-        eq(creditNotes.party, party),
-        sql`${creditNotes.status} <> 'void'`,
-        sql`${creditNotes.remainingCents} > 0`,
-        lte(creditNotes.issueDate, asOfDate),
-      ),
-    )
-
-  return { count: Number(row?.count ?? 0), functionalCents: Number(row?.functionalCents ?? 0) }
-}
-
-/**
  * Accounts receivable aging (spec §13).
  *
- * Reads outstanding balances from the invoices themselves rather than the AR
- * control account, because aging needs per-customer, per-due-date detail that a
- * single ledger account does not carry.
+ * Reads the documents rather than the AR control account, because aging needs
+ * per-customer, per-due-date detail a single ledger account does not carry —
+ * and reads them **as at the date asked about** (Phase 108), which is what
+ * `openDocumentsAsAt` restores. The same function feeds the control-account
+ * check, so the two reports cannot disagree about what was open then.
  */
 export async function arAging(
   ctx: ActorContext,
@@ -331,32 +301,13 @@ export async function arAging(
 ): Promise<AgingReport> {
   requirePermission(ctx, 'reports:view')
 
-  const [rows, currency, credits] = await Promise.all([
-    db
-      .select({
-        partyId: customers.id,
-        partyName: customers.name,
-        dueDate: invoices.dueDate,
-        currency: invoices.currency,
-        balanceCents: invoices.balanceCents,
-        functionalBalanceCents: invoices.functionalBalanceCents,
-      })
-      .from(invoices)
-      .innerJoin(customers, eq(customers.id, invoices.customerId))
-      .where(
-        scoped(
-          ctx,
-          invoices,
-          // Drafts are not yet obligations; voided and paid ones are settled.
-          sql`${invoices.status} IN ('open', 'partial')`,
-          lte(invoices.issueDate, opts.asOfDate),
-        ),
-      ),
+  const [documents, currency, credits] = await Promise.all([
+    openDocumentsAsAt(ctx, 'invoice', opts.asOfDate),
     functionalCurrency(ctx.companyId),
     unappliedCredits(ctx, 'customer', opts.asOfDate),
   ])
 
-  return buildAging(rows, { asOfDate: opts.asOfDate, currency, credits })
+  return buildAging(documents, { asOfDate: opts.asOfDate, currency, credits })
 }
 
 /** Accounts payable aging (spec §13). Mirror of AR, over bills and vendors. */
@@ -366,29 +317,32 @@ export async function apAging(
 ): Promise<AgingReport> {
   requirePermission(ctx, 'reports:view')
 
-  const [rows, currency, credits] = await Promise.all([
-    db
-      .select({
-        partyId: vendors.id,
-        partyName: vendors.name,
-        dueDate: bills.dueDate,
-        currency: bills.currency,
-        balanceCents: bills.balanceCents,
-        functionalBalanceCents: bills.functionalBalanceCents,
-      })
-      .from(bills)
-      .innerJoin(vendors, eq(vendors.id, bills.vendorId))
-      .where(
-        scoped(
-          ctx,
-          bills,
-          sql`${bills.status} IN ('open', 'partial')`,
-          lte(bills.issueDate, opts.asOfDate),
-        ),
-      ),
+  const [documents, currency, credits] = await Promise.all([
+    openDocumentsAsAt(ctx, 'bill', opts.asOfDate),
     functionalCurrency(ctx.companyId),
     unappliedCredits(ctx, 'vendor', opts.asOfDate),
   ])
 
-  return buildAging(rows, { asOfDate: opts.asOfDate, currency, credits })
+  return buildAging(documents, { asOfDate: opts.asOfDate, currency, credits })
+}
+
+/**
+ * Credits issued and not yet applied, as at the date (Phases 106, 108).
+ *
+ * A credit note reduces the control account when it is issued, so without this
+ * the aging total and the balance sheet differ by an amount neither report
+ * mentions. Restored to `asOf` by the same shared function the control-account
+ * check uses, because a credit applied since was still unapplied then.
+ */
+async function unappliedCredits(
+  ctx: ActorContext,
+  party: 'customer' | 'vendor',
+  asOf: string,
+): Promise<UnappliedCredits> {
+  const rows = await openCreditsAsAt(ctx, party, asOf)
+
+  return {
+    count: rows.reduce((sum, row) => sum + row.documents, 0),
+    functionalCents: rows.reduce((sum, row) => sum + row.cents, 0),
+  }
 }
