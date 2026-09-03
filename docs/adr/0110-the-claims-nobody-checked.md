@@ -63,6 +63,28 @@ premise.
 for the treatment Phase 108 gave the control accounts, because
 `retainer_applications.applied_on` dates every draw.
 
+### The cost, demonstrated
+
+The full suite for this phase failed twice, in `tests/overpayment.test.ts`:
+
+```
+FAIL  the account nobody would otherwise watch > agrees with what the receipts say is held
+FAIL  the account nobody would otherwise watch > catches a held amount the ledger does not carry
+TypeError: Cannot read properties of undefined (reading 'agrees')
+```
+
+Both ask the register about `2026-08-31` and look for a
+`receivables.customer_credit` finding. Since Phase 109 there isn't one — that
+check is `today_only`, so the register skips it, correctly. **A declaration
+written without reading the query switched off a check two existing tests relied
+on, and Phase 109's own suite was stopped before it reached them.**
+
+The declaration is right: held credit is a running column on the payment with no
+dated record of its consumption, so a past date really would compare a ledger
+walked back against a figure as it stands now. The tests now ask about today,
+with the reason written where somebody will hit it. This is the abstract cost of
+fifteen guesses, made concrete on the one that happened to be under test.
+
 ## Decision 2: the tripwire is a date before the books existed
 
 ADR 0109 admitted its own tripwire was weak — it asserted a check *declares* a

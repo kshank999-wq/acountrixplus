@@ -4926,6 +4926,15 @@ nearly promoted both:
   — present tense. A run released in February and finished in May is not
   released now, so a March report would miss it.
 
+**And the cost showed up in the suite.** Two tests in `tests/overpayment.test.ts`
+ask the register about `2026-08-31` and look for a
+`receivables.customer_credit` finding. Since Phase 109 there isn't one — the
+check is `today_only`, so the register skips it. The declaration is right (held
+credit is a running column with no dated record of its consumption), but it was
+written without reading the query, and it **switched off a check two existing
+tests relied on**; Phase 109's own suite was stopped before it reached them. The
+tests now ask about today, with the reason written where somebody will hit it.
+
 **The tripwire is a date before the books existed.** ADR 0109 admitted it only
 asserted that a check *declares* a reach. The proof it wanted is one line: a
 check whose subledger side honours the date must report **nothing** for

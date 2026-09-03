@@ -378,6 +378,20 @@ describe('giving held credit back', () => {
 
 describe('the account nobody would otherwise watch', () => {
   /**
+   * The date is today's rather than a fixed one, and that is a consequence
+   * rather than a preference (Phase 110).
+   *
+   * `receivables.customer_credit` is declared `today_only`: held credit is a
+   * running column on the payment with no dated record of its consumption, so
+   * a past date would compare a ledger walked back against a figure as it
+   * stands now. Since Phase 109 the register **skips** such a check rather than
+   * answering it wrongly, so asking about 2026-08-31 produces no finding at
+   * all — which is the register working, and these two assertions failing on it
+   * is how a declaration that switches a check off gets noticed.
+   */
+  const today = () => new Date().toISOString().slice(0, 10)
+
+  /**
    * Added with the account rather than after it. Phase 48 found a clearing
    * account with no check on it and $28,700 in it that nothing could clear.
    */
@@ -385,7 +399,7 @@ describe('the account nobody would otherwise watch', () => {
     const invoice = await anInvoice(740_000)
     await overpay(invoice.id, 740_000, 800_000)
 
-    const run = await runIntegrityChecks(fixture.ctx, { asOf: '2026-08-31' })
+    const run = await runIntegrityChecks(fixture.ctx, { asOf: today() })
     const finding = run.findings.find((row) => row.key === 'receivables.customer_credit')!
 
     expect(finding.agrees).toBe(true)
@@ -401,7 +415,7 @@ describe('the account nobody would otherwise watch', () => {
     // Somebody edits the subledger behind the ledger's back.
     await db.update(payments).set({ unappliedCents: 90_000 }).where(eq(payments.id, payment.id))
 
-    const run = await runIntegrityChecks(fixture.ctx, { asOf: '2026-08-31' })
+    const run = await runIntegrityChecks(fixture.ctx, { asOf: today() })
     const finding = run.findings.find((row) => row.key === 'receivables.customer_credit')!
 
     expect(finding.agrees).toBe(false)
