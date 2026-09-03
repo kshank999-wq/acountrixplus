@@ -145,8 +145,14 @@ export function mixesCurrencies(tallies: CurrencyTally[]): boolean {
  * Prose rather than a flag, on Phase 70's rule: the next person adding a
  * dataset has to say what their file means rather than copy a boolean.
  */
-export function summarise(fileName: string, tallies: CurrencyTally[]): string {
-  if (tallies.length === 0) return `${fileName} holds no money columns.`
+export function summarise(fileName: string, tallies: CurrencyTally[] | null): string {
+  // Null and empty mean different things and used to produce the same
+  // sentence (Phase 104): `customers.csv` has no money in it at all, while an
+  // empty `gift_cards.csv` has money columns and no rows. Telling a reader the
+  // second one "holds no money columns" is a small lie about the shape of
+  // their own file.
+  if (tallies === null) return `${fileName} holds no money columns.`
+  if (tallies.length === 0) return `${fileName} has money columns and no rows.`
 
   if (tallies.length === 1) {
     const only = tallies[0]

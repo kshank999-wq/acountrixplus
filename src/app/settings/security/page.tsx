@@ -9,7 +9,7 @@ import {
   securityPolicy,
 } from '@/modules/auth/login-history'
 import { listDevices } from '@/modules/mobile/devices'
-import { listExports } from '@/modules/tenancy/export'
+import { datasetSentence, listExports } from '@/modules/tenancy/export'
 import { resolveSession, SESSION_COOKIE } from '@/modules/auth/session'
 import { SETTINGS_NAV } from '../nav'
 import { SecurityBoard } from './board'
@@ -94,6 +94,7 @@ export default async function SecurityPage({
         }))}
         canManagePolicy={canManagePolicy}
         canExport={canExport}
+        datasets={datasetSentence()}
         signInEmail={session.userEmail}
       />
     </AppShell>

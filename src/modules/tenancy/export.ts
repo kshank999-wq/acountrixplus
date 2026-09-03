@@ -3,13 +3,16 @@ import { db } from '@/db'
 import {
   bills,
   chartAccounts,
+  creditNotes,
   customers,
   dataExports,
+  giftCards,
   invoices,
   journalEntries,
   journalLines,
   payments,
   bankTransactions,
+  retainers,
   vendors,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
@@ -59,28 +62,25 @@ import {
  * `scripts/backup.sh` for the other thing.
  */
 
-export type DatasetName =
-  | 'chart_of_accounts'
-  | 'journal'
-  | 'bank_transactions'
-  | 'customers'
-  | 'invoices'
-  | 'vendors'
-  | 'bills'
-  | 'payments'
-
-export const DATASETS: DatasetName[] = [
-  'chart_of_accounts',
-  'journal',
-  'bank_transactions',
-  'customers',
-  'invoices',
-  'vendors',
-  'bills',
-  'payments',
-]
-
-export const DATASET_LABELS: Record<DatasetName, string> = {
+/**
+ * Every dataset, declared exactly once (Phase 104).
+ *
+ * `DatasetName`, `DATASETS` and this record used to be three parallel
+ * hand-written structures, and only one of them was checked: a
+ * `Record<DatasetName, string>` cannot miss an entry, but `DATASETS` was a
+ * plain array and could. A dataset added to the union, the labels and the
+ * switch but forgotten in `DATASETS` would compile, be selectable by name, and
+ * silently never appear in the default export — a missing file in somebody's
+ * leaving archive, found by its absence.
+ *
+ * So the labels are the declaration. The union is its keys and the list is
+ * derived, which leaves `buildDataset`'s switch as the only other place that
+ * has to know, and TypeScript already checks that against the union.
+ *
+ * Order is insertion order, so the files come out in the same sequence every
+ * time and an export can be diffed against an earlier one.
+ */
+export const DATASET_LABELS = {
   chart_of_accounts: 'Chart of accounts',
   journal: 'Journal entries and lines',
   bank_transactions: 'Bank transactions',
@@ -89,6 +89,33 @@ export const DATASET_LABELS: Record<DatasetName, string> = {
   vendors: 'Vendors',
   bills: 'Bills',
   payments: 'Payments',
+  // What the company is holding that belongs to somebody else (Phase 104).
+  retainers: 'Retainers held on account',
+  credit_notes: 'Credit notes',
+  gift_cards: 'Gift cards in issue',
+} as const
+
+export type DatasetName = keyof typeof DATASET_LABELS
+
+export const DATASETS: DatasetName[] = Object.keys(DATASET_LABELS) as DatasetName[]
+
+/**
+ * The datasets, as a sentence for the screen that offers the export.
+ *
+ * Derived rather than written out, because the blurb on the security page was
+ * a *fourth* hand-written copy of this list — "the chart of accounts, the
+ * journal, bank transactions, customers, invoices, vendors, bills, and
+ * payments" — and adding three datasets made it quietly wrong. A promise about
+ * what a file contains is worth keeping true.
+ */
+export function datasetSentence(): string {
+  const names = DATASETS.map((dataset) => {
+    const label = DATASET_LABELS[dataset]
+    return label.charAt(0).toLowerCase() + label.slice(1)
+  })
+
+  const last = names[names.length - 1]
+  return `${names.slice(0, -1).join(', ')} and ${last}`
 }
 
 export type ExportedFile = {
@@ -96,11 +123,15 @@ export type ExportedFile = {
   content: string
   rowCount: number
   /**
-   * What each currency in this file sums to, for the manifest. Empty for a
-   * file with no money in it — which is not the same as a file whose money is
-   * all in one currency, and the manifest says so differently.
+   * What each currency in this file sums to, for the manifest.
+   *
+   * Three distinct states, deliberately: `null` for a file with no money in it
+   * at all, `[]` for one that has money columns and no rows, and entries for
+   * one that has both. The first two produced the same sentence until Phase
+   * 104, which told the reader of an empty `gift_cards.csv` that it had no
+   * money columns when it has four.
    */
-  currencies: CurrencyTally[]
+  currencies: CurrencyTally[] | null
 }
 
 /**
@@ -207,8 +238,8 @@ const MILLION = 1_000_000
  */
 function manifest(files: ExportedFile[]): ExportedFile {
   const rows = files.flatMap((file) =>
-    file.currencies.length === 0
-      ? [{ file: file.name, currency: '', rows: String(file.rowCount), total: '', note: summarise(file.name, []) }]
+    file.currencies === null || file.currencies.length === 0
+      ? [{ file: file.name, currency: '', rows: String(file.rowCount), total: '', note: summarise(file.name, file.currencies) }]
       : file.currencies.map((entry) => ({
           file: file.name,
           currency: entry.currency,
@@ -222,7 +253,7 @@ function manifest(files: ExportedFile[]): ExportedFile {
     name: MANIFEST,
     content: toCsv(rows, ['file', 'currency', 'rows', 'total', 'note']),
     rowCount: rows.length,
-    currencies: [],
+    currencies: null,
   }
 }
 
@@ -539,6 +570,167 @@ async function buildDataset(
         rows.map((row) => ({ cents: row.amount ?? 0, currency: row.currency })),
       )
     }
+
+    /*
+      The three below are what the company is holding that belongs to somebody
+      else (Phase 104). Until then the export answered "what are we owed" and
+      "what do we owe suppliers" and said nothing about money on account: the
+      ledger showed a liability balance and the trail stopped there, so a
+      leaving company could not say whose 12,400 it was holding.
+
+      Each tallies its **remaining** balance rather than what was issued, so
+      the manifest figure is the one that should tie to the liability account
+      in `journal.csv` — the reconciliation an accountant does first.
+    */
+    case 'retainers': {
+      const rows = await db
+        .select({
+          customer: customers.name,
+          received_on: retainers.receivedOn,
+          reference: retainers.reference,
+          currency: retainers.currency,
+          amount: retainers.amountCents,
+          rate: retainers.exchangeRateMillionths,
+          remaining: retainers.remainingCents,
+          functionalRemaining: retainers.functionalRemainingCents,
+        })
+        .from(retainers)
+        .innerJoin(customers, eq(customers.id, retainers.customerId))
+        .where(eq(retainers.companyId, ctx.companyId))
+        .orderBy(asc(retainers.receivedOn))
+
+      return file(
+        'retainers.csv',
+        rows.map((row) => ({
+          customer: row.customer,
+          received_on: row.received_on,
+          reference: row.reference,
+          // Like a payment, a retainer stores a functional figure only for
+          // what is *left*; the amount received is derived from the rate the
+          // money came in at, which the row has carried since (Phase 66).
+          ...spread('amount', moneyColumns(
+            { cents: row.amount ?? 0, currency: row.currency },
+            { cents: convert(row.amount ?? 0, row.rate ?? MILLION), currency: home },
+          )),
+          ...spread('remaining', moneyColumns(
+            { cents: row.remaining ?? 0, currency: row.currency },
+            { cents: row.functionalRemaining ?? 0, currency: home },
+          )),
+          exchange_rate: describeRate(row.rate ?? MILLION),
+        })),
+        [
+          'customer',
+          'received_on',
+          'reference',
+          ...columnsFor('amount'),
+          ...columnsFor('remaining'),
+          'exchange_rate',
+        ],
+        rows.map((row) => ({ cents: row.remaining ?? 0, currency: row.currency })),
+      )
+    }
+
+    case 'credit_notes': {
+      const rows = await db
+        .select({
+          number: creditNotes.number,
+          party: creditNotes.party,
+          customer: customers.name,
+          vendor: vendors.name,
+          issue_date: creditNotes.issueDate,
+          status: creditNotes.status,
+          currency: creditNotes.currency,
+          total: creditNotes.totalCents,
+          functionalTotal: creditNotes.functionalTotalCents,
+          remaining: creditNotes.remainingCents,
+          functionalRemaining: creditNotes.functionalRemainingCents,
+        })
+        .from(creditNotes)
+        .leftJoin(customers, eq(customers.id, creditNotes.customerId))
+        .leftJoin(vendors, eq(vendors.id, creditNotes.vendorId))
+        .where(eq(creditNotes.companyId, ctx.companyId))
+        .orderBy(asc(creditNotes.issueDate))
+
+      return file(
+        'credit_notes.csv',
+        rows.map((row) => ({
+          number: row.number,
+          // Which side of the books this credit is on, and the one name that
+          // goes with it. Exactly one of the two joins matches, by the same
+          // constraint that keeps `party` honest.
+          party: row.party,
+          party_name: row.party === 'vendor' ? row.vendor : row.customer,
+          issue_date: row.issue_date,
+          status: row.status,
+          ...spread('total', moneyColumns(
+            { cents: row.total ?? 0, currency: row.currency },
+            { cents: row.functionalTotal ?? row.total ?? 0, currency: home },
+          )),
+          ...spread('remaining', moneyColumns(
+            { cents: row.remaining ?? 0, currency: row.currency },
+            { cents: row.functionalRemaining ?? row.remaining ?? 0, currency: home },
+          )),
+        })),
+        [
+          'number',
+          'party',
+          'party_name',
+          'issue_date',
+          'status',
+          ...columnsFor('total'),
+          ...columnsFor('remaining'),
+        ],
+        rows.map((row) => ({ cents: row.remaining ?? 0, currency: row.currency })),
+      )
+    }
+
+    case 'gift_cards': {
+      const rows = await db
+        .select({
+          code: giftCards.code,
+          purchaser: customers.name,
+          issued_on: giftCards.issuedOn,
+          is_active: giftCards.isActive,
+          issued: giftCards.issuedCents,
+          balance: giftCards.balanceCents,
+        })
+        .from(giftCards)
+        .leftJoin(customers, eq(customers.id, giftCards.purchaserCustomerId))
+        .where(eq(giftCards.companyId, ctx.companyId))
+        .orderBy(asc(giftCards.issuedOn))
+
+      /*
+        A gift card names no owner, and that is what a gift card *is* rather
+        than a gap in the schema: `purchaser_customer_id` is who paid, and who
+        will spend it is whoever holds the code. The column is named
+        `purchaser` for that reason — calling it `customer` would be a
+        plausible-looking wrong answer.
+
+        `gift_cards` has no currency column, having been built in Phase 29
+        before the currency work, so every balance is in the company's own
+        money by construction and the file says so.
+      */
+      return file(
+        'gift_cards.csv',
+        rows.map((row) => ({
+          code: row.code,
+          purchaser: row.purchaser,
+          issued_on: row.issued_on,
+          is_active: row.is_active,
+          ...spread('issued', moneyColumns({ cents: row.issued ?? 0, currency: home })),
+          ...spread('balance', moneyColumns({ cents: row.balance ?? 0, currency: home })),
+        })),
+        [
+          'code',
+          'purchaser',
+          'issued_on',
+          'is_active',
+          ...columnsFor('issued'),
+          ...columnsFor('balance'),
+        ],
+        rows.map((row) => ({ cents: row.balance ?? 0, currency: home })),
+      )
+    }
   }
 }
 
@@ -553,13 +745,15 @@ function file(
   name: string,
   rows: Array<Record<string, unknown>>,
   columns: string[],
-  money: Money[] = [],
+  money: Money[] | null = null,
 ): ExportedFile {
   return {
     name,
     content: toCsv(rows, columns),
     rowCount: rows.length,
-    currencies: tally(money),
+    // Null stays null: a file with no money concept is not the same as one
+    // whose money happens to be zero rows long.
+    currencies: money === null ? null : tally(money),
   }
 }
 

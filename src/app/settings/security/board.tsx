@@ -56,6 +56,7 @@ export function SecurityBoard({
   exports,
   canManagePolicy,
   canExport,
+  datasets,
   signInEmail,
 }: {
   enrolmentRequired: boolean
@@ -67,6 +68,8 @@ export function SecurityBoard({
   exports: ExportRow[]
   canManagePolicy: boolean
   canExport: boolean
+  /** The datasets this export contains, derived from the registry (Phase 104). */
+  datasets: string
   /** What this person signs in as today (Phase 98). */
   signInEmail: string
 }) {
@@ -132,17 +135,40 @@ export function SecurityBoard({
       const result = await exportCompanyDataAction(undefined)
       if (!result.ok) return notify(result)
 
+      /*
+        One file at a time, and the object URL is released *after* the browser
+        has had a turn — not on the line below the click (Phase 104).
+
+        A download is asynchronous. Revoking the URL synchronously after
+        `click()` races the browser's fetch of the blob, and with eight files it
+        won that race and with twelve it stopped winning: the last two arrived
+        nowhere while the notice said twelve. Silent, and the kind of silent
+        that only shows up as a missing file in somebody's leaving archive
+        months later.
+
+        The anchor goes into the document too, which some browsers require, and
+        the yield between files keeps Chromium's rapid-download heuristics from
+        dropping the tail.
+      */
+      const saved: string[] = []
+
       for (const file of result.files) {
         const blob = new Blob([file.content], { type: 'text/csv;charset=utf-8' })
         const url = URL.createObjectURL(blob)
         const anchor = document.createElement('a')
         anchor.href = url
         anchor.download = file.name
+        anchor.style.display = 'none'
+        document.body.appendChild(anchor)
         anchor.click()
+
+        await new Promise((resolve) => setTimeout(resolve, 120))
+        anchor.remove()
         URL.revokeObjectURL(url)
+        saved.push(file.name)
       }
 
-      notify({ ok: true, message: `${result.rowCount} rows across ${result.files.length} files.` })
+      notify({ ok: true, message: `${result.rowCount} rows across ${saved.length} files.` })
     })
   }
 
@@ -563,8 +589,7 @@ export function SecurityBoard({
         <section className="card p-4">
           <h2 className="text-sm font-semibold">Export your data</h2>
           <p className="mt-0.5 text-sm text-muted">
-            The chart of accounts, the journal, bank transactions, customers, invoices, vendors,
-            bills, and payments — as CSV another accounting package can read. Your books are yours.
+            The {datasets} — as CSV another accounting package can read. Your books are yours.
           </p>
           <button className="btn btn-primary mt-3" onClick={runExport} disabled={pending}>
             {pending ? 'Building…' : 'Download everything'}
