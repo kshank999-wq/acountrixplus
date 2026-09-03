@@ -115,6 +115,10 @@ export type AuditAction =
   | 'vendor.update'
   /** Two records of one business put together, on both of them (Phase 96). */
   | 'party.merge'
+  /** Somebody asked to move the address they sign in with (Phase 98). */
+  | 'user.address_claim'
+  /** They proved they hold it, and it moved. */
+  | 'user.address_change'
   // Time and expense billing (spec §5, Phase 15)
   | 'time.log'
   | 'time.approve'

@@ -22,6 +22,8 @@ import {
   readChallenge,
 } from '@/modules/auth/challenge'
 import { hasConfirmedMfa, verifyChallenge } from '@/modules/auth/mfa'
+import { requestAddressChange } from '@/modules/notify/email-change'
+import { requireActor, requireSession } from '@/lib/current-user'
 import { lockoutState, recordLoginAttempt } from '@/modules/auth/login-history'
 import { companiesForUser, registerCompany } from '@/modules/tenancy/onboarding'
 import { registerDevice } from '@/modules/mobile/devices'
@@ -278,4 +280,38 @@ export async function logoutAction() {
   cookieStore.delete(SESSION_COOKIE)
 
   redirect('/login')
+}
+
+/**
+ * Claims a new sign-in address (Phase 98).
+ *
+ * The refusal text comes from the core, so what somebody reads when they are
+ * stopped is the sentence that decided it. An accepted claim says the same
+ * thing whether or not the address belongs to somebody else — see
+ * `requestAddressChange`, and `requestPasswordReset` before it.
+ */
+export async function requestAddressChangeAction(
+  input: unknown,
+): Promise<{ ok: true; message: string } | { ok: false; error: string }> {
+  try {
+    const actor = await requireActor()
+    const session = await requireSession()
+    const parsed = z.object({ requested: z.string() }).parse(input)
+
+    const result = await requestAddressChange(actor, {
+      requested: parsed.requested,
+      companyName: session.companyName,
+    })
+
+    if (!result.accepted) return { ok: false, error: result.error }
+
+    return {
+      ok: true,
+      message:
+        'Check the new address for a link. Nothing changes until you open it, and the address ' +
+        'you use now has been told.',
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'Could not start that change.') }
+  }
 }

@@ -13,6 +13,7 @@ import {
   revokeOtherDevicesAction,
   updateSecurityPolicyAction,
 } from '@/app/actions/security'
+import { requestAddressChangeAction } from '@/app/actions/auth'
 import { LOGIN_OUTCOME_LABELS } from '@/modules/auth/vocabulary'
 
 type Mfa = { enrolled: boolean; confirmedAt: string | null; recoveryCodesRemaining: number }
@@ -54,6 +55,7 @@ export function SecurityBoard({
   exports,
   canManagePolicy,
   canExport,
+  signInEmail,
 }: {
   enrolmentRequired: boolean
   mfa: Mfa
@@ -64,6 +66,8 @@ export function SecurityBoard({
   exports: ExportRow[]
   canManagePolicy: boolean
   canExport: boolean
+  /** What this person signs in as today (Phase 98). */
+  signInEmail: string
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -147,6 +151,13 @@ export function SecurityBoard({
           Your sign-in, the places this account is signed in, and what your company requires.
         </p>
       </header>
+
+      {/*
+        Changing the address you sign in with (Phase 98). Nothing here writes
+        anything: it starts a claim, and the letter to the new address is what
+        finishes it.
+      */}
+      <AddressChange current={signInEmail} />
 
       {enrolmentRequired && (
         <p className="card border-warning/40 p-3 text-sm text-warning" role="alert">
@@ -557,5 +568,72 @@ export function SecurityBoard({
         </section>
       )}
     </div>
+  )
+}
+
+
+/**
+ * The form that starts a claim on a new sign-in address (Phase 98).
+ *
+ * The reassurance under the field is the point of the whole design and is said
+ * before anybody types: nothing changes until the new address is opened, and
+ * the address being left is told either way.
+ */
+function AddressChange({ current }: { current: string }) {
+  const [requested, setRequested] = useState('')
+  const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
+  const [pending, startTransition] = useTransition()
+
+  return (
+    <section className="card space-y-2 p-4">
+      <h2 className="text-sm font-semibold">The address you sign in with</h2>
+      <p className="text-sm text-muted">
+        You sign in as <strong className="text-fg">{current}</strong>. Password resets go there
+        too, so an address that stops reaching you is how an account gets lost.
+      </p>
+
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="block text-sm">
+          <span className="text-xs text-muted">New address</span>
+          <input
+            className="input mt-1 w-72"
+            type="email"
+            value={requested}
+            placeholder="you@example.test"
+            onChange={(event) => setRequested(event.target.value)}
+          />
+        </label>
+        <button
+          type="button"
+          className="btn btn-primary text-sm"
+          disabled={pending}
+          onClick={() =>
+            startTransition(async () => {
+              const result = await requestAddressChangeAction({ requested })
+              setNotice(
+                result.ok
+                  ? { ok: true, text: result.message }
+                  : { ok: false, text: result.error },
+              )
+              if (result.ok) setRequested('')
+            })
+          }
+        >
+          Send a confirmation
+        </button>
+      </div>
+
+      <p className="text-xs text-muted">
+        Nothing changes until you open the link sent to the new address. {current} is told that
+        this was asked for, and told again if it happens — because moving where recovery goes is
+        the first thing somebody does when they take an account over.
+      </p>
+
+      {notice && (
+        <p className={`text-sm ${notice.ok ? 'text-positive' : 'text-danger'}`} role="status">
+          {notice.text}
+        </p>
+      )}
+    </section>
   )
 }

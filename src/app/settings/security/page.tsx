@@ -94,6 +94,7 @@ export default async function SecurityPage({
         }))}
         canManagePolicy={canManagePolicy}
         canExport={canExport}
+        signInEmail={session.userEmail}
       />
     </AppShell>
   )

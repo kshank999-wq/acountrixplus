@@ -43,6 +43,17 @@ export type TransactionalKind =
   | 'practice_invitation'
   | 'security_alert'
   /**
+   * A letter asking somebody to prove they hold a new sign-in address
+   * (Phase 98).
+   *
+   * Its own kind rather than a `security_alert`, because the pair are opposite
+   * things: this one carries the link, and the alert that goes to the address
+   * being *left* must never carry one. Sharing a kind would put the two under
+   * one rate-limit bucket and, worse, invite somebody later to give them one
+   * template.
+   */
+  | 'email_change'
+  /**
    * An invoice, sent to the customer who owes it (Phase 42).
    *
    * Transactional rather than marketing, and the distinction is the one this

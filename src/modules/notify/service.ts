@@ -59,6 +59,14 @@ export type SendInput = {
  */
 const HOURLY_LIMIT: Record<TransactionalKind, number> = {
   password_reset: 5,
+  /**
+   * The same five a reset gets (Phase 98).
+   *
+   * A claim needs a signed-in session, so this is not the open door a reset
+   * form is — but somebody with a session can still aim letters at an address
+   * they do not own, and five is plenty for a person who mistyped twice.
+   */
+  email_change: 5,
   company_invitation: 20,
   practice_invitation: 20,
   /**
@@ -233,6 +241,11 @@ function escapeHtml(raw: string): string {
 }
 
 // --- The letters ------------------------------------------------------------
+
+/** Where a claimed sign-in address is confirmed (Phase 98). */
+export function addressChangeUrl(token: string): string {
+  return `${appBaseUrl()}/settings/security/address?token=${encodeURIComponent(token)}`
+}
 
 export function resetUrl(token: string): string {
   return `${appBaseUrl()}/reset?token=${encodeURIComponent(token)}`

@@ -86,6 +86,11 @@ export const KIND_CONCERNS: Record<TransactionalKind, PartyKind> = {
   practice_invitation: 'contact',
   security_alert: 'contact',
   /**
+   * A letter to a person about their own account, not to a side of the books
+   * (Phase 98). The same answer `password_reset` gives, for the same reason.
+   */
+  email_change: 'contact',
+  /**
    * A firm's own morning post. It has no company behind it at all, so it never
    * reaches this module — `recordOutboundMail` runs only when there is a
    * company. Listed so the record stays exhaustive.

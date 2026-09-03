@@ -4292,6 +4292,42 @@ join `reason` in `NOT_A_CHANGE`. Also fixed: `party.merge` was in Phase 70's
 vocabulary and not in the audit story, so the one screen that would explain a
 merge showed the raw action code.
 
+### The address you could not change (Phase 98)
+
+The caveat above said *"changing your email is still a direct write with no
+confirmation to either address"*. There was no write. The only `update(users)`
+in the application set `passwordHash`, so **nobody had ever been able to change
+their sign-in address** — and a person who mistypes at registration, or leaves
+the company whose domain it is on, is holding an account whose only route back
+in sends to somewhere that no longer reaches them.
+
+**An address is not yours until you prove it**, so this is a claim rather than a
+write. Nothing moves until somebody opens the letter sent to the address being
+taken; until then the old one still signs in, still receives resets, still
+works. A half-finished change must not lock anybody out, because the person most
+likely to abandon one halfway is the person who mistyped.
+
+**The address being left is told, and told without a link.** Moving the recovery
+address is the first move in taking an account over, so a confirmation sent only
+to the new address is a letter sent only to the attacker. The notice is a
+warning, not a second way to finish the job — a link in it would let whoever
+holds the old address complete a change they never asked for. The two letters
+are decided together as a pair, because that property belongs to the pair, and
+`ChangeLetter.url` is typed nullable so the notice cannot acquire one by
+somebody forgetting. When the change completes, that address is told a second
+time: the letter that matters most to somebody who was not watching their inbox
+an hour ago.
+
+**It says the same thing whether or not the address is taken**, which is the
+stance `requestPasswordReset` already settled. A screen that answered would be
+the one place in the application that confirms whether an account exists.
+
+Sessions are deliberately *not* ended, which is the opposite of what a password
+reset does. A reset ends them because another person may know the password;
+nothing here suggests that. Ending them would sign out the real owner — who, if
+the claim was somebody else's work, no longer has the address the new links go
+to.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -6073,12 +6109,16 @@ Gaps within the phases already built:
   development, to the terminal. The seam is one interface and one variable, but nothing has been
   sent over SMTP or through a real provider, so none of the delivery problems — DKIM, bounces,
   complaint feedback loops, suppression at the provider — have been met.
-- **Bounced transactional mail is recorded, not surfaced.** `failedDeliveries` exists and no screen
-  calls it, so nobody is told when an invitation to a mistyped address never arrives.
+- ~~**Bounced transactional mail is recorded, not surfaced.**~~ Corrected in Phase 98: this was
+  fixed by Phase 24 and the caveat outlived it. `health.ts` quotes this very sentence as the thing
+  it was written to fix, and both the daily digest and the operations page have called
+  `failedDeliveries` ever since.
 - **No email verification for a self-registered owner.** Invitees and resetters prove they own an
   address; somebody registering a company still proves nothing. The mechanism to fix it now exists.
-- **No confirmed change of email.** Reset re-checks the current address, so the machinery is ready,
-  but changing your email is still a direct write with no confirmation to either address.
+- ~~**No confirmed change of email.**~~ Since Phase 98 it is a claim, confirmed from the address
+  being taken and announced to the one being left. The caveat was also wrong while it stood: it
+  said "a direct write", and there was no write — nobody could change their sign-in address at
+  all.
 - ~~**`action_tokens` is pruned on demand, never on a schedule.**~~ Thirty days past expiry since
   Phase 24 — measured from expiry rather than issue, so a week-long invitation is not swept early.
 - **Reset requests are rate-limited per address, not per IP.** It bounds using this application to
