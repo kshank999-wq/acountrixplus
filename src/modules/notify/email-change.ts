@@ -8,6 +8,8 @@ import {
   normaliseLogin,
   redemptionCheck,
 } from '@/modules/auth/address-change'
+import { guardVerdict } from '@/modules/auth/reauthentication'
+import { verifyPassword } from '@/modules/auth/password'
 import { issueToken, lookupToken, redeemToken, TOKEN_TTL_MINUTES } from './tokens'
 import { addressChangeUrl, sendTransactional } from './service'
 import type { ActorContext } from '@/modules/tenancy/context'
@@ -34,14 +36,43 @@ export type ClaimResult = { accepted: true } | { accepted: false; error: string 
  */
 export async function requestAddressChange(
   ctx: ActorContext,
-  input: { requested: string; companyName: string },
+  input: {
+    requested: string
+    companyName: string
+    /**
+     * Required since Phase 99.
+     *
+     * Phase 98 shipped without it and its own ADR admitted the gap: somebody
+     * who walks up to an unlocked session could start a claim, with only the
+     * notice to the old address standing between that and a taken account.
+     */
+    currentPassword: string
+  },
 ): Promise<ClaimResult> {
   const [me] = await db
-    .select({ id: users.id, name: users.name, email: users.email })
+    .select({
+      id: users.id,
+      name: users.name,
+      email: users.email,
+      passwordHash: users.passwordHash,
+    })
     .from(users)
     .where(eq(users.id, ctx.userId))
 
   if (!me) return { accepted: false, error: 'That account no longer exists.' }
+
+  /**
+   * Before anything else, including before deciding whether the address is
+   * even valid. A refusal that told somebody "that is already your address"
+   * without asking for the password would answer a question on behalf of
+   * whoever is holding the session.
+   */
+  const guard = guardVerdict({
+    act: 'address.claim',
+    given: input.currentPassword,
+    matches: await verifyPassword(input.currentPassword ?? '', me.passwordHash),
+  })
+  if (!guard.ok) return { accepted: false, error: guard.why }
 
   const verdict = claimCheck({ current: me.email, requested: input.requested })
   if (!verdict.ok) return { accepted: false, error: verdict.why }

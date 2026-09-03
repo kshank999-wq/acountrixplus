@@ -1,4 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { beforeEach, describe, expect, it } from 'vitest'
+import { eq } from 'drizzle-orm'
+import { db } from '@/db'
+import { actionTokens, transactionalMessages, users } from '@/db/schema'
+import { createCompanyFixture, type Fixture } from './helpers'
+import { changePassword, disableMfa, regenerateRecoveryCodes } from '@/modules/auth/mfa'
+import { requestAddressChange } from '@/modules/notify/email-change'
 import {
   everyGuardedAct,
   guardFor,
@@ -100,5 +106,110 @@ describe('guardFor', () => {
   it('hands back the act it was asked for', () => {
     expect(guardFor('address.claim').act).toBe('address.claim')
     expect(guardFor('address.claim').because).toContain('resets go to the sign-in address')
+  })
+})
+
+/**
+ * The guard, on the four acts themselves.
+ *
+ * The core above proves the rule is written down. These prove it is *applied*
+ * — which is the failure mode this phase exists to fix, since Phase 13 wrote
+ * the argument in `disableMfa`'s docstring and two acts were added afterwards
+ * without reading it.
+ */
+describe('against the database', () => {
+  const PASSWORD = 'correct-horse-battery'
+  const WRONG = 'not-the-password'
+
+  let fixture: Fixture
+
+  beforeEach(async () => {
+    fixture = await createCompanyFixture({ name: 'Guarded Co' })
+  })
+
+  const emailNow = async () => {
+    const [row] = await db
+      .select({ email: users.email })
+      .from(users)
+      .where(eq(users.id, fixture.ctx.userId))
+    return row.email
+  }
+
+  it('refuses to change the password without the old one', async () => {
+    const result = await changePassword(fixture.ctx, {
+      currentPassword: WRONG,
+      newPassword: 'a-brand-new-password',
+    })
+
+    expect(result).toEqual({ ok: false, error: WRONG_PASSWORD })
+  })
+
+  it('refuses to switch off two-factor without it', async () => {
+    const result = await disableMfa(fixture.ctx.userId, WRONG)
+    expect(result).toEqual({ ok: false, error: WRONG_PASSWORD })
+  })
+
+  it('refuses to replace recovery codes without it', async () => {
+    // Unguarded from Phase 13 to Phase 99. Regenerating destroys the printout
+    // the owner has and hands ten fresh codes to whoever is at the screen.
+    await expect(
+      regenerateRecoveryCodes(fixture.ctx.userId, WRONG),
+    ).rejects.toThrow(WRONG_PASSWORD)
+  })
+
+  it('refuses to claim a new sign-in address without it', async () => {
+    // Unguarded in Phase 98, whose own ADR admitted it.
+    const result = await requestAddressChange(fixture.ctx, {
+      requested: 'somewhere-else@hartleyco.test',
+      companyName: 'Guarded Co',
+      currentPassword: WRONG,
+    })
+
+    expect(result).toEqual({ accepted: false, error: WRONG_PASSWORD })
+  })
+
+  it('sends no letter and starts no claim when the password is wrong', async () => {
+    const before = await emailNow()
+
+    await requestAddressChange(fixture.ctx, {
+      requested: 'somewhere-else@hartleyco.test',
+      companyName: 'Guarded Co',
+      currentPassword: WRONG,
+    })
+
+    // Not one letter — including to the address being left, which would
+    // otherwise be a way to post mail at somebody by guessing passwords.
+    const letters = await db.select({ id: transactionalMessages.id }).from(transactionalMessages)
+    expect(letters).toHaveLength(0)
+
+    const tokens = await db
+      .select({ id: actionTokens.id })
+      .from(actionTokens)
+      .where(eq(actionTokens.purpose, 'email_change'))
+    expect(tokens).toHaveLength(0)
+    expect(await emailNow()).toBe(before)
+  })
+
+  it('asks before saying anything about the address itself', async () => {
+    // The refusal for a wrong password must not depend on what was typed in
+    // the other box: "that is already your address" would answer a question
+    // on behalf of whoever is holding the session.
+    const result = await requestAddressChange(fixture.ctx, {
+      requested: await emailNow(),
+      companyName: 'Guarded Co',
+      currentPassword: WRONG,
+    })
+
+    expect(result).toEqual({ accepted: false, error: WRONG_PASSWORD })
+  })
+
+  it('lets the right password through', async () => {
+    const result = await requestAddressChange(fixture.ctx, {
+      requested: 'somewhere-else@hartleyco.test',
+      companyName: 'Guarded Co',
+      currentPassword: PASSWORD,
+    })
+
+    expect(result).toEqual({ accepted: true })
   })
 })

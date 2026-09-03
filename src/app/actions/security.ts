@@ -5,6 +5,7 @@ import { cookies } from 'next/headers'
 import { eq } from 'drizzle-orm'
 import { z } from 'zod'
 import { db } from '@/db'
+import { WRONG_PASSWORD } from '@/modules/auth/reauthentication'
 import { securityPolicies } from '@/db/schema'
 import { requireActor, requireSession } from '@/lib/current-user'
 import { requirePermission } from '@/modules/tenancy/context'
@@ -125,10 +126,18 @@ export type RecoveryCodesResult =
   | { ok: true; recoveryCodes: string[] }
   | { ok: false; error: string }
 
-export async function regenerateRecoveryCodesAction(): Promise<RecoveryCodesResult> {
+export async function regenerateRecoveryCodesAction(
+  currentPassword: unknown,
+): Promise<RecoveryCodesResult> {
   try {
     const actor = await requireActor()
-    const codes = await regenerateRecoveryCodes(actor.userId)
+    const parsed = z.string().safeParse(currentPassword)
+    if (!parsed.success) return { ok: false, error: WRONG_PASSWORD }
+
+    // Guarded since Phase 99: fresh codes handed to whoever is at an
+    // unattended screen is the same defect disabling MFA has refused since
+    // Phase 13.
+    const codes = await regenerateRecoveryCodes(actor.userId, parsed.data)
 
     await recordAudit(actor, {
       action: 'mfa.recovery_codes_regenerated',

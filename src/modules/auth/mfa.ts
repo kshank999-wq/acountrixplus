@@ -6,6 +6,8 @@ import { recordAudit } from '@/modules/audit'
 import { OUR_NAME } from '@/modules/brand/voice'
 import type { ActorContext } from '@/modules/tenancy/context'
 import { hashPassword, verifyPassword } from './password'
+import { guardVerdict, WRONG_PASSWORD } from './reauthentication'
+import { DomainError } from '@/modules/errors'
 import { decryptSecret, encryptSecret } from './secret-box'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp'
 
@@ -270,9 +272,12 @@ export async function disableMfa(
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
   if (!user) return { ok: false, error: 'User not found' }
 
-  if (!(await verifyPassword(currentPassword, user.passwordHash))) {
-    return { ok: false, error: 'That password is not right.' }
-  }
+  const guard = guardVerdict({
+    act: 'mfa.disable',
+    given: currentPassword,
+    matches: await verifyPassword(currentPassword, user.passwordHash),
+  })
+  if (!guard.ok) return { ok: false, error: guard.why }
 
   await db.transaction(async (tx) => {
     await tx.delete(mfaRecoveryCodes).where(eq(mfaRecoveryCodes.userId, userId))
@@ -283,7 +288,28 @@ export async function disableMfa(
 }
 
 /** Issues a fresh set of recovery codes, invalidating the old ones. */
-export async function regenerateRecoveryCodes(userId: string): Promise<string[]> {
+export async function regenerateRecoveryCodes(
+  userId: string,
+  /**
+   * Required since Phase 99.
+   *
+   * Recovery codes are a way in. Regenerating them destroys the ones the owner
+   * wrote down and hands ten fresh ones to whoever is at the screen — the same
+   * situation `disableMfa` two functions up has refused since Phase 13, with a
+   * better prize. It was unguarded for eighty-six phases.
+   */
+  currentPassword: string,
+): Promise<string[]> {
+  const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
+  if (!user) throw new DomainError(WRONG_PASSWORD)
+
+  const guard = guardVerdict({
+    act: 'mfa.recovery_codes',
+    given: currentPassword,
+    matches: await verifyPassword(currentPassword, user.passwordHash),
+  })
+  if (!guard.ok) throw new DomainError(guard.why)
+
   const [row] = await db.select().from(userMfa).where(eq(userMfa.userId, userId)).limit(1)
   if (!row?.confirmedAt) {
     throw new Error('Two-factor authentication is not switched on for this account.')
@@ -347,9 +373,12 @@ export async function changePassword(
   const [user] = await db.select().from(users).where(eq(users.id, ctx.userId)).limit(1)
   if (!user) return { ok: false, error: 'User not found' }
 
-  if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
-    return { ok: false, error: 'That is not your current password.' }
-  }
+  const guard = guardVerdict({
+    act: 'password.change',
+    given: input.currentPassword,
+    matches: await verifyPassword(input.currentPassword, user.passwordHash),
+  })
+  if (!guard.ok) return { ok: false, error: guard.why }
 
   const passwordHash = await hashPassword(input.newPassword)
 

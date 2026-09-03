@@ -14,6 +14,7 @@ import {
   updateSecurityPolicyAction,
 } from '@/app/actions/security'
 import { requestAddressChangeAction } from '@/app/actions/auth'
+import { guardFor } from '@/modules/auth/reauthentication'
 import { LOGIN_OUTCOME_LABELS } from '@/modules/auth/vocabulary'
 
 type Mfa = { enrolled: boolean; confirmedAt: string | null; recoveryCodesRemaining: number }
@@ -75,6 +76,8 @@ export function SecurityBoard({
 
   const [enrolling, setEnrolling] = useState<{ secret: string; uri: string } | null>(null)
   const [code, setCode] = useState('')
+  /** Phase 99's guard on regenerating recovery codes. */
+  const [codesPassword, setCodesPassword] = useState('')
   const [codes, setCodes] = useState<string[] | null>(null)
 
   const [disablePassword, setDisablePassword] = useState('')
@@ -225,13 +228,28 @@ export function SecurityBoard({
           )}
 
           {mfa.enrolled && (
-            <div className="flex gap-2">
+            <div className="flex flex-wrap items-end gap-2">
+              {/*
+                Guarded since Phase 99. Fresh codes handed to whoever is at an
+                unattended screen — and the owner's printout dead — is the
+                situation switching MFA off has refused since Phase 13.
+              */}
+              <label className="block text-sm">
+                <span className="text-xs text-muted">{guardFor('mfa.recovery_codes').prompt}</span>
+                <input
+                  className="input mt-1 w-56"
+                  type="password"
+                  value={codesPassword}
+                  onChange={(event) => setCodesPassword(event.target.value)}
+                />
+              </label>
               <button
                 className="btn btn-ghost"
                 disabled={pending}
                 onClick={() =>
                   startTransition(async () => {
-                    const result = await regenerateRecoveryCodesAction()
+                    const result = await regenerateRecoveryCodesAction(codesPassword)
+                    setCodesPassword('')
                     if (!result.ok) return notify(result)
                     setCodes(result.recoveryCodes)
                   })
@@ -581,6 +599,8 @@ export function SecurityBoard({
  */
 function AddressChange({ current }: { current: string }) {
   const [requested, setRequested] = useState('')
+  /** Phase 99: Phase 98 shipped this act without asking. */
+  const [password, setPassword] = useState('')
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
   const [pending, startTransition] = useTransition()
 
@@ -603,18 +623,31 @@ function AddressChange({ current }: { current: string }) {
             onChange={(event) => setRequested(event.target.value)}
           />
         </label>
+        <label className="block text-sm">
+          <span className="text-xs text-muted">{guardFor('address.claim').prompt}</span>
+          <input
+            className="input mt-1 w-56"
+            type="password"
+            value={password}
+            onChange={(event) => setPassword(event.target.value)}
+          />
+        </label>
         <button
           type="button"
           className="btn btn-primary text-sm"
           disabled={pending}
           onClick={() =>
             startTransition(async () => {
-              const result = await requestAddressChangeAction({ requested })
+              const result = await requestAddressChangeAction({
+                requested,
+                currentPassword: password,
+              })
               setNotice(
                 result.ok
                   ? { ok: true, text: result.message }
                   : { ok: false, text: result.error },
               )
+              setPassword('')
               if (result.ok) setRequested('')
             })
           }

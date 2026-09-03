@@ -4328,6 +4328,43 @@ nothing here suggests that. Ending them would sign out the real owner — who, i
 the claim was somebody else's work, no longer has the address the new links go
 to.
 
+### The acts that move the way back in (Phase 99)
+
+`disableMfa` has asked for the current password since Phase 13 and said why —
+*"an unattended browser is the exact situation MFA is protecting against, and
+switching it off is the first thing somebody sitting at one would do"*.
+`changePassword` asks too. Two acts beside them did not, and both move a route
+back into the account.
+
+**`regenerateRecoveryCodes`**, unguarded since Phase 13 — the same phase that
+wrote the argument two functions above it. Recovery codes are a way in;
+regenerating them destroys the ones the owner wrote down and hands ten fresh
+ones to whoever is at the screen. And **`requestAddressChange`**, unguarded
+since Phase 98, whose ADR wrote the gap down rather than closing it.
+
+That is the shape worth noticing: the reasoning existed, in a docstring, in this
+repository, and two later acts were written without it. A rule living in one
+function's comment is a rule the next function does not inherit.
+
+**The rule, said once: an act that changes how you get back in must prove you
+are still there.** Deliberately not "acts on the security page". Exporting data
+is a read and changes nothing about access — guarding it would train people to
+type their password for the ordinary, which is how a prompt stops being a
+signal. Ending another device's session *removes* access, and somebody locking a
+stranger out of their books should not be slowed down. What qualifies is the
+password, the second factor, the recovery codes and the address recovery is sent
+to: between them every route back in.
+
+Each act carries a sentence arguing for itself rather than a boolean, which is
+Phase 70's device again — a flag would have let the address claim be added with
+`false` and no argument, which is roughly what happened.
+
+One refusal replaces two (*"That password is not right."* and *"That is not your
+current password."*), and it says the same thing for a blank box, a wrong
+password and an account with none. The guard runs **before** anything else, so a
+refusal cannot leak that the address typed was already yours — and before the
+letters, so a wrong password cannot post mail at somebody.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -6021,6 +6058,13 @@ Gaps within the phases already built:
   that has never amortized a prepayment gets it left on the balance sheet with a caveat naming the
   amount. Matching per item needs the accrual linked to its settlement the way
   `payment_applications` links a payment to its invoice.
+- **A refused password is silent.** Somebody guessing at an unattended laptop can try all four
+  guarded acts as often as they like: nothing is recorded, nothing is rate limited, and the owner
+  is never told — while `login_attempts` has counted exactly this since Phase 13 for the sign-in
+  form one page away.
+- **The guard does not remember.** The password is typed once per act, every time. A "recently
+  authenticated" window is the usual next step and needs its own decision about how long, what
+  refreshes it, and what happens when it is open on a machine somebody walked away from.
 - **No WebAuthn or passkeys.** TOTP works with any authenticator app and no hardware, but it is
   phishable in a way a passkey is not.
 - ~~**`login_attempts` is never pruned.**~~ Ninety days since Phase 24, on a nightly sweep, with the

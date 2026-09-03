@@ -121,8 +121,10 @@ describe('refusing to guess', () => {
 describe('KIND_CONCERNS', () => {
   it('names a party for every kind this application sends', () => {
     // Exhaustive by construction — a missing kind would not compile — and
-    // asserted so the count is visible when a ninth is added.
-    expect(ALL_KINDS).toHaveLength(8)
+    // asserted so the count is visible when another is added. Nine since
+    // Phase 98's `email_change`, which is a letter to a person about their own
+    // account and so concerns a contact, the answer `password_reset` gives.
+    expect(ALL_KINDS).toHaveLength(9)
     for (const kind of ALL_KINDS) {
       expect(['contact', 'customer', 'vendor']).toContain(KIND_CONCERNS[kind])
     }

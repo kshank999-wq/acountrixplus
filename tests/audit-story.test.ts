@@ -204,6 +204,9 @@ describe('one row, told', () => {
       label: 'Approval withdrawn',
       named: true,
       reason: 'Wrong cost code',
+      // Null here, and that is the point: only an event that wrote a sentence
+      // about itself carries one (Phase 97). Withdrawing an approval does not.
+      summary: null,
       changes: [
         { key: 'approvedBy', label: 'Approved by', kind: 'plain', from: 'user-1', to: null },
       ],

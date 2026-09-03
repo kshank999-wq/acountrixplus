@@ -243,7 +243,7 @@ describe('enrolling a second factor', () => {
     const first = await confirmEnrollment(fixture.userId, totpCode(started.secret, Date.now()))
     if (!first.ok) throw new Error('enrolment failed')
 
-    const second = await regenerateRecoveryCodes(fixture.userId)
+    const second = await regenerateRecoveryCodes(fixture.userId, 'correct-horse-battery')
     expect(second).toHaveLength(10)
 
     // An old printout must stop working, or regenerating achieves nothing.

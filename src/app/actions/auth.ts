@@ -296,11 +296,14 @@ export async function requestAddressChangeAction(
   try {
     const actor = await requireActor()
     const session = await requireSession()
-    const parsed = z.object({ requested: z.string() }).parse(input)
+    const parsed = z
+      .object({ requested: z.string(), currentPassword: z.string() })
+      .parse(input)
 
     const result = await requestAddressChange(actor, {
       requested: parsed.requested,
       companyName: session.companyName,
+      currentPassword: parsed.currentPassword,
     })
 
     if (!result.accepted) return { ok: false, error: result.error }

@@ -22,6 +22,8 @@ const mock = mockTransactionalProvider()
 
 let fixture: Fixture
 const COMPANY = 'Hartley & Co'
+/** What `createCompanyFixture` signs its owner up with. */
+const PASSWORD = 'correct-horse-battery'
 
 /** The token, taken the way a person takes it: out of the letter. */
 function tokenSentTo(address: string): string {
@@ -64,6 +66,7 @@ describe('asking for a new address', () => {
     const result = await requestAddressChange(fixture.ctx, {
       requested: 'Robin.New@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     expect(result).toEqual({ accepted: true })
@@ -88,6 +91,7 @@ describe('asking for a new address', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'later@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     // A half-finished change must not lock anybody out — the person most
@@ -100,6 +104,7 @@ describe('asking for a new address', () => {
     const result = await requestAddressChange(fixture.ctx, {
       requested: before.toUpperCase(),
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     expect(result).toEqual({
@@ -121,6 +126,7 @@ describe('asking for a new address', () => {
     const result = await requestAddressChange(fixture.ctx, {
       requested: theirs.email,
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     expect(result).toEqual({ accepted: true })
@@ -131,10 +137,12 @@ describe('asking for a new address', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'first@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
     await requestAddressChange(fixture.ctx, {
       requested: 'second@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     const all = await db
@@ -156,6 +164,7 @@ describe('asking for a new address', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'audited@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     const [event] = await db
@@ -173,6 +182,7 @@ describe('finishing the claim', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'moved@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     const token = tokenSentTo('moved@hartleyco.test')
@@ -193,6 +203,7 @@ describe('finishing the claim', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'moved@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
     await completeAddressChange({
       token: tokenSentTo('moved@hartleyco.test'),
@@ -215,6 +226,7 @@ describe('finishing the claim', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'contested@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
     const token = tokenSentTo('contested@hartleyco.test')
 
@@ -235,12 +247,14 @@ describe('finishing the claim', () => {
     await requestAddressChange(fixture.ctx, {
       requested: 'abandoned@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
     const abandoned = tokenSentTo('abandoned@hartleyco.test')
 
     await requestAddressChange(fixture.ctx, {
       requested: 'wanted@hartleyco.test',
       companyName: COMPANY,
+      currentPassword: PASSWORD,
     })
 
     expect(await completeAddressChange({ token: abandoned, companyName: COMPANY })).toMatchObject({
