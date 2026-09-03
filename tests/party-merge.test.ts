@@ -8,7 +8,13 @@ import {
   createInvoice,
   createVendor,
 } from '@/modules/receivables/service'
-import { listCustomerSummaries, mergeParties } from '@/modules/parties/service'
+import {
+  listCustomerSummaries,
+  mergeParties,
+  setCustomerActive,
+} from '@/modules/parties/service'
+import { describeArchived } from '@/modules/parties/merged'
+import { nameOf } from '@/modules/audit/story'
 import {
   describeMerge,
   EXCLUSIVE_REFERENCES,
@@ -378,5 +384,120 @@ describe('the words for a count', () => {
     )
 
     expect(irregular).toEqual([])
+  })
+})
+
+/**
+ * Following the pointer (Phase 97).
+ *
+ * Phase 96 wrote `merged_into_id` and read it nowhere, while its own ADR
+ * claimed the archived record "lands somewhere that explains itself". These
+ * pin the claim to behaviour, so it cannot become decorative again.
+ */
+describe('a merged record explains itself', () => {
+  let fixture: Fixture
+  let revenueId: string
+
+  beforeEach(async () => {
+    fixture = await createCompanyFixture({ name: 'Pointer Co' })
+    revenueId = (await fixture.account('4000')).id
+  })
+
+  it('says where it went, not just that it is archived', async () => {
+    const winner = await createCustomer(fixture.ctx, { name: 'Cascade Joinery' })
+    const loser = await createCustomer(fixture.ctx, { name: 'Cascade Joinery Ltd' })
+
+    await mergeParties(fixture.ctx, {
+      side: 'customer',
+      winnerId: winner.id,
+      loserId: loser.id,
+      reason: 'One business.',
+    })
+
+    const gone = (await listCustomerSummaries(fixture.ctx)).find((row) => row.id === loser.id)!
+
+    expect(gone.mergedInto).toEqual({ id: winner.id, name: 'Cascade Joinery' })
+    expect(
+      describeArchived({ side: 'customer', isActive: gone.isActive, mergedInto: gone.mergedInto }),
+    ).toBe('merged into Cascade Joinery')
+  })
+
+  it('leaves a plainly archived record saying nothing about a merge', async () => {
+    const retired = await createCustomer(fixture.ctx, { name: 'Quiet Ltd' })
+    await setCustomerActive(fixture.ctx, retired.id, false)
+
+    const row = (await listCustomerSummaries(fixture.ctx)).find((one) => one.id === retired.id)!
+
+    expect(row.mergedInto).toBeNull()
+    expect(
+      describeArchived({ side: 'customer', isActive: row.isActive, mergedInto: row.mergedInto }),
+    ).toBe('archived')
+  })
+
+  it('says nothing about a live record', async () => {
+    const live = await createCustomer(fixture.ctx, { name: 'Trading Ltd' })
+    const row = (await listCustomerSummaries(fixture.ctx)).find((one) => one.id === live.id)!
+
+    expect(row.mergedInto).toBeNull()
+    expect(row.isActive).toBe(true)
+  })
+
+  it('does not multiply a row because of the pointer', async () => {
+    // The name is a correlated subquery rather than a self-join, for the reason
+    // Phase 92 gave: a join can multiply rows, and a list screen that silently
+    // doubled a customer would be worse than the defect this fixes.
+    const winner = await createCustomer(fixture.ctx, { name: 'Keep' })
+    const first = await createCustomer(fixture.ctx, { name: 'Go One' })
+    const second = await createCustomer(fixture.ctx, { name: 'Go Two' })
+
+    for (const loser of [first, second]) {
+      await mergeParties(fixture.ctx, {
+        side: 'customer',
+        winnerId: winner.id,
+        loserId: loser.id,
+        reason: 'Same business.',
+      })
+    }
+
+    const all = await listCustomerSummaries(fixture.ctx)
+    expect(all).toHaveLength(3)
+    expect(all.filter((row) => row.id === winner.id)).toHaveLength(1)
+  })
+
+  it('records which documents moved, not only how many', async () => {
+    // Phase 96 could say "2 invoices moved" and not answer "did THIS invoice
+    // move" — the question somebody asks when a customer says an invoice was
+    // never theirs.
+    const winner = await createCustomer(fixture.ctx, { name: 'Keep' })
+    const loser = await createCustomer(fixture.ctx, { name: 'Go' })
+
+    const moved = await createInvoice(fixture.ctx, {
+      customerId: loser.id,
+      issueDate: '2026-02-01',
+      dueDate: '2026-03-03',
+      lines: [{ chartAccountId: revenueId, description: 'Work', unitPriceCents: 5000 }],
+    })
+
+    await mergeParties(fixture.ctx, {
+      side: 'customer',
+      winnerId: winner.id,
+      loserId: loser.id,
+      reason: 'One business.',
+    })
+
+    const [row] = (await db.execute(
+      sql`select after from audit_events
+          where action = 'party.merge' and entity_id = ${winner.id}`,
+    )) as unknown as Array<{ after: { moved: Array<{ table: string; ids: string[] }> } }>
+
+    const invoices = row.after.moved.find((one) => one.table === 'invoices')!
+    expect(invoices.ids).toEqual([moved.id])
+  })
+
+  it('names the act instead of showing its code', async () => {
+    // Phase 96 added party.merge to the vocabulary and did not connect it to
+    // the audit story, so the one screen that would explain a merge rendered
+    // the raw string `party.merge`.
+    expect(nameOf('party.merge')).toEqual({ label: 'Records merged', named: true })
   })
 })

@@ -4254,6 +4254,44 @@ And it shows its work first: *"5 records (4 invoices, 1 recurring invoice) will
 move to Bremen Hafenbau GmbH, and Meridian Facilities Ltd will be archived. This
 cannot be undone."*
 
+### The pointer nobody followed (Phase 97)
+
+Phase 96 gave the losing record a `merged_into_id` and claimed in its ADR that
+this meant "a bookmark, an export or somebody's memory of the old name still
+lands somewhere that explains itself". That was false when written: `grep` finds
+one use of the column in the whole application, and it is the `set` that writes
+it. What somebody actually found was an archived customer with no documents and
+no explanation — worse than before the merge, when it at least had its invoices.
+
+The correction is written into ADR 0096 rather than the sentence quietly edited
+away, on Phase 91's reasoning: a wrong reason written down is more dangerous
+than none, because the next person builds on it.
+
+**An archive and a merge are different acts and say so.** The row now reads
+*merged into Cascade Joinery* where there is a pointer and *archived* where
+there is not — naming the survivor, so nobody is left knowing something happened
+and not where to look. The name comes from a correlated subquery rather than a
+self-join, for the reason Phase 92 gave: a join can multiply rows, and a list
+that silently doubled a customer would be worse than the defect being fixed.
+
+**Evidence of what moved belongs on the act, not on each thing moved.** The
+merge takes its ids from `returning "id"` on the update itself and records them
+on the event, so the trail can answer "did *this* invoice move" and not only
+"five invoices moved". An audit row per document was rejected — hundreds of rows
+saying the same thing on the same day would bury every other entry in both
+histories. The ids are capped at 500, with the cap recorded as its own
+`truncated` field rather than inferred from the list's length, which is wrong
+for a merge of exactly 500. A truncated list that does not say so is worse than
+a count.
+
+**An event may write a sentence about itself.** The merge entry read "Records
+merged" and named nothing, above `Role nothing → absorbed` — the payload
+describing its own filing. `Told` gains a `summary`, written where the facts are
+known rather than reconstructed from an action name, and `role`/`side`/`summary`
+join `reason` in `NOT_A_CHANGE`. Also fixed: `party.merge` was in Phase 70's
+vocabulary and not in the audit story, so the one screen that would explain a
+merge showed the raw action code.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5998,11 +6036,14 @@ Gaps within the phases already built:
 - ~~**Nothing merges two customers.**~~ Since Phase 96 two records of one business can be put
   together, with every one of the twenty-two references repointed under a tripwire that fails when
   a new one is added and not registered.
-- **A merge cannot be undone.** It is the only correction in the vocabulary with no way back. The
-  audit trail records enough to explain it — who, when, why, and how many rows moved per table —
-  but not the ids, so nothing could reverse it. Whether an unmerge is a feature a bookkeeping
-  system should have, given what may have been posted against the combined record since, is
-  undecided.
+- **A merge cannot be undone.** It is the only correction in the vocabulary with no way back.
+  Since Phase 97 the trail records which documents moved, not only how many, so a reversal is
+  *possible* — but what should happen to an invoice raised against the combined record afterwards,
+  or a payment allocated across documents from both sides, is undecided, and deciding it is the
+  whole of that feature rather than a detail of it.
+- **A merge tells the customer nothing.** A statement sent the month after covers invoices that
+  were, until last week, addressed to a differently-named account, and Phase 55's statement has no
+  idea that happened.
 - **No backfill.** Letters sent before Phase 93 have no communications row and do not get one:
   which party they were about was never decided, and inventing it now would be a guess dressed as
   a record.

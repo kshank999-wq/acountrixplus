@@ -6,6 +6,13 @@ import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { clashesAmong, type Clash, type PartySide } from './addresses'
 import {
+  describeAbsorbed,
+  movedRecordFor,
+  tallyOf,
+  type MergedInto,
+  type MovedRecord,
+} from './merged'
+import {
   describeMerge,
   EXCLUSIVE_REFERENCES,
   mergeCheck,
@@ -70,6 +77,16 @@ export type PartySummary = {
   hasForeignDocuments: boolean
   /** Every document ever, so a quiet record is distinguishable from a new one. */
   documentCount: number
+  /**
+   * Where this record went, when it was merged away rather than retired
+   * (Phase 97).
+   *
+   * Null for every live record and for one that was simply archived. Phase 96
+   * wrote the pointer and nothing read it, so an absorbed record showed as a
+   * bare "archived" with no documents — worse than before the merge, when it at
+   * least had its invoices.
+   */
+  mergedInto: MergedInto | null
 }
 
 export type VendorSummary = PartySummary & {
@@ -87,6 +104,22 @@ const OPEN_STATUSES = ['open', 'partial'] as const
  * two queries per customer is one that stops loading at four hundred of them,
  * which is a size a real business reaches in a year.
  */
+
+/**
+ * The name of the record this one was merged into, or null (Phase 97).
+ *
+ * A correlated subquery rather than a self-join, for the reason Phase 92 gave
+ * for the same shape: a join can multiply rows, and a list screen that silently
+ * doubled a customer because of a pointer would be a worse defect than the one
+ * this fixes.
+ */
+function mergedIntoName(table: typeof customers | typeof vendors) {
+  return sql<string | null>`(
+    select "into"."name" from ${table} as "into"
+    where "into"."id" = ${table.mergedIntoId}
+  )`
+}
+
 export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySummary[]> {
   requirePermission(ctx, 'crm:view')
 
@@ -209,6 +242,7 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
       foreignCount: trading.foreignCount,
       documentCount: trading.documentCount,
       heldCreditCents: heldCredit.heldCents,
+      mergedIntoName: mergedIntoName(customers),
     })
     .from(customers)
     .leftJoin(trading, eq(trading.customerId, customers.id))
@@ -239,6 +273,10 @@ export async function listCustomerSummaries(ctx: ActorContext): Promise<PartySum
     oldestDueDate: row.oldestDueDate ?? null,
     hasForeignDocuments: Number(row.foreignCount ?? 0) > 0,
     documentCount: Number(row.documentCount ?? 0),
+    mergedInto:
+      row.customer.mergedIntoId && row.mergedIntoName
+        ? { id: row.customer.mergedIntoId, name: row.mergedIntoName }
+        : null,
   }))
 }
 
@@ -349,6 +387,7 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
       foreignCount: trading.foreignCount,
       documentCount: trading.documentCount,
       heldCreditCents: unspentCredit.heldCents,
+      mergedIntoName: mergedIntoName(vendors),
     })
     .from(vendors)
     .leftJoin(trading, eq(trading.vendorId, vendors.id))
@@ -378,6 +417,10 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
     oldestDueDate: row.oldestDueDate ?? null,
     hasForeignDocuments: Number(row.foreignCount ?? 0) > 0,
     documentCount: Number(row.documentCount ?? 0),
+    mergedInto:
+      row.vendor.mergedIntoId && row.mergedIntoName
+        ? { id: row.vendor.mergedIntoId, name: row.mergedIntoName }
+        : null,
   }))
 }
 
@@ -582,17 +625,29 @@ export async function mergeParties(
   if (!check.ok) throw new DomainError(check.why)
 
   return db.transaction(async (tx) => {
-    const moved: MergeTally[] = []
+    const moved: MovedRecord[] = []
 
     for (const ref of references) {
-      const result = await tx.execute(
+      /**
+       * `returning id` rather than a bare row count (Phase 97).
+       *
+       * Phase 96 recorded that five invoices moved and not *which* five, so
+       * the trail could not answer "did this invoice move" — the question
+       * somebody actually asks when a customer says an invoice was never
+       * theirs. The ids come back from the update itself, so there is no
+       * second query whose answer could differ from what was written.
+       */
+      const rows = (await tx.execute(
         sql`update ${sql.raw(`"${ref.table}"`)}
             set ${sql.raw(`"${ref.column}"`)} = ${winner.id}
             where ${sql.raw(`"${ref.column}"`)} = ${loser.id}
-              and "company_id" = ${ctx.companyId}`,
-      )
-      const rows = (result as unknown as { count?: number }).count ?? 0
-      if (rows > 0) moved.push({ table: ref.table, rows })
+              and "company_id" = ${ctx.companyId}
+            returning "id"::text`,
+      )) as unknown as Array<{ id: string }>
+
+      if (rows.length > 0) {
+        moved.push(movedRecordFor({ table: ref.table, ids: rows.map((row) => row.id) }))
+      }
     }
 
     await tx
@@ -607,6 +662,7 @@ export async function mergeParties(
      * absorbed another — otherwise its history begins mid-story with documents
      * that were never raised against it. Phase 71 renders both.
      */
+    const tally = tallyOf(moved)
     const shared = {
       side: input.side,
       reason: verdict.reason,
@@ -618,7 +674,27 @@ export async function mergeParties(
 
     await recordAudit(
       ctx,
-      { action: 'party.merge', entityType, entityId: winner.id, after: { ...shared, role: 'absorbed' } },
+      {
+        action: 'party.merge',
+        entityType,
+        entityId: winner.id,
+        /**
+         * The sentence written where the facts are (Phase 97).
+         *
+         * Without it the surviving record's history read "Records merged"
+         * about nothing in particular — it did not name what it had absorbed,
+         * so its extra documents still arrived unexplained.
+         */
+        after: {
+          ...shared,
+          role: 'absorbed',
+          summary: describeAbsorbed({
+            side: input.side,
+            loserName: loser.name,
+            moved: tally,
+          }),
+        },
+      },
       tx,
     )
     await recordAudit(
@@ -628,12 +704,17 @@ export async function mergeParties(
         entityType,
         entityId: loser.id,
         before: { isActive: true },
-        after: { ...shared, role: 'merged_away', isActive: false },
+        after: {
+          ...shared,
+          role: 'merged_away',
+          isActive: false,
+          summary: `Merged into ${winner.name}.`,
+        },
       },
       tx,
     )
 
-    return { winnerName: winner.name, loserName: loser.name, moved }
+    return { winnerName: winner.name, loserName: loser.name, moved: tally }
   })
 }
 

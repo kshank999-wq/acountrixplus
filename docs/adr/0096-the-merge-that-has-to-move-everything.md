@@ -61,9 +61,19 @@ from the row above it"* — are exactly what happened here.
 
 ## Decision 3: the losing record is archived, not deleted
 
-It stays, archived, pointing at the record that absorbed it, so a bookmark, an
-export or somebody's memory of the old name still lands somewhere that explains
-itself. Deleting it would destroy the only evidence the merge happened.
+It stays, archived, pointing at the record that absorbed it. Deleting it would
+destroy the only evidence the merge happened.
+
+> **Corrected in Phase 97.** This section originally went on to claim that the
+> pointer meant "a bookmark, an export or somebody's memory of the old name
+> still lands somewhere that explains itself." That was false when written:
+> `merged_into_id` was set by `mergeParties` and read by nothing at all, so what
+> somebody found was an archived record with no documents and no explanation —
+> worse than before the merge, when it at least had its invoices. The claim
+> described an intention as though it were behaviour. Phase 97 made it true.
+> The correction is left here rather than the sentence quietly edited away,
+> because a wrong reason written down is more dangerous than none: the next
+> person builds on it.
 
 Two database constraints rather than service discipline: a merged record must
 be archived, and cannot point at itself. A merged record still appearing in

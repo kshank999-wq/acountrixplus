@@ -15,6 +15,7 @@ import { formatCents } from '@/lib/money'
 import { partyStanding } from '@/modules/parties/standing'
 import type { Resolution } from '@/modules/parties/duplicates'
 import { correction } from '@/modules/corrections/vocabulary'
+import { describeArchived } from '@/modules/parties/merged'
 import { RecordHistory } from '@/components/record-history'
 import { PartyPost } from '@/components/party-post'
 
@@ -45,6 +46,8 @@ type Party = {
   oldestDueDate: string | null
   hasForeignDocuments: boolean
   documentCount: number
+  /** Where it went, when it was merged away rather than retired (Phase 97). */
+  mergedInto: { id: string; name: string } | null
 }
 
 type Vendor = Party & { taxId: string | null; is1099Vendor: boolean }
@@ -532,7 +535,22 @@ export function PeopleBoard({
                     <>
                       <td className="px-4 py-2">
                         <span className="font-medium">{row.name}</span>
-                        {!row.isActive && <span className="ml-2 text-xs text-faint">archived</span>}
+                        {/*
+                          "archived" and "merged into X" are different acts and
+                          say so (Phase 97). Phase 96 wrote the pointer and
+                          nothing read it, so an absorbed record showed as a
+                          bare archived customer with no documents — which is
+                          exactly the abandoned duplicate Phase 94 reports.
+                        */}
+                        {!row.isActive && (
+                          <span className="ml-2 text-xs text-faint">
+                            {describeArchived({
+                              side: isVendors ? 'vendor' : 'customer',
+                              isActive: row.isActive,
+                              mergedInto: row.mergedInto,
+                            })}
+                          </span>
+                        )}
                         {isVendors && (row as Vendor).is1099Vendor && (
                           <span className="ml-2 text-xs text-muted">1099</span>
                         )}

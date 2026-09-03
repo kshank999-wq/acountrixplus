@@ -83,6 +83,15 @@ export function RecordHistory({
             </span>
           </div>
 
+          {line.summary && (
+            /* What the event says about itself (Phase 97) — above the reason,
+               because "Absorbed Meridian Facilities Ltd, and 5 records with
+               it" is what happened, and the reason explains it. Without this
+               the merge entry read "Records merged" about nothing in
+               particular. */
+            <p className="mt-1 text-sm">{line.summary}</p>
+          )}
+
           {line.reason && (
             /* The whole point of Phase 70, given a reader at last. It leads,
                above the field list, because it is what somebody opened this

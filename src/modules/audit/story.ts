@@ -58,6 +58,10 @@ const CORRECTION_ACTIONS: Record<string, CorrectionKind> = {
   'bill.void': 'document.void',
   'deposit.void': 'deposit.void',
   'bill.approval_withdraw': 'approval.withdraw',
+  // Phase 96 added the correction and did not connect it here, so the one
+  // screen that would explain a merge showed the raw string `party.merge` as
+  // a code. Fixed in Phase 97.
+  'party.merge': 'party.merge',
 }
 
 export type Name = {
@@ -88,7 +92,27 @@ export function nameOf(action: string): Name {
  * from nothing to "Keyed at ten times the amount" buries the one thing
  * somebody opened the history to read.
  */
-const NOT_A_CHANGE = new Set(['reason'])
+const NOT_A_CHANGE = new Set([
+  'reason',
+  /**
+   * The sentence an event writes about itself (Phase 97).
+   *
+   * Surfaced on its own, like `reason`. Rendering it as a field would print
+   * "Summary nothing → Absorbed Meridian Facilities Ltd, and 5 records with
+   * it." — the right words in the wrong shape.
+   */
+  'summary',
+  /**
+   * How an event's payload is put together, not what happened (Phase 97).
+   *
+   * Browser verification of the merge showed "Role nothing → absorbed" and
+   * "Side nothing → customer" above the sentence somebody actually wanted.
+   * These are the record telling you about its own filing, and a history that
+   * reports them is a history somebody stops reading.
+   */
+  'role',
+  'side',
+])
 
 export type ChangeKind = 'money' | 'plain' | 'secret'
 
@@ -237,12 +261,27 @@ export function reasonFrom(after: Record<string, unknown> | null | undefined): s
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
+/** The sentence an event wrote about itself, when it wrote one (Phase 97). */
+export function summaryFrom(after: Record<string, unknown> | null | undefined): string | null {
+  const value = after?.summary
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
+}
+
 export type Told = Name & {
   action: string
   /** Field by field, which is what `before` and `after` were written for. */
   changes: Change[]
   /** Why, when it was asked for or offered. */
   reason: string | null
+  /**
+   * What the event says about itself, when it wrote a sentence (Phase 97).
+   *
+   * Written where the facts are known rather than reconstructed here: only the
+   * merge knows it absorbed *Meridian Facilities Ltd* and brought five records
+   * with it, and a switch in this file guessing that from an action name would
+   * be a second answer to a question the writer had already answered.
+   */
+  summary: string | null
 }
 
 /** One audit row, as much of it as there are words for. */
@@ -256,5 +295,6 @@ export function tell(row: {
     action: row.action,
     changes: changedFields(row.before, row.after),
     reason: reasonFrom(row.after),
+    summary: summaryFrom(row.after),
   }
 }

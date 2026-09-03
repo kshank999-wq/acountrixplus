@@ -49,8 +49,12 @@ import type { Standing } from './duplicates'
  * ## What a merge is not
  *
  * It is not a deletion. The losing record stays, archived, pointing at the one
- * that absorbed it — so a bookmark, an export or somebody's memory of the old
- * name still lands somewhere that explains itself.
+ * that absorbed it.
+ *
+ * This paragraph used to claim the pointer meant such a record "lands somewhere
+ * that explains itself". It did not: nothing read `merged_into_id`, so an
+ * absorbed record showed as a bare archived row with no documents on it.
+ * Phase 97 made the claim true and `merged.ts` records the correction.
  *
  * It is not a guess. Phase 95 refuses to say two records are the same business;
  * so does this. A person decides, and the reason they type is what says so.
