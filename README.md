@@ -4518,6 +4518,66 @@ valuable direction is the second: making a column nullable is a migration nobody
 would connect to a retention screen, and it silently turns a complete count into
 a partial one.
 
+### The column that added euros to dollars (Phase 103)
+
+`export.ts` opens by saying what it is for — *could an accountant rebuild these
+books somewhere else from it* — and warns, about CSV quoting, that the danger is
+**"a file that looks fine and is wrong, which is the worst kind"**. Both
+sentences are right, and the file was doing the thing the second one warns about.
+
+`invoices.csv` had a `total` column. It held `invoices.total_cents`, the amount
+in the currency the invoice was *issued* in, as a bare decimal with no currency
+anywhere in the file. `bills.csv` and `payments.csv` did the same.
+
+Ridgeline is not a contrived case: fifteen invoices in USD totalling 80,719.94
+and two in EUR totalling 6,500.00, all seventeen written into one column.
+Summing it gave **87,219.94**, which is not money in any currency. The real
+receivable is 87,762.69 — the euro invoices were booked at 4,334.00 and
+2,708.75 — so the file was out by 542.75, in the direction of understating what
+the business is owed. This is the sum Phase 65 was named for closing; it was
+closed in the reports, the statements, the chase, the approval threshold and the
+aging, and the export was written at Phase 13 and was not on the list.
+
+**A money column may not be written without its currency**, and that is a type
+rather than a rule. The old helper was `units(cents: number): string`, so every
+call site was one keystroke from being wrong and none of them could be checked —
+a bare number is a perfectly good argument. `moneyColumns` cannot be called
+without saying what currency the amount is in.
+
+**Both the document amount and the functional amount**, even when equal. A
+column that appears only sometimes breaks every formula written against the
+file, and a shape that depends on whether the company happens to have traded
+abroad is worse than a duplicated column. The reason is reconciliation:
+`journal.csv` is in the company's own currency because a ledger is, so without
+the functional column there is no way to tie a euro invoice to the entry that
+booked it.
+
+Invoices and bills store both figures, so theirs are read rather than
+recomputed. **Payments turned out to be the exception**, and finding that out
+changed the design: a payment stores no functional amount for the whole receipt,
+only `functional_unapplied_cents` for the part not yet spent. So its functional
+column is derived with `convert` — the same function the rest of the system uses
+— from the rate **the payment itself recorded**, which is a stored fact of that
+receipt rather than today's rate. The rate is exported in its own column so the
+arithmetic is checkable rather than trusted.
+
+**A manifest**, because "can I add this column up" is a question about a file
+rather than a row. `manifest.csv` names each file's currencies and what each one
+totals, and says in as many words when there is no single total. Deliberately
+not a footer row inside each CSV — a totals row is a row every importer reads as
+data, which is how a customer list acquires a customer called TOTAL.
+
+The header row and the value object were also two hand-written lists, so adding
+a column meant editing both; out of step, every value in the file shifts one
+position. `columnsFor` now generates both from one place. (The first draft of the
+new test split CSV lines on commas and tripped over a chart-account description
+containing one — the same failure, in the test rather than the export.)
+
+**And "who took a copy of everything" was showing the oldest ten.** `listExports`
+ordered `asc(createdAt)` while the security page asks for ten, so the panel
+answered with the first ten exports the company ever took and stopped changing
+after that. Newest first, which is what the question means.
+
 One more check came out of the rewrite: the sweeps are now asserted to touch the
 table their policy *names*. Phase 24's safety property — no policy naming a
 table that holds the books — is asserted against a hand-written string, so a
@@ -4645,6 +4705,7 @@ Coverage matches what spec §21 asks for:
 | `tests/control-accounts.test.ts` | **What the balance sheet says is owed, against the documents behind it** — the check that would have caught Phases 29 and 30 on their first day. An empty company agreeing; a delivered visit agreeing **and naming who owes it**, with the aging report able to see it too; a billed repair order agreeing against its keeper; **a walk-in billed to one house account** however many of them there are, rather than to nobody; **a hand-written journal entry against 1100 caught** with the difference named, because that is the one thing that genuinely breaks the agreement; payables checked the same way **without blaming receivables for one fault**; one company's control accounts out of another's; and **a gift card settling the invoice and not just the ledger**, so the two sides still agree at £15 after a £50 card is spent on a £65 visit |
 | `tests/books-integrity.test.ts` | **The books checking themselves.** Every check in the register given a stable key, a module gate, a severity and a *meaning* — a number nobody can argue with is a number with no argument. **The three positions that legitimately differ classified as positions** and the other seven as faults, by name, so a reclassification has to be deliberate. Then: an empty company where **every register entry is accounted for, run or skipped, never silently absent**; a check skipped because its module is off and **absent from the findings rather than present and green**; the same check running once the module is on; **a hand-written entry against 1100 caught** with the difference and the severity; **a position that differs not counted as a fault**; **a check that threw recorded rather than swallowed**, as an admission and not an assertion, and not counted as a fault because nobody knows whether they agree; **the rest of the register still running after one check throws**, with the exploding one inserted first so a loop that stopped would report almost nothing; the permission; and one company's findings out of another's. On the record: a run and a finding written per check, the latest read back **with what it skipped**, **"never run" told apart from "nothing wrong"**, **when a difference started answered** across three nights, and a dry run leaving nothing behind. And the alarm: **everything broken reported on a first run**, **nothing said the second night about the same drift**, **a second different check speaking up**, silence when nothing is wrong, and the handler registered, scheduled daily, and **still writing the run down on the firing it says nothing about** |
 | `tests/counter.test.ts` | **Change is not a transaction** — $50 against a $20 bill settles $20 and hands $30 back, with only the $20 posted. Against a pure core: **non-cash applied before cash**, because only cash can give change, so an $80 bill met with a $50 card and a $50 note charges the card $50 and takes $30 of the cash; **a card over the bill refused outright** with the amount and what to take instead, and every non-cash kind treated the same way; change taken out of the cash when a card covers part of it; **several notes collapsed into one payment** while each non-cash tender stays its own; under-tendering leaving the rest owing; an empty offer, a tender of nothing, and **a figure the ledger cannot hold refused rather than quietly zeroed**. Then against the database: the bill settled with **the money in the drawer and not the bank**, each tender recorded as its own payment, banked directly when somebody says where, part of a bill taken with the rest left owing, **a settled bill refused a second payment**, an over-charged card refused **with nothing taken at all**, the journal permission required, and one shop's till out of another's. And end to end: a visit delivered, billed, and paid with a $70 note — **$5 change, the invoice settled, Phase 31's control accounts still agreeing on both sides, $65 in Undeposited Funds, and the stylist still owed their $29.25**, because taking the client's money does not pay the staff |
+| `tests/exported-money.test.ts` | **A money column never written without its currency**, and the functional figure stated as equal rather than left blank when it is; the header names generated from the same place as the values, so the two lists cannot drift apart; per-currency totals for a file, sorted so an export can be diffed, and a sentence saying **when a file holds two currencies and has no single total**; against the database, **a euro invoice and a dollar one coming out distinguishable** with what each was booked at, the manifest naming both currencies, **a foreign invoice not restated when the rate later moves**, the ledger and bank files naming the company's own currency so no money column anywhere is bare, the manifest counted as a file but not as rows of books, a customer whose name holds a comma still quoted, **every row carrying the same number of cells as its header** (checked with a quote-aware splitter, because the naive one trips on a chart-account description), and **the copies somebody took listed newest first** |
 | `tests/retention-attribution.test.ts` | **One company's letters never counted into another's total** — the defect stated as a number, with the unscoped version reading three where one is right; the deployment given every count because a total is only true for it; **a count described as this company's share where some rows belong to a firm or a person**, with the caveat saying which rather than just that the number is partial; **a reason rather than a blank** where no row has a company, and the policy's days and reason still shown to a viewer who gets no number; **a letter belonging to no company counted for the deployment and for nobody else**, so scoping does not make it invisible to everybody; the expiring count scoped the same way as the total; **every company swept however narrow the report was**, because scoping the delete would mean retention only removed rows belonging to whoever last loaded a page; every attribution checked against `information_schema` for whether the column exists **and whether it is nullable**; every policy that cannot name a company arguing for itself in prose; and **each sweep touching the table its policy names**, without which Phase 24's allowlist guarantee is asserted against a string nothing ties to the query |
 | `tests/retention.test.ts` | **No policy naming a table that holds the books**, checked against the ledger, the audit log, the documents, the notes and dead jobs by name; every policy explaining itself in more than a line, each kind and each table named exactly once so there is one answer to how long; the cutoff measured from a date it is given rather than the clock, and null for the sweep that asks about reachability; **the number of tables in the database written down, so adding one fails here with a message naming the two ways to answer**, `guard_attempts` swept on a year with the sign-in record's window asserted shorter, **an old guard attempt deleted while one inside the fifteen-minute cool-off is left where the guard can still read it**, and **`pruneExpiredTokens` gone from `tokens.ts` so thirty days has one answer**; sign-in attempts past the window deleted with the recent ones kept, **a second run deleting nothing**, a token held until well past its expiry rather than its issue, **an event that has not been relayed never swept**, **a lead that became an opportunity never swept however old**, and every policy run in one pass; **a journal entry dated 2019 still there after every sweep runs as at 2030**; the report counting what is held and what would go without deleting any of it; a handler registered for every schedule and a schedule for every handler the phase added, with housekeeping global and the rest per company; a dead job and a bounced letter found in one shape, **nothing at all on a quiet day** and nothing said about a sending reputation nobody has the volume to judge, **the digest speaking when the mail is bouncing though nothing failed**, **the send that did it named** and **nobody named when every campaign is as bad as the rest**, **which way it is going once two readings sit a window apart** with nothing claimed on one reading, **the day's reading written down on a quiet day too** and once however often the digest fires, one company's readings out of another's trend, a month-old bounce not reported as today's news, `company:manage` needed to see any of it, and one company's failures off another's digest; and overdue follow-ups grouped per person with the unclaimed ones counted apart |
 | `tests/ai.test.ts` | The core-works-without-AI guarantee, cost arithmetic in micros, gateway ordering and schema rejection, quotas and ceilings, provider fallback, prompt versioning and rollback, permission-gated retrieval, human-in-the-loop approval and audit attribution, capability behaviour, tenant isolation |
