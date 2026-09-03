@@ -519,6 +519,13 @@
       "when": 1788740006000,
       "tag": "0073_phase113_payment_application_dated",
       "breakpoints": true
+    },
+    {
+      "idx": 74,
+      "version": "7",
+      "when": 1788740007000,
+      "tag": "0074_phase116_paired_money_sane",
+      "breakpoints": true
     }
   ]
 }

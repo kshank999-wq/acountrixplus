@@ -209,79 +209,46 @@ export async function foreignExposure(
   }
 }
 
-export type ConversionCheck = {
-  /** Σ what the documents say they are carried at. */
-  documentsCents: number
-  /** Σ what a fresh conversion at each document's own rate would give. */
-  recomputedCents: number
-  differenceCents: number
-  agrees: boolean
-  offenders: Array<{ number: string; carriedCents: number; recomputedCents: number }>
-}
-
 /**
- * Whether every document's stored home amount matches its own rate.
+ * `conversionsAgree` and the `fx.conversions` check lived here from Phase 35
+ * until Phase 116, and are gone.
  *
- * The two sides are genuinely different in the sense Phase 26 established: the
- * left is a column written when the document was raised, the right is the
- * conversion recomputed now from the balance and the rate beside it. Nothing
- * derives one from the other, and they can only disagree if something wrote a
- * home amount that its own rate does not produce.
+ * They compared each open foreign document's stored home amount against a fresh
+ * conversion of its remaining balance, and called more than a cent apart a
+ * fault. The premise was that a functional figure is a conversion of its face
+ * amount. **It never has been, and deliberately so.**
  *
- * They are **expected to differ by rounding on a part-paid document**, which is
- * why the tolerance is a cent per open document rather than zero — a payment
- * takes an exact remainder out of the carried amount, and the remainder is not
- * always what re-converting the remaining foreign balance gives.
+ * A document's functional total is its *lines* converted and added, because the
+ * header stores what the journal entry actually posted — converting the total
+ * separately would leave the balance a cent from the receivable it must equal.
+ * A document's functional balance comes down by `relieveFunctional`, which
+ * takes the whole remainder on the last settlement so nothing is stranded.
+ * Both rules round per movement, and rounding accumulates:
+ *
+ * - A two-line €10.01 + €10.01 invoice at 1.0835 carries **$21.70**; converting
+ *   its €20.02 total gives **$21.69**.
+ * - A €1,000 invoice paid in three instalments of €250 carries **$270.86**
+ *   against a €250 balance that recomputes to **$270.88** — two cents, which
+ *   the check called a fault, nightly, on correct books.
+ *
+ * The doc comment admitted the drift and set the tolerance at one cent per
+ * document. The drift is not bounded per document; it is bounded by the number
+ * of movements, and any tolerance that covered them would be wide enough to
+ * hide the thing the check was for.
+ *
+ * What replaced it, in two exact pieces with no tolerance anywhere:
+ *
+ * - **The reach-zero-together constraint** on all five tables carrying a paired
+ *   money column (`fx/paired.ts`), which stops a settled document carrying
+ *   money on a control account rather than reporting it the next morning.
+ * - **`ledger.receivables` and `ledger.payables`**, which have compared Σ
+ *   functional balances against the control accounts since Phase 31. A home
+ *   amount edited by hand moves that sum, and those checks have no tolerance
+ *   because a control account either equals its subledger or does not.
+ *
+ * The note stays because the shape is worth keeping: a check whose premise is
+ * false is worse than no check, and a tolerance is where a false premise hides.
  */
-export async function conversionsAgree(ctx: ActorContext): Promise<ConversionCheck> {
-  requirePermission(ctx, 'reports:view')
-
-  const home = await functionalCurrency(ctx.companyId)
-
-  const rows = await db
-    .select({
-      number: invoices.number,
-      balanceCents: invoices.balanceCents,
-      rate: invoices.exchangeRateMillionths,
-      carriedCents: invoices.functionalBalanceCents,
-    })
-    .from(invoices)
-    .where(
-      scoped(
-        ctx,
-        invoices,
-        and(inArray(invoices.status, [...OPEN_INVOICE_STATUSES]), ne(invoices.currency, home)),
-      ),
-    )
-
-  let documentsCents = 0
-  let recomputedCents = 0
-  const offenders: ConversionCheck['offenders'] = []
-
-  for (const row of rows) {
-    const recomputed = Math.round((row.balanceCents * row.rate) / 1_000_000)
-    documentsCents += row.carriedCents
-    recomputedCents += recomputed
-
-    // More than a cent apart is not rounding — it is a home amount that its own
-    // rate cannot produce.
-    if (Math.abs(recomputed - row.carriedCents) > 1) {
-      offenders.push({
-        number: row.number,
-        carriedCents: row.carriedCents,
-        recomputedCents: recomputed,
-      })
-    }
-  }
-
-  return {
-    documentsCents,
-    recomputedCents,
-    differenceCents: documentsCents - recomputedCents,
-    agrees: offenders.length === 0,
-    offenders,
-  }
-}
 
 /**
  * What currency has already cost or earned, in the profit and loss (spec §19).

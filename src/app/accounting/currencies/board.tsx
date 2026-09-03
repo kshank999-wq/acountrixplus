@@ -42,14 +42,6 @@ type Exposure = {
   noExposure: boolean
 }
 
-type Check = {
-  documentsCents: number
-  recomputedCents: number
-  differenceCents: number
-  agrees: boolean
-  offenders: Array<{ number: string; carriedCents: number; recomputedCents: number }>
-}
-
 /** 1_083_500 → "1.083500". Six places, always, so a column of them lines up. */
 function rateText(millionths: number): string {
   return (millionths / 1_000_000).toFixed(6)
@@ -73,7 +65,6 @@ export function CurrencyBoard({
   exposure,
   exposureError,
   realised,
-  check,
   canEnterRates,
   canSeeExposure,
 }: {
@@ -84,7 +75,6 @@ export function CurrencyBoard({
   exposure: Exposure | null
   exposureError: string | null
   realised: { accountNumber: string; realisedCents: number; hasAccount: boolean } | null
-  check: Check | null
   canEnterRates: boolean
   canSeeExposure: boolean
 }) {
@@ -368,38 +358,6 @@ export function CurrencyBoard({
                   </div>
                 ))}
             </div>
-          )}
-        </section>
-      )}
-
-      {check && (
-        <section className="card px-4 py-4">
-          <h3 className="text-sm font-semibold">
-            Do the documents carry what their own rates produce?
-          </h3>
-          {check.agrees ? (
-            <p className="mt-1 text-sm text-success">
-              Yes — {money(check.documentsCents)} on the documents against{' '}
-              {money(check.recomputedCents)} recomputed.{' '}
-              <span className="text-faint">
-                Checked nightly too; this is the same comparison the integrity register runs.
-              </span>
-            </p>
-          ) : (
-            <>
-              <p className="mt-1 text-sm text-danger">
-                No. {money(check.documentsCents)} on the documents against{' '}
-                {money(check.recomputedCents)} recomputed — {money(check.differenceCents)} apart.
-              </p>
-              <ul className="mt-2 space-y-1 text-sm">
-                {check.offenders.map((row) => (
-                  <li key={row.number} className="text-muted">
-                    <span className="font-medium text-ink">{row.number}</span> carries{' '}
-                    {money(row.carriedCents)}; its own rate gives {money(row.recomputedCents)}.
-                  </li>
-                ))}
-              </ul>
-            </>
           )}
         </section>
       )}

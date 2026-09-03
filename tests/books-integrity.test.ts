@@ -138,7 +138,8 @@ describe('the register names every check there is (Phase 33)', () => {
     // — or reclassifying one — a deliberate act rather than something that
     // slips in. `cash_drawer.open_tills` joined in Phase 34 and failed here
     // first, which is the test doing its job; `fx.conversions` did the same in
-    // Phase 35.
+    // Phase 35 — and its removal in Phase 116 failed here too, which is the
+    // same test doing the same job in the other direction.
     expect(faults.sort()).toEqual([
       'appointments.gift_cards',
       'assets.register',
@@ -147,7 +148,6 @@ describe('the register names every check there is (Phase 33)', () => {
       // (Phase 40).
       'banking.shared_ledger_accounts',
       'cash_drawer.open_tills',
-      'fx.conversions',
       // Receiving stock credits 2050 and the bill debits it — the same event
       // from either end, so a difference is never a timing artefact. Nothing
       // watched this account until Phase 48, which is how it grew a balance
@@ -193,16 +193,17 @@ describe('running the checks (Phase 33)', () => {
     )
     expect(run.checksRun + run.checksSkipped).toBe(INTEGRITY_CHECKS.length)
 
-    // The ones every company gets, whatever industry it is. Currency is not an
-    // industry — a general company can raise a euro invoice on any Tuesday —
-    // so `fx.conversions` is ungated too (Phase 35).
+    // The ones every company gets, whatever industry it is.
+    //
+    // `fx.conversions` was one of them from Phase 35 until Phase 116, when it
+    // was retired: it recomputed a functional figure from its face amount, and
+    // no functional figure in this system is a conversion of one.
     expect(run.findings.map((row) => row.key).sort()).toEqual([
       'assets.register',
       // Every company has bank accounts, or should — neither banking check is
       // gated on an industry (Phase 40).
       'banking.cash_tie_out',
       'banking.shared_ledger_accounts',
-      'fx.conversions',
       'ledger.payables',
       'ledger.receivables',
       // Ungated: any company can enter the same customer twice, and the check

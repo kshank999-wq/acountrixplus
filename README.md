@@ -5244,6 +5244,73 @@ rather than leaving somebody to find it. ADR 0115 nominates the check that would
 close it: the two columns must **reach zero together**, which needs its own key,
 severity and verified reach declaration.
 
+### The check that recomputed what nothing computes (Phase 116)
+
+ADR 0115 nominated a check: a payment's face and functional columns must reach
+zero together. Verifying it found two things, and neither was the nomination.
+
+**The invariant already existed — on one table out of five.**
+`retainers_functional_remaining_sane` has been in the database since Phase 66,
+added in a raw migration. The comment on the column has claimed it ever since,
+and the claim is true; but it was **never declared in the schema file**, so
+`drizzle-kit` did not know it existed and would have offered to drop it. It
+survived on luck for fifty phases. `invoices`, `bills`, `credit_notes` and
+`payments` carry the same pair and had nothing at all.
+
+**And the check that was meant to watch this is built on a false premise.**
+`fx.conversions` — fault severity, ungated, so every company ran it nightly —
+compared each open foreign document's stored home amount against a fresh
+conversion of its remaining balance. The premise is that a functional figure is
+a conversion of its face amount. It never has been, and deliberately so: **every
+functional figure in this system is a sum of conversions, never a conversion of
+a sum.** A document's functional total is its *lines* converted and added,
+because the header must store what the journal entry posted; its functional
+balance comes down by `relieveFunctional`, which takes the whole remainder on
+the last settlement so nothing is stranded. Both round per movement, and
+rounding accumulates.
+
+**Measured** at the ECB rate this repository's own seed data carries, 1.0835:
+
+| | carried | recomputed |
+|---|---|---|
+| A two-line €10.01 + €10.01 invoice | **$21.70** | $21.69 |
+| A €1,000 invoice paid in three €250 instalments | **$270.86** | $270.88 |
+
+The second exceeds the check's `> 1` tolerance, so it reported a **fault** on a
+euro invoice paid quarterly. That tolerance is the fingerprint: its own doc
+comment admitted the drift and set it at a cent *per document*, but the drift is
+bounded by the number of *movements*, and any tolerance wide enough to cover
+them would hide what the check was for.
+
+So the constraint goes on all five tables — enforced rather than reported,
+because a check reports what has already happened and this can be made not to
+happen — and `fx.conversions` is **retired rather than repaired**, since there
+is nothing to repair it into. What it was reaching for is already exact:
+`ledger.receivables` and `ledger.payables` compare Σ functional balances against
+the control accounts with no tolerance at all, and the new constraints catch the
+case those sums cannot see — a *settled* document still carrying functional
+money, which drops out of an open-document sum. `fx.conversions` could not see
+that either: it read only open documents, so the stranded cent that
+`relieveFunctional`'s own comment warns about was outside its scope.
+
+`src/modules/fx/paired.ts` names all eight pairs with prose, and `pairsFor`
+throws on an undeclared table. Two tests hold it to that — one asks the database
+whether every constraint the registry names is really there, one asks whether
+the registry names every constraint the database has. The retainer constraint
+failed the second direction for fifty phases.
+
+**What I got wrong on the way.** My first draft said the *fixed* pair
+(`total_cents` against `functional_total_cents`) was exactly recomputable, and
+proposed re-aiming the check at it. Wrong for the same reason the original was:
+the functional total is the sum of converted **lines**, and a two-line invoice
+disproves it. Rewritten before anything shipped. I also left the dev database
+inconsistent after Phase 115's browser probe — the receipt's journal entry is
+memoed `Customer payment`, which my cleanup filter did not match, so it outlived
+its deleted payment row and put $2,200 on `2520`. The nightly run found it,
+which is the register doing its job on me.
+
+Twenty checks remain: thirteen reach any date, seven are `today_only`.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5379,6 +5446,8 @@ Coverage matches what spec §21 asks for:
 | `tests/credit-applied-across-rates.test.ts` | **Held credit spent at a rate it was never carried at** (Phase 114): €2,000 held from January at 1.10 is carried at $2,200, and applying it to a June invoice at 1.25 **relieves the liability by $2,200 rather than $2,500** — before this phase the held account was left at −$300, a liability with a debit balance; the fault-severity `receivables.customer_credit` agreeing afterwards, subledger against ledger; **the $300 recognised as a realised loss** on `7100`, which had never even been created because nothing asked for it — read as −30000 because the account is `other_income` and a loss is a debit; the invoice's own side relieved at its own rate and the payment's columns reaching zero together; and the unmoved-rate case posting no gain or loss at all |
 | `tests/held-credit-check-currency.test.ts` | **A euro credit nobody has spent, against the account holding it** (Phase 115): the fault-severity `receivables.customer_credit` reading 220000 against 220000 rather than 200000 against 220000 — it had been comparing what the customer sent with what the ledger carries, and reporting a fault on correct books; the list keeping the face amount, because that is the figure a customer would recognise on their own statement, while **gaining the currency it is in and what it is worth in the company's own money**; a euro credit and a dollar credit totalling 260000, which is $2,200 plus $400 rather than 240000 of nothing; and the rate-of-one case asserted so the repair is shown not to have moved the common one |
 | `tests/payment-list-currency.test.ts` | **The payments screen's amounts and its two totals** (Phase 115): a €4,000 receipt naming `EUR` and carrying 440000 beside its 400000 face value, converted at the rate fixed when the money arrived rather than today's; a dollar receipt where both figures coincide, unchanged; **the RECEIVED tile summing 590000 rather than 550000** — $4,400 plus $1,500, instead of euro added to dollars under a dollar sign; and a restoration stated in the **document's** currency rather than the payment's, since `payment_applications` records what the document was relieved by |
+| `tests/paired-core.test.ts` | **Why no functional figure in this system may be recomputed** (Phase 116): a sum of conversions is not the conversion of a sum — €10.01 twice at 1.0835 gives 2170 where the €20.02 total gives 2169 — and the drift grows with movements, three instalments putting a carried 27086 against a recomputed 27088, which is what `fx.conversions` called a fault; **the one thing that is exact**, both sides reaching zero together because the last relief takes the whole remainder; and the registry itself — a pair named for all five tables, prose on every entry, a constraint on every moving pair and none on any fixed one, a refusal for a table nobody declared rather than a quiet "no pairs", and the five constraint names the tripwire goes looking for |
+| `tests/paired-money.test.ts` | Against the database (Phase 116): **a €1,000 invoice paid in three €250 instalments carrying $270.86 against a balance that recomputes to $270.88** — correct books that the retired check called a fault, with the control-account check agreeing on them because it compares documents against the ledger rather than against themselves; the fixed pair agreeing on a one-line invoice, which is why this stayed hidden, and **parting company on two lines**; and the constraint refusing a settled document that still carries functional money — named, not merely thrown — on a retainer where it has existed since Phase 66 and on an invoice where it had not, while an ordinary four-instalment settlement passes; plus **the registry asked in both directions**, since a constraint the registry does not name is exactly how the retainer one went fifty phases unmentioned |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |

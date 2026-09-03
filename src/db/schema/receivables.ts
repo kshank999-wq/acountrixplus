@@ -236,6 +236,22 @@ export const invoices = pgTable(
     // invoice on the public route, so a collision would show one company's
     // invoice to another's customer.
     shareTokenUnique: unique('invoices_share_token_unique').on(t.shareToken),
+    /**
+     * The two sides reach zero together (Phase 116).
+     *
+     * `relieveFunctional` guarantees it: the final settlement takes the whole
+     * remaining functional balance rather than a computed one. A paid invoice
+     * still carrying a functional balance is money on the receivables control
+     * account that no document can ever clear.
+     *
+     * A constraint rather than a nightly check, because a check reports what has
+     * already happened and this can be made not to happen. `retainers` has had
+     * the same one since Phase 66; the other four had nothing until this phase.
+     */
+    functionalBalanceSane: check(
+      'invoices_functional_balance_sane',
+      sql`(${t.balanceCents} = 0) = (${t.functionalBalanceCents} = 0) AND ${t.functionalBalanceCents} >= 0`,
+    ),
   }),
 )
 
@@ -399,6 +415,11 @@ export const bills = pgTable(
       t.vendorId,
       t.totalCents,
       t.issueDate,
+    ),
+    /** The payables side of the invoice rule above (Phase 116). */
+    functionalBalanceSane: check(
+      'bills_functional_balance_sane',
+      sql`(${t.balanceCents} = 0) = (${t.functionalBalanceCents} = 0) AND ${t.functionalBalanceCents} >= 0`,
     ),
   }),
 )
@@ -672,6 +693,18 @@ export const payments = pgTable(
     unappliedWithinAmount: check(
       'payments_unapplied_within_amount',
       sql`${t.unappliedCents} >= 0 AND ${t.unappliedCents} <= ${t.amountCents}`,
+    ),
+    /**
+     * Held money reaches zero on both sides at once (Phase 116).
+     *
+     * The constraint beside it bounds the face amount; this one keeps the
+     * functional column from outliving it. A receipt with nothing left to apply
+     * but functional money still on `2520 Customer Overpayments` is a liability
+     * to a customer whose credit is already spent.
+     */
+    functionalUnappliedSane: check(
+      'payments_functional_unapplied_sane',
+      sql`(${t.unappliedCents} = 0) = (${t.functionalUnappliedCents} = 0) AND ${t.functionalUnappliedCents} >= 0`,
     ),
     // The index a shift's takings are summed on.
     drawerShiftIdx: index('payments_drawer_shift_idx').on(t.drawerShiftId),

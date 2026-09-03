@@ -26,7 +26,7 @@ import {
 } from '@/modules/fx/service'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { createCreditNote, writeOffInvoice } from '@/modules/receivables/credits'
-import { conversionsAgree, foreignExposure } from '@/modules/fx/reporting'
+import { foreignExposure } from '@/modules/fx/reporting'
 import { INTEGRITY_CHECKS } from '@/modules/integrity/register'
 
 /**
@@ -618,41 +618,54 @@ describe('what is still owed, restated (Phase 35)', () => {
   })
 })
 
-describe('the twelfth check (Phase 35)', () => {
-  it('agrees on a freshly raised foreign invoice', async () => {
+describe('the twelfth check, retired (Phase 35, retired Phase 116)', () => {
+  /**
+   * `fx.conversions` compared each open foreign document's stored home amount
+   * against a fresh conversion of its remaining balance, and called more than a
+   * cent apart a fault.
+   *
+   * The premise was that a functional figure is a conversion of its face
+   * amount. It never has been: a document's functional total is its **lines**
+   * converted and added, and its functional balance comes down by
+   * `relieveFunctional`, which takes the whole remainder on the last
+   * settlement. Both round per movement, and rounding accumulates past a cent
+   * on ordinary bookkeeping.
+   */
+  it('is gone from the register', async () => {
+    expect(INTEGRITY_CHECKS.find((row) => row.key === 'fx.conversions')).toBeUndefined()
+  })
+
+  it('leaves the control-account check, which needs no tolerance', async () => {
+    // What replaced it. A control account either equals the documents behind it
+    // or does not, and a home amount edited by hand moves that sum — so the
+    // edit `fx.conversions` was reaching for is still caught, exactly.
     const fixture = await withRates(await usd())
     await aEuroInvoice(fixture)
 
-    const check = await conversionsAgree(fixture.ctx)
-    expect(check.agrees).toBe(true)
-    expect(check.documentsCents).toBe(433_400)
-    expect(check.recomputedCents).toBe(433_400)
+    const report = await controlAccounts(fixture.ctx, { asOf: '2026-09-03' })
+    expect(report.agrees).toBe(true)
+    expect(report.receivables.differenceCents).toBe(0)
   })
 
-  it('agrees after a part payment, within the rounding it allows', async () => {
+  it('no longer calls three ordinary instalments a fault', async () => {
+    // The measurement. A €4,000 invoice at 1.0835 part-paid three times leaves
+    // a carried figure a recomputation cannot reproduce, and the books are
+    // correct — which is the whole reason the check is gone.
     const fixture = await withRates(await usd())
     const invoice = await aEuroInvoice(fixture)
 
-    await recordPayment(fixture.ctx, {
-      kind: 'receipt',
-      customerId: invoice.customerId,
-      paymentDate: '2026-05-01',
-      amountCents: 133_333,
-      applications: [{ invoiceId: invoice.id, amountCents: 133_333 }],
-    })
+    for (const on of ['2026-05-01', '2026-05-02', '2026-05-03']) {
+      await recordPayment(fixture.ctx, {
+        kind: 'receipt',
+        customerId: invoice.customerId,
+        paymentDate: on,
+        amountCents: 100_000,
+        applications: [{ invoiceId: invoice.id, amountCents: 100_000 }],
+      })
+    }
 
-    const check = await conversionsAgree(fixture.ctx)
-    expect(check.agrees).toBe(true)
-  })
-
-  it('is in the register as a fault every company gets', () => {
-    const check = INTEGRITY_CHECKS.find((row) => row.key === 'fx.conversions')
-
-    expect(check).toBeDefined()
-    expect(check!.severity).toBe('fault')
-    // Not gated: a company with no foreign documents has nothing to check and
-    // agrees trivially, which is cheaper than a module nobody would switch on.
-    expect(check!.module).toBeNull()
+    const report = await controlAccounts(fixture.ctx, { asOf: '2026-09-03' })
+    expect(report.agrees).toBe(true)
   })
 })
 
@@ -749,8 +762,11 @@ describe('every way a balance goes down (Phase 35)', () => {
     // Written off at the document's rate, not today's — the loss is a bad debt
     // of what the books carried, and re-converting it here would fold a
     // currency movement into it that nobody chose to recognise.
-    const check = await conversionsAgree(fixture.ctx)
-    expect(check.agrees).toBe(true)
+    //
+    // Asserted against the control account since Phase 116: it compares the
+    // documents against the ledger with no tolerance, where the retired
+    // `fx.conversions` compared a document against a recomputation of itself.
+    expect((await controlAccounts(fixture.ctx, { asOf: '2026-09-03' })).agrees).toBe(true)
   })
 
   /**
@@ -796,8 +812,7 @@ describe('every way a balance goes down (Phase 35)', () => {
     expect(after.functionalBalanceCents).toBe(433_400)
 
     // And the books still reconcile, which is what the refusal was protecting.
-    const check = await conversionsAgree(fixture.ctx)
-    expect(check.agrees).toBe(true)
+    expect((await controlAccounts(fixture.ctx, { asOf: '2026-09-03' })).agrees).toBe(true)
   })
 
   it('still credits a domestic invoice, in a company that has foreign ones', async () => {

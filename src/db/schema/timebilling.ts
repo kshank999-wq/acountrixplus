@@ -334,6 +334,20 @@ export const retainers = pgTable(
       'retainers_remaining_sane',
       sql`${t.remainingCents} >= 0 AND ${t.remainingCents} <= ${t.amountCents}`,
     ),
+    /**
+     * Declared at last (Phase 116).
+     *
+     * This constraint has been in the database since Phase 66, added in a raw
+     * migration, and the comment on `functionalRemainingCents` above has
+     * claimed it ever since — but the schema file said nothing, so `drizzle-kit`
+     * did not know it existed and would have offered to drop it. It survived on
+     * luck. The other four tables carrying the same pair had no constraint at
+     * all until this phase.
+     */
+    functionalRemainingSane: check(
+      'retainers_functional_remaining_sane',
+      sql`(${t.remainingCents} = 0) = (${t.functionalRemainingCents} = 0) AND ${t.functionalRemainingCents} >= 0`,
+    ),
   }),
 )
 

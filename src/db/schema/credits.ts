@@ -152,6 +152,17 @@ export const creditNotes = pgTable(
       sql`(${t.party} = 'customer' AND ${t.customerId} IS NOT NULL AND ${t.vendorId} IS NULL)
           OR (${t.party} = 'vendor' AND ${t.vendorId} IS NOT NULL AND ${t.customerId} IS NULL)`,
     ),
+    /**
+     * The two sides reach zero together (Phase 116).
+     *
+     * A fully spent credit note is worth nothing to anybody, so a functional
+     * remainder on one is a promise the business has already kept and is still
+     * carrying on a control account.
+     */
+    functionalRemainingSane: check(
+      'credit_notes_functional_remaining_sane',
+      sql`(${t.remainingCents} = 0) = (${t.functionalRemainingCents} = 0) AND ${t.functionalRemainingCents} >= 0`,
+    ),
     documentMatches: check(
       'credit_notes_document_matches',
       sql`(${t.party} = 'customer' AND ${t.billId} IS NULL)

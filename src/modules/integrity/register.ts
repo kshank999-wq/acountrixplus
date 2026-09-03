@@ -11,7 +11,6 @@ import { controlAccounts } from '@/modules/ledger/receivables-check'
 import { wipPosition } from '@/modules/manufacturing/reporting'
 import { tipsPosition } from '@/modules/pos/service'
 import { drawerPosition } from '@/modules/drawer/service'
-import { conversionsAgree } from '@/modules/fx/reporting'
 import { depositsHeld } from '@/modules/properties/deposits'
 import { retainerPosition } from '@/modules/timebilling/billing'
 import { verdictFor, weakerBecauseShared } from '@/modules/timebilling/retainer-position'
@@ -434,30 +433,6 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
           ]
             .filter(Boolean)
             .join(' ') || undefined,
-      }
-    },
-  },
-  {
-    key: 'fx.conversions',
-    label: 'What foreign documents are carried at, against their own rates',
-    compares: 'invoices.functional_balance_cents against balance × the rate beside it',
-    module: null,
-    severity: 'fault',
-    meaning:
-      'A home-currency amount is written once, when the document is raised, and never ' +
-      'recomputed. A document carrying an amount its own rate cannot produce means something ' +
-      'wrote one by hand, or converted at a rate other than the one it stored.',
-    asAt: { reach: 'today_only', because: "Verified: conversionsAgree takes no asOf at all and reads the unrealised position as it stands now." },
-    run: async (ctx) => {
-      const result = await conversionsAgree(ctx)
-      return {
-        agrees: result.agrees,
-        leftCents: result.documentsCents,
-        rightCents: result.recomputedCents,
-        detail:
-          result.offenders.length === 0
-            ? undefined
-            : result.offenders.map((row) => row.number).join(', '),
       }
     },
   },

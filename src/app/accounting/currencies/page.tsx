@@ -2,7 +2,7 @@ import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { currenciesInUse, functionalCurrency, listRates } from '@/modules/fx/service'
-import { conversionsAgree, foreignExposure, realisedMovement } from '@/modules/fx/reporting'
+import { foreignExposure, realisedMovement } from '@/modules/fx/reporting'
 import { ACCOUNTING_NAV } from '../nav'
 import { CurrencyBoard } from './board'
 import { messageFor } from '@/modules/errors'
@@ -46,10 +46,15 @@ export default async function CurrenciesPage({
   ])
 
   // The exposure report is a financial one, so a bookkeeper who can enter a
-  // rate still may not read what the position is worth. The check is a
-  // reconciliation and needs only `reports:view` — the same split Phase 33 drew.
+  // rate still may not read what the position is worth.
+  //
+  // The conversion check that sat beside it needed only `reports:view` and is
+  // gone (Phase 116): it asked whether a document carries what its own rate
+  // produces, and the answer on correct books is routinely no — every
+  // functional figure here is a sum of conversions rather than a conversion of
+  // a sum. What is guaranteed instead is enforced by a database constraint, and
+  // what a ledger holds against its subledger is on the operations page.
   const canSeeExposure = can(actor, 'reports:financial')
-  const canSeeCheck = can(actor, 'reports:view')
 
   // A missing closing rate is a refusal inside `foreignExposure`, and it is a
   // refusal worth showing rather than a page that fails to load: "you have open
@@ -66,7 +71,6 @@ export default async function CurrenciesPage({
     }
   }
 
-  const check = canSeeCheck ? await conversionsAgree(actor) : null
   const realised = canSeeExposure ? await realisedMovement(actor) : null
 
   return (
@@ -84,7 +88,6 @@ export default async function CurrenciesPage({
         exposure={exposure}
         exposureError={exposureError}
         realised={realised}
-        check={check}
         canEnterRates={can(actor, 'accounting:journal')}
         canSeeExposure={canSeeExposure}
       />
