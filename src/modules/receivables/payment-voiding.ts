@@ -145,8 +145,19 @@ export type PaymentRow = VoidablePayment & {
   partyName: string | null
   financialAccountId: string | null
   voidReason: string | null
+  /** The money that actually moved, which is what `amountCents` is in. */
+  currency: string
+  /**
+   * The same receipt or disbursement in the company's own money (Phase 115).
+   *
+   * Converted here once, at the rate fixed when the money moved, because the
+   * screen adds these rows up: a euro receipt and a dollar receipt in one
+   * "received" total is not a figure, and the tiles above the list had been
+   * summing face amounts since Phase 52.
+   */
+  functionalAmountCents: number
   /** What it settled, and what putting it back would do to each document. */
-  restorations: Restoration[]
+  restorations: (Restoration & { currency: string })[]
   /** Whether it may be taken back, and why not when it may not. */
   verdict: VoidVerdict
   /** When the supplier was told what it covered, if ever (Phase 58). */
@@ -178,6 +189,8 @@ export async function listPayments(
       status: payments.status,
       reference: payments.reference,
       voidReason: payments.voidReason,
+      currency: payments.currency,
+      exchangeRateMillionths: payments.exchangeRateMillionths,
       financialAccountId: payments.financialAccountId,
       drawerShiftId: payments.drawerShiftId,
       customerName: customers.name,
@@ -213,6 +226,11 @@ export async function listPayments(
         partyName: row.customerName ?? row.vendorName ?? null,
         financialAccountId: row.financialAccountId,
         voidReason: row.voidReason,
+        currency: row.currency,
+        // At the rate fixed when the money moved, which is the rate the bank
+        // line was posted at — not today's, which would restate what the
+        // business banked every time a currency moved.
+        functionalAmountCents: convert(row.amountCents, row.exchangeRateMillionths),
         restorations: await restorationsForPayment(ctx, row.id, row.kind),
         verdict: voidability({ payment, ties, closedPeriods, today }),
         remittanceSentAt: row.remittanceSentAt,
@@ -222,12 +240,25 @@ export async function listPayments(
   )
 }
 
-/** What each document this payment settled would go back to. */
+/**
+ * What each document this payment settled would go back to, and in what money.
+ *
+ * The currency rides alongside `restorationsFor` rather than through it
+ * (Phase 115). What a document goes back to — and whether that leaves it open
+ * or partial — is a decision about amounts, and which currency they are
+ * denominated in changes none of it. Widening the pure core to carry a field it
+ * only hands back would be carrying data for a renderer; the screen needs it,
+ * so the screen's query attaches it.
+ *
+ * It is the **document's** currency, not the payment's: `payment_applications`
+ * stores what the document was relieved by, so a dollar receipt settling a euro
+ * invoice puts euro back onto it.
+ */
 async function restorationsForPayment(
   ctx: ActorContext,
   paymentId: string,
   kind: 'receipt' | 'disbursement',
-): Promise<Restoration[]> {
+): Promise<(Restoration & { currency: string })[]> {
   const table = kind === 'receipt' ? invoices : bills
   const idColumn = kind === 'receipt' ? paymentApplications.invoiceId : paymentApplications.billId
 
@@ -238,6 +269,7 @@ async function restorationsForPayment(
       amountCents: paymentApplications.amountCents,
       balanceCents: table.balanceCents,
       totalCents: table.totalCents,
+      currency: table.currency,
     })
     .from(paymentApplications)
     .innerJoin(table, eq(table.id, idColumn))
@@ -248,7 +280,12 @@ async function restorationsForPayment(
       ),
     )
 
-  return restorationsFor(rows)
+  const currencyByDocument = new Map(rows.map((row) => [row.documentId, row.currency]))
+
+  return restorationsFor(rows).map((restoration) => ({
+    ...restoration,
+    currency: currencyByDocument.get(restoration.documentId) ?? 'USD',
+  }))
 }
 
 export type VoidResult = {

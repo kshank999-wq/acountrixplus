@@ -19,11 +19,21 @@ type Row = {
   kind: 'receipt' | 'disbursement'
   paymentDate: string
   amountCents: number
+  /** The money that moved, which is what `amountCents` is in (Phase 115). */
+  currency: string
+  /** The same amount in the company's own money — the only totallable one. */
+  functionalAmountCents: number
   status: 'posted' | 'void'
   reference: string | null
   partyName: string | null
   voidReason: string | null
-  restorations: { number: string; amountCents: number; status: 'open' | 'partial' }[]
+  restorations: {
+    number: string
+    amountCents: number
+    /** The document's own currency, which need not be the payment's. */
+    currency: string
+    status: 'open' | 'partial'
+  }[]
   verdict: VoidVerdict
   /** When the supplier was told what this payment covered (Phase 58). */
   remittanceSentAt: string | null
@@ -37,6 +47,8 @@ type Credit = {
   paymentDate: string
   reference: string | null
   availableCents: number
+  /** The money the customer sent, which is the money `availableCents` is in. */
+  currency: string
   openInvoices: { id: string; number: string; balanceCents: number }[]
 }
 
@@ -81,13 +93,24 @@ export function PaymentsBoard({
   const [refundAccountId, setRefundAccountId] = useState(accounts[0]?.id ?? '')
   const [refundReference, setRefundReference] = useState('')
 
+  /**
+   * The two tiles, in the company's own money (Phase 115).
+   *
+   * `amountCents` is what the payer actually sent, and each row shows it that
+   * way. Adding those across rows is not addition — a €5,000 receipt counted as
+   * 500,000 alongside dollars made "RECEIVED" a number in no currency at all.
+   * `functionalAmountCents` is the same money converted at the rate fixed when
+   * it moved, which is the only thing these can be totalled in.
+   */
   const totals = useMemo(() => {
     const live = rows.filter((row) => row.status === 'posted')
     return {
-      inCents: live.filter((r) => r.kind === 'receipt').reduce((s, r) => s + r.amountCents, 0),
+      inCents: live
+        .filter((r) => r.kind === 'receipt')
+        .reduce((s, r) => s + r.functionalAmountCents, 0),
       outCents: live
         .filter((r) => r.kind === 'disbursement')
-        .reduce((s, r) => s + r.amountCents, 0),
+        .reduce((s, r) => s + r.functionalAmountCents, 0),
       voided: rows.filter((row) => row.status === 'void').length,
     }
   }, [rows])
@@ -180,7 +203,7 @@ export function PaymentsBoard({
                   <td className="py-1">{credit.customerName}</td>
                   <td className="tnum py-1 text-muted">{credit.paymentDate}</td>
                   <td className="tnum py-1 text-right font-medium">
-                    {formatCents(credit.availableCents)}
+                    {formatCents(credit.availableCents, credit.currency)}
                   </td>
                 </tr>
               ))}
@@ -203,7 +226,8 @@ export function PaymentsBoard({
                   <option value="">Choose…</option>
                   {credits.map((credit) => (
                     <option key={credit.paymentId} value={credit.paymentId}>
-                      {credit.customerName} — {formatCents(credit.availableCents)} held
+                      {credit.customerName} — {formatCents(credit.availableCents, credit.currency)}{' '}
+                      held
                     </option>
                   ))}
                 </select>
@@ -395,7 +419,7 @@ export function PaymentsBoard({
                         <td
                           className={`tnum px-4 py-1.5 text-right ${voided ? 'line-through' : ''}`}
                         >
-                          {formatCents(row.amountCents)}
+                          {formatCents(row.amountCents, row.currency)}
                         </td>
                         {canVoid && (
                           <td className="whitespace-nowrap px-4 py-1.5 text-right">
@@ -484,7 +508,7 @@ export function PaymentsBoard({
                             <CorrectionPanel
                               kind="payment.void"
                               pending={pending}
-                              confirmSuffix={formatCents(row.amountCents)}
+                              confirmSuffix={formatCents(row.amountCents, row.currency)}
                               onConfirm={(reason) =>
                                 act(() => voidPaymentAction({ paymentId: row.id, reason }))
                               }
@@ -496,7 +520,10 @@ export function PaymentsBoard({
                                   {row.restorations.map((r) => (
                                     <li key={r.number}>
                                       <strong>{r.number}</strong> goes back to{' '}
-                                      <span className="tnum">{formatCents(r.amountCents)}</span> owed
+                                      <span className="tnum">
+                                        {formatCents(r.amountCents, r.currency)}
+                                      </span>{' '}
+                                      owed
                                       <span className="text-faint"> — {r.status}</span>
                                     </li>
                                   ))}

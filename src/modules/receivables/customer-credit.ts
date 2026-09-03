@@ -52,8 +52,24 @@ export type HeldCredit = {
   customerName: string
   paymentDate: string
   reference: string | null
-  /** What is still held from this receipt. */
+  /**
+   * What is still held from this receipt, **in the money the customer sent**.
+   * This is the figure to show a person: it is what they would recognise on
+   * their own statement, and refunding it takes an amount in this currency.
+   */
   availableCents: number
+  /** Which money that is, so nothing renders €2,000 with a dollar sign. */
+  currency: string
+  /**
+   * The same held money in the company's own currency, carried at the rate the
+   * receipt arrived at (Phase 115).
+   *
+   * This is the only figure that may be **added up**. `availableCents` on two
+   * rows can be euros and dollars; a total of those is not money. The ledger
+   * balance on `2520 Customer Overpayments` is functional, so anything
+   * comparing a subledger total against it must compare this.
+   */
+  functionalCents: number
 }
 
 /** What each customer is holding, newest receipt first. */
@@ -68,6 +84,8 @@ export async function heldCredits(ctx: ActorContext): Promise<HeldCredit[]> {
       paymentDate: payments.paymentDate,
       reference: payments.reference,
       availableCents: payments.unappliedCents,
+      currency: payments.currency,
+      functionalCents: payments.functionalUnappliedCents,
     })
     .from(payments)
     .innerJoin(customers, eq(customers.id, payments.customerId))

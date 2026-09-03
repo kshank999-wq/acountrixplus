@@ -642,7 +642,16 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     asAt: { reach: 'today_only', because: "Verified: heldCredits takes no asOf; held credit is a running column on the payment with no dated record of its consumption." },
     run: async (ctx) => {
       const rows = await heldCredits(ctx)
-      const heldTotal = rows.reduce((sum, row) => sum + row.availableCents, 0)
+      /**
+       * The functional figure, not the face one (Phase 115).
+       *
+       * Each row's `availableCents` is in the money the customer sent, which is
+       * right for the list it feeds and wrong for a total: a euro receipt and a
+       * dollar receipt cannot be added, and the ledger balance below is in the
+       * company's own money either way. Summing the face amounts put €2,000
+       * against $2,200 and reported a **fault** on correct books.
+       */
+      const heldTotal = rows.reduce((sum, row) => sum + row.functionalCents, 0)
 
       const account = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.customerOverpayments)
       // `balanceForAccount` signs in the account's *normal* direction, so a

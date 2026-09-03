@@ -68,6 +68,11 @@ export default async function PaymentsPage() {
           kind: row.kind,
           paymentDate: row.paymentDate,
           amountCents: row.amountCents,
+          // What money the payment moved, and the same money converted at the
+          // rate it moved at — the row shows the first, the tiles add the
+          // second (Phase 115).
+          currency: row.currency,
+          functionalAmountCents: row.functionalAmountCents,
           status: row.status,
           reference: row.reference,
           partyName: row.partyName,
@@ -75,6 +80,8 @@ export default async function PaymentsPage() {
           restorations: row.restorations.map((r) => ({
             number: r.number,
             amountCents: r.amountCents,
+            // The document's currency, which need not be the payment's.
+            currency: r.currency,
             status: r.status,
           })),
           verdict: row.verdict,
@@ -92,6 +99,10 @@ export default async function PaymentsPage() {
           paymentDate: row.paymentDate,
           reference: row.reference,
           availableCents: row.availableCents,
+          // Which money that held amount is in (Phase 115). Without it the
+          // screen rendered €2,000 as "$2,000.00" — the right number under the
+          // wrong sign, which is worse than no number at all.
+          currency: row.currency,
           openInvoices: openByCustomer.get(row.customerId) ?? [],
         }))}
         accounts={accounts.map((row) => ({ id: row.id, name: row.name, mask: row.mask }))}

@@ -412,13 +412,51 @@ describe('the account nobody would otherwise watch', () => {
     const invoice = await anInvoice(740_000)
     const payment = await overpay(invoice.id, 740_000, 800_000)
 
-    // Somebody edits the subledger behind the ledger's back.
-    await db.update(payments).set({ unappliedCents: 90_000 }).where(eq(payments.id, payment.id))
+    /**
+     * Somebody edits the subledger behind the ledger's back.
+     *
+     * Both columns, because since Phase 115 the check reads the functional one:
+     * the ledger balance it is compared against is in the company's own money,
+     * and the face amount can be euros. On these books the rate is one and the
+     * two figures coincide, so moving them together is what a tamper on a
+     * single-currency company looks like anyway.
+     */
+    await db
+      .update(payments)
+      .set({ unappliedCents: 90_000, functionalUnappliedCents: 90_000 })
+      .where(eq(payments.id, payment.id))
 
     const run = await runIntegrityChecks(fixture.ctx, { asOf: today() })
     const finding = run.findings.find((row) => row.key === 'receivables.customer_credit')!
 
     expect(finding.agrees).toBe(false)
     expect(finding.detail).toContain('900.00')
+  })
+
+  /**
+   * What this check stopped being able to see (Phase 115), recorded rather than
+   * left for somebody to discover.
+   *
+   * Moving the face column alone leaves the functional column agreeing with the
+   * ledger, so the check — which asks *does the subledger total match `2520`* —
+   * correctly answers yes. The books are still consistent; what is broken is
+   * the relationship between a payment's own two columns, which is a different
+   * question and cannot be asked by subtracting one currency from another.
+   *
+   * Nothing asks it yet. ADR 0115 nominates the exact form it takes: the two
+   * columns must reach zero together, so a receipt holding a face amount with
+   * no functional amount behind it — or the reverse — is a stranded cent.
+   */
+  it('does not see a face amount moved on its own', async () => {
+    const invoice = await anInvoice(740_000)
+    const payment = await overpay(invoice.id, 740_000, 800_000)
+
+    await db.update(payments).set({ unappliedCents: 90_000 }).where(eq(payments.id, payment.id))
+
+    const run = await runIntegrityChecks(fixture.ctx, { asOf: today() })
+    const finding = run.findings.find((row) => row.key === 'receivables.customer_credit')!
+
+    expect(finding.agrees).toBe(true)
+    expect(finding.leftCents).toBe(60_000)
   })
 })
