@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCompanyFixture, type Fixture } from './helpers'
-import { runIntegrityChecks } from '@/modules/integrity/service'
+import { latestRun, runIntegrityChecks } from '@/modules/integrity/service'
 import { INTEGRITY_CHECKS, checkByKey } from '@/modules/integrity/register'
+import { outOfReachNote } from '@/modules/integrity/reach'
 import { reconcileInventory, receiveStock } from '@/modules/inventory/service'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { db } from '@/db'
@@ -75,6 +76,39 @@ describe('the register skips what it cannot answer', () => {
     const run = await runIntegrityChecks(fixture.ctx, { asOf: '2026-03-31' })
 
     for (const key of run.outOfReach) expect(run.skipped).not.toContain(key)
+  })
+
+  it('still tells them apart after the run is written down (Phase 110)', async () => {
+    // Phase 109 said a stored run could not: "the row records a count, not
+    // which kind." It records what we write into it, and now it writes the
+    // keys — so the page reads the same split the run made.
+    const live = await runIntegrityChecks(fixture.ctx, { asOf: '2026-03-31' })
+    const stored = await latestRun(fixture.ctx)
+
+    expect(live.outOfReach.length).toBeGreaterThan(0)
+    expect(stored!.outOfReach).toEqual(live.outOfReach)
+    for (const key of stored!.outOfReach) expect(stored!.skipped).not.toContain(key)
+  })
+
+  it('says which checks the date silenced, not merely how many', async () => {
+    // The count is what Phase 109's page could have shown; eleven checks
+    // vanishing is alarming and unactionable. The names are what let somebody
+    // see whether the one they came for is among them.
+    const run = await runIntegrityChecks(fixture.ctx, { asOf: '2026-03-31' })
+    const labels = run.outOfReach.map((key) => checkByKey(key)!.label)
+    const note = outOfReachNote(labels, '2026-03-31')
+
+    expect(note).toContain('2026-03-31')
+    for (const label of labels) expect(note).toContain(label)
+  })
+
+  it('records nothing out of reach for a run asked about today', async () => {
+    // The nightly run, which is the only one that happens without somebody
+    // asking. Written down as `[]` rather than left to be inferred.
+    const today = new Date().toISOString().slice(0, 10)
+    await runIntegrityChecks(fixture.ctx, { asOf: today })
+
+    expect((await latestRun(fixture.ctx))!.outOfReach).toEqual([])
   })
 })
 

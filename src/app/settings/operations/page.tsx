@@ -173,6 +173,10 @@ export default async function OperationsPage() {
             startedAt: integrity.startedAt.toISOString(),
             checksRun: integrity.checksRun,
             checksSkipped: integrity.checksSkipped,
+            // Labels rather than keys, from the register rather than the row,
+            // for the same reason `compares` and `meaning` are read from the
+            // register below: these are the current words for a check.
+            outOfReach: integrity.outOfReach.map((key) => checkByKey(key)?.label ?? key),
             faults: integrity.faults,
             errors: integrity.errors,
             // `compares` and `meaning` live in the register rather than on the

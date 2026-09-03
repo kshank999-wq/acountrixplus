@@ -93,11 +93,34 @@ export function runnableAt(
  * check that applies but cannot answer the question asked. Reporting them as
  * one number would leave somebody thinking a check they rely on had been turned
  * off.
+ *
+ * Takes the **labels** rather than a count (Phase 110). Phase 109 took a count,
+ * and the difference is what somebody reading the page can do next: eleven
+ * checks vanishing is alarming and unactionable, whereas being told *which*
+ * eleven is the difference between "the one I came here for is missing" and
+ * "the one I came here for ran". A count cannot be turned back into names.
+ *
+ * The whole clause is built in one place because four things have to agree on
+ * the count — the noun, both verbs, and whether the names are introduced by a
+ * dash or a colon — and Phase 96 shipped "1 recurring invoices" by pluralising
+ * one of two.
  */
-export function outOfReachNote(count: number, asOf: string): string | undefined {
-  if (count === 0) return undefined
+export function outOfReachNote(labels: readonly string[], asOf: string): string | undefined {
+  if (labels.length === 0) return undefined
 
-  return count === 1
-    ? `1 check could not answer for ${asOf} and was skipped — it can only speak for today.`
-    : `${count} checks could not answer for ${asOf} and were skipped — they can only speak for today.`
+  if (labels.length === 1) {
+    return (
+      `1 check could not answer for ${asOf} and was skipped — ` +
+      `“${labels[0]}” can only speak for today.`
+    )
+  }
+
+  // Semicolons rather than commas, because a check's label is itself a clause
+  // with a comma in it — "What each bank account holds, against its feed" — and
+  // comma-joining seven of those produced a fourteen-item list on the page
+  // where seven were meant. Read in the browser before it was believed.
+  return (
+    `${labels.length} checks could not answer for ${asOf} and were skipped — ` +
+    `they can only speak for today: ${labels.join('; ')}.`
+  )
 }

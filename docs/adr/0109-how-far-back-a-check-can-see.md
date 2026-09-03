@@ -57,6 +57,14 @@ have **no evidence either way** — the development data leaves them at `0/0`, a
 guessing would be the same failure as Phase 108's false premise, which claimed
 an impossibility nobody had checked.
 
+> **Corrected by Phase 110.** "No evidence either way" was a statement about
+> how far I had read, not about the code — and `today_only` does not mean
+> *unverified*, it means *skipped*. Reading the fifteen queries found three that
+> already honoured the date and had been switched off for nothing:
+> `properties.deposits`, `pos.tips` and `funds.untagged_contributions`. Two more
+> that looked promotable are correctly `today_only` for reasons only the query
+> shows. No declaration says "Not verified" any more.
+
 So `today_only` is worded as what it is: *"Not verified to reach back."* It errs
 toward skipping rather than lying, and each one names what a future phase would
 have to show. Two of them are stated positively instead, because their subledger
@@ -100,12 +108,21 @@ Reading a **stored** run back cannot tell them apart: the row records a count,
 not which kind. That path reports them as skipped, which is what they were, and
 says so in a comment rather than guessing.
 
+> **Corrected by Phase 110.** True of the row and false of what a row can hold.
+> The keys are known at run time and nothing was writing them down;
+> `integrity_runs.checks_out_of_reach` now does, and `latestRun` subtracts them
+> out of `skipped` exactly.
+
 ## What this does not do
 
 **It does not restore the other seventeen subledgers.** Stated as a limit, not a
 claim of impossibility: `timebilling.retainers` in particular has a dated
 `retainer_applications` table and is an obvious candidate for the treatment Phase
 108 gave the control accounts. Its declaration says so.
+
+> **Both closed by Phase 110.** The tripwire is a date before the books existed
+> — `1900-01-01` — and the page now names the checks the date silenced rather
+> than counting them.
 
 **It does not test each declaration against reality.** The tripwire this phase
 has is weaker than Phase 102's: it asserts every check *declares* a reach with

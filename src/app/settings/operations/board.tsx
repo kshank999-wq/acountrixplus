@@ -13,6 +13,7 @@ import {
   tickWorkerAction,
 } from '@/app/actions/operations'
 import { formatCents } from '@/lib/money'
+import { outOfReachNote } from '@/modules/integrity/reach'
 
 type Counts = Record<string, number>
 
@@ -117,6 +118,13 @@ type Integrity = {
   startedAt: string
   checksRun: number
   checksSkipped: number
+  /**
+   * The checks this run's date put out of reach, by label (Phase 110).
+   *
+   * Not folded into `checksSkipped`: that is a check which does not apply, and
+   * this is one that applies but can only speak for today.
+   */
+  outOfReach: string[]
   faults: number
   errors: number
   findings: Array<{
@@ -878,11 +886,20 @@ function IntegritySection({ integrity }: { integrity: Integrity }) {
           : `${broken.length} ${broken.length === 1 ? 'check has' : 'checks have'} stopped agreeing`
       }
       subtitle={
-        `As at ${integrity.asOf}, run ${integrity.startedAt.slice(0, 16).replace('T', ' ')}. ` +
-        `${integrity.checksRun} run` +
-        (integrity.checksSkipped > 0
-          ? `, ${integrity.checksSkipped} skipped because their module is switched off — which is not the same as passing.`
-          : '.')
+        [
+          `As at ${integrity.asOf}, run ${integrity.startedAt.slice(0, 16).replace('T', ' ')}. ` +
+            `${integrity.checksRun} run` +
+            (integrity.checksSkipped > 0
+              ? `, ${integrity.checksSkipped} skipped because their module is switched off — which is not the same as passing.`
+              : '.'),
+          // A second sentence rather than a second clause, because it is a
+          // different kind of absence and Phase 109 shipped the page saying
+          // nothing at all about it: eleven checks can vanish from a past-dated
+          // run, and until now they vanished silently (Phase 110).
+          outOfReachNote(integrity.outOfReach, integrity.asOf),
+        ]
+          .filter(Boolean)
+          .join(' ')
       }
     >
       <ul className="divide-y divide-line text-sm">

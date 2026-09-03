@@ -1,4 +1,14 @@
-import { pgTable, uuid, text, boolean, bigint, integer, timestamp, index } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  uuid,
+  text,
+  boolean,
+  bigint,
+  integer,
+  jsonb,
+  timestamp,
+  index,
+} from 'drizzle-orm/pg-core'
 import { companies } from './tenancy'
 
 /**
@@ -11,12 +21,23 @@ import { companies } from './tenancy'
  * not: **when did this start?**
  *
  * That question is what decides whether somebody is looking for a bad deploy
- * on Tuesday or a data import last March, and it cannot be recomputed. The
- * balances are as at a date; the *documents* are as they stand today. Phase 31
- * named that limitation and it has not gone away — reconstructing what the
- * subledger said on an arbitrary past date would mean replaying every payment
- * application. Writing down what the check said each night is cheap and
- * answers the question exactly.
+ * on Tuesday or a data import last March, and it cannot be recomputed —
+ * because a check that has since been fixed reports agreement for every past
+ * date, including the ones it was failing on. Writing down what the check said
+ * each night is cheap and answers the question exactly.
+ *
+ * This comment used to give a second reason, and it was wrong (Phase 110):
+ *
+ * > The balances are as at a date; the *documents* are as they stand today.
+ * > Phase 31 named that limitation and it has not gone away — reconstructing
+ * > what the subledger said on an arbitrary past date would mean replaying
+ * > every payment application.
+ *
+ * Phase 108 did exactly that replay, for both control accounts, in one query
+ * per settlement kind; Phase 109 restored inventory the same way. The claim was
+ * repeated in three places and checked in none of them, which is the shape of
+ * defect this project keeps finding at the bottom of a phase. What survives is
+ * the reason above, which is about *history* rather than reconstruction.
  *
  * ## Two tables, and the second one is why
  *
@@ -41,6 +62,19 @@ export const integrityRuns = pgTable(
     checksRun: integer('checks_run').notNull().default(0),
     /** Skipped because the module is switched off. Not the same as passing. */
     checksSkipped: integer('checks_skipped').notNull().default(0),
+    /**
+     * The checks this run's date put out of reach (Phase 110).
+     *
+     * A different kind of absence from `checksSkipped`: that is a check which
+     * does not apply, and this is one that applies but can only speak for
+     * today. Reporting them as one number would leave somebody thinking a check
+     * they rely on had been switched off.
+     *
+     * The keys rather than a count, because a count cannot be turned back into
+     * the keys and Phase 109 shipped a page that could only say *how many*
+     * vanished.
+     */
+    checksOutOfReach: jsonb('checks_out_of_reach').$type<string[]>().notNull().default([]),
     /** Checks whose two sides disagree and are meant not to. */
     faults: integer('faults').notNull().default(0),
     /** Checks that threw. A broken check must not look like a clean one. */

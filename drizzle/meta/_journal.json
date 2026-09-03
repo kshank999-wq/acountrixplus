@@ -498,6 +498,13 @@
       "when": 1788740003000,
       "tag": "0070_phase100_guard_attempts",
       "breakpoints": true
+    },
+    {
+      "idx": 71,
+      "version": "7",
+      "when": 1788740004000,
+      "tag": "0071_phase110_integrity_out_of_reach",
+      "breakpoints": true
     }
   ]
 }

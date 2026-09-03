@@ -4877,13 +4877,13 @@ Phases 70, 101, 105, 106 and 108 used. One that cannot answer for a past date is
 **skipped** there rather than answered wrongly — the register already separated a
 skip from a pass. The nightly run asks about today, so nothing about it changes.
 
-**`today_only` is worded as what it honestly is: *not verified to reach back*.**
+**`today_only` was worded as what it honestly was: *not verified to reach back*.**
 I proved `inventory.lots` wrong and the two control accounts right; for most of
-the other eighteen there is no evidence either way, and guessing would repeat
+the other eighteen there was no evidence either way, and guessing would repeat
 Phase 108's false premise — a claimed impossibility nobody had checked. Two are
 stated positively instead, because their question is genuinely present-tense:
 `cash_drawer.open_tills` counts the drawers open *now*, and `banking.cash_tie_out`
-never took a date at all.
+never took a date at all. **Phase 110 read the rest of the queries** — see below.
 
 **Inventory is repaired rather than declared away.** `stock_movements` dates
 every change and carries an already *signed* `cost_cents`, so the value at a date
@@ -4896,6 +4896,66 @@ same books: `2026-05-31: agrees 1668600/1668600`, `2026-03-31: agrees 0/0`.
 off is a check that does not apply; this is one that applies but cannot answer.
 Reporting them as one number would leave somebody thinking a check they rely on
 had been turned off.
+
+### The claims nobody checked (Phase 110)
+
+Phase 109 shipped three claims and verified none of them. This phase checks all
+three, and the largest was costing something: **fifteen checks declared *"not
+verified to reach back"*, and `today_only` does not mean unverified — it means
+skipped.** Fifteen guesses are fifteen checks switched off for every historical
+question.
+
+Reading the fifteen queries found **three that already honoured the date and had
+been switched off for nothing**: `properties.deposits` (filters
+`deposit_movements.occurred_on <= asOf` for every movement kind),
+`pos.tips` (takings on `pos_days.business_date`, ledger on `entry_date` — both
+sides as at the same day) and `funds.untagged_contributions` (`netAssets`
+threads the date through every figure it compares). On the development books
+`properties.deposits` walks back on both sides together: `agrees 175000/175000`
+at 2026-03-31, `agrees 0/0` in 1900.
+
+**Two that looked promotable are not, for reasons only the query shows** — and
+this is the argument for reading the query rather than the table name, because I
+nearly promoted both:
+
+- `assets.register` is a *half-measure*: `depreciation_entries` is filtered by
+  `period_end <= asOf`, but the `fixed_assets` query has no date filter, so an
+  asset bought in June still counts at cost in a March report.
+- `manufacturing.wip` is subtler: its ledger side *is* dated, which is what makes
+  it look fine, but its subledger side is `work_orders where status = 'released'`
+  — present tense. A run released in February and finished in May is not
+  released now, so a March report would miss it.
+
+**The tripwire is a date before the books existed.** ADR 0109 admitted it only
+asserted that a check *declares* a reach. The proof it wanted is one line: a
+check whose subledger side honours the date must report **nothing** for
+`1900-01-01`. Where the fixture has no activity the test is vacuous — a check
+that ignores the date also reports 0 when there is nothing to report — so the
+fixture builds real activity for the two checks that carry the weight, and the
+vacuous cases are named rather than counted as evidence.
+
+**The stored run records which checks the date silenced.** ADR 0109 said reading
+one back "cannot tell them apart: the row records a count, not which kind" —
+true of the row, false of what a row can hold. `integrity_runs` gains
+`checks_out_of_reach`, holding the keys, and `latestRun` subtracts them out of
+`skipped` exactly.
+
+**The page names them.** Eleven checks now vanish from a past-dated run, and
+until this phase they vanished silently. `outOfReachNote` takes the labels rather
+than a count, because *eleven checks vanished* is alarming and unactionable while
+the names are the difference between "the one I came here for is missing" and
+"the one I came here for ran". The separator is a semicolon, and that is not a
+style preference: every label is itself a clause containing a comma, so the first
+draft rendered seven checks as a fourteen-item list. Caught in the browser.
+
+**A false premise found in a third place.** Phase 108 disproved the claim that
+reconstructing a subledger at a past date "would mean replaying every payment
+application" and deleted it from `receivables-check.ts`. It was still in
+`src/db/schema/integrity.ts`, unchanged since Phase 33. Phase 108 did exactly
+that replay; Phase 109 did it again for inventory. What survives is the *other*
+reason the run is stored, which is about history rather than reconstruction: a
+check that has since been fixed reports agreement for every past date, including
+the ones it was failing on.
 
 ## Deploying
 
@@ -5021,7 +5081,8 @@ Coverage matches what spec §21 asks for:
 | `tests/export-held-money.test.ts` | **The dataset list derived from the labels**, so a dataset cannot exist and be silently absent from the default export, with a file for every one of them; **whose retainer it is, in the currency it arrived in**, with what it was booked at and the rate beside it; **a gift card's purchaser named as a purchaser and not as an owner**, blank where nobody left a name, and its balance in the company's own currency because the table has no other; **a spent card kept in the file and out of the total**, so the manifest figure ties to the liability account rather than to what was issued; which side of the books a credit note is on; **an empty money file told apart from one with no money in it**; and one company's held money kept out of another's export |\n| `tests/exported-money.test.ts` | **A money column never written without its currency**, and the functional figure stated as equal rather than left blank when it is; the header names generated from the same place as the values, so the two lists cannot drift apart; per-currency totals for a file, sorted so an export can be diffed, and a sentence saying **when a file holds two currencies and has no single total**; against the database, **a euro invoice and a dollar one coming out distinguishable** with what each was booked at, the manifest naming both currencies, **a foreign invoice not restated when the rate later moves**, the ledger and bank files naming the company's own currency so no money column anywhere is bare, the manifest counted as a file but not as rows of books, a customer whose name holds a comma still quoted, **every row carrying the same number of cells as its header** (checked with a quote-aware splitter, because the naive one trips on a chart-account description), and **the copies somebody took listed newest first** |
 | `tests/as-at-balance.test.ts` | **All four paths that reduce a balance declared with the column that dates each** — the claim that made this look unreconstructible was that they were not — and a kind nobody declared raising rather than returning a silent zero; every path arguing for itself, with the payment one recording that `payment_applications` carries no date of its own; **a settlement after the date put back and one before it left alone**, with a settlement *on* the date counted as already happened; every kind restored rather than payments only, several of one kind summed, and **the face value and the functional figure restored independently** because a euro invoice's two numbers are different; a document issued after the date excluded and one already settled by then excluded too, which is the condition that was missing; and the sentence saying what came off since, quiet when nothing did |
 | `tests/as-at-reports.test.ts` | Against the database: **an invoice paid in June shown as outstanding in March**, where the report used to read zero; a partly paid one at what was still owed then; a payment dated on the day itself counted as received; **a debt written off in July still owed in March**, which is exactly what a historical aging is for; a credit applied in June counted as unapplied in March, sitting in the reconciliation line rather than the buckets; an invoice raised after the date left out entirely; and the pair this phase exists for — **the control account and the documents agreeing at every date rather than only today**, reporting March's figure rather than today's, and still catching an entry posted straight at 1100 at a past date |
-| `tests/integrity-reach.test.ts` | **A check that reaches any date run whenever it is asked, and a today-only one skipped when asked about the past** — but run for today, which is what the nightly job asks, and for a future date, where the present-tense subledger is the right answer anyway; the skip naming the check, the date and the reason, including why a wrong answer would be worse than none; the page sentence counting one and many and staying quiet when nothing was out of reach; and the tripwire over the register itself — **every check declaring a reach with prose arguing for it**, the two control accounts declaring the reach Phase 108 built them, inventory declaring the one its movements support, and at least one of each so neither branch is theoretical |\n| `tests/integrity-as-at.test.ts` | Against the database: **every applicable check running when asked about today** and the today-only ones left out when asked about the past, with the ones Phase 108 built still running; **no out-of-reach check ever reported as a finding**, which is the whole point — skipped rather than answered wrongly; a date-gated skip counted apart from a module-gated one; and inventory restored to the date — **lots valued at what they were worth then rather than now**, nothing before the first receipt, and the same answer for today with or without a date so the nightly run is unchanged |\n| `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
+| `tests/integrity-reach.test.ts` | **A check that reaches any date run whenever it is asked, and a today-only one skipped when asked about the past** — but run for today, which is what the nightly job asks, and for a future date, where the present-tense subledger is the right answer anyway; the skip naming the check, the date and the reason, including why a wrong answer would be worse than none; the page sentence counting one and many, **naming the checks themselves rather than only counting them** (Phase 110), separating labels that already contain a comma, and staying quiet when nothing was out of reach; and the tripwire over the register itself — **every check declaring a reach with prose arguing for it**, the two control accounts declaring the reach Phase 108 built them, inventory declaring the one its movements support, and at least one of each so neither branch is theoretical |\n| `tests/integrity-as-at.test.ts` | Against the database: **every applicable check running when asked about today** and the today-only ones left out when asked about the past, with the ones Phase 108 built still running; **no out-of-reach check ever reported as a finding**, which is the whole point — skipped rather than answered wrongly; a date-gated skip counted apart from a module-gated one — **and still told apart after the run is written down** (Phase 110), which ADR 0109 had said a stored row could not do, with a run asked about today recording nothing out of reach; and inventory restored to the date — **lots valued at what they were worth then rather than now**, nothing before the first receipt, and the same answer for today with or without a date so the nightly run is unchanged |\n| `tests/integrity-reach-proof.test.ts` | **Proving what Phase 109 only claimed**: a check whose subledger side honours the date reports *nothing* for `1900-01-01`, before any company in this application existed — held against a real invoice (100000 today, 0 then) and real stock (5000 today, 0 then), because the test is vacuous where the fixture has no activity and that is said in the comment rather than counted as evidence; the ungated `any_date` checks swept the same way, with the module-gated ones left out because the register skips them for wanting a chart this company has no reason to carry; and what verifying the fifteen declarations changed — **three promoted** (`properties.deposits` on `occurred_on`, `pos.tips` on `business_date`, `funds.untagged_contributions` through `netAssets`), **two kept** for reasons only the query shows (`assets.register`'s undated `fixed_assets`, `manufacturing.wip`'s present-tense `status = 'released'`), the seven with no dated history left alone, and **no declaration anywhere still saying "not verified"** |
+| `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |
 | `tests/control-account-credits.test.ts` | **Both control accounts agreeing while a credit sits unapplied** — the measured failure was ledger 70000 against a subledger of 100000 — and still agreeing once it is applied, with nothing double-counted, since applying posts no entry and moves both sides by the same amount; **a customer whose only document is a credit note still named**, because the credit rows are grouped on the foreign key rather than joined to the invoices, and shown owed money rather than clamped to zero; a customer whose credit covers everything they owe dropped from the list; **an entry posted straight at 1100 still caught**, which is what Phase 31 exists for; the composition sentence reaching the register's finding; the register naming credit notes in what it compares and saying "when it is issued" in why it matters; and one company's credit notes kept out of another's control account |

@@ -72,19 +72,41 @@ describe('whether a check can answer for a date', () => {
 })
 
 describe('what the page says', () => {
+  const one = ['Cash tie-out']
+  const three = ['Cash tie-out', 'Payments in transit', 'Client money held']
+
   it('counts one and many', () => {
-    expect(outOfReachNote(1, '2026-03-31')).toContain('1 check could not answer')
-    expect(outOfReachNote(1, '2026-03-31')).toContain('was skipped')
-    expect(outOfReachNote(3, '2026-03-31')).toContain('3 checks could not answer')
-    expect(outOfReachNote(3, '2026-03-31')).toContain('were skipped')
+    expect(outOfReachNote(one, '2026-03-31')).toContain('1 check could not answer')
+    expect(outOfReachNote(one, '2026-03-31')).toContain('was skipped')
+    expect(outOfReachNote(three, '2026-03-31')).toContain('3 checks could not answer')
+    expect(outOfReachNote(three, '2026-03-31')).toContain('were skipped')
   })
 
   it('names the date that put them out of reach', () => {
-    expect(outOfReachNote(2, '2026-03-31')).toContain('2026-03-31')
+    expect(outOfReachNote(three, '2026-03-31')).toContain('2026-03-31')
+  })
+
+  it('separates labels that already contain a comma', () => {
+    // Every real label is a clause with a comma in it. Joining seven of them
+    // with commas read as a fourteen-item list, which is how the browser check
+    // earned its keep.
+    const real = INTEGRITY_CHECKS.filter((entry) => entry.asAt.reach === 'today_only').map(
+      (entry) => entry.label,
+    )
+    expect(real.some((label) => label.includes(','))).toBe(true)
+    expect(outOfReachNote(real, '2026-03-31')).toContain('; ')
+  })
+
+  it('names the checks themselves (Phase 110)', () => {
+    // Phase 109 took a count. Eleven checks vanishing is alarming and
+    // unactionable; being told which eleven is the difference between "the one
+    // I came here for is missing" and "the one I came here for ran".
+    for (const label of three) expect(outOfReachNote(three, '2026-03-31')).toContain(label)
+    expect(outOfReachNote(one, '2026-03-31')).toContain('Cash tie-out')
   })
 
   it('stays quiet when every check could answer', () => {
-    expect(outOfReachNote(0, '2026-03-31')).toBeUndefined()
+    expect(outOfReachNote([], '2026-03-31')).toBeUndefined()
   })
 })
 

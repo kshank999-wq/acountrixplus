@@ -173,6 +173,9 @@ export async function runIntegrityChecks(
         finishedAt,
         checksRun: findings.length,
         checksSkipped: skipped.length,
+        // Written down rather than counted, so reading the run back can say
+        // which checks a past date silenced and not merely how many (Phase 110).
+        checksOutOfReach: outOfReach,
         faults,
         errors,
       })
@@ -250,11 +253,17 @@ export async function latestRun(ctx: ActorContext): Promise<IntegrityRun | null>
     faults: run.faults,
     errors: run.errors,
     findings: rows.map(toFinding),
-    // Reading a stored run back cannot tell a module-gated skip from a
-    // date-gated one — the row records a count, not which. Reported as skipped,
-    // which is what it was, rather than guessed at.
-    skipped: INTEGRITY_CHECKS.filter((check) => !found.has(check.key)).map((check) => check.key),
-    outOfReach: [],
+    // Phase 109 said a stored run could not tell a module-gated skip from a
+    // date-gated one, "because the row records a count, not which kind". That
+    // was true of the row and false of what a row can hold: the run now writes
+    // the out-of-reach keys down, so the two are subtracted apart exactly
+    // rather than guessed at (Phase 110). A run recorded before that column
+    // existed reads as `[]`, which is what those runs were — they asked about
+    // today, where nothing is out of reach.
+    skipped: INTEGRITY_CHECKS.filter(
+      (check) => !found.has(check.key) && !run.checksOutOfReach.includes(check.key),
+    ).map((check) => check.key),
+    outOfReach: run.checksOutOfReach,
   }
 }
 
