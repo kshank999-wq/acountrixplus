@@ -14,6 +14,7 @@ import {
   verifyTotp,
 } from '@/modules/auth/totp'
 import { decryptSecret, encryptSecret, isEncrypted } from '@/modules/auth/secret-box'
+import { WRONG_PASSWORD } from '@/modules/auth/reauthentication'
 import {
   beginEnrollment,
   changePassword,
@@ -258,9 +259,15 @@ describe('enrolling a second factor', () => {
 
     // An unattended browser is exactly what MFA protects against, and turning
     // it off is the first thing somebody sitting at one would do.
+    //
+    // Asserted against the constant rather than a copy of the sentence. This
+    // test used to spell out "That password is not right." and a second one
+    // spelled out "That is not your current password." — two ways of saying
+    // one thing, which is the duplication Phase 99's guard removed. Writing
+    // the words here again would put a third copy back.
     expect(await disableMfa(fixture.userId, 'not-the-password')).toEqual({
       ok: false,
-      error: 'That password is not right.',
+      error: WRONG_PASSWORD,
     })
     expect(await hasConfirmedMfa(fixture.userId)).toBe(true)
 
@@ -461,7 +468,8 @@ describe('sessions and revocation', () => {
       newPassword: 'a-brand-new-password',
     })
 
-    expect(result).toEqual({ ok: false, error: 'That is not your current password.' })
+    // Same sentence as every other guarded act refuses with (Phase 99).
+    expect(result).toEqual({ ok: false, error: WRONG_PASSWORD })
   })
 
   it('honours the company session length', async () => {
