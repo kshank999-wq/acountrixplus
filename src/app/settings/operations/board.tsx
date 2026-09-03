@@ -136,15 +136,26 @@ type Integrity = {
   }>
 } | null
 
-type Retention = Array<{
-  kind: string
-  label: string
-  days: number | null
-  publicallyWritten: boolean
-  why: string
-  expired: number
-  held: number
-}> | null
+/**
+ * A policy as this viewer sees it (Phase 102).
+ *
+ * The counts sit inside the `counted: true` arm rather than beside a flag, so
+ * this component cannot render a number it was not given — the check is the
+ * type. How long and why are outside it, because a retention policy is a
+ * published statement and only the count is tenant data.
+ */
+type Retention = Array<
+  {
+    kind: string
+    label: string
+    days: number | null
+    publicallyWritten: boolean
+    why: string
+  } & (
+    | { counted: true; whole: boolean; caveat: string | null; expired: number; held: number }
+    | { counted: false; because: string }
+  )
+> | null
 
 /**
  * The operations board.
@@ -615,7 +626,7 @@ export function OperationsBoard({
       {retention && (
         <Card
           title="What is kept, and for how long"
-          subtitle="Every table this application lets grow with traffic. Nothing here can reach the ledger, the audit log, or a document — the policy is an allowlist, and the suite fails if the books ever appear on it."
+          subtitle="The tables somebody has decided grow with traffic. Nothing here can reach the ledger, the audit log, or a document — the policy is an allowlist, and the suite fails if the books ever appear on it. Counts are this company's; the rows that belong to a person rather than a company say so instead."
         >
           <table className="w-full text-sm">
             <thead className="border-b border-line text-left text-xs text-muted">
@@ -648,12 +659,30 @@ export function OperationsBoard({
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2 text-right tabular-nums">{policy.held}</td>
-                  <td className="px-4 py-2 text-right tabular-nums">
-                    <span className={policy.expired > 0 ? 'text-warning' : 'text-faint'}>
-                      {policy.expired}
-                    </span>
-                  </td>
+                  {policy.counted ? (
+                    <>
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        {policy.held}
+                        {policy.caveat && (
+                          <span className="block text-xs text-faint" title={policy.caveat}>
+                            this company&rsquo;s share
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-right tabular-nums">
+                        <span className={policy.expired > 0 ? 'text-warning' : 'text-faint'}>
+                          {policy.expired}
+                        </span>
+                      </td>
+                    </>
+                  ) : (
+                    // A reason rather than a blank. These rows are held and
+                    // swept like any others; they just are not about a company,
+                    // so a number here would be every company's number.
+                    <td className="px-4 py-2 text-right text-xs text-faint" colSpan={2}>
+                      {policy.because}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

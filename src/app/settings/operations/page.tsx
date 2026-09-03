@@ -83,7 +83,12 @@ export default async function OperationsPage() {
       canAdminister
         ? health(actor, { since: new Date(Date.now() - 7 * 24 * 60 * 60 * 1000) })
         : Promise.resolve(null),
-      canAdminister ? retentionReport() : Promise.resolve(null),
+      // This company's rows, not the deployment's. Until Phase 102 this call
+      // took no audience and counted every company's letters, campaign events
+      // and check runs into a number shown to one of them.
+      canAdminister
+        ? retentionReport({ kind: 'company', companyId: actor.companyId })
+        : Promise.resolve(null),
       canReadBooks ? latestRun(actor) : Promise.resolve(null),
     ])
 

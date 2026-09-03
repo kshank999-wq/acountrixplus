@@ -28,6 +28,7 @@ import {
   retentionSummary,
 } from '@/modules/retention/policy'
 import { retentionReport, sweepAll, sweepOne } from '@/modules/retention/sweep'
+import type { Audience } from '@/modules/retention/attribution'
 import { health } from '@/modules/worker/health'
 import { recordLoginAttempt } from '@/modules/auth/login-history'
 import { issueToken } from '@/modules/notify/tokens'
@@ -51,6 +52,9 @@ import '@/modules/worker/handlers'
  *  3. **A failure is never silent** — and never noisy either: a digest with a
  *     count, and nothing at all on a quiet day.
  */
+
+/** Nobody's company: the only viewer for whom a total is a true answer. */
+const DEPLOYMENT: Audience = { kind: 'deployment' }
 
 describe('the retention policy', () => {
   it('never names a table that holds the books', () => {
@@ -175,10 +179,12 @@ describe('sweeping', () => {
       .set({ createdAt: new Date('2020-01-01T00:00:00Z') })
       .where(eq(loginAttempts.email, 'old@example.test'))
 
-    const before = await retentionReport(new Date('2026-06-15T00:00:00Z'))
+    // The deployment audience: sign-in attempts have no company, so this is
+    // the only viewer they are counted for at all (Phase 102).
+    const before = await retentionReport(DEPLOYMENT, new Date('2026-06-15T00:00:00Z'))
     const attempts = before.find((row) => row.kind === 'login_attempts')!
-    expect(attempts.held).toBe(2)
-    expect(attempts.expired).toBe(1)
+    expect(attempts.counted && attempts.held).toBe(2)
+    expect(attempts.counted && attempts.expired).toBe(1)
 
     const result = await sweepOne('login_attempts', new Date('2026-06-15T00:00:00Z'))
     expect(result.removed).toBe(1)
@@ -331,13 +337,14 @@ describe('sweeping', () => {
       .set({ createdAt: new Date('2020-01-01T00:00:00Z') })
       .where(eq(loginAttempts.email, 'old@example.test'))
 
-    const report = await retentionReport(new Date('2026-06-15T00:00:00Z'))
+    const report = await retentionReport(DEPLOYMENT, new Date('2026-06-15T00:00:00Z'))
     expect(report.length).toBe(RETENTION_POLICIES.length)
 
     // Counting is a separate query from deleting on purpose: a number nobody
     // can check before the delete is a number nobody can dispute after it.
     expect(await db.select({ id: loginAttempts.id }).from(loginAttempts)).toHaveLength(1)
-    expect(report.find((row) => row.kind === 'login_attempts')?.expired).toBe(1)
+    const attempts = report.find((row) => row.kind === 'login_attempts')!
+    expect(attempts.counted && attempts.expired).toBe(1)
   })
 
   it('deletes an old guard attempt and leaves the ones still being counted', async () => {

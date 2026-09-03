@@ -737,10 +737,13 @@ async function main() {
     error: 'No mail server for ridgelien.test — the domain does not exist.',
   })
 
-  const holding = await retentionReport()
-  const expiring = holding.reduce((sum, row) => sum + row.expired, 0)
+  // The deployment audience: a seed script is nobody's company, and the totals
+  // are the honest answer for it (Phase 102).
+  const holding = await retentionReport({ kind: 'deployment' })
+  const counted = holding.filter((row) => row.counted)
+  const expiring = counted.reduce((sum, row) => sum + row.expired, 0)
   console.log(
-    `  Retention: ${holding.length} policies, holding ${holding.reduce((sum, row) => sum + row.held, 0)} rows, ` +
+    `  Retention: ${holding.length} policies, holding ${counted.reduce((sum, row) => sum + row.held, 0)} rows, ` +
       `${expiring} past their window and waiting for the 3am sweep.`,
   )
   console.log(
