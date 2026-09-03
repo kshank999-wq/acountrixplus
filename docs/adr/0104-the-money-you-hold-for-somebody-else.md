@@ -78,10 +78,17 @@ generates — wants the row to exist at all. Filtering serves the first and
 silently fails the second.
 
 So every row is exported, and the **manifest tallies the remaining balance**,
-not the issued amount. That makes the manifest figure the one that should tie to
-the liability account in `journal.csv`, which is the reconciliation an accountant
-does first — and a test asserts exactly that correspondence rather than trusting
-it.
+not the issued amount. That makes the manifest figure the one that *should* tie
+to the liability account in `journal.csv`, which is the reconciliation an
+accountant does first.
+
+> **Corrected in Phase 105.** This paragraph originally ended "and a test asserts
+> exactly that correspondence rather than trusting it". It does not. The test
+> asserts the manifest ties to **the table the manifest was computed from**,
+> which is nearly a tautology and says nothing about the ledger. Tying the held
+> money to the ledger is a real check and it did not exist for retainers at all;
+> ADR 0105 builds it, in the integrity register — which is where the section
+> below said reconciliation belongs.
 
 ## Decision 4: one declaration of what a dataset is
 
