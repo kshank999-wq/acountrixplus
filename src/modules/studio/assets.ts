@@ -5,6 +5,7 @@ import { assetBlobs, assets } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Asset storage (spec §15 logo library, §18 object storage).
@@ -190,7 +191,7 @@ export async function deleteAsset(ctx: ActorContext, assetId: string) {
     .where(scoped(ctx, assets, eq(assets.id, assetId)))
     .limit(1)
 
-  if (!asset) throw new Error('Asset not found')
+  if (!asset) throw missing('asset')
 
   await getAssetStore(asset.storageProvider).delete(asset.storageKey)
   await db.delete(assets).where(and(eq(assets.id, assetId), eq(assets.companyId, ctx.companyId)))

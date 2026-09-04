@@ -153,7 +153,7 @@ describe('posting manual entries', () => {
           { chartAccountId: betaEquity.id, creditCents: 100 },
         ],
       }),
-    ).rejects.toThrow(/not found/i)
+    ).rejects.toThrow(/not on these books/i)
   })
 
   it('requires accounting:journal to post manually', async () => {

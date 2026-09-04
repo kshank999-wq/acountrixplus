@@ -28,6 +28,7 @@ import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from
 import { DomainError, Refusal } from '@/modules/errors'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { heldAcrossAt, type Position } from './retainer-position'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Turning recorded work into an invoice (spec §5).
@@ -109,7 +110,7 @@ export async function previewBilling(
     .where(scoped(ctx, projects, eq(projects.id, opts.projectId)))
     .limit(1)
 
-  if (!project) throw new Error('Engagement not found')
+  if (!project) throw missing('engagement')
 
   const timeRows = await db
     .select({
@@ -486,7 +487,7 @@ export async function receiveRetainer(
     .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
     .limit(1)
 
-  if (!account) throw new Error('Financial account not found')
+  if (!account) throw missing('financialAccount')
 
   const heldAccount = await retainerAccount(ctx.companyId)
 
@@ -496,7 +497,7 @@ export async function receiveRetainer(
     .where(scoped(ctx, customers, eq(customers.id, input.customerId)))
     .limit(1)
 
-  if (!customer) throw new Error('Client not found')
+  if (!customer) throw missing('client')
 
   /**
    * What the money is worth in the books, fixed on the day it arrived
@@ -610,7 +611,7 @@ async function applyRetainerWithin(
     .where(and(eq(retainers.companyId, ctx.companyId), eq(retainers.id, input.retainerId)))
     .limit(1)
 
-  if (!retainer) throw new Error('Retainer not found')
+  if (!retainer) throw missing('retainer')
 
   const [invoice] = await tx
     .select()
@@ -618,7 +619,7 @@ async function applyRetainerWithin(
     .where(and(eq(invoices.companyId, ctx.companyId), eq(invoices.id, input.invoiceId)))
     .limit(1)
 
-  if (!invoice) throw new Error('Invoice not found')
+  if (!invoice) throw missing('invoice')
   if (invoice.customerId !== retainer.customerId) {
     throw new Refusal('A retainer can only be drawn against the same client’s invoice.')
   }

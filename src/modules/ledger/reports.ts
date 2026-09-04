@@ -206,7 +206,7 @@ export async function generalLedger(
     .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, chartAccountId)))
     .limit(1)
 
-  if (!account) throw new Error('Chart account not found')
+  if (!account) throw missing('chartAccount')
 
   const type = account.type as AccountType
   const sign = isDebitNormal(type) ? 1 : -1
@@ -285,6 +285,7 @@ export {
   type AgingRow,
   type AgingReport,
 } from './aging'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Accounts receivable aging (spec §13).

@@ -14,6 +14,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { PAYROLL_ACCOUNTS } from './accounts'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Remitting what was withheld (spec §13, §19).
@@ -168,7 +169,7 @@ export async function recordRemittance(
     .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, input.liabilityAccountId)))
     .limit(1)
 
-  if (!liability) throw new Error('Liability account not found')
+  if (!liability) throw missing('liabilityAccount')
   if (liability.type !== 'liability') {
     throw new Refusal(
       `${liability.number} ${liability.name} is not a liability account. A remittance clears a debt.`,
@@ -197,7 +198,7 @@ export async function recordRemittance(
     .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
     .limit(1)
 
-  if (!bank) throw new Error('Financial account not found')
+  if (!bank) throw missing('financialAccount')
 
   const positions = await liabilityPositions(ctx, { asOfDate: input.paidOn })
   const position = positions.find((entry) => entry.accountId === input.liabilityAccountId)

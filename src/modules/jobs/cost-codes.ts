@@ -7,6 +7,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { requireModule } from '@/modules/industry/modules'
 import type { CostType } from './vocabulary'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * The cost code library (spec §5 "job costing").
@@ -176,7 +177,7 @@ export async function updateCostCode(
       .where(and(eq(costCodes.id, costCodeId), eq(costCodes.companyId, ctx.companyId)))
       .limit(1)
 
-    if (!before) throw new Error('Cost code not found')
+    if (!before) throw missing('costCode')
 
     await tx
       .update(costCodes)

@@ -11,6 +11,7 @@ import { liabilityPositions, remittancesInPeriod } from './remittance'
 import { salesTaxReturn } from './sales-tax'
 import { contractorPayments } from './vendor-reporting'
 import { DomainError, Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Tax workpapers (spec §13: "tax-workpaper-friendly reports").
@@ -312,7 +313,7 @@ export async function markFiledExternally(
       .where(scoped(ctx, taxFilings, eq(taxFilings.id, filingId)))
       .limit(1)
 
-    if (!filing) throw new Error('Filing not found')
+    if (!filing) throw missing('filing')
 
     await tx
       .update(taxFilings)

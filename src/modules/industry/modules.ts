@@ -10,6 +10,7 @@ import {
   type IndustryModule,
 } from '@/modules/coa/industry'
 import { DomainError } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Which optional modules a company has switched on (spec §5, §20, §23).
@@ -133,7 +134,7 @@ async function companyRow(companyId: string): Promise<CompanyRow> {
     .where(eq(companies.id, companyId))
     .limit(1)
 
-  if (!row) throw new Error('Company not found')
+  if (!row) throw missing('company')
   return row
 }
 

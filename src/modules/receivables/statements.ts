@@ -27,6 +27,7 @@ import {
 } from './settlement-currency'
 import { agingBucket } from '@/modules/ledger/aging'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Customer statements (spec §13: "customers, invoices, credits, payments,
@@ -177,7 +178,7 @@ export async function buildStatement(
     .where(scoped(ctx, customers, eq(customers.id, input.customerId)))
     .limit(1)
 
-  if (!customer) throw new Error('Customer not found')
+  if (!customer) throw missing('customer')
 
   if (kind === 'balance_forward' && !input.periodStart) {
     throw new Refusal('A balance-forward statement needs a period to carry a balance into.')

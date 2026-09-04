@@ -25,7 +25,7 @@ import { eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { companies } from '@/db/schema'
 import { inviteToPractice } from '@/modules/notify/invitations'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /** Server actions for accountant practice mode (spec §14, Phase 18). */
 
@@ -63,7 +63,7 @@ export async function setBriefPreferenceAction(
 
     const mine = await practicesFor(actor.userId)
     if (!mine.some((entry) => entry.practiceId === id)) {
-      throw new Error('You do not work at that firm.')
+      throw new Refusal('You do not work at that firm.')
     }
 
     await setPreferenceFor({ kind: 'practice', practiceId: id }, actor.userId, 'practice_brief', wanted)
@@ -79,7 +79,7 @@ export async function switchCompanyAction(companyId: unknown): Promise<ActionRes
   return run(async () => {
     const actor = await requireActor()
     const session = await currentSession()
-    if (!session) throw new Error('Sign in again.')
+    if (!session) throw new Refusal('Sign in again.')
 
     const result = await switchCompany(
       {

@@ -273,7 +273,7 @@ describe('the cost code dimension', () => {
           { chartAccountId: (await ours.account('1000')).id, creditCents: 10_000 },
         ],
       }),
-    ).rejects.toThrow(/cost codes were not found/i)
+    ).rejects.toThrow(/cost codes are not on these books/i)
   })
 
   it('carries dimensions onto a reversing entry', async () => {

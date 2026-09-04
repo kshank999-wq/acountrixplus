@@ -815,6 +815,6 @@ describe('tenant isolation', () => {
         writtenOffOn: '2026-09-01',
         reason: 'Not mine to write off',
       }),
-    ).rejects.toThrow(/not found/i)
+    ).rejects.toThrow(/not on these books/i)
   })
 })

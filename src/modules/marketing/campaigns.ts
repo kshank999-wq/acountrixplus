@@ -25,6 +25,7 @@ import { defaultBrandKit } from '@/modules/studio/service'
 import { evaluateSegment, parseDefinition, suppressedEmails } from './audience'
 import { getEmailProvider, publicBaseUrl, type OutboundMessage } from './email-provider'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Campaigns and the send pipeline (spec §10).
@@ -486,7 +487,7 @@ async function loadCampaign(ctx: ActorContext, campaignId: string) {
     .where(scoped(ctx, campaigns, eq(campaigns.id, campaignId)))
     .limit(1)
 
-  if (!campaign) throw new Error('Campaign not found')
+  if (!campaign) throw missing('campaign')
   return campaign
 }
 

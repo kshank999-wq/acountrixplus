@@ -635,7 +635,15 @@ describe('devices', () => {
     })
 
     // Scoped to the acting user: this is not a way to lock a colleague out.
-    await expect(revokeDevice(fixture.ctx, theirPhone.id)).rejects.toThrow(/not found/i)
+    await expect(revokeDevice(fixture.ctx, theirPhone.id)).rejects.toThrow(/not on these books/i)
+
+    // Phase 120: and the refusal says nothing about whose device it is. This
+    // assertion is the security property, not the wording — a message that
+    // distinguished "never existed" from "somebody else's" would make any id
+    // an oracle.
+    await expect(revokeDevice(fixture.ctx, theirPhone.id)).rejects.not.toThrow(
+      /belongs to|another|colleague|permission/i,
+    )
   })
 
   it('leaves a session with no device working', async () => {

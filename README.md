@@ -5493,6 +5493,80 @@ arguably *should* be sentences a person reads, but rewording ninety-two messages
 is a different phase from making the ones already written arrive.
 
 
+### The answer that was also a security boundary (Phase 120)
+
+Both of ADR 0119's nominations verified, and one was worse than that ADR said.
+**All 17 bare throws in `src/app` carry a person-facing sentence**, 16 of them in
+`src/app/actions/*.ts` — the very files that call `messageFor`. Phase 119 fixed
+one directory and left the identical defect one directory over.
+
+The other 74 are `X not found`, the largest single family in the codebase, and
+they are not a wording problem. **49 of them sit directly after a `scoped()`
+query**, which adds `company_id = ctx.companyId` — so an id belonging to another
+company returns no row and lands in exactly the same branch as an id that never
+existed. The message is answering two questions at once:
+
+1. your link is stale, and
+2. this system will not confirm whether that record exists in somebody else's books.
+
+The second is a real security property, and the codebase already depends on it —
+this is a tenant-isolation test whose subject is the wording:
+
+```ts
+await expect(revokeDevice(fixture.ctx, theirPhone.id)).rejects.toThrow(/not found/i)
+```
+
+Nothing anywhere said so. The obvious improvement — *"that device belongs to
+Kestrel Joinery"* — is a cross-tenant disclosure that reads like a kindness, and
+no rule, test or comment would have stopped somebody writing it. That is the
+defect: a security decision carried by an unremarked string, in 49 places, with
+no way to notice.
+
+`src/modules/errors/missing.ts` declares 45 record kinds, each recording
+**whether its lookup is tenant-scoped** — the fact that makes the wording
+load-bearing, so it is data rather than folklore — and produces one sentence
+true of all three causes and silent about which:
+
+```
+That invoice is not on these books. It may have been removed since this page
+was opened — reload and try again.
+```
+
+`DISCLOSING_WORDS` names the four phrases that would answer the withheld
+question (`another company`, `belongs to`, `permission`, `deleted`), each with
+its argument, and the test holds every declared kind against all four. One test
+compares a tenant-scoped kind's sentence against an open one's with the noun
+elided, because if the two shapes differed the difference would itself be the
+oracle.
+
+**The tripwire caught its own author.** `missing.ts` was committed a step ahead
+of the conversion, and the 118+119 full suite failed on exactly one test:
+`kindFor`'s registry throw reads as prose, because it is prose, and it needed an
+`ALLOWED_BARE_REFUSALS` entry like the two ledger registries before it. Phase
+119's rule caught the phase that came after it, on its first run, in a file
+written by the person who wrote the rule.
+
+**Browser-verified** on `/bookkeeping`, accepting a suggestion with the
+transaction id in the server action's body rewritten to an id on nobody's books
+— what a stale link, a deleted record and another company's id all look like
+from the server's side:
+
+```
+SCREEN SAYS: That transaction is not on these books. It may have been removed
+             since this page was opened — reload and try again.
+disclosing words: none
+```
+
+**The dry run caught a bug the compiler could not.** The conversion was
+scripted, and run first against a copy of the tree it produced
+`if (!customer) missing('customer')` — the regex started at `throw new Error(`
+and the replacement dropped the `throw`. That constructs a refusal, discards it,
+and carries on with `customer` undefined. It is a valid expression statement, so
+`tsc --noEmit` is clean and every type is satisfied; the failure would have been
+a null dereference somewhere downstream, in 74 places. A scripted edit is only
+as good as the pass that reads its output.
+
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5635,6 +5709,7 @@ Coverage matches what spec §21 asks for:
 | `tests/coa-proposal.test.ts` | **Whether a proposed chart account is coherent** (Phase 118), no database and no clock: the eight number bands covering 1000–9999 with no gap and no overlap, each carrying prose arguing for itself, and `rangeFor` throwing on a type nobody declared a home for; the bands holding for **every standard account and every industry pack**, so the screen can never refuse a number the software itself installs; and the refusals — no name, a number that is not four digits, a number the application looks up by name, a number already taken, and an expense numbered among the assets — each quoting the band's argument rather than only reporting a violation |
 | `tests/chart-management.test.ts` | Against the database, **the chart a business can finally add to** (Phase 118): an added account reaching `listAccounts` and `categorizableAccounts` — the pickers that are the point of adding one — with the act recorded against whoever did it; a duplicate refused in a sentence rather than as a unique-index violation; permission and tenancy both enforced, with the same number free in another company; and retiring taking an account out of every picker while leaving it on the chart, keeping its number reserved because the entries behind it still point there, refusing outright for an account the software posts into by number, and recording retirement and return as different acts |
 | `tests/refusal-audience.test.ts` | **Whether a refusal can be read by the person it refused** (Phase 119), reading the source rather than calling anything: the three rules that must all hold for a message to count as prose written for a reader, checked against real sentences from this codebase in both directions; a scan that asserts it found throws at all, so a broken parser cannot pass green on an empty list; **no person-facing sentence left thrown as a bare `Error`** anywhere in `src/modules`, and no entry in the fourteen-strong allowlist that has stopped pointing at a real throw — keyed by sentence rather than line number, because an allowlist that goes stale when somebody adds an import is a trap; and, at the other end, `messageFor` showing a `Refusal` verbatim while still replacing a `Failed query:` leak with the caller's fallback, which is the half of ADR 0074 that was always right |
+| `tests/missing-record.test.ts` | **What a failed lookup is allowed to say** (Phase 120), no database and no clock: the 45 record kinds named the way a screen names them rather than the way a table does, each recording whether its lookup is tenant-scoped, with `kindFor` throwing on a kind nobody declared; the sentence reading as person-facing by the Phase 119 rules for every kind, saying where the reader is and what to do; and **the disclosure rule made testable** — every declared kind held against all four forbidden phrases in singular and plural, and a tenant-scoped kind's sentence compared against an open one's with the noun elided, because 49 of these lookups sit behind a `scoped()` query and a difference between the two shapes would itself tell an attacker which case they had hit |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |

@@ -19,6 +19,7 @@ import {
 } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Bank deposits (spec §13).
@@ -127,7 +128,7 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
     .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
     .limit(1)
 
-  if (!account) throw new Error('Financial account not found')
+  if (!account) throw missing('financialAccount')
 
   const undepositedAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.undepositedFunds)
   if (!undepositedAccount) {
@@ -319,7 +320,7 @@ export async function voidDeposit(
     .where(scoped(ctx, deposits, eq(deposits.id, depositId)))
     .limit(1)
 
-  if (!deposit) throw new Error('Deposit not found')
+  if (!deposit) throw missing('deposit')
   if (deposit.voidedAt) throw new Refusal(`Deposit ${deposit.number} has already been reversed.`)
 
   if (deposit.journalEntryId) {
@@ -381,7 +382,7 @@ export async function depositWithItems(ctx: ActorContext, depositId: string) {
     .where(scoped(ctx, deposits, eq(deposits.id, depositId)))
     .limit(1)
 
-  if (!deposit) throw new Error('Deposit not found')
+  if (!deposit) throw missing('deposit')
 
   const items = await db
     .select({

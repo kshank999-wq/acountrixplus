@@ -4,6 +4,7 @@ import { devices, sessions } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import type { ActorContext } from '@/modules/tenancy/context'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Signed-in devices (spec §19 least privilege, §22 attributable changes).
@@ -182,7 +183,7 @@ export async function revokeDevice(ctx: ActorContext, deviceId: string): Promise
 
     // Scoped to the acting user: revoking somebody else's device is not a
     // feature, it is a way to lock a colleague out.
-    if (!device) throw new Error('Device not found')
+    if (!device) throw missing('device')
     if (device.revokedAt) return
 
     await tx
@@ -223,7 +224,7 @@ export async function renameDevice(
     .where(and(eq(devices.id, deviceId), eq(devices.userId, ctx.userId)))
     .returning({ id: devices.id })
 
-  if (result.length === 0) throw new Error('Device not found')
+  if (result.length === 0) throw missing('device')
 }
 
 /**

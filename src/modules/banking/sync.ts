@@ -15,6 +15,7 @@ import { mintChartAccount } from './accounts'
 import { getBankProvider } from './registry'
 import type { ProviderAccount, ProviderTransaction } from './provider'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 export type ImportSummary = {
   connectionId: string
@@ -169,7 +170,7 @@ export async function syncConnection(
     .where(scoped(ctx, bankConnections, eq(bankConnections.id, connectionId)))
     .limit(1)
 
-  if (!connection) throw new Error('Bank connection not found')
+  if (!connection) throw missing('bankConnection')
 
   const provider = getBankProvider(connection.provider)
   const page = await provider.fetchTransactions(connection.providerItemId, {

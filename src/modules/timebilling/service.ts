@@ -22,6 +22,7 @@ import {
   type ResolvedRate,
   type UtilizationRow,
 } from './rates'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Timesheets, approval, and reimbursable expenses (spec §5).
@@ -162,7 +163,7 @@ async function loadOwnEditable(ctx: ActorContext, entryId: string, tx: Executor)
     .where(and(eq(timeEntries.companyId, ctx.companyId), eq(timeEntries.id, entryId)))
     .limit(1)
 
-  if (!entry) throw new Error('Time entry not found')
+  if (!entry) throw missing('timeEntry')
 
   if (entry.status === 'billed') {
     throw new Refusal(

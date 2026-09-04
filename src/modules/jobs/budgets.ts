@@ -12,6 +12,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Job budgets and change orders (spec §5 "estimates, change orders").
@@ -59,7 +60,7 @@ async function assertJob(ctx: ActorContext, projectId: string, exec: Executor = 
     .where(and(eq(projects.id, projectId), eq(projects.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!job) throw new Error('Job not found')
+  if (!job) throw missing('job')
   return job
 }
 
@@ -324,7 +325,7 @@ export async function approveChangeOrder(
       .where(and(eq(changeOrders.id, changeOrderId), eq(changeOrders.companyId, ctx.companyId)))
       .limit(1)
 
-    if (!order) throw new Error('Change order not found')
+    if (!order) throw missing('changeOrder')
     if (order.status === 'approved') {
       throw new Refusal('That change order has already been approved.')
     }
@@ -437,7 +438,7 @@ export async function rejectChangeOrder(
       .where(and(eq(changeOrders.id, changeOrderId), eq(changeOrders.companyId, ctx.companyId)))
       .limit(1)
 
-    if (!order) throw new Error('Change order not found')
+    if (!order) throw missing('changeOrder')
     if (order.status === 'approved') {
       throw new Refusal('That change order is already approved. Raise a deductive one to undo it.')
     }

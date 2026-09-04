@@ -29,6 +29,7 @@ import {
   type CostMethod,
   type Lot,
 } from './costing'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Perpetual inventory (spec §5, §13).
@@ -886,7 +887,7 @@ async function requireInventoriedItem(ctx: ActorContext, itemId: string, exec: E
     .where(and(eq(serviceItems.companyId, ctx.companyId), eq(serviceItems.id, itemId)))
     .limit(1)
 
-  if (!item) throw new Error('Item not found')
+  if (!item) throw missing('item')
   if (!item.isInventoried) {
     throw new Refusal(
       `${item.name} is not a stocked item. Switch stock tracking on for it first, or use a plain invoice line.`,

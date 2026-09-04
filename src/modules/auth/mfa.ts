@@ -12,6 +12,7 @@ import { sendGuardWarning } from '@/modules/notify/guard-warning'
 import { DomainError, Refusal } from '@/modules/errors'
 import { decryptSecret, encryptSecret } from './secret-box'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Second-factor enrolment and verification (spec §14: "MFA support").
@@ -96,7 +97,7 @@ export async function beginEnrollment(
   opts: { issuer?: string } = {},
 ): Promise<EnrollmentStart> {
   const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1)
-  if (!user) throw new Error('User not found')
+  if (!user) throw missing('user')
 
   const [existing] = await db.select().from(userMfa).where(eq(userMfa.userId, userId)).limit(1)
   if (existing?.confirmedAt) {

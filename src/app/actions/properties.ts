@@ -14,7 +14,7 @@ import {
 import { runRent } from '@/modules/properties/billing'
 import { applyDeposit, receiveDeposit, refundDeposit } from '@/modules/properties/deposits'
 import { formatCents } from '@/lib/money'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /** Server actions for properties, tenancies, rent and deposits (spec §5, Phase 23). */
 
@@ -106,7 +106,7 @@ export async function activateLeaseAction(leaseId: unknown): Promise<ActionResul
   return run(async () => {
     const actor = await requireActor()
     const done = await activateLease(actor, uuid.parse(leaseId))
-    if (!done) throw new Error('That tenancy is not waiting to start.')
+    if (!done) throw new Refusal('That tenancy is not waiting to start.')
     return 'Started. It bills from the next run.'
   })
 }
@@ -123,7 +123,7 @@ export async function endLeaseAction(input: unknown): Promise<ActionResult> {
       reason: parsed.reason ?? null,
     })
 
-    if (!done) throw new Error('That tenancy has already ended.')
+    if (!done) throw new Refusal('That tenancy has already ended.')
     // Deliberately says nothing about the deposit: what happens to it is a
     // decision somebody has to make, and doing it automatically would refund
     // money that should have been kept against damage.

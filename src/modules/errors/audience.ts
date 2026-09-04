@@ -201,6 +201,16 @@ export const ALLOWED_BARE_REFUSALS: readonly {
       'a source type; only a developer editing the registry can.',
   },
   {
+    file: 'src/modules/errors/missing.ts',
+    message:
+      'No record kind is declared for "X". A lookup has to say what it was looking for before ' +
+      'it can tell somebody it failed.',
+    because:
+      'The registry device a third time, and this one caught itself: Phase 120 committed ' +
+      'missing.ts and the full suite failed on this very rule, because the sentence reads as ' +
+      'prose. It is addressed to whoever adds a record type without declaring its noun.',
+  },
+  {
     file: 'src/modules/jobs/billing.ts',
     message: 'Contract item disappeared while billing.',
     because:

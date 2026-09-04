@@ -41,9 +41,16 @@ describe('tenant isolation', () => {
     })
     const alphaExpense = await alpha.account('6350')
 
+    // Phase 120: the refusal is the tenancy boundary speaking. It says the
+    // record is not on these books and nothing about whether it exists
+    // elsewhere — a message that distinguished the cases would turn any id
+    // into an oracle.
     await expect(
       categorize(alpha.ctx, betaTransaction.id, alphaExpense.id),
-    ).rejects.toThrow(/not found/i)
+    ).rejects.toThrow(/not on these books/i)
+    await expect(
+      categorize(alpha.ctx, betaTransaction.id, alphaExpense.id),
+    ).rejects.not.toThrow(/belongs to|another company|permission/i)
 
     // Beta's row is untouched.
     const [unchanged] = await db
@@ -67,7 +74,10 @@ describe('tenant isolation', () => {
 
     await expect(
       categorize(alpha.ctx, alphaTransaction.id, betaExpense.id),
-    ).rejects.toThrow(/not found/i)
+    ).rejects.toThrow(/not on these books/i)
+    await expect(
+      categorize(alpha.ctx, alphaTransaction.id, betaExpense.id),
+    ).rejects.not.toThrow(/belongs to|another company|permission/i)
   })
 
   it('silently drops foreign ids from bulk operations', async () => {

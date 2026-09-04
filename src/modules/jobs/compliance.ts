@@ -36,6 +36,7 @@ export {
   type ComplianceKind,
   type DocumentStatus,
 } from './vocabulary'
+import { missing } from '@/modules/errors/missing'
 
 export type SubcontractorSummary = {
   id: string
@@ -84,7 +85,7 @@ export async function createSubcontractor(
     .where(scoped(ctx, vendors, eq(vendors.id, input.vendorId)))
     .limit(1)
 
-  if (!vendor) throw new Error('Vendor not found')
+  if (!vendor) throw missing('vendor')
 
   const defaultRetainageBp = input.defaultRetainageBp ?? 0
   if (defaultRetainageBp < 0 || defaultRetainageBp > 10_000) {
@@ -153,7 +154,7 @@ export async function updateSubcontractor(
       )
       .limit(1)
 
-    if (!before) throw new Error('Subcontractor not found')
+    if (!before) throw missing('subcontractor')
 
     await tx
       .update(subcontractors)
@@ -207,7 +208,7 @@ export async function recordComplianceDocument(
     .where(scoped(ctx, subcontractors, eq(subcontractors.id, input.subcontractorId)))
     .limit(1)
 
-  if (!sub) throw new Error('Subcontractor not found')
+  if (!sub) throw missing('subcontractor')
 
   if (input.issuedOn && input.expiresOn && input.expiresOn < input.issuedOn) {
     throw new Refusal('A document cannot expire before it was issued.')

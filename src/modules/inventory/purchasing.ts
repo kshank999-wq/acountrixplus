@@ -14,6 +14,7 @@ import { requireModule } from '@/modules/industry/modules'
 import { extend } from './costing'
 import { inventoryAccounts, receiveStock } from './service'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Purchase orders, receiving, and the three-way match (spec §5, Retail:
@@ -75,7 +76,7 @@ export async function createPurchaseOrder(
     .where(scoped(ctx, vendors, eq(vendors.id, input.vendorId)))
     .limit(1)
 
-  if (!vendor) throw new Error('Vendor not found')
+  if (!vendor) throw missing('vendor')
 
   const items = await db
     .select()
@@ -515,7 +516,7 @@ export async function purchaseOrderWithLines(ctx: ActorContext, orderId: string)
     .where(scoped(ctx, purchaseOrders, eq(purchaseOrders.id, orderId)))
     .limit(1)
 
-  if (!order) throw new Error('Purchase order not found')
+  if (!order) throw missing('purchaseOrder')
 
   const lines = await db
     .select({

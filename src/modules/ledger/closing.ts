@@ -9,6 +9,7 @@ import { createJournalEntry, voidJournalEntry } from '@/modules/ledger/journal'
 import { accountBalances } from './balances'
 import { formatCents } from '@/lib/money'
 import { DomainError, Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Year-end closing entries (spec §13: "recurring entries, adjusting entries,
@@ -306,7 +307,7 @@ export async function reopenFiscalYear(
       .where(scoped(ctx, fiscalYearCloses, eq(fiscalYearCloses.id, closeId)))
       .limit(1)
 
-    if (!closed) throw new Error('Close not found')
+    if (!closed) throw missing('close')
     if (closed.reopenedAt) throw new Refusal('That year is already reopened.')
 
     if (closed.journalEntryId) {

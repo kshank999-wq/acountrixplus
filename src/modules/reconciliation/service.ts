@@ -4,6 +4,7 @@ import { bankTransactions, financialAccounts, reconciliations } from '@/db/schem
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Bank and credit-card reconciliation (spec §4).
@@ -64,7 +65,7 @@ export async function startReconciliation(
     )
     .limit(1)
 
-  if (!account) throw new Error('Financial account not found')
+  if (!account) throw missing('financialAccount')
 
   const [openSession] = await db
     .select({ id: reconciliations.id })
@@ -222,7 +223,7 @@ export async function summarize(
     .where(scoped(ctx, reconciliations, eq(reconciliations.id, reconciliationId)))
     .limit(1)
 
-  if (!session) throw new Error('Reconciliation not found')
+  if (!session) throw missing('reconciliation')
 
   const [cleared] = await db
     .select({
@@ -359,7 +360,7 @@ export async function reopenReconciliation(ctx: ActorContext, reconciliationId: 
     .where(scoped(ctx, reconciliations, eq(reconciliations.id, reconciliationId)))
     .limit(1)
 
-  if (!session) throw new Error('Reconciliation not found')
+  if (!session) throw missing('reconciliation')
   if (session.status !== 'completed') {
     throw new Refusal('Only a completed reconciliation can be reopened.')
   }
@@ -412,7 +413,7 @@ export async function reconcilableTransactions(ctx: ActorContext, reconciliation
     .where(scoped(ctx, reconciliations, eq(reconciliations.id, reconciliationId)))
     .limit(1)
 
-  if (!session) throw new Error('Reconciliation not found')
+  if (!session) throw missing('reconciliation')
 
   return db
     .select({
@@ -451,7 +452,7 @@ async function loadOpenSession(ctx: ActorContext, reconciliationId: string) {
     .where(scoped(ctx, reconciliations, eq(reconciliations.id, reconciliationId)))
     .limit(1)
 
-  if (!session) throw new Error('Reconciliation not found')
+  if (!session) throw missing('reconciliation')
   if (session.status === 'completed') {
     throw new Refusal('That reconciliation is completed. Reopen it before making changes.')
   }

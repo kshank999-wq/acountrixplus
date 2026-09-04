@@ -12,6 +12,7 @@ import { recordAudit } from '@/modules/audit'
 import { DomainError } from '@/modules/errors'
 import { BRAND_STYLE_FIELDS, brandStyleProblem } from '@/modules/design/style-values'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * The Design Center — "Company Studio" in spec §15.
@@ -186,7 +187,7 @@ export async function updateBrandKit(
       .where(and(eq(brandKits.id, kitId), eq(brandKits.companyId, ctx.companyId)))
       .returning()
 
-    if (!kit) throw new Error('Brand kit not found')
+    if (!kit) throw missing('brandKit')
 
     await recordAudit(
       ctx,
@@ -393,7 +394,7 @@ export async function reviseClause(
       .where(and(eq(clauses.id, clauseId), eq(clauses.companyId, ctx.companyId)))
       .limit(1)
 
-    if (!clause) throw new Error('Clause not found')
+    if (!clause) throw missing('clause')
 
     const [{ nextVersion }] = await tx
       .select({

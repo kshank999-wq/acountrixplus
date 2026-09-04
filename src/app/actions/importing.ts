@@ -19,7 +19,7 @@ import {
 } from '@/modules/importing/statements'
 import type { ImportPlan } from '@/modules/importing/plan'
 import { IMPORT_KINDS } from '@/modules/importing/vocabulary'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /** Server actions for the migration wizard (spec §20 Phase 8). */
 
@@ -143,7 +143,7 @@ export async function commitImportAction(input: unknown): Promise<ActionResult> 
       }
       case 'trial_balance': {
         if (!parsed.asOfDate) {
-          throw new Error('Say what date these balances are as at.')
+          throw new Refusal('Say what date these balances are as at.')
         }
         const result = await commitTrialBalanceImport(actor, plan as never, {
           asOfDate: parsed.asOfDate,

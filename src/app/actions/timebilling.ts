@@ -13,7 +13,7 @@ import {
 } from '@/modules/timebilling/service'
 import { billWork, receiveRetainer, refundRetainer } from '@/modules/timebilling/billing'
 import { parseDuration } from '@/modules/timebilling/rates'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 import { formatCents } from '@/lib/money'
 
 /** Server actions for the time and billing workspace (spec §5, Phase 15). */
@@ -51,7 +51,7 @@ export async function logTimeAction(input: unknown): Promise<ActionResult> {
 
     const minutes = parseDuration(parsed.duration)
     if (minutes === null || minutes <= 0) {
-      throw new Error(
+      throw new Refusal(
         `“${parsed.duration}” is not a length of time. Try 1.5, 1:30, or 90m — they all mean the same thing.`,
       )
     }

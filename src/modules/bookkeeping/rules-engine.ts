@@ -5,6 +5,7 @@ import { newBatchId, recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { firstMatchingRule, vendorMemoryConditions } from './matching'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Rule persistence and application (spec §3).
@@ -224,7 +225,7 @@ export async function applyRuleToExisting(
     .where(scoped(ctx, categorizationRules, eq(categorizationRules.id, ruleId)))
     .limit(1)
 
-  if (!rule) throw new Error('Rule not found')
+  if (!rule) throw missing('rule')
 
   const candidates = await db
     .select()
@@ -353,7 +354,7 @@ export async function deactivateRule(ctx: ActorContext, ruleId: string) {
       .where(scoped(ctx, categorizationRules, eq(categorizationRules.id, ruleId)))
       .limit(1)
 
-    if (!existing) throw new Error('Rule not found')
+    if (!existing) throw missing('rule')
 
     await tx
       .update(categorizationRules)

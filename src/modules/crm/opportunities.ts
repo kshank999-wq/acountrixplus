@@ -23,6 +23,7 @@ import {
   STAGE_PROBABILITY,
   type Stage,
 } from './pipeline'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Opportunity records and pipeline movement (spec §6).
@@ -54,7 +55,7 @@ export async function createOpportunity(ctx: ActorContext, input: CreateOpportun
     .where(scoped(ctx, organizations, eq(organizations.id, input.organizationId)))
     .limit(1)
 
-  if (!organization) throw new Error('Organization not found')
+  if (!organization) throw missing('organization')
 
   const stage = input.stage ?? 'new_inquiry'
 
@@ -351,7 +352,7 @@ async function loadOpportunity(ctx: ActorContext, opportunityId: string) {
     .where(scoped(ctx, opportunities, eq(opportunities.id, opportunityId)))
     .limit(1)
 
-  if (!opportunity) throw new Error('Opportunity not found')
+  if (!opportunity) throw missing('opportunity')
   return opportunity
 }
 

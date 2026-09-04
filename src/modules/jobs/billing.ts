@@ -15,6 +15,7 @@ import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { requireModule } from '@/modules/industry/modules'
 import { createInvoice } from '@/modules/receivables/service'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Schedule of values and progress billing (spec §5).
@@ -77,7 +78,7 @@ export async function setScheduleOfValues(
     .where(scoped(ctx, projects, eq(projects.id, projectId)))
     .limit(1)
 
-  if (!job) throw new Error('Job not found')
+  if (!job) throw missing('job')
 
   const seen = new Set<string>()
   for (const line of lines) {

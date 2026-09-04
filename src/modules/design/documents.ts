@@ -21,6 +21,7 @@ import { letterheadFor } from '@/modules/brand/letterhead'
 import { parseBlocks, validateBlocks, type Block } from './blocks'
 import { buildMergeContext, type MergeContext } from './merge-fields'
 import { builtInTemplate, templatesForIndustry, type TemplateDefinition } from './templates'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Design document persistence and composition (spec §7).
@@ -73,7 +74,7 @@ export async function createDocumentForProposal(
     .where(scoped(ctx, proposals, eq(proposals.id, proposalId)))
     .limit(1)
 
-  if (!proposal) throw new Error('Proposal not found')
+  if (!proposal) throw missing('proposal')
 
   const blocks = await resolveTemplateBlocks(ctx, templateKey)
   const brandKit = await defaultBrandKit(ctx.companyId)
@@ -234,7 +235,7 @@ async function loadDocument(ctx: ActorContext, documentId: string) {
     .where(scoped(ctx, designDocuments, eq(designDocuments.id, documentId)))
     .limit(1)
 
-  if (!document) throw new Error('Document not found')
+  if (!document) throw missing('document')
   return document
 }
 

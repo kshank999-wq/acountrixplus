@@ -16,6 +16,7 @@ import {
   type DimensionAssignment,
 } from '@/modules/dimensions/service'
 import { DomainError, Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * The double-entry journal (spec §13).
@@ -390,7 +391,7 @@ export async function voidJournalEntry(
     )
     .limit(1)
 
-  if (!entry) throw new Error('Journal entry not found')
+  if (!entry) throw missing('journalEntry')
   if (entry.status === 'void') return
 
   // Voiding changes the books, so the period rules apply here too.
@@ -483,7 +484,7 @@ export async function reverseEntry(
       .where(scoped(ctx, journalEntries, eq(journalEntries.id, entryId)))
       .limit(1)
 
-    if (!original) throw new Error('Journal entry not found')
+    if (!original) throw missing('journalEntry')
     if (original.status !== 'posted') {
       throw new Refusal('Only a posted entry can be reversed.')
     }
@@ -577,7 +578,7 @@ async function assertAccountsInCompany(
     )
 
   if (rows.length !== unique.length) {
-    throw new Error('One or more chart accounts were not found')
+    throw missing('chartAccounts', { plural: true })
   }
 }
 
@@ -603,7 +604,7 @@ async function assertDimensionsInCompany(
       .where(and(eq(projects.companyId, ctx.companyId), inArray(projects.id, projectIds)))
 
     if (rows.length !== projectIds.length) {
-      throw new Error('One or more jobs were not found')
+      throw missing('jobs', { plural: true })
     }
   }
 
@@ -614,7 +615,7 @@ async function assertDimensionsInCompany(
       .where(and(eq(costCodes.companyId, ctx.companyId), inArray(costCodes.id, costCodeIds)))
 
     if (rows.length !== costCodeIds.length) {
-      throw new Error('One or more cost codes were not found')
+      throw missing('costCodes', { plural: true })
     }
   }
 }
@@ -677,7 +678,7 @@ export async function postDraftEntry(ctx: ActorContext, entryId: string) {
       .where(scoped(ctx, journalEntries, eq(journalEntries.id, entryId)))
       .limit(1)
 
-    if (!entry) throw new Error('Entry not found')
+    if (!entry) throw missing('entry')
     if (entry.status !== 'draft') {
       throw new Refusal(`Entry ${entry.entryNumber} is ${entry.status}, not a draft.`)
     }
@@ -716,7 +717,7 @@ export async function discardDraftEntry(ctx: ActorContext, entryId: string): Pro
       .where(scoped(ctx, journalEntries, eq(journalEntries.id, entryId)))
       .limit(1)
 
-    if (!entry) throw new Error('Entry not found')
+    if (!entry) throw missing('entry')
     if (entry.status !== 'draft') {
       throw new Refusal(
         `Entry ${entry.entryNumber} is ${entry.status}. A posted entry is voided, never deleted.`,
@@ -861,7 +862,7 @@ export async function reopenPeriod(ctx: ActorContext, periodId: string) {
       .where(scoped(ctx, accountingPeriods, eq(accountingPeriods.id, periodId)))
       .limit(1)
 
-    if (!period) throw new Error('Accounting period not found')
+    if (!period) throw missing('accountingPeriod')
 
     await tx
       .update(accountingPeriods)

@@ -21,7 +21,9 @@ function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) return sourceFiles(path)
-    return path.endsWith('.ts') ? [path] : []
+    // `.tsx` too, since Phase 120: a client component throws just as well as a
+    // server action, and one of the 17 was in `src/app/m/receipt/capture.tsx`.
+    return path.endsWith('.ts') || path.endsWith('.tsx') ? [path] : []
   })
 }
 
@@ -35,10 +37,17 @@ function flatten(argument: string): string | null {
 
 type Site = { file: string; line: number; message: string }
 
-/** Every `throw new Error(...)` left in the module layer, with its sentence. */
+/**
+ * Every `throw new Error(...)` left in the layers a person can reach, with its
+ * sentence.
+ *
+ * `src/app` joined the scan in Phase 120. Phase 119 read `src/modules` only and
+ * left 17 person-facing bare throws one directory over — 16 of them in
+ * `src/app/actions/*.ts`, the very files that call `messageFor`.
+ */
 function bareThrows(): Site[] {
   const sites: Site[] = []
-  for (const file of sourceFiles('src/modules')) {
+  for (const file of [...sourceFiles('src/modules'), ...sourceFiles('src/app')]) {
     const src = readFileSync(file, 'utf8')
     const opener = /throw new Error\(/g
     let match: RegExpExecArray | null
@@ -104,7 +113,12 @@ describe('the module layer, read as source', () => {
     // If the parser ever stopped matching, every assertion below would pass on
     // an empty list. This is the guard against a green tripwire that reads
     // nothing.
-    expect(sites.length).toBeGreaterThan(50)
+    //
+    // The floor was 50 when Phase 119 wrote it and 106 bare throws remained.
+    // Phase 120 converted 74 `X not found` sites and the 17 in `src/app`,
+    // leaving 31 — so the floor moved with them. It is a smoke test for the
+    // scanner, not a budget for how many throws may exist.
+    expect(sites.length).toBeGreaterThan(20)
   })
 
   // Keyed by the sentence rather than by line number: an allowlist that goes

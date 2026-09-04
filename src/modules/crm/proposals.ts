@@ -19,6 +19,7 @@ import { logActivity } from './opportunities'
 import { snapshotProposalPdf } from '@/modules/pdf/service'
 import { PIPELINE_STAGES, STAGE_PROBABILITY, stageIndex } from './pipeline'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Proposal lifecycle (spec §7 commercial structure, §9 statuses).
@@ -116,7 +117,7 @@ export async function createProposal(
     .where(scoped(ctx, opportunities, eq(opportunities.id, input.opportunityId)))
     .limit(1)
 
-  if (!opportunity) throw new Error('Opportunity not found')
+  if (!opportunity) throw missing('opportunity')
   if (input.items.length === 0) throw new Refusal('A proposal needs at least one line item.')
 
   const items = input.items.map((item, index) => {
@@ -530,7 +531,7 @@ async function partiesAtSend(ctx: ActorContext, proposalId: string) {
     .where(scoped(ctx, proposals, eq(proposals.id, proposalId)))
     .limit(1)
 
-  if (!row) throw new Error('Proposal not found')
+  if (!row) throw missing('proposal')
 
   return partiesFor({
     letterhead: letterheadFor({ companyName: row.company.name, profile: row.profile }),
@@ -545,7 +546,7 @@ async function loadProposal(ctx: ActorContext, proposalId: string) {
     .where(scoped(ctx, proposals, eq(proposals.id, proposalId)))
     .limit(1)
 
-  if (!proposal) throw new Error('Proposal not found')
+  if (!proposal) throw missing('proposal')
   return proposal
 }
 

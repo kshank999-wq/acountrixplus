@@ -11,7 +11,7 @@ import {
 } from '@/modules/evidence/service'
 import { resolveNote, writeNote } from '@/modules/evidence/notes'
 import { EVIDENCE_SUBJECTS } from '@/modules/evidence/subjects'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /** Server actions for attachments and accountant notes (spec §13, Phase 20). */
 
@@ -53,7 +53,7 @@ export async function uploadEvidenceAction(form: FormData): Promise<ActionResult
     })
 
     const file = form.get('file')
-    if (!(file instanceof File) || file.size === 0) throw new Error('Choose a file first.')
+    if (!(file instanceof File) || file.size === 0) throw new Refusal('Choose a file first.')
 
     const stored = await storeDocument(actor, {
       filename: file.name || 'attachment',
@@ -102,7 +102,7 @@ export async function detachEvidenceAction(input: unknown): Promise<ActionResult
       documentId: parsed.documentId,
     })
 
-    if (!removed) throw new Error('That was not attached to this record.')
+    if (!removed) throw new Refusal('That was not attached to this record.')
     return 'Removed from this record. The file is still in your documents.'
   })
 }
@@ -112,7 +112,7 @@ export async function deleteDocumentAction(documentId: unknown): Promise<ActionR
     const actor = await requireActor()
     const done = await deleteDocument(actor, z.string().uuid().parse(documentId))
 
-    if (!done) throw new Error('That document does not exist.')
+    if (!done) throw new Refusal('That document does not exist.')
     return 'Deleted, everywhere it was attached.'
   })
 }
@@ -147,7 +147,7 @@ export async function resolveNoteAction(
       typeof answer === 'string' ? answer : undefined,
     )
 
-    if (!done) throw new Error('That question has already been answered.')
+    if (!done) throw new Refusal('That question has already been answered.')
     return 'Answered.'
   })
 }

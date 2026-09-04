@@ -19,7 +19,7 @@ import {
   saveAsTemplate,
   saveDocument,
 } from '@/modules/design/documents'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -113,7 +113,7 @@ export async function uploadAssetAction(formData: FormData): Promise<ActionResul
     const actor = await requireActor()
 
     const file = formData.get('file')
-    if (!(file instanceof File)) throw new Error('Choose a file to upload.')
+    if (!(file instanceof File)) throw new Refusal('Choose a file to upload.')
 
     const kind = formData.get('kind')
     const buffer = Buffer.from(await file.arrayBuffer())

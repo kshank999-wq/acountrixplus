@@ -3,7 +3,7 @@
 import { useRef, useState } from 'react'
 import { formatCents } from '@/lib/money'
 import { OutboxBadge } from '../outbox-badge'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 type Candidate = { id: string; postedDate: string; amountCents: number; label: string }
 
@@ -223,7 +223,7 @@ const JPEG_QUALITY = 0.82
 async function downscale(file: File): Promise<File> {
   if (file.type === 'application/pdf') return file
   if (!file.type.startsWith('image/')) {
-    throw new Error('That is not a photo or a PDF.')
+    throw new Refusal('That is not a photo or a PDF.')
   }
 
   const bitmap = await createImageBitmap(file)

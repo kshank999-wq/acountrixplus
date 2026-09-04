@@ -7,6 +7,7 @@ import {
 } from '@/db/schema'
 import type { ActorContext } from '@/modules/tenancy/context'
 import { createJournalEntry, entryForSource, voidJournalEntry, type JournalLineInput } from './journal'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Derives ledger entries from bank transactions (ADR 0001).
@@ -61,7 +62,7 @@ export async function syncLedgerForTransaction(
     )
     .limit(1)
 
-  if (!transaction) throw new Error('Transaction not found')
+  if (!transaction) throw missing('transaction')
 
   const existing = await entryForSource(ctx, 'bank_transaction', transactionId, exec)
   if (existing) {
@@ -259,6 +260,6 @@ async function bankGlAccount(financialAccountId: string, exec: Executor): Promis
     .where(eq(financialAccounts.id, financialAccountId))
     .limit(1)
 
-  if (!account) throw new Error('Financial account not found')
+  if (!account) throw missing('financialAccount')
   return account.chartAccountId
 }

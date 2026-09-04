@@ -518,7 +518,7 @@ describe('crm tenant isolation', () => {
 
     await expect(
       createOpportunity(alpha.ctx, { organizationId: betaOrg.id, title: 'Cross-tenant' }),
-    ).rejects.toThrow(/not found/i)
+    ).rejects.toThrow(/not on these books/i)
   })
 
   it('scopes analytics to the acting company', async () => {

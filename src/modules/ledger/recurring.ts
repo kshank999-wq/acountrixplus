@@ -11,6 +11,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Recurring journal entries (spec §13: "recurring entries").
@@ -231,7 +232,7 @@ export async function setRecurringActive(
       .where(scoped(ctx, recurringEntries, eq(recurringEntries.id, templateId)))
       .limit(1)
 
-    if (!template) throw new Error('Recurring entry not found')
+    if (!template) throw missing('recurringEntry')
 
     await tx
       .update(recurringEntries)

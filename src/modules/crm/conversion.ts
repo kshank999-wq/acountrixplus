@@ -13,6 +13,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { createInvoice } from '@/modules/receivables/service'
 import { logActivity } from './opportunities'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Turning a win into work (spec §6).
@@ -47,7 +48,7 @@ export async function convertWonOpportunity(
     .where(scoped(ctx, opportunities, eq(opportunities.id, opportunityId)))
     .limit(1)
 
-  if (!row) throw new Error('Opportunity not found')
+  if (!row) throw missing('opportunity')
   const { opportunity, organization } = row
 
   if (opportunity.stage !== 'won') {

@@ -2,6 +2,7 @@ import { asc, eq, gte, lte, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { paymentApplications, payments, vendors } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Contractor payment reporting (spec §13: "1099-related vendor data fields as
@@ -177,7 +178,7 @@ export async function setVendorReporting(
       .where(scoped(ctx, vendors, eq(vendors.id, vendorId)))
       .limit(1)
 
-    if (!before) throw new Error('Vendor not found')
+    if (!before) throw missing('vendor')
 
     await tx
       .update(vendors)

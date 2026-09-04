@@ -11,6 +11,7 @@ import {
   type SegmentCandidate,
   type SegmentDefinition,
 } from './segments'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Segment persistence and evaluation (spec §10).
@@ -196,7 +197,7 @@ export async function updateSegment(
       .where(and(eq(segments.id, segmentId), eq(segments.companyId, ctx.companyId)))
       .returning()
 
-    if (!segment) throw new Error('Segment not found')
+    if (!segment) throw missing('segment')
 
     await recordAudit(
       ctx,

@@ -16,7 +16,7 @@ import {
   createTask,
   reopenTask,
 } from '@/modules/engagement/tasks'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /** Server actions for communications and tasks (spec §6, §16, Phase 22). */
 
@@ -214,7 +214,7 @@ export async function completeTaskAction(
       typeof outcome === 'string' ? outcome : undefined,
     )
 
-    if (!done) throw new Error('That was already closed by somebody else.')
+    if (!done) throw new Refusal('That was already closed by somebody else.')
     return 'Done.'
   })
 }
@@ -228,7 +228,7 @@ export async function cancelTaskAction(taskId: unknown, outcome?: unknown): Prom
       typeof outcome === 'string' ? outcome : undefined,
     )
 
-    if (!done) throw new Error('That was already closed.')
+    if (!done) throw new Refusal('That was already closed.')
     return 'Dropped.'
   })
 }
@@ -238,7 +238,7 @@ export async function reopenTaskAction(taskId: unknown): Promise<ActionResult> {
     const actor = await requireActor()
     const done = await reopenTask(actor, uuid.parse(taskId))
 
-    if (!done) throw new Error('That is already open.')
+    if (!done) throw new Refusal('That is already open.')
     return 'Back on the list.'
   })
 }
@@ -252,7 +252,7 @@ export async function assignTaskAction(taskId: unknown, userId: unknown): Promis
       userId ? uuid.parse(userId) : null,
     )
 
-    if (!done) throw new Error('That task does not exist.')
+    if (!done) throw new Refusal('That task does not exist.')
     return userId ? 'Assigned.' : 'Unassigned — back on the shared list.'
   })
 }

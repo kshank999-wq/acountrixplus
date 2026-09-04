@@ -15,6 +15,7 @@ import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/m
 import { getPayrollProvider, type PayrollLineKind } from './provider'
 import { PAYROLL_ACCOUNTS } from './accounts'
 import { DomainError, Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Payroll runs and the entry they post (spec §13, §20 Phase 8).
@@ -468,7 +469,7 @@ export async function voidPayrollRun(ctx: ActorContext, runId: string, reason?: 
       .where(and(eq(payrollRuns.id, runId), eq(payrollRuns.companyId, ctx.companyId)))
       .limit(1)
 
-    if (!run) throw new Error('Payroll run not found')
+    if (!run) throw missing('payrollRun')
     if (run.status === 'void') return
 
     if (run.journalEntryId) {

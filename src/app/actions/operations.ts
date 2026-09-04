@@ -10,7 +10,7 @@ import { getHandler } from '@/modules/worker/registry'
 import { runOnce } from '@/modules/worker/runner'
 import { postDraftEntry, discardDraftEntry } from '@/modules/ledger/journal'
 import '@/modules/worker/handlers'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /**
  * Server actions for the operations page.
@@ -81,7 +81,7 @@ export async function runNowAction(kind: string): Promise<ActionResult> {
     requirePermission(actor, 'operations:manage')
 
     const definition = getHandler(kind)
-    if (!definition) throw new Error(`No handler registered for "${kind}".`)
+    if (!definition) throw new Refusal(`No handler registered for "${kind}".`)
 
     const result = await enqueue({
       kind,

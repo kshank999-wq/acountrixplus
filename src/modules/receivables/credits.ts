@@ -20,6 +20,7 @@ import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
 import { functionalCurrency, rateFor } from '@/modules/fx/service'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Credit notes and write-offs (spec §13).
@@ -86,7 +87,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
     .where(scoped(ctx, customers, eq(customers.id, input.customerId)))
     .limit(1)
 
-  if (!customer) throw new Error('Customer not found')
+  if (!customer) throw missing('customer')
 
   const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable)
   if (!arAccount) throw new Refusal('Accounts Receivable is missing from the chart.')
@@ -100,7 +101,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
       .where(scoped(ctx, invoices, eq(invoices.id, input.invoiceId)))
       .limit(1)
 
-    if (!row) throw new Error('Invoice not found')
+    if (!row) throw missing('invoice')
     if (row.customerId !== input.customerId) {
       throw new Refusal('That invoice belongs to a different customer.')
     }
@@ -348,7 +349,7 @@ async function applyCreditWithin(
     .where(and(eq(creditNotes.id, input.creditNoteId), eq(creditNotes.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!note) throw new Error('Credit note not found')
+  if (!note) throw missing('creditNote')
   if (note.party !== 'customer') {
     throw new Refusal('That is a vendor credit. It cannot be applied to an invoice.')
   }
@@ -360,7 +361,7 @@ async function applyCreditWithin(
     .where(and(eq(invoices.id, input.invoiceId), eq(invoices.companyId, ctx.companyId)))
     .limit(1)
 
-  if (!invoice) throw new Error('Invoice not found')
+  if (!invoice) throw missing('invoice')
   if (invoice.customerId !== note.customerId) {
     throw new Refusal('A credit can only be applied to the same customer’s invoice.')
   }
@@ -493,7 +494,7 @@ export async function writeOffInvoice(
     .where(scoped(ctx, invoices, eq(invoices.id, invoiceId)))
     .limit(1)
 
-  if (!invoice) throw new Error('Invoice not found')
+  if (!invoice) throw missing('invoice')
   if (invoice.status === 'void') {
     throw new Refusal('That invoice is voided — there is nothing owed to write off.')
   }
@@ -613,7 +614,7 @@ export async function recoverWriteOff(
     .where(scoped(ctx, invoiceWriteOffs, eq(invoiceWriteOffs.id, writeOffId)))
     .limit(1)
 
-  if (!writeOff) throw new Error('Write-off not found')
+  if (!writeOff) throw missing('writeOff')
   if (writeOff.recoveredOn) throw new Refusal('That write-off has already been recovered.')
   if (input.amountCents <= 0) throw new Refusal('A recovery must be greater than zero.')
   if (input.amountCents > writeOff.amountCents) {
@@ -630,7 +631,7 @@ export async function recoverWriteOff(
     .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
     .limit(1)
 
-  if (!bank) throw new Error('Financial account not found')
+  if (!bank) throw missing('financialAccount')
 
   const badDebtAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.badDebt)
   if (!badDebtAccount) throw new Refusal('Bad Debt (6025) is missing from the chart of accounts.')

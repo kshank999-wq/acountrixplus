@@ -24,6 +24,7 @@ import {
 } from '@/modules/ledger/posting'
 import { rememberVendor } from './rules-engine'
 import { DomainError, Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 export type ReviewState =
   | 'new'
@@ -154,7 +155,7 @@ async function loadTransaction(ctx: ActorContext, transactionId: string) {
     .where(scoped(ctx, bankTransactions, eq(bankTransactions.id, transactionId)))
     .limit(1)
 
-  if (!transaction) throw new Error('Transaction not found')
+  if (!transaction) throw missing('transaction')
   return transaction
 }
 
@@ -888,7 +889,7 @@ async function assertAccountInTenant(ctx: ActorContext, chartAccountId: string) 
     .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, chartAccountId)))
     .limit(1)
 
-  if (!account) throw new Error('Chart account not found')
+  if (!account) throw missing('chartAccount')
 }
 
 async function assertAccountsInTenant(ctx: ActorContext, chartAccountIds: string[]) {
@@ -898,6 +899,6 @@ async function assertAccountsInTenant(ctx: ActorContext, chartAccountIds: string
     .where(scoped(ctx, chartAccounts, inArray(chartAccounts.id, chartAccountIds)))
 
   if (rows.length !== chartAccountIds.length) {
-    throw new Error('One or more chart accounts were not found')
+    throw missing('chartAccounts', { plural: true })
   }
 }
