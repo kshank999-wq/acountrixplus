@@ -137,6 +137,30 @@ export const ALLOWED_BARE_REFUSALS: readonly {
   because: string
 }[] = [
   {
+    file: 'src/modules/fx/addition.ts',
+    message:
+      'No addition form is declared for "X". A tripwire that scans for sums has to say which '
+      + 'forms of sum it scans for, or its guarantee is narrower than it reads.',
+    because:
+      'The sixth registry lookup to trip this rule, after prompts, retention policies, record ' +
+      'kinds and falsifiers. It reads as prose because it is explaining a rule to whoever is ' +
+      'adding a third way of summing money — and that person is a maintainer holding a failing ' +
+      'test, not somebody who clicked something. A key nobody declared cannot reach a screen: ' +
+      'the keys are literals in this repository.',
+  },
+  {
+    file: 'src/modules/fx/on-screen.ts',
+    message:
+      'No basis is declared for X in X. Money reaching a screen has to say whether it came off '
+      + 'a document — which carries its own currency — or out of the books, which are in the '
+      + 'company’s. Nothing else can tell the two apart at the call site.',
+    because:
+      'The same shape as its sibling above, and the seventh overall. It fires when a prop type ' +
+      'carrying money has not been classified, which only ever happens while somebody is running ' +
+      'the scan that found it. Phase 125 is the reason to keep it a throw rather than a return: ' +
+      'the classification it demands is exactly what that phase found two phases had got wrong.',
+  },
+  {
     file: 'src/modules/ai/prompts.ts',
     message: 'No prompt registered for "X"',
     because:
