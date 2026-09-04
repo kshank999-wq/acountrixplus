@@ -5,6 +5,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { PAYROLL_ACCOUNTS } from './accounts'
 import { accountByNumber } from '@/modules/coa/service'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Sales tax (spec §13: "sales tax and payroll should use modular/integration
@@ -42,12 +43,12 @@ export type TaxCodeInput = {
 export async function createTaxCode(ctx: ActorContext, input: TaxCodeInput) {
   requirePermission(ctx, 'tax:manage')
 
-  if (!input.code.trim()) throw new Error('A tax code needs a code.')
+  if (!input.code.trim()) throw new Refusal('A tax code needs a code.')
   if (!input.jurisdiction.trim()) {
-    throw new Error('A tax code needs a jurisdiction — it is what the return is filed with.')
+    throw new Refusal('A tax code needs a jurisdiction — it is what the return is filed with.')
   }
   if (input.rateBp < 0 || input.rateBp > 10_000) {
-    throw new Error('A tax rate must be between 0% and 100%.')
+    throw new Refusal('A tax rate must be between 0% and 100%.')
   }
 
   const liability = await accountByNumber(ctx.companyId, PAYROLL_ACCOUNTS.salesTaxPayable)
@@ -171,7 +172,7 @@ export async function priceDocumentTax(
 
   const priced = lines.map((line) => {
     const code = codes.get(line.taxCodeId)
-    if (!code) throw new Error('That tax code is not on this company’s list.')
+    if (!code) throw new Refusal('That tax code is not on this company’s list.')
 
     return {
       taxCodeId: line.taxCodeId,
@@ -218,7 +219,7 @@ export async function recordDocumentTax(
   let total = 0
   const rows = input.lines.map((line) => {
     const code = byId.get(line.taxCodeId)
-    if (!code) throw new Error('That tax code is not on this company’s list.')
+    if (!code) throw new Refusal('That tax code is not on this company’s list.')
 
     const taxCents = line.taxCents ?? taxOn(line.taxableCents, code.rateBp)
     total += taxCents

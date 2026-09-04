@@ -26,6 +26,7 @@ import {
   summarySchema,
 } from './schemas'
 import { getSuggestion, markAccepted, recordSuggestion } from './suggestions'
+import { Refusal } from '@/modules/errors'
 
 /**
  * The AI bookkeeping assistant (spec §11).
@@ -134,14 +135,14 @@ export async function acceptCategorization(
   const suggestion = await getSuggestion(ctx, suggestionId)
 
   if (!suggestion || suggestion.status !== 'pending') {
-    throw new Error('That suggestion is no longer awaiting a decision.')
+    throw new Refusal('That suggestion is no longer awaiting a decision.')
   }
   if (suggestion.feature !== 'bookkeeping_categorize' || !suggestion.entityId) {
-    throw new Error('That suggestion is not a categorization.')
+    throw new Refusal('That suggestion is not a categorization.')
   }
 
   const chartAccountId = String(suggestion.payload.chartAccountId ?? '')
-  if (!chartAccountId) throw new Error('That suggestion has no account on it.')
+  if (!chartAccountId) throw new Refusal('That suggestion has no account on it.')
 
   // `categorize` runs its own permission check, its own tenant scoping, and
   // writes its own audit event under this actor. Nothing about the call says
@@ -290,10 +291,10 @@ export async function acceptRule(ctx: ActorContext, suggestionId: string) {
   const suggestion = await getSuggestion(ctx, suggestionId)
 
   if (!suggestion || suggestion.status !== 'pending') {
-    throw new Error('That suggestion is no longer awaiting a decision.')
+    throw new Refusal('That suggestion is no longer awaiting a decision.')
   }
   if (suggestion.feature !== 'bookkeeping_rule') {
-    throw new Error('That suggestion is not a rule.')
+    throw new Refusal('That suggestion is not a rule.')
   }
 
   // Re-validated on the way out. The payload was schema-checked when it was

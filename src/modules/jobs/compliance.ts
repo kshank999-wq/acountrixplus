@@ -4,6 +4,7 @@ import { complianceDocuments, subcontractors, vendors } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
+import { Refusal } from '@/modules/errors'
 import {
   COMPLIANCE_LABELS,
   documentStatus,
@@ -87,7 +88,7 @@ export async function createSubcontractor(
 
   const defaultRetainageBp = input.defaultRetainageBp ?? 0
   if (defaultRetainageBp < 0 || defaultRetainageBp > 10_000) {
-    throw new Error('Retainage must be between 0% and 100%.')
+    throw new Refusal('Retainage must be between 0% and 100%.')
   }
 
   return db.transaction(async (tx) => {
@@ -137,7 +138,7 @@ export async function updateSubcontractor(
     input.defaultRetainageBp !== undefined &&
     (input.defaultRetainageBp < 0 || input.defaultRetainageBp > 10_000)
   ) {
-    throw new Error('Retainage must be between 0% and 100%.')
+    throw new Refusal('Retainage must be between 0% and 100%.')
   }
 
   return db.transaction(async (tx) => {
@@ -209,7 +210,7 @@ export async function recordComplianceDocument(
   if (!sub) throw new Error('Subcontractor not found')
 
   if (input.issuedOn && input.expiresOn && input.expiresOn < input.issuedOn) {
-    throw new Error('A document cannot expire before it was issued.')
+    throw new Refusal('A document cannot expire before it was issued.')
   }
 
   return db.transaction(async (tx) => {

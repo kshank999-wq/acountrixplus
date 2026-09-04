@@ -17,6 +17,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { creditableByReceipt } from './receipt-credit'
+import { Refusal } from '@/modules/errors'
 import {
   applyConsumption,
   consume,
@@ -87,7 +88,7 @@ export async function inventoryAccounts(
   ])
 
   if (!inventory || !cogs || !shrinkage || !grni) {
-    throw new Error(
+    throw new Refusal(
       'The chart of accounts is missing an inventory account. Expected 1400, 5000, 5400, and 2050.',
     )
   }
@@ -235,8 +236,8 @@ export async function receiveStock(
     const item = await requireInventoriedItem(ctx, input.itemId, tx)
     const accounts = await inventoryAccounts(ctx.companyId, item, tx)
 
-    if (input.quantityMilli <= 0) throw new Error('A receipt has to bring something in.')
-    if (input.unitCostCents < 0) throw new Error('A negative cost is a mistake, not a discount.')
+    if (input.quantityMilli <= 0) throw new Refusal('A receipt has to bring something in.')
+    if (input.unitCostCents < 0) throw new Refusal('A negative cost is a mistake, not a discount.')
 
     // Where the other side of the entry goes is the caller's to choose, except
     // for one class it may never be (Phase 117).
@@ -246,7 +247,7 @@ export async function receiveStock(
       .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, input.creditAccountId)))
       .limit(1)
 
-    if (!creditAccount) throw new Error('That account is not on this chart.')
+    if (!creditAccount) throw new Refusal('That account is not on this chart.')
 
     const verdict = creditableByReceipt(creditAccount)
     if (!verdict.ok) throw new Error(verdict.why)
@@ -472,12 +473,12 @@ export async function adjustStock(
 
   const reason = input.reason.trim()
   if (!reason) {
-    throw new Error(
+    throw new Refusal(
       'Say why the count differs. Stock that vanished with no explanation is theft, breakage, ' +
         'or a counting error, and which one changes what to do next.',
     )
   }
-  if (input.countedMilli < 0) throw new Error('A count cannot be negative.')
+  if (input.countedMilli < 0) throw new Refusal('A count cannot be negative.')
 
   return db.transaction(async (tx) => {
     const item = await requireInventoriedItem(ctx, input.itemId, tx)
@@ -777,7 +778,7 @@ export async function reconcileInventory(
     : [{ value: '0' }]
 
   const inventoryAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.inventory)
-  if (!inventoryAccount) throw new Error('The Inventory account is missing from the chart.')
+  if (!inventoryAccount) throw new Refusal('The Inventory account is missing from the chart.')
 
   /**
    * Every account stock is actually carried on, not just 1400.
@@ -887,7 +888,7 @@ async function requireInventoriedItem(ctx: ActorContext, itemId: string, exec: E
 
   if (!item) throw new Error('Item not found')
   if (!item.isInventoried) {
-    throw new Error(
+    throw new Refusal(
       `${item.name} is not a stocked item. Switch stock tracking on for it first, or use a plain invoice line.`,
     )
   }

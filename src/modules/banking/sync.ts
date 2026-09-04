@@ -14,6 +14,7 @@ import { applyRulesToNewTransactions } from '@/modules/bookkeeping/rules-engine'
 import { mintChartAccount } from './accounts'
 import { getBankProvider } from './registry'
 import type { ProviderAccount, ProviderTransaction } from './provider'
+import { Refusal } from '@/modules/errors'
 
 export type ImportSummary = {
   connectionId: string
@@ -105,7 +106,7 @@ async function createFinancialAccounts(
   // a numbering surprise later.
   const checking = await accountByNumber(companyId, SYSTEM_ACCOUNTS.defaultChecking, exec)
   if (!checking) {
-    throw new Error(
+    throw new Refusal(
       'Chart of accounts is not installed for this company. Run onboarding before connecting a bank.',
     )
   }

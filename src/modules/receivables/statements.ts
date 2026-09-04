@@ -26,6 +26,7 @@ import {
   type CurrencyPosition,
 } from './settlement-currency'
 import { agingBucket } from '@/modules/ledger/aging'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Customer statements (spec §13: "customers, invoices, credits, payments,
@@ -179,7 +180,7 @@ export async function buildStatement(
   if (!customer) throw new Error('Customer not found')
 
   if (kind === 'balance_forward' && !input.periodStart) {
-    throw new Error('A balance-forward statement needs a period to carry a balance into.')
+    throw new Refusal('A balance-forward statement needs a period to carry a balance into.')
   }
 
   const activity = await customerActivity(ctx, input.customerId, input.asOfDate)

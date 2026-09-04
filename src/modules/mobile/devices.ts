@@ -3,6 +3,7 @@ import { db, type Executor } from '@/db'
 import { devices, sessions } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import type { ActorContext } from '@/modules/tenancy/context'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Signed-in devices (spec §19 least privilege, §22 attributable changes).
@@ -214,7 +215,7 @@ export async function renameDevice(
   label: string,
 ): Promise<void> {
   const trimmed = label.trim().slice(0, 60)
-  if (!trimmed) throw new Error('A device needs a name.')
+  if (!trimmed) throw new Refusal('A device needs a name.')
 
   const result = await db
     .update(devices)

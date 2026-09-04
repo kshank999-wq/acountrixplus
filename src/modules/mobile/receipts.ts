@@ -1,5 +1,6 @@
 import type { Executor } from '@/db'
 import { type ActorContext } from '@/modules/tenancy/context'
+import { Refusal } from '@/modules/errors'
 import {
   attachDocument,
   detachDocument,
@@ -75,12 +76,12 @@ export type ReceiptUpload = {
  */
 export async function uploadReceipt(ctx: ActorContext, input: ReceiptUpload) {
   if (!(RECEIPT_CONTENT_TYPES as readonly string[]).includes(input.contentType)) {
-    throw new Error(
+    throw new Refusal(
       `Unsupported file type ${input.contentType}. Use a photo (PNG, JPEG, WebP) or a PDF.`,
     )
   }
   if (input.data.byteLength > MAX_RECEIPT_BYTES) {
-    throw new Error('That receipt is larger than 2 MB. Try again with a smaller photo.')
+    throw new Refusal('That receipt is larger than 2 MB. Try again with a smaller photo.')
   }
 
   const document = await storeDocument(ctx, input)

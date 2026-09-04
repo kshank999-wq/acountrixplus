@@ -13,6 +13,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { accountByNumber } from '@/modules/coa/service'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { PAYROLL_ACCOUNTS } from './accounts'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Remitting what was withheld (spec §13, §19).
@@ -155,10 +156,10 @@ export async function recordRemittance(
   requirePermission(ctx, 'accounting:journal')
 
   if (input.amountCents <= 0) {
-    throw new Error('A remittance must be greater than zero.')
+    throw new Refusal('A remittance must be greater than zero.')
   }
   if (input.periodEnd < input.periodStart) {
-    throw new Error('The period end must be on or after the period start.')
+    throw new Refusal('The period end must be on or after the period start.')
   }
 
   const [liability] = await db
@@ -169,7 +170,7 @@ export async function recordRemittance(
 
   if (!liability) throw new Error('Liability account not found')
   if (liability.type !== 'liability') {
-    throw new Error(
+    throw new Refusal(
       `${liability.number} ${liability.name} is not a liability account. A remittance clears a debt.`,
     )
   }
@@ -184,7 +185,7 @@ export async function recordRemittance(
       : [PAYROLL_ACCOUNTS.payrollLiabilities, PAYROLL_ACCOUNTS.netPayPayable]
 
   if (!expected.includes(liability.number)) {
-    throw new Error(
+    throw new Refusal(
       `A ${input.kind === 'sales_tax' ? 'sales tax' : 'payroll'} remittance clears ` +
         `${expected.join(' or ')}, not ${liability.number} ${liability.name}.`,
     )
@@ -203,7 +204,7 @@ export async function recordRemittance(
   const owed = position?.balanceCents ?? 0
 
   if (input.amountCents > owed) {
-    throw new Error(
+    throw new Refusal(
       `The ledger shows ${formatCents(owed)} owed on ${liability.number} ${liability.name} as at ${input.paidOn}, ` +
         `but this remittance is ${formatCents(input.amountCents)}. Post the accrual first, or check the amount.`,
     )

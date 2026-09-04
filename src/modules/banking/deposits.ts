@@ -18,6 +18,7 @@ import {
   type JournalLineInput,
 } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Bank deposits (spec §13).
@@ -117,7 +118,7 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
   requirePermission(ctx, 'accounting:journal')
 
   if (input.items.length === 0) {
-    throw new Error('A deposit needs at least one item.')
+    throw new Refusal('A deposit needs at least one item.')
   }
 
   const [account] = await db
@@ -130,7 +131,7 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
 
   const undepositedAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.undepositedFunds)
   if (!undepositedAccount) {
-    throw new Error('The Undeposited Funds account is missing from the chart.')
+    throw new Refusal('The Undeposited Funds account is missing from the chart.')
   }
 
   const paymentIds = input.items.filter(isReceiptItem).map((item) => item.paymentId)
@@ -152,12 +153,12 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
     : []
 
   if (receipts.length !== paymentIds.length) {
-    throw new Error('One or more of those receipts could not be found.')
+    throw new Refusal('One or more of those receipts could not be found.')
   }
 
   const alreadyBanked = receipts.find((receipt) => receipt.financialAccountId !== null)
   if (alreadyBanked) {
-    throw new Error(
+    throw new Refusal(
       'One of those receipts already went straight to a bank account, so it is not ' +
         'waiting to be deposited.',
     )
@@ -168,7 +169,7 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
   const totalCents = receiptsCents + otherCents
 
   if (totalCents <= 0) {
-    throw new Error(
+    throw new Refusal(
       `The deposit comes to ${formatCents(totalCents)}. A deposit has to add up to more than nothing — ` +
         'check whether a fee was entered larger than the receipts it was taken from.',
     )
@@ -319,7 +320,7 @@ export async function voidDeposit(
     .limit(1)
 
   if (!deposit) throw new Error('Deposit not found')
-  if (deposit.voidedAt) throw new Error(`Deposit ${deposit.number} has already been reversed.`)
+  if (deposit.voidedAt) throw new Refusal(`Deposit ${deposit.number} has already been reversed.`)
 
   if (deposit.journalEntryId) {
     await reverseEntry(ctx, deposit.journalEntryId, reversalDate)

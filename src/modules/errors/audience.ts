@@ -48,6 +48,14 @@
  * This is a heuristic, and it is stated as one. Its job is to be the tripwire's
  * rule, so `tests/refusal-audience.test.ts` can fail the moment somebody writes
  * a new refusal that will never be read.
+ *
+ * ## What Phase 119 did with it
+ *
+ * 192 sites across 46 files became `throw new Refusal(...)`. Fourteen stayed
+ * bare and are listed in `ALLOWED_BARE_REFUSALS` below, each with the argument
+ * for it. The heuristic got those fourteen wrong — they read as prose because
+ * somebody was explaining something, but the explanation is for whoever
+ * maintains this, and two of them name environment variables.
  */
 
 export type Audience =
@@ -109,17 +117,129 @@ export function audienceOf(message: string): Audience {
 }
 
 /**
- * Bare `throw new Error` sites that carry a person-facing sentence and are
- * nonetheless allowed to stay.
+ * Bare `throw new Error` sites that read as a sentence and stay bare anyway.
  *
- * Empty on purpose, and it is meant to stay that way. It exists so that a
- * future case with a real argument has somewhere to make it — in prose, next to
- * the exception — rather than being smuggled in by weakening the rules above.
- * A refusal a person cannot read is not a refusal; it is a dead end with a
- * sentence wasted on it.
+ * The rules above are a heuristic, and these fourteen are where it is wrong:
+ * each one is written in prose because whoever wrote it was explaining
+ * something, but the explanation is for whoever maintains this, not whoever
+ * clicked. Showing them would be the leak ADR 0074 exists to prevent — two of
+ * them name environment variables.
+ *
+ * Each entry argues for itself rather than merely being listed, on the Phase
+ * 101 device, and `tests/refusal-audience.test.ts` fails if one of these sites
+ * stops existing or if a new bare person-facing throw appears without an entry
+ * here. That is the point: a future exception has somewhere to make its case in
+ * prose, instead of being smuggled in by weakening the rules.
  */
 export const ALLOWED_BARE_REFUSALS: readonly {
   file: string
   message: string
   because: string
-}[] = []
+}[] = [
+  {
+    file: 'src/modules/ai/prompts.ts',
+    message: 'No prompt registered for "X"',
+    because:
+      'A prompt key that is not in the registry means code asked for a prompt nobody wrote. ' +
+      'No user action produces it and no user action would fix it.',
+  },
+  {
+    file: 'src/modules/auth/secret-box.ts',
+    message: 'Stored secret is not in a form this version can read.',
+    because:
+      'A stored secret in an unreadable envelope is a deployment or key-rotation problem. ' +
+      'Telling the person at the keyboard about the envelope format helps nobody and says ' +
+      'more about the crypto than it should.',
+  },
+  {
+    file: 'src/modules/evidence/store.ts',
+    message:
+      'OBJECT_STORE=filesystem needs OBJECT_STORE_PATH set to a directory the application ' +
+      'may write to.',
+    because:
+      'Names OBJECT_STORE_PATH. An environment variable is exactly the kind of thing ADR ' +
+      '0074 exists to keep off a screen.',
+  },
+  {
+    file: 'src/modules/notify/providers/http.ts',
+    message:
+      'TRANSACTIONAL_EMAIL_PROVIDER is "X" but X is not set. Set it, or use ' +
+      'TRANSACTIONAL_EMAIL_PROVIDER=mock to keep mail in memory.',
+    because:
+      'Names TRANSACTIONAL_EMAIL_PROVIDER and the missing key beside it, for the same ' +
+      'reason: configuration belongs in a log, not in front of somebody sending a letter.',
+  },
+  {
+    file: 'src/modules/notify/providers/index.ts',
+    message: 'Unknown transactional email provider "X". Available: mock, X.',
+    because:
+      'Lists the registered provider names. Configuration again, and a person sending a ' +
+      'letter can do nothing whatever with it.',
+  },
+  {
+    file: 'src/modules/worker/runner.ts',
+    message:
+      'Job "X" needs a company and has none. Enqueue it with a companyId, or register the ' +
+      'handler as global.',
+    because:
+      'A handler enqueued without a company is a registration mistake in this codebase. The ' +
+      'sentence is addressed to whoever registered the handler, and says so.',
+  },
+  {
+    file: 'src/modules/ledger/as-at.ts',
+    message: 'Nothing declares how a X settles a document.',
+    because:
+      'The Phase 101 registry throw: a settlement kind exists that nothing declared. It is ' +
+      'the "make a new table answer the question" device speaking to the developer adding ' +
+      'the kind, not to anybody who clicked something.',
+  },
+  {
+    file: 'src/modules/ledger/control-account.ts',
+    message: 'Nothing declares how a X moves X.',
+    because:
+      'The same registry device, for what moves a control account. A person cannot declare ' +
+      'a source type; only a developer editing the registry can.',
+  },
+  {
+    file: 'src/modules/jobs/billing.ts',
+    message: 'Contract item disappeared while billing.',
+    because:
+      'An invariant inside a transaction that has already loaded the item. If it ever ' +
+      'fires, the code is wrong rather than the application, and no wording would help.',
+  },
+  {
+    file: 'src/modules/mobile/audience.ts',
+    message: 'A notification preference names one owner, not two.',
+    because:
+      'Its own doc comment says it: "Both ids or neither is a programming error rather than ' +
+      'a user one." A notification preference is constructed by this codebase.',
+  },
+  {
+    file: 'src/modules/mobile/audience.ts',
+    message: 'A notification preference names an owner.',
+    because:
+      'The other half of the same invariant — a row that named no owner at all would be ' +
+      'read by nobody, and only a caller can have built one.',
+  },
+  {
+    file: 'src/modules/mobile/decision.ts',
+    message: 'A letter is addressed by construction; "no_subscription" is a push outcome.',
+    because:
+      'A letter is addressed by construction, so a mail channel cannot carry a push ' +
+      'outcome. The caller built both fields; nobody typed them into anything.',
+  },
+  {
+    file: 'src/modules/mobile/decision.ts',
+    message: 'A notification log row needs a title to be readable.',
+    because:
+      'The title on a notification log row comes from the sending code, never from a form, ' +
+      'so an empty one is this codebase failing to describe what it sent.',
+  },
+  {
+    file: 'src/modules/mobile/decision.ts',
+    message: 'A suppressed notification has no letter to point at.',
+    because:
+      'A suppression has no letter by construction, so a message id on one would name ' +
+      'somebody else\'s letter. Refusing protects the log, and only a caller causes it.',
+  },
+]

@@ -25,7 +25,7 @@ import { settleHeld } from '@/modules/fx/settlement'
 import { drawableAgainst } from '@/modules/fx/denomination'
 import { mayUse } from '@/modules/receivables/overpayment'
 import { convert, ensureFxAccount, functionalCurrency, normalise, rateFor } from '@/modules/fx/service'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { heldAcrossAt, type Position } from './retainer-position'
 
@@ -238,7 +238,7 @@ export async function billWork(ctx: ActorContext, input: BillWorkInput) {
   })
 
   if (preview.time.length === 0 && preview.expenses.length === 0) {
-    throw new Error('There is no approved, unbilled work on that engagement.')
+    throw new Refusal('There is no approved, unbilled work on that engagement.')
   }
 
   const grouping = input.grouping ?? 'person'
@@ -253,7 +253,7 @@ export async function billWork(ctx: ActorContext, input: BillWorkInput) {
   ])
 
   if (!serviceRevenue || !expenseRevenue) {
-    throw new Error('No revenue account is set up for billing time.')
+    throw new Refusal('No revenue account is set up for billing time.')
   }
 
   const lines: DocumentLineInput[] = groupTimeIntoLines(preview.time, grouping).map((line) => ({
@@ -476,7 +476,7 @@ export async function receiveRetainer(
   requirePermission(ctx, 'accounting:journal')
   await requireModule(ctx, 'time_billing')
 
-  if (input.amountCents <= 0) throw new Error('A retainer has to be more than nothing.')
+  if (input.amountCents <= 0) throw new Refusal('A retainer has to be more than nothing.')
 
   const { financialAccounts } = await import('@/db/schema')
 
@@ -620,7 +620,7 @@ async function applyRetainerWithin(
 
   if (!invoice) throw new Error('Invoice not found')
   if (invoice.customerId !== retainer.customerId) {
-    throw new Error('A retainer can only be drawn against the same client’s invoice.')
+    throw new Refusal('A retainer can only be drawn against the same client’s invoice.')
   }
 
   /**
@@ -659,7 +659,7 @@ async function applyRetainerWithin(
 
   const heldAccount = await retainerAccount(ctx.companyId, tx)
   const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable, tx)
-  if (!arAccount) throw new Error('Accounts Receivable is missing from the chart.')
+  if (!arAccount) throw new Refusal('Accounts Receivable is missing from the chart.')
 
   /**
    * The settlement, in the company's own money.
@@ -808,7 +808,7 @@ export async function resolveRetainerAccount(companyId: string, exec: Executor =
   if (held) return { account: held, holding: 'dedicated' as const }
 
   const unearned = await accountByNumber(companyId, '2500', exec)
-  if (!unearned) throw new Error('No account is set up to hold client retainers.')
+  if (!unearned) throw new Refusal('No account is set up to hold client retainers.')
   return { account: unearned, holding: 'shared' as const }
 }
 

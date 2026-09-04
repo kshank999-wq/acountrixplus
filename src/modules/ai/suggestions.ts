@@ -4,6 +4,7 @@ import { aiSuggestions } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import type { AiFeature } from './gateway'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Human-in-the-loop approval (spec §11 "User approval required for material
@@ -187,7 +188,7 @@ async function decide(
 
     // Already decided, or another company's. Either way there is nothing to
     // record — and reporting which would leak whether the id exists.
-    if (!updated) throw new Error('That suggestion is no longer awaiting a decision.')
+    if (!updated) throw new Refusal('That suggestion is no longer awaiting a decision.')
 
     await recordAudit(
       ctx,

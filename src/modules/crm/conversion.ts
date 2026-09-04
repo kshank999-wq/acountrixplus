@@ -12,6 +12,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { createInvoice } from '@/modules/receivables/service'
 import { logActivity } from './opportunities'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Turning a win into work (spec §6).
@@ -50,7 +51,7 @@ export async function convertWonOpportunity(
   const { opportunity, organization } = row
 
   if (opportunity.stage !== 'won') {
-    throw new Error('Only a won opportunity can be converted to a client and job.')
+    throw new Refusal('Only a won opportunity can be converted to a client and job.')
   }
 
   // Idempotent: converting twice must not create a second client or job.

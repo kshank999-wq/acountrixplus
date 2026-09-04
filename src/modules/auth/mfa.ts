@@ -9,7 +9,7 @@ import { hashPassword, verifyPassword } from './password'
 import { WRONG_PASSWORD } from './reauthentication'
 import { guardAct } from './guard-service'
 import { sendGuardWarning } from '@/modules/notify/guard-warning'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 import { decryptSecret, encryptSecret } from './secret-box'
 import { generateTotpSecret, otpauthUri, verifyTotp } from './totp'
 
@@ -100,7 +100,7 @@ export async function beginEnrollment(
 
   const [existing] = await db.select().from(userMfa).where(eq(userMfa.userId, userId)).limit(1)
   if (existing?.confirmedAt) {
-    throw new Error(
+    throw new Refusal(
       'Two-factor authentication is already switched on. Turn it off first to enrol a new device.',
     )
   }
@@ -318,7 +318,7 @@ export async function regenerateRecoveryCodes(
 
   const [row] = await db.select().from(userMfa).where(eq(userMfa.userId, userId)).limit(1)
   if (!row?.confirmedAt) {
-    throw new Error('Two-factor authentication is not switched on for this account.')
+    throw new Refusal('Two-factor authentication is not switched on for this account.')
   }
 
   const codes = Array.from({ length: RECOVERY_CODE_COUNT }, () => generateRecoveryCode())

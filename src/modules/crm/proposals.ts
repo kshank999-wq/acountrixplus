@@ -18,6 +18,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { logActivity } from './opportunities'
 import { snapshotProposalPdf } from '@/modules/pdf/service'
 import { PIPELINE_STAGES, STAGE_PROBABILITY, stageIndex } from './pipeline'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Proposal lifecycle (spec §7 commercial structure, §9 statuses).
@@ -116,7 +117,7 @@ export async function createProposal(
     .limit(1)
 
   if (!opportunity) throw new Error('Opportunity not found')
-  if (input.items.length === 0) throw new Error('A proposal needs at least one line item.')
+  if (input.items.length === 0) throw new Refusal('A proposal needs at least one line item.')
 
   const items = input.items.map((item, index) => {
     const quantityMilli = item.quantityMilli ?? 1000
@@ -195,7 +196,7 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
 
   const proposal = await loadProposal(ctx, proposalId)
   if (proposal.status === 'won' || proposal.status === 'lost') {
-    throw new Error('That proposal has already been decided.')
+    throw new Refusal('That proposal has already been decided.')
   }
 
   const items = await db
@@ -402,7 +403,7 @@ export async function decideProposal(
 
   const proposal = await loadProposal(ctx, proposalId)
   if (proposal.status === 'draft') {
-    throw new Error('Send the proposal before recording a decision on it.')
+    throw new Refusal('Send the proposal before recording a decision on it.')
   }
 
   return db.transaction(async (tx) => {
@@ -445,7 +446,7 @@ export async function updateProposalItems(
   requirePermission(ctx, 'proposals:manage')
 
   const proposal = await loadProposal(ctx, proposalId)
-  if (items.length === 0) throw new Error('A proposal needs at least one line item.')
+  if (items.length === 0) throw new Refusal('A proposal needs at least one line item.')
 
   const prepared = items.map((item, index) => {
     const quantityMilli = item.quantityMilli ?? 1000

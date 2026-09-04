@@ -5,6 +5,7 @@ import {
   type ScryptOptions,
 } from 'node:crypto'
 import { promisify } from 'node:util'
+import { Refusal } from '@/modules/errors'
 
 /**
  * `promisify` resolves to scrypt's no-options overload, so the cost parameters
@@ -29,7 +30,7 @@ const PARAMS = { N: 16384, r: 8, p: 1 } as const
 
 export async function hashPassword(password: string): Promise<string> {
   if (password.length < 8) {
-    throw new Error('Password must be at least 8 characters.')
+    throw new Refusal('Password must be at least 8 characters.')
   }
 
   const salt = randomBytes(16)

@@ -1,4 +1,5 @@
 import { BRAND } from './identity'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Whose name goes on a letter (spec §8, §19, Phase 74).
@@ -71,7 +72,7 @@ export function senderName(input: {
   if (!company) {
     // Not a fallback: a company with no name is a broken tenant, and quietly
     // signing its post with ours would hide that rather than fix it.
-    throw new Error('A company must have a name before it can send anything.')
+    throw new Refusal('A company must have a name before it can send anything.')
   }
 
   return firstFilled(input.chosen, input.legalName) ?? company

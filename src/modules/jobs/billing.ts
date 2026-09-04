@@ -14,6 +14,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { requireModule } from '@/modules/industry/modules'
 import { createInvoice } from '@/modules/receivables/service'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Schedule of values and progress billing (spec §5).
@@ -81,11 +82,11 @@ export async function setScheduleOfValues(
   const seen = new Set<string>()
   for (const line of lines) {
     if (seen.has(line.itemNumber)) {
-      throw new Error(`Item ${line.itemNumber} appears twice in the schedule of values.`)
+      throw new Refusal(`Item ${line.itemNumber} appears twice in the schedule of values.`)
     }
     seen.add(line.itemNumber)
     if (line.scheduledValueCents < 0) {
-      throw new Error('A scheduled value cannot be negative.')
+      throw new Refusal('A scheduled value cannot be negative.')
     }
   }
 
@@ -107,7 +108,7 @@ export async function setScheduleOfValues(
       const alreadyBilled = previous ? (billed.get(previous.id) ?? 0) : 0
 
       if (line.scheduledValueCents < alreadyBilled) {
-        throw new Error(
+        throw new Refusal(
           `Item ${line.itemNumber} has ${alreadyBilled} already billed, so its value cannot be lowered to ${line.scheduledValueCents}.`,
         )
       }
@@ -140,7 +141,7 @@ export async function setScheduleOfValues(
     for (const row of existing) {
       if (seen.has(row.itemNumber)) continue
       if ((billed.get(row.id) ?? 0) > 0) {
-        throw new Error(
+        throw new Refusal(
           `Item ${row.itemNumber} has already been billed and cannot be removed from the schedule of values.`,
         )
       }
@@ -214,7 +215,7 @@ export async function priceApplication(
   requirePermission(ctx, 'jobs:view')
 
   if (input.retainagePercentBp < 0 || input.retainagePercentBp > 10_000) {
-    throw new Error('Retainage must be between 0% and 100%.')
+    throw new Refusal('Retainage must be between 0% and 100%.')
   }
 
   const items = await scheduleFor(ctx, input.projectId)
@@ -225,14 +226,14 @@ export async function priceApplication(
 
   const lines = input.lines.map((line) => {
     const item = itemById.get(line.scheduleOfValuesId)
-    if (!item) throw new Error('That contract item is not on this job.')
+    if (!item) throw new Refusal('That contract item is not on this job.')
 
     const previousCompletedCents = billed.get(item.id) ?? 0
 
     let completedToDateCents: number
     if (line.percentCompleteBp !== undefined) {
       if (line.percentCompleteBp < 0 || line.percentCompleteBp > 10_000) {
-        throw new Error(`Item ${item.itemNumber}: percent complete must be between 0% and 100%.`)
+        throw new Refusal(`Item ${item.itemNumber}: percent complete must be between 0% and 100%.`)
       }
       completedToDateCents = Math.round(
         (item.scheduledValueCents * line.percentCompleteBp) / 10_000,
@@ -244,12 +245,12 @@ export async function priceApplication(
     const thisPeriodCents = completedToDateCents - previousCompletedCents
 
     if (thisPeriodCents < 0) {
-      throw new Error(
+      throw new Refusal(
         `Item ${item.itemNumber} would bill a negative amount. Completion cannot go backwards on an application; raise a credit instead.`,
       )
     }
     if (completedToDateCents > item.scheduledValueCents) {
-      throw new Error(
+      throw new Refusal(
         `Item ${item.itemNumber} would be billed beyond its scheduled value. Approve a change order first.`,
       )
     }
@@ -316,7 +317,7 @@ export async function createProgressBilling(
   })
 
   if (draft.thisPeriodCents <= 0) {
-    throw new Error('This application bills nothing. Enter progress on at least one item.')
+    throw new Refusal('This application bills nothing. Enter progress on at least one item.')
   }
 
   const items = await scheduleFor(ctx, input.projectId)
@@ -438,15 +439,15 @@ export async function releaseRetainage(
 
   const held = await retainageHeld(ctx, input.projectId)
   if (held <= 0) {
-    throw new Error('There is no retainage held on this job.')
+    throw new Refusal('There is no retainage held on this job.')
   }
 
   const amountCents = input.amountCents ?? held
   if (amountCents <= 0) {
-    throw new Error('A retainage release must be greater than zero.')
+    throw new Refusal('A retainage release must be greater than zero.')
   }
   if (amountCents > held) {
-    throw new Error(`Only ${held} is held in retainage on this job.`)
+    throw new Refusal(`Only ${held} is held in retainage on this job.`)
   }
 
   const retainageAccount = await accountByNumber(
@@ -454,7 +455,7 @@ export async function releaseRetainage(
     INDUSTRY_ACCOUNTS.retainageReceivable,
   )
   if (!retainageAccount) {
-    throw new Error('This chart of accounts has no Retainage Receivable account (1170).')
+    throw new Refusal('This chart of accounts has no Retainage Receivable account (1170).')
   }
 
   const applicationNumber = (await lastApplicationNumber(ctx, input.projectId)) + 1

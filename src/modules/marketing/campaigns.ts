@@ -24,6 +24,7 @@ import { emailBrand, renderEmailHtml, renderEmailText, type EmailBrand } from '.
 import { defaultBrandKit } from '@/modules/studio/service'
 import { evaluateSegment, parseDefinition, suppressedEmails } from './audience'
 import { getEmailProvider, publicBaseUrl, type OutboundMessage } from './email-provider'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Campaigns and the send pipeline (spec §10).
@@ -89,7 +90,7 @@ export async function addStep(
 
   const campaign = await loadCampaign(ctx, campaignId)
   if (campaign.status !== 'draft') {
-    throw new Error('Only a draft campaign can be changed.')
+    throw new Refusal('Only a draft campaign can be changed.')
   }
 
   return db.transaction(async (tx) => {
@@ -146,13 +147,13 @@ export async function sendStep(
 
   const campaign = await loadCampaign(ctx, campaignId)
   if (campaign.status === 'sent' || campaign.status === 'cancelled') {
-    throw new Error(`This campaign is ${campaign.status} and cannot be sent again.`)
+    throw new Refusal(`This campaign is ${campaign.status} and cannot be sent again.`)
   }
   if (!campaign.segmentId) {
-    throw new Error('Choose an audience segment before sending.')
+    throw new Refusal('Choose an audience segment before sending.')
   }
   if (!campaign.fromEmail) {
-    throw new Error('Set a from address before sending.')
+    throw new Refusal('Set a from address before sending.')
   }
 
   const [step] = await db
@@ -167,7 +168,7 @@ export async function sendStep(
     )
     .limit(1)
 
-  if (!step) throw new Error(`Step ${stepNumber} does not exist on this campaign.`)
+  if (!step) throw new Refusal(`Step ${stepNumber} does not exist on this campaign.`)
 
   const [segment] = await db
     .select()
@@ -175,7 +176,7 @@ export async function sendStep(
     .where(scoped(ctx, segments, eq(segments.id, campaign.segmentId)))
     .limit(1)
 
-  if (!segment) throw new Error('The campaign audience no longer exists.')
+  if (!segment) throw new Refusal('The campaign audience no longer exists.')
 
   // Step 1 and 2: who matches, and who may actually be contacted right now.
   const audience = await evaluateSegment(ctx, parseDefinition(segment.definition))
@@ -215,7 +216,7 @@ export async function sendStep(
     .where(eq(companies.id, ctx.companyId))
     .limit(1)
 
-  if (!company) throw new Error('This company no longer exists.')
+  if (!company) throw new Refusal('This company no longer exists.')
 
   const provider = getEmailProvider()
   const baseUrl = publicBaseUrl()

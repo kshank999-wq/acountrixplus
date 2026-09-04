@@ -4,6 +4,7 @@ import { db } from '@/db'
 import { assetBlobs, assets } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Asset storage (spec §15 logo library, §18 object storage).
@@ -93,15 +94,15 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
   requirePermission(ctx, 'company:manage')
 
   if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(input.contentType)) {
-    throw new Error(
+    throw new Refusal(
       `Unsupported file type ${input.contentType}. Use PNG, JPEG, WebP, or GIF.`,
     )
   }
   if (input.data.byteLength > MAX_ASSET_BYTES) {
-    throw new Error('That file is larger than 5 MB.')
+    throw new Refusal('That file is larger than 5 MB.')
   }
   if (input.data.byteLength === 0) {
-    throw new Error('That file is empty.')
+    throw new Refusal('That file is empty.')
   }
 
   // The content hash keeps the key stable for identical bytes, and the tenant

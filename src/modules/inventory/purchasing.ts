@@ -13,6 +13,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { requireModule } from '@/modules/industry/modules'
 import { extend } from './costing'
 import { inventoryAccounts, receiveStock } from './service'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Purchase orders, receiving, and the three-way match (spec §5, Retail:
@@ -66,7 +67,7 @@ export async function createPurchaseOrder(
   requirePermission(ctx, 'accounting:journal')
   await requireModule(ctx, 'inventory')
 
-  if (input.lines.length === 0) throw new Error('A purchase order needs at least one line.')
+  if (input.lines.length === 0) throw new Refusal('A purchase order needs at least one line.')
 
   const [vendor] = await db
     .select()
@@ -85,8 +86,8 @@ export async function createPurchaseOrder(
 
   for (const line of input.lines) {
     const item = itemsById.get(line.itemId)
-    if (!item) throw new Error('One of those items could not be found.')
-    if (line.quantityMilli <= 0) throw new Error('Order a quantity greater than zero.')
+    if (!item) throw new Refusal('One of those items could not be found.')
+    if (line.quantityMilli <= 0) throw new Refusal('Order a quantity greater than zero.')
   }
 
   const totalCents = input.lines.reduce(
@@ -173,7 +174,7 @@ export async function receiveGoods(
   requirePermission(ctx, 'accounting:journal')
   await requireModule(ctx, 'inventory')
 
-  if (input.lines.length === 0) throw new Error('A receipt needs at least one line.')
+  if (input.lines.length === 0) throw new Refusal('A receipt needs at least one line.')
 
   const accounts = await inventoryAccounts(ctx.companyId)
 
@@ -217,7 +218,7 @@ export async function receiveGoods(
 
       const unitCostCents = line.unitCostCents ?? orderLine?.unitCostCents
       if (unitCostCents === undefined) {
-        throw new Error('A receipt line with no purchase order needs a cost.')
+        throw new Refusal('A receipt line with no purchase order needs a cost.')
       }
 
       // Each line brings its own stock in and posts its own leg, so a receipt
@@ -468,7 +469,7 @@ export async function attachBillToReceipts(
 
   const alreadyBilled = receipts.find((receipt) => receipt.billId !== null)
   if (alreadyBilled) {
-    throw new Error(
+    throw new Refusal(
       `Receipt ${alreadyBilled.number} has already been billed. Billing it twice would double the payable.`,
     )
   }

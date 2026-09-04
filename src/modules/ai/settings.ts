@@ -4,6 +4,7 @@ import { aiRequests, aiSettings } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { getAiProvider } from './registry'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Module configuration, quotas, and cost ceilings (spec §11, §12).
@@ -57,10 +58,10 @@ export async function updateSettings(
   requirePermission(ctx, 'ai:manage')
 
   if (input.monthlyCeilingMicros !== undefined && input.monthlyCeilingMicros < 0) {
-    throw new Error('A spend ceiling cannot be negative.')
+    throw new Refusal('A spend ceiling cannot be negative.')
   }
   if (input.hourlyRequestLimit !== undefined && input.hourlyRequestLimit < 1) {
-    throw new Error('The hourly limit must allow at least one request.')
+    throw new Refusal('The hourly limit must allow at least one request.')
   }
 
   const before = await getSettings(ctx.companyId)

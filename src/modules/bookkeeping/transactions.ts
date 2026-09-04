@@ -23,7 +23,7 @@ import {
   unpostTransaction,
 } from '@/modules/ledger/posting'
 import { rememberVendor } from './rules-engine'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 
 export type ReviewState =
   | 'new'
@@ -243,7 +243,7 @@ export async function categorize(
   await assertAccountInTenant(ctx, chartAccountId)
 
   if (opts.costCodeId && !opts.projectId) {
-    throw new Error('A cost code needs the job it belongs to. Choose a job as well.')
+    throw new Refusal('A cost code needs the job it belongs to. Choose a job as well.')
   }
 
   const before = snapshot(transaction)
@@ -426,20 +426,20 @@ export async function splitTransaction(
   requirePermission(ctx, 'bookkeeping:categorize')
 
   if (splits.length < 2) {
-    throw new Error('A split needs at least two lines.')
+    throw new Refusal('A split needs at least two lines.')
   }
 
   const transaction = await loadEditableTransaction(ctx, transactionId)
 
   const total = splits.reduce((sum, split) => sum + split.amountCents, 0)
   if (total !== transaction.amountCents) {
-    throw new Error(
+    throw new Refusal(
       `Split lines total ${total} but the transaction is ${transaction.amountCents}. They must match exactly.`,
     )
   }
 
   if (splits.some((split) => split.amountCents === 0)) {
-    throw new Error('Split lines cannot be zero.')
+    throw new Refusal('Split lines cannot be zero.')
   }
 
   const accountIds = [...new Set(splits.map((s) => s.chartAccountId))]
@@ -595,10 +595,10 @@ export async function markAsTransfer(
 
     // The two legs must offset. Anything else is not a transfer.
     if (pair.amountCents !== -transaction.amountCents) {
-      throw new Error('Transfer legs must be equal and opposite.')
+      throw new Refusal('Transfer legs must be equal and opposite.')
     }
     if (pair.financialAccountId === transaction.financialAccountId) {
-      throw new Error('A transfer must move between two different accounts.')
+      throw new Refusal('A transfer must move between two different accounts.')
     }
   }
 
@@ -664,7 +664,7 @@ export async function acceptSuggestion(ctx: ActorContext, transactionId: string)
 
   const transaction = await loadEditableTransaction(ctx, transactionId)
   if (transaction.reviewState !== 'suggested' || !transaction.chartAccountId) {
-    throw new Error('That transaction has no pending suggestion.')
+    throw new Refusal('That transaction has no pending suggestion.')
   }
 
   const before = snapshot(transaction)

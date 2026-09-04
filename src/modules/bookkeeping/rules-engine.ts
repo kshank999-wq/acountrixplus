@@ -4,6 +4,7 @@ import { bankTransactions, categorizationRules, type RuleCondition } from '@/db/
 import { newBatchId, recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { firstMatchingRule, vendorMemoryConditions } from './matching'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Rule persistence and application (spec §3).
@@ -156,7 +157,7 @@ export async function createRule(ctx: ActorContext, input: CreateRuleInput) {
   requirePermission(ctx, 'bookkeeping:rules')
 
   if (input.conditions.length === 0) {
-    throw new Error('A rule needs at least one condition.')
+    throw new Refusal('A rule needs at least one condition.')
   }
 
   const rule = await db.transaction(async (tx) => {

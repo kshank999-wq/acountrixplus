@@ -14,7 +14,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/modules/ledger/journal'
 import { getPayrollProvider, type PayrollLineKind } from './provider'
 import { PAYROLL_ACCOUNTS } from './accounts'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 
 /**
  * Payroll runs and the entry they post (spec §13, §20 Phase 8).
@@ -105,12 +105,12 @@ export function totalsFor(input: PayslipInput[]): PayrollTotals {
   for (const payslip of input) {
     for (const line of payslip.lines) {
       if (line.amountCents < 0) {
-        throw new Error(
+        throw new Refusal(
           `"${line.label}" is negative. Payroll amounts are always positive; the kind carries the direction.`,
         )
       }
       if (!Number.isInteger(line.amountCents)) {
-        throw new Error('Payroll amounts must be whole numbers of cents.')
+        throw new Refusal('Payroll amounts must be whole numbers of cents.')
       }
 
       if (EARNING_KINDS.has(line.kind)) grossPayCents += line.amountCents
@@ -174,13 +174,13 @@ export async function createEmployee(
 ) {
   requirePermission(ctx, 'payroll:manage')
 
-  if (!input.name.trim()) throw new Error('A worker needs a name.')
+  if (!input.name.trim()) throw new Refusal('A worker needs a name.')
 
   // Refused rather than truncated: somebody pasting a full tax number into
   // this field has misunderstood what it is for, and silently keeping four
   // digits of it would hide that the other digits were ever sent.
   if (input.taxIdLast4 && input.taxIdLast4.trim().length > 4) {
-    throw new Error(
+    throw new Refusal(
       'Only the last four digits belong here. This system does not store full tax identifiers.',
     )
   }
@@ -244,15 +244,15 @@ export async function createPayrollRun(ctx: ActorContext, input: PayrollRunInput
   requirePermission(ctx, 'payroll:run')
 
   if (input.payslips.length === 0) {
-    throw new Error('A payroll run needs at least one payslip.')
+    throw new Refusal('A payroll run needs at least one payslip.')
   }
   if (input.periodEnd < input.periodStart) {
-    throw new Error('The period end must be on or after the period start.')
+    throw new Refusal('The period end must be on or after the period start.')
   }
 
   const totals = totalsFor(input.payslips)
   if (totals.grossPayCents <= 0) {
-    throw new Error('A payroll run must have gross pay greater than zero.')
+    throw new Refusal('A payroll run must have gross pay greater than zero.')
   }
 
   const staff = await listEmployees(ctx)
@@ -260,7 +260,7 @@ export async function createPayrollRun(ctx: ActorContext, input: PayrollRunInput
 
   for (const payslip of input.payslips) {
     const person = byId.get(payslip.employeeId)
-    if (!person) throw new Error('One of those workers is not on this company’s payroll.')
+    if (!person) throw new Refusal('One of those workers is not on this company’s payroll.')
 
     const net = netPayFor(payslip)
     if (net < 0) throw new NegativeNetPayError(person.name, net)
@@ -444,7 +444,7 @@ function assertBalanced(totals: PayrollTotals): void {
     totals.employerCostCents
 
   if (debits !== credits) {
-    throw new Error(
+    throw new Refusal(
       `Payroll does not balance: cost ${debits} against ${credits} owed. ` +
         'Gross plus employer cost must equal net pay plus every liability.',
     )
@@ -628,7 +628,7 @@ export async function resolvePayrollAccounts(
   )
 
   if (!wages || !payrollTaxes || !liabilities) {
-    throw new Error(
+    throw new Refusal(
       'This chart of accounts is missing the payroll accounts (6500, 6550, 2300).',
     )
   }

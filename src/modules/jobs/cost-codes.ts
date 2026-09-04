@@ -6,6 +6,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { accountByNumber } from '@/modules/coa/service'
 import { requireModule } from '@/modules/industry/modules'
 import type { CostType } from './vocabulary'
+import { Refusal } from '@/modules/errors'
 
 /**
  * The cost code library (spec §5 "job costing").
@@ -129,8 +130,8 @@ export async function createCostCode(
   await requireModule(ctx, 'job_costing')
 
   const code = input.code.trim()
-  if (!code) throw new Error('A cost code needs a code.')
-  if (!input.name.trim()) throw new Error('A cost code needs a name.')
+  if (!code) throw new Refusal('A cost code needs a code.')
+  if (!input.name.trim()) throw new Refusal('A cost code needs a name.')
 
   return db.transaction(async (tx) => {
     const [created] = await tx

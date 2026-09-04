@@ -1,4 +1,5 @@
 import type { AccountType } from './standard'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Whether a proposed chart account is coherent (spec §5, Phase 118).
@@ -112,7 +113,7 @@ export const NUMBER_RANGES: readonly NumberRange[] = [
 export function rangeFor(type: AccountType): NumberRange {
   const range = NUMBER_RANGES.find((row) => row.type === type)
   if (!range) {
-    throw new Error(
+    throw new Refusal(
       `No number range is declared for account type "${type}". A new type has to say where ` +
         'in the chart it belongs before an account can be given one.',
     )

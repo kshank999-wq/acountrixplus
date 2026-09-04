@@ -1,4 +1,5 @@
 import { extend } from '@/modules/inventory/costing'
+import { Refusal } from '@/modules/errors'
 
 /**
  * What a batch needs, and what a batch cost (spec §5, "Manufacturing — raw
@@ -53,7 +54,7 @@ export function explodeBom(
   batchMilli: number,
   quantityMilli: number,
 ): Requirement[] {
-  if (batchMilli <= 0) throw new Error('A bill of materials has to make something.')
+  if (batchMilli <= 0) throw new Refusal('A bill of materials has to make something.')
 
   return lines.map((line) => {
     // Scaled in one step rather than per-unit then multiplied, so a component

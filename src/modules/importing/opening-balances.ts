@@ -27,6 +27,7 @@ import {
   valueFor,
 } from './mapping'
 import { contactKey } from './contacts'
+import { Refusal } from '@/modules/errors'
 import {
   finishPlan,
   ImportNotReadyError,
@@ -378,7 +379,7 @@ export async function commitTrialBalanceImport(
       SYSTEM_ACCOUNTS.openingBalanceEquity,
       tx,
     )
-    if (!openingEquity) throw new Error('No Opening Balance Equity account is set up.')
+    if (!openingEquity) throw new Refusal('No Opening Balance Equity account is set up.')
 
     const debitTotal = lines.filter((l) => l.amountCents > 0).reduce((s, l) => s + l.amountCents, 0)
     const creditTotal = lines.filter((l) => l.amountCents < 0).reduce((s, l) => s - l.amountCents, 0)
@@ -701,8 +702,8 @@ export async function commitOpenDocumentImport(
       accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.openingBalanceEquity, tx),
     ])
 
-    if (!controlAccount) throw new Error('The control account is missing from the chart.')
-    if (!openingEquity) throw new Error('No Opening Balance Equity account is set up.')
+    if (!controlAccount) throw new Refusal('The control account is missing from the chart.')
+    if (!openingEquity) throw new Refusal('No Opening Balance Equity account is set up.')
 
     const [run] = await tx
       .insert(importRuns)

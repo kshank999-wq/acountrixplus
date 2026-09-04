@@ -52,6 +52,44 @@ export class DomainError extends Error {
 }
 
 /**
+ * A refusal whose sentence is the whole point of it (Phase 119).
+ *
+ * ## Why one class and not twenty-four
+ *
+ * Sixty classes already extend `DomainError`, and every one of them exists so
+ * that *something can catch it by type* — `ClosedPeriodError` is caught,
+ * `IdempotencyConflictError` is caught, `PermissionError` is caught. That is a
+ * good reason to name an error, and none of it applies here.
+ *
+ * The 192 refusals this replaces were `throw new Error(...)`. Nothing could
+ * catch them by type, because they had no type; nothing ever wanted to. Their
+ * entire job was to be **read by the person who hit them**, and `messageFor`'s
+ * deny-by-default (ADR 0074) meant not one of them ever was:
+ *
+ * ```
+ * That is a vendor credit. It cannot be applied to an invoice.
+ *   → "Something went wrong."
+ * ```
+ *
+ * So the defect was never "the wrong class". It was that a sentence written for
+ * a reader carried nothing saying so. Inventing twenty-four module classes to
+ * fix that would add twenty-four things to import and nothing to catch — the
+ * ceremony of a type system without the use of one.
+ *
+ * `Refusal` says the one thing that was missing: **this sentence is for
+ * whoever hit it.** Use it for anything a person can cause and act on. Keep a
+ * bare `Error` for what only an operator can act on — a missing environment
+ * variable, an unregistered key, an invariant that means the code is wrong
+ * rather than the input — because hiding those is what ADR 0074 is for.
+ */
+export class Refusal extends DomainError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'Refusal'
+  }
+}
+
+/**
  * Logged rather than shown, with enough context to find it.
  *
  * `cause` is walked explicitly because that is where the useful sentence

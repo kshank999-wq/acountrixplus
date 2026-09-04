@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Time-based one-time passwords, RFC 6238 (spec §14: "MFA support").
@@ -79,7 +80,7 @@ export function base32Decode(encoded: string): Buffer {
 
   for (const character of cleaned) {
     const index = BASE32_ALPHABET.indexOf(character)
-    if (index === -1) throw new Error('That is not a valid secret.')
+    if (index === -1) throw new Refusal('That is not a valid secret.')
 
     value = (value << 5) | index
     bits += 5

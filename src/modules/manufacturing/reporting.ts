@@ -21,6 +21,7 @@ import {
 import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { explodeBom, componentVariance, unitCostOf, yieldOf, type ComponentVariance, type YieldReport } from './bom'
+import { Refusal } from '@/modules/errors'
 
 /**
  * What is on the factory floor, and what a run actually cost (spec §5).
@@ -248,7 +249,7 @@ export async function runCost(
     .where(scoped(ctx, workOrders, eq(workOrders.id, workOrderId)))
     .limit(1)
 
-  if (!order) throw new Error('That work order does not exist.')
+  if (!order) throw new Refusal('That work order does not exist.')
 
   const cost = unitCostOf({
     materialCents: order.materialCents,

@@ -13,6 +13,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
+import { Refusal } from '@/modules/errors'
 import {
   amountForMinutes,
   billableAmountCents,
@@ -67,12 +68,12 @@ export async function logTime(ctx: ActorContext, input: LogTimeInput) {
 
   const description = input.description.trim()
   if (!description) {
-    throw new Error(
+    throw new Refusal(
       'Say what the time was for. A line reading only "work" is what a client queries.',
     )
   }
-  if (input.minutes <= 0) throw new Error('Log more than zero minutes.')
-  if (input.minutes > 1440) throw new Error('That is more than a day. Check the units.')
+  if (input.minutes <= 0) throw new Refusal('Log more than zero minutes.')
+  if (input.minutes > 1440) throw new Refusal('That is more than a day. Check the units.')
 
   return db.transaction(async (tx) => {
     const [entry] = await tx
@@ -164,7 +165,7 @@ async function loadOwnEditable(ctx: ActorContext, entryId: string, tx: Executor)
   if (!entry) throw new Error('Time entry not found')
 
   if (entry.status === 'billed') {
-    throw new Error(
+    throw new Refusal(
       'That time has been invoiced. Raise a credit note and log a corrected entry rather than ' +
         'changing what the client was shown.',
     )
@@ -256,7 +257,7 @@ export async function writeOffTime(
 
   const trimmed = reason.trim()
   if (!trimmed) {
-    throw new Error('Say why it is not being charged for. "Over-run" and "goodwill" are different.')
+    throw new Refusal('Say why it is not being charged for. "Over-run" and "goodwill" are different.')
   }
   if (entryIds.length === 0) return 0
 
@@ -432,7 +433,7 @@ export async function recordBillableExpense(
   requirePermission(ctx, 'accounting:journal')
   await requireModule(ctx, 'time_billing')
 
-  if (input.costCents <= 0) throw new Error('An expense has to have cost something.')
+  if (input.costCents <= 0) throw new Refusal('An expense has to have cost something.')
 
   const markupBasisPoints = input.markupBasisPoints ?? 0
 

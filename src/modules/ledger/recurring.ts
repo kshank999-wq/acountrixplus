@@ -10,6 +10,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Recurring journal entries (spec §13: "recurring entries").
@@ -116,7 +117,7 @@ export function firstOccurrence(
 /** Validates a template's lines by the same rule the journal engine applies. */
 function assertBalanced(lines: RecurringLineInput[]): number {
   if (lines.length < 2) {
-    throw new Error('A journal entry needs at least two lines.')
+    throw new Refusal('A journal entry needs at least two lines.')
   }
 
   let debits = 0
@@ -126,9 +127,9 @@ function assertBalanced(lines: RecurringLineInput[]): number {
     const debit = line.debitCents ?? 0
     const credit = line.creditCents ?? 0
 
-    if (debit < 0 || credit < 0) throw new Error('Amounts cannot be negative.')
+    if (debit < 0 || credit < 0) throw new Refusal('Amounts cannot be negative.')
     if ((debit === 0) === (credit === 0)) {
-      throw new Error('Each line is either a debit or a credit, never both and never neither.')
+      throw new Refusal('Each line is either a debit or a credit, never both and never neither.')
     }
 
     debits += debit
@@ -138,7 +139,7 @@ function assertBalanced(lines: RecurringLineInput[]): number {
   if (debits !== credits) {
     // Checked when the template is saved rather than when it first fires, so a
     // broken template is a failed save instead of a failed job at 2am.
-    throw new Error(
+    throw new Refusal(
       `This template does not balance: ${formatCents(debits)} of debits against ` +
         `${formatCents(credits)} of credits.`,
     )
@@ -150,7 +151,7 @@ function assertBalanced(lines: RecurringLineInput[]): number {
 export async function createRecurringEntry(ctx: ActorContext, input: RecurringEntryInput) {
   requirePermission(ctx, 'accounting:journal')
 
-  if (!input.name.trim()) throw new Error('A recurring entry needs a name.')
+  if (!input.name.trim()) throw new Refusal('A recurring entry needs a name.')
 
   const totalCents = assertBalanced(input.lines)
 
@@ -161,7 +162,7 @@ export async function createRecurringEntry(ctx: ActorContext, input: RecurringEn
     .where(scoped(ctx, chartAccounts, inArray(chartAccounts.id, accountIds)))
 
   if (found.length !== accountIds.length) {
-    throw new Error('One or more accounts are not on this company’s chart.')
+    throw new Refusal('One or more accounts are not on this company’s chart.')
   }
 
   const nextRunOn = firstOccurrence(input, input.startsOn)

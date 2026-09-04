@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { bankTransactions, financialAccounts, reconciliations } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Bank and credit-card reconciliation (spec §4).
@@ -52,7 +53,7 @@ export async function startReconciliation(
   requirePermission(ctx, 'reconciliation:perform')
 
   if (input.statementEndDate < input.statementStartDate) {
-    throw new Error('The statement end date must be on or after the start date.')
+    throw new Refusal('The statement end date must be on or after the start date.')
   }
 
   const [account] = await db
@@ -79,7 +80,7 @@ export async function startReconciliation(
     .limit(1)
 
   if (openSession) {
-    throw new Error(
+    throw new Refusal(
       'This account already has a reconciliation in progress. Open it from the list above and finish it first.',
     )
   }
@@ -285,11 +286,11 @@ export async function completeReconciliation(ctx: ActorContext, reconciliationId
 
   const summary = await summarize(ctx, reconciliationId)
   if (summary.status !== 'in_progress') {
-    throw new Error('That reconciliation is not in progress.')
+    throw new Refusal('That reconciliation is not in progress.')
   }
 
   if (!summary.isBalanced) {
-    throw new Error(
+    throw new Refusal(
       `Cannot complete: the difference is ${summary.differenceCents} cents. ` +
         'Clear or uncheck transactions until the difference is zero.',
     )
@@ -360,7 +361,7 @@ export async function reopenReconciliation(ctx: ActorContext, reconciliationId: 
 
   if (!session) throw new Error('Reconciliation not found')
   if (session.status !== 'completed') {
-    throw new Error('Only a completed reconciliation can be reopened.')
+    throw new Refusal('Only a completed reconciliation can be reopened.')
   }
 
   await db.transaction(async (tx) => {
@@ -452,7 +453,7 @@ async function loadOpenSession(ctx: ActorContext, reconciliationId: string) {
 
   if (!session) throw new Error('Reconciliation not found')
   if (session.status === 'completed') {
-    throw new Error('That reconciliation is completed. Reopen it before making changes.')
+    throw new Refusal('That reconciliation is completed. Reopen it before making changes.')
   }
 
   return session

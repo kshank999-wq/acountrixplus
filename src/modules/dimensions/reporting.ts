@@ -4,6 +4,7 @@ import { chartAccounts, dimensionValues, dimensions, journalEntries, journalLine
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import type { AccountType } from '@/modules/coa/standard'
 import { isDebitNormal, normalBalance } from '@/modules/ledger/balances'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Reporting across a dimension (spec §13).
@@ -108,7 +109,7 @@ export async function dimensionalProfitAndLoss(
     .where(scoped(ctx, dimensions, eq(dimensions.id, input.dimensionId)))
     .limit(1)
 
-  if (!dimension) throw new Error('That dimension does not exist on these books.')
+  if (!dimension) throw new Refusal('That dimension does not exist on these books.')
 
   const [values, cells] = await Promise.all([
     db

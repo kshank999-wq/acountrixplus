@@ -8,7 +8,7 @@ import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry, voidJournalEntry } from '@/modules/ledger/journal'
 import { accountBalances } from './balances'
 import { formatCents } from '@/lib/money'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 
 /**
  * Year-end closing entries (spec §13: "recurring entries, adjusting entries,
@@ -197,14 +197,14 @@ export async function closeFiscalYear(
   })
 
   const retained = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.retainedEarnings)
-  if (!retained) throw new Error('Retained Earnings (3200) is missing from the chart of accounts.')
+  if (!retained) throw new Refusal('Retained Earnings (3200) is missing from the chart of accounts.')
 
   const periodAccounts = balances.filter((row) =>
     ['revenue', 'other_income', 'cogs', 'expense', 'other_expense'].includes(row.type),
   )
 
   if (periodAccounts.length === 0) {
-    throw new Error('There is nothing to close in this year.')
+    throw new Refusal('There is nothing to close in this year.')
   }
 
   // Each account is zeroed by posting the opposite of its balance. Working
@@ -297,7 +297,7 @@ export async function reopenFiscalYear(
 ): Promise<void> {
   requirePermission(ctx, 'accounting:close')
 
-  if (!reason.trim()) throw new Error('Say why the year is being reopened.')
+  if (!reason.trim()) throw new Refusal('Say why the year is being reopened.')
 
   await db.transaction(async (tx) => {
     const [closed] = await tx
@@ -307,7 +307,7 @@ export async function reopenFiscalYear(
       .limit(1)
 
     if (!closed) throw new Error('Close not found')
-    if (closed.reopenedAt) throw new Error('That year is already reopened.')
+    if (closed.reopenedAt) throw new Refusal('That year is already reopened.')
 
     if (closed.journalEntryId) {
       await voidJournalEntry(ctx, closed.journalEntryId, tx)

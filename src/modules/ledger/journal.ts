@@ -15,7 +15,7 @@ import {
   assignLineDimensions,
   type DimensionAssignment,
 } from '@/modules/dimensions/service'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 
 /**
  * The double-entry journal (spec §13).
@@ -129,7 +129,7 @@ export class ClosedPeriodError extends DomainError {
  */
 export function normalizeLines(lines: JournalLineInput[]) {
   if (lines.length < 2) {
-    throw new Error('A journal entry needs at least two lines.')
+    throw new Refusal('A journal entry needs at least two lines.')
   }
 
   let debitTotal = 0
@@ -140,17 +140,17 @@ export function normalizeLines(lines: JournalLineInput[]) {
     const credit = line.creditCents ?? 0
 
     if (!Number.isInteger(debit) || !Number.isInteger(credit)) {
-      throw new Error('Journal amounts must be whole numbers of cents.')
+      throw new Refusal('Journal amounts must be whole numbers of cents.')
     }
     if (debit < 0 || credit < 0) {
-      throw new Error('Journal amounts cannot be negative. Use the other column instead.')
+      throw new Refusal('Journal amounts cannot be negative. Use the other column instead.')
     }
     if ((debit === 0) === (credit === 0)) {
-      throw new Error('Each line must be either a debit or a credit, not both and not neither.')
+      throw new Refusal('Each line must be either a debit or a credit, not both and not neither.')
     }
 
     if (line.costCodeId && !line.projectId) {
-      throw new Error('A cost code needs the job it belongs to. Choose a job as well.')
+      throw new Refusal('A cost code needs the job it belongs to. Choose a job as well.')
     }
 
     debitTotal += debit
@@ -485,7 +485,7 @@ export async function reverseEntry(
 
     if (!original) throw new Error('Journal entry not found')
     if (original.status !== 'posted') {
-      throw new Error('Only a posted entry can be reversed.')
+      throw new Refusal('Only a posted entry can be reversed.')
     }
 
     const lines = await tx
@@ -679,7 +679,7 @@ export async function postDraftEntry(ctx: ActorContext, entryId: string) {
 
     if (!entry) throw new Error('Entry not found')
     if (entry.status !== 'draft') {
-      throw new Error(`Entry ${entry.entryNumber} is ${entry.status}, not a draft.`)
+      throw new Refusal(`Entry ${entry.entryNumber} is ${entry.status}, not a draft.`)
     }
 
     await assertPeriodOpen(ctx, entry.entryDate, tx)
@@ -718,7 +718,7 @@ export async function discardDraftEntry(ctx: ActorContext, entryId: string): Pro
 
     if (!entry) throw new Error('Entry not found')
     if (entry.status !== 'draft') {
-      throw new Error(
+      throw new Refusal(
         `Entry ${entry.entryNumber} is ${entry.status}. A posted entry is voided, never deleted.`,
       )
     }
@@ -814,7 +814,7 @@ export async function closePeriod(
   requirePermission(ctx, 'accounting:close')
 
   if (input.periodEnd < input.periodStart) {
-    throw new Error('The period end must be on or after the period start.')
+    throw new Refusal('The period end must be on or after the period start.')
   }
 
   return db.transaction(async (tx) => {

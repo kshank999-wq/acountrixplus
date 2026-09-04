@@ -14,6 +14,7 @@ import {
   diffParty,
   normaliseParty,
 } from '@/modules/parties/changes'
+import { Refusal } from '@/modules/errors'
 import {
   assertStageTransition,
   isTerminal,
@@ -125,7 +126,7 @@ export async function changeStage(
   assertStageTransition(opportunity.stage, input.stage)
 
   if (requiresLossReason(input.stage) && !input.lossReason) {
-    throw new Error(
+    throw new Refusal(
       `Closing as ${stageLabel(input.stage)} needs a loss reason so it can be reported on.`,
     )
   }
@@ -195,10 +196,10 @@ export async function reopenOpportunity(ctx: ActorContext, opportunityId: string
 
   const opportunity = await loadOpportunity(ctx, opportunityId)
   if (!isTerminal(opportunity.stage)) {
-    throw new Error('That opportunity is not closed.')
+    throw new Refusal('That opportunity is not closed.')
   }
   if (isTerminal(stage)) {
-    throw new Error('Reopen to an active stage, not another closed one.')
+    throw new Refusal('Reopen to an active stage, not another closed one.')
   }
 
   return db.transaction(async (tx) => {
@@ -257,7 +258,7 @@ export async function updateOpportunity(
   const opportunity = await loadOpportunity(ctx, opportunityId)
 
   if (input.probability !== undefined && (input.probability < 0 || input.probability > 100)) {
-    throw new Error('Probability must be between 0 and 100.')
+    throw new Refusal('Probability must be between 0 and 100.')
   }
 
   return db.transaction(async (tx) => {
@@ -506,7 +507,7 @@ export async function organizationById(ctx: ActorContext, organizationId: string
     .where(scoped(ctx, organizations, eq(organizations.id, organizationId)))
     .limit(1)
 
-  if (!row) throw new Error('That organization is not on these books.')
+  if (!row) throw new Refusal('That organization is not on these books.')
   return row
 }
 
@@ -563,10 +564,10 @@ export async function updateOrganization(
     .where(scoped(ctx, organizations, eq(organizations.id, organizationId)))
     .limit(1)
 
-  if (!before) throw new Error('That organization is not on these books.')
+  if (!before) throw new Refusal('That organization is not on these books.')
 
   if (input.name !== undefined && !input.name.trim()) {
-    throw new Error('An organization needs a name.')
+    throw new Refusal('An organization needs a name.')
   }
 
   const changes = diffParty({ fields: ORGANIZATION_FIELDS, before, after: input })

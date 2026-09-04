@@ -11,6 +11,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Job budgets and change orders (spec §5 "estimates, change orders").
@@ -108,11 +109,11 @@ export async function setJobBudget(
   const seen = new Set<string>()
   for (const line of lines) {
     if (seen.has(line.costCodeId)) {
-      throw new Error('The same cost code appears twice in the budget.')
+      throw new Refusal('The same cost code appears twice in the budget.')
     }
     seen.add(line.costCodeId)
     if (!Number.isInteger(line.originalAmountCents)) {
-      throw new Error('Budget amounts must be whole numbers of cents.')
+      throw new Refusal('Budget amounts must be whole numbers of cents.')
     }
   }
 
@@ -236,7 +237,7 @@ export async function createChangeOrder(
   await requireModule(ctx, 'job_costing')
   await assertJob(ctx, input.projectId)
 
-  if (!input.title.trim()) throw new Error('A change order needs a title.')
+  if (!input.title.trim()) throw new Refusal('A change order needs a title.')
 
   const lines = input.lines ?? []
   const costAmountCents = lines.reduce((sum, line) => sum + line.amountCents, 0)
@@ -325,10 +326,10 @@ export async function approveChangeOrder(
 
     if (!order) throw new Error('Change order not found')
     if (order.status === 'approved') {
-      throw new Error('That change order has already been approved.')
+      throw new Refusal('That change order has already been approved.')
     }
     if (order.status === 'rejected') {
-      throw new Error('That change order was rejected. Raise a new one instead.')
+      throw new Refusal('That change order was rejected. Raise a new one instead.')
     }
 
     const lines = await tx
@@ -438,7 +439,7 @@ export async function rejectChangeOrder(
 
     if (!order) throw new Error('Change order not found')
     if (order.status === 'approved') {
-      throw new Error('That change order is already approved. Raise a deductive one to undo it.')
+      throw new Refusal('That change order is already approved. Raise a deductive one to undo it.')
     }
 
     await tx

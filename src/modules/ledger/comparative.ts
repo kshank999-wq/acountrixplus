@@ -2,6 +2,7 @@ import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import type { AccountType } from '@/modules/coa/standard'
 import { balanceSheet, profitAndLoss, type StatementSection } from './reports'
 import type { ReportingBasis } from './cash-basis'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Comparative periods (spec §13: "...transaction detail, and comparative
@@ -138,7 +139,7 @@ export async function comparativeProfitAndLoss(
   requirePermission(ctx, 'reports:financial')
 
   if (opts.periods.length < 2) {
-    throw new Error('A comparative statement needs at least two periods.')
+    throw new Refusal('A comparative statement needs at least two periods.')
   }
 
   const basis = opts.basis ?? 'accrual'
@@ -193,7 +194,7 @@ export async function comparativeBalanceSheet(
   requirePermission(ctx, 'reports:financial')
 
   if (opts.columns.length < 2) {
-    throw new Error('A comparative statement needs at least two dates.')
+    throw new Refusal('A comparative statement needs at least two dates.')
   }
 
   const basis = opts.basis ?? 'accrual'

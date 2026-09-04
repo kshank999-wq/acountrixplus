@@ -17,6 +17,7 @@ import {
   type Audience,
 } from './audience'
 import { decisionFor, type DecisionInput, type Outcome } from './decision'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Notifications (spec §3 "bookkeeping as a continuous habit").
@@ -82,7 +83,7 @@ export async function subscribe(
   input: { endpoint: string; p256dh: string; auth: string; deviceId?: string | null },
 ) {
   if (!input.endpoint.startsWith('https://')) {
-    throw new Error('A push endpoint must be an https URL.')
+    throw new Refusal('A push endpoint must be an https URL.')
   }
 
   const provider = getPushProvider()

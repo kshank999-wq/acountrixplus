@@ -3,6 +3,7 @@ import { db } from '@/db'
 import { aiPrompts } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { Refusal } from '@/modules/errors'
 
 /**
  * The prompt registry (spec §12: "Central prompt/template registry with
@@ -302,10 +303,10 @@ export async function savePromptVersion(
   requirePermission(ctx, 'ai:manage')
 
   if (!BUILT_IN_PROMPTS.some((prompt) => prompt.key === input.key)) {
-    throw new Error(`"${input.key}" is not a prompt this application uses.`)
+    throw new Refusal(`"${input.key}" is not a prompt this application uses.`)
   }
   if (!input.template.trim()) {
-    throw new Error('A prompt needs a template.')
+    throw new Refusal('A prompt needs a template.')
   }
 
   return db.transaction(async (tx) => {
@@ -389,7 +390,7 @@ export async function activatePromptVersion(
         )
         .returning({ id: aiPrompts.id })
 
-      if (!activated) throw new Error(`Version ${version} of "${key}" was not found.`)
+      if (!activated) throw new Refusal(`Version ${version} of "${key}" was not found.`)
     }
 
     await recordAudit(

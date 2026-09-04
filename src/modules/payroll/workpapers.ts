@@ -10,7 +10,7 @@ import { payrollSummary } from './service'
 import { liabilityPositions, remittancesInPeriod } from './remittance'
 import { salesTaxReturn } from './sales-tax'
 import { contractorPayments } from './vendor-reporting'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 
 /**
  * Tax workpapers (spec §13: "tax-workpaper-friendly reports").
@@ -302,7 +302,7 @@ export async function markFiledExternally(
   requirePermission(ctx, 'tax:manage')
 
   if (!input.note.trim()) {
-    throw new Error('Say where it was filed and with what reference.')
+    throw new Refusal('Say where it was filed and with what reference.')
   }
 
   return db.transaction(async (tx) => {

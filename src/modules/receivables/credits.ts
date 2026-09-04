@@ -19,6 +19,7 @@ import { formatCents } from '@/lib/money'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
 import { functionalCurrency, rateFor } from '@/modules/fx/service'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Credit notes and write-offs (spec §13).
@@ -88,7 +89,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
   if (!customer) throw new Error('Customer not found')
 
   const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable)
-  if (!arAccount) throw new Error('Accounts Receivable is missing from the chart.')
+  if (!arAccount) throw new Refusal('Accounts Receivable is missing from the chart.')
 
   let invoice: typeof invoices.$inferSelect | null = null
 
@@ -101,9 +102,9 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
 
     if (!row) throw new Error('Invoice not found')
     if (row.customerId !== input.customerId) {
-      throw new Error('That invoice belongs to a different customer.')
+      throw new Refusal('That invoice belongs to a different customer.')
     }
-    if (row.status === 'void') throw new Error('That invoice is voided.')
+    if (row.status === 'void') throw new Refusal('That invoice is voided.')
     invoice = row
   }
 
@@ -119,12 +120,12 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
     : await defaultLinesFromInvoice(ctx, invoice)
 
   if (lines.length === 0) {
-    throw new Error('A credit note needs at least one line, or an invoice to credit.')
+    throw new Refusal('A credit note needs at least one line, or an invoice to credit.')
   }
 
   for (const line of lines) {
     if (line.amountCents <= 0) {
-      throw new Error('Credit note amounts are positive; the direction is what makes it a credit.')
+      throw new Refusal('Credit note amounts are positive; the direction is what makes it a credit.')
     }
   }
 
@@ -160,7 +161,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
   })
 
   if (invoice && totalCents > invoice.totalCents) {
-    throw new Error(
+    throw new Refusal(
       `A credit of ${formatCents(totalCents)} is more than invoice ${invoice.number} was for ` +
         `(${formatCents(invoice.totalCents)}).`,
     )
@@ -227,7 +228,7 @@ export async function createCreditNote(ctx: ActorContext, input: CreditNoteInput
 
     if (taxCents > 0) {
       const taxAccount = await accountByNumber(ctx.companyId, '2200', tx)
-      if (!taxAccount) throw new Error('Sales Tax Payable is missing from the chart.')
+      if (!taxAccount) throw new Refusal('Sales Tax Payable is missing from the chart.')
       journalLineInputs.splice(lines.length, 0, {
         chartAccountId: taxAccount.id,
         debitCents: functional.functionalTaxCents,
@@ -339,7 +340,7 @@ async function applyCreditWithin(
   tx: Executor,
   input: { creditNoteId: string; invoiceId: string; amountCents: number; appliedOn: string },
 ) {
-  if (input.amountCents <= 0) throw new Error('An application must be greater than zero.')
+  if (input.amountCents <= 0) throw new Refusal('An application must be greater than zero.')
 
   const [note] = await tx
     .select()
@@ -349,9 +350,9 @@ async function applyCreditWithin(
 
   if (!note) throw new Error('Credit note not found')
   if (note.party !== 'customer') {
-    throw new Error('That is a vendor credit. It cannot be applied to an invoice.')
+    throw new Refusal('That is a vendor credit. It cannot be applied to an invoice.')
   }
-  if (note.status === 'void') throw new Error('That credit note is voided.')
+  if (note.status === 'void') throw new Refusal('That credit note is voided.')
 
   const [invoice] = await tx
     .select()
@@ -361,7 +362,7 @@ async function applyCreditWithin(
 
   if (!invoice) throw new Error('Invoice not found')
   if (invoice.customerId !== note.customerId) {
-    throw new Error('A credit can only be applied to the same customer’s invoice.')
+    throw new Refusal('A credit can only be applied to the same customer’s invoice.')
   }
 
   /**
@@ -384,12 +385,12 @@ async function applyCreditWithin(
   if (!verdict.ok) throw new Error(verdict.reason)
 
   if (input.amountCents > note.remainingCents) {
-    throw new Error(
+    throw new Refusal(
       `Only ${formatCents(note.remainingCents)} of credit note ${note.number} is left to apply.`,
     )
   }
   if (input.amountCents > invoice.balanceCents) {
-    throw new Error(
+    throw new Refusal(
       `Invoice ${invoice.number} has a balance of ${formatCents(invoice.balanceCents)}, ` +
         `so ${formatCents(input.amountCents)} cannot be applied to it.`,
     )
@@ -483,7 +484,7 @@ export async function writeOffInvoice(
   requirePermission(ctx, 'accounting:journal')
 
   if (!input.reason.trim()) {
-    throw new Error('Say why it is being written off. An unexplained loss is worse than a loss.')
+    throw new Refusal('Say why it is being written off. An unexplained loss is worse than a loss.')
   }
 
   const [invoice] = await db
@@ -494,16 +495,16 @@ export async function writeOffInvoice(
 
   if (!invoice) throw new Error('Invoice not found')
   if (invoice.status === 'void') {
-    throw new Error('That invoice is voided — there is nothing owed to write off.')
+    throw new Refusal('That invoice is voided — there is nothing owed to write off.')
   }
   if (invoice.balanceCents <= 0) {
-    throw new Error(`Invoice ${invoice.number} is settled. There is nothing to write off.`)
+    throw new Refusal(`Invoice ${invoice.number} is settled. There is nothing to write off.`)
   }
 
   const amountCents = input.amountCents ?? invoice.balanceCents
 
   if (amountCents > invoice.balanceCents) {
-    throw new Error(
+    throw new Refusal(
       `Invoice ${invoice.number} has ${formatCents(invoice.balanceCents)} outstanding, ` +
         `so ${formatCents(amountCents)} cannot be written off.`,
     )
@@ -514,9 +515,9 @@ export async function writeOffInvoice(
     accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.badDebt),
   ])
 
-  if (!arAccount) throw new Error('Accounts Receivable is missing from the chart.')
+  if (!arAccount) throw new Refusal('Accounts Receivable is missing from the chart.')
   if (!badDebtAccount) {
-    throw new Error('Bad Debt (6025) is missing from the chart of accounts.')
+    throw new Refusal('Bad Debt (6025) is missing from the chart of accounts.')
   }
 
   // A write-off is the one balance reduction that converts exactly: one amount,
@@ -613,10 +614,10 @@ export async function recoverWriteOff(
     .limit(1)
 
   if (!writeOff) throw new Error('Write-off not found')
-  if (writeOff.recoveredOn) throw new Error('That write-off has already been recovered.')
-  if (input.amountCents <= 0) throw new Error('A recovery must be greater than zero.')
+  if (writeOff.recoveredOn) throw new Refusal('That write-off has already been recovered.')
+  if (input.amountCents <= 0) throw new Refusal('A recovery must be greater than zero.')
   if (input.amountCents > writeOff.amountCents) {
-    throw new Error(
+    throw new Refusal(
       `Only ${formatCents(writeOff.amountCents)} was written off, so ` +
         `${formatCents(input.amountCents)} cannot be recovered.`,
     )
@@ -632,7 +633,7 @@ export async function recoverWriteOff(
   if (!bank) throw new Error('Financial account not found')
 
   const badDebtAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.badDebt)
-  if (!badDebtAccount) throw new Error('Bad Debt (6025) is missing from the chart of accounts.')
+  if (!badDebtAccount) throw new Refusal('Bad Debt (6025) is missing from the chart of accounts.')
 
   return db.transaction(async (tx) => {
     const entry = await createJournalEntry(

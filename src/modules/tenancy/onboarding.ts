@@ -8,6 +8,7 @@ import { industryPack, type Industry } from '@/modules/coa/industry'
 import { recordAudit } from '@/modules/audit'
 import type { ActorContext } from './context'
 import type { Role } from '@/modules/permissions'
+import { Refusal } from '@/modules/errors'
 
 export type RegisterInput = {
   companyName: string
@@ -30,7 +31,7 @@ export async function registerCompany(input: RegisterInput) {
 
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1)
   if (existing) {
-    throw new Error('An account with that email already exists.')
+    throw new Refusal('An account with that email already exists.')
   }
 
   const passwordHash = await hashPassword(input.password)
@@ -115,7 +116,7 @@ export async function registerUser(input: { name: string; email: string; passwor
 
   const [existing] = await db.select().from(users).where(eq(users.email, email)).limit(1)
   if (existing) {
-    throw new Error('An account with that email already exists.')
+    throw new Refusal('An account with that email already exists.')
   }
 
   const passwordHash = await hashPassword(input.password)

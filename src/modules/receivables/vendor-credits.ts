@@ -23,7 +23,7 @@ import { recoverHeld } from '@/modules/fx/settlement'
 import { convert } from '@/modules/fx/rates'
 import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
 import { mayUse } from './overpayment'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 
 /**
  * Vendor credits (spec §13: "vendors, bills, **credits**, payments, aging").
@@ -90,7 +90,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
   if (!vendor) throw new DomainError('Vendor not found')
 
   const apAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable)
-  if (!apAccount) throw new Error('Accounts Payable is missing from the chart.')
+  if (!apAccount) throw new Refusal('Accounts Payable is missing from the chart.')
 
   let bill: typeof bills.$inferSelect | null = null
 
@@ -219,7 +219,7 @@ export async function createVendorCredit(ctx: ActorContext, input: VendorCreditI
 
     if (taxCents > 0) {
       const taxAccount = await accountByNumber(ctx.companyId, '2200', tx)
-      if (!taxAccount) throw new Error('Sales Tax Payable is missing from the chart.')
+      if (!taxAccount) throw new Refusal('Sales Tax Payable is missing from the chart.')
       journalLineInputs.push({
         chartAccountId: taxAccount.id,
         creditCents: functional.functionalTaxCents,
@@ -519,7 +519,7 @@ export async function refundVendorCredit(
     if (!account) throw new DomainError('That account is not on these books.')
 
     const apAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable, tx)
-    if (!apAccount) throw new Error('Accounts Payable is missing from the chart.')
+    if (!apAccount) throw new Refusal('Accounts Payable is missing from the chart.')
 
     /**
      * What actually lands in the bank, at the rate on the day it lands — the

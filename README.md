@@ -5430,6 +5430,69 @@ same failure as the feature itself — something correct that nothing reached.
 plain `Error` against 60 classes extending `DomainError`, Phase 117's own
 `receiveStock` refusal among them.
 
+### The refusals nobody could read (Phase 119)
+
+Phase 118 shipped four refusals with thirty-three passing tests behind them, and
+the first browser pass showed `Something went wrong.` for all four. `ChartError`
+extended `Error`, and `messageFor` denies by default (ADR 0074), so every
+sentence was discarded one layer above the screen — and **no test could see it**,
+because every test in this repository calls the service directly and asserts on
+the thrown message, which is the one place the sentence still exists.
+
+That was one class. Measured across `src/modules`:
+
+```
+plain `throw new Error` in src/modules                     298
+  ...carrying a sentence written for a person              206
+exported functions among those                             103
+  ...whose name appears anywhere in src/app                 80
+```
+
+Forty-three of the forty-four server actions call `messageFor`. So every one of
+these arrived on a screen as "Something went wrong":
+
+> That is a vendor credit. It cannot be applied to an invoice.
+>
+> That change order was rejected. Raise a new one instead.
+>
+> Say why it is being written off. An unexplained loss is worse than a loss.
+
+**Not a rule about types.** "No bare `throw new Error`" would be simple and
+wrong: some of the 298 are for an operator and must stay hidden — a missing
+`OBJECT_STORE_PATH`, an unregistered provider, an invariant meaning the code is
+broken rather than the input. So `src/modules/errors/audience.ts` asks who the
+*sentence* was written for, with three rules that must all hold, each carrying
+its own argument: it opens like a sentence, it closes like one, and it says more
+than a name.
+
+**One class, not twenty-four.** Sixty classes already extend `DomainError`, and
+every one exists so something can catch it by type. None of that applies here:
+these 192 had no type, so nothing could catch them and nothing wanted to — their
+whole job was to be read. `Refusal extends DomainError` says the one thing that
+was missing. **192 sites in 46 files** were converted; **fourteen stayed bare**,
+each with its argument in `ALLOWED_BARE_REFUSALS` — two name environment
+variables, four are pure-core invariants whose own comments already said *"a
+programming error rather than a user one"*, two are the Phase 101 registry
+throws.
+
+The allowlist is keyed by file and sentence, not line number: the first draft
+used lines and the conversion's own added `import` broke two entries
+immediately. An allowlist that goes stale when somebody adds a line above it is
+not an allowlist, it is a trap.
+
+**Browser-verified** on `/time` at Kestrel Joinery, logging thirty hours in a
+day — the form guards a blank description and an unparseable duration, not a
+length longer than a day:
+
+```
+SCREEN SAYS: That is more than a day. Check the units.
+```
+
+**Left alone:** the 92 operator-facing throws stay bare and stay hidden. Several
+arguably *should* be sentences a person reads, but rewording ninety-two messages
+is a different phase from making the ones already written arrive.
+
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5571,6 +5634,7 @@ Coverage matches what spec §21 asks for:
 | `tests/control-account-integrity.test.ts` | Against the database, ADR 0031's failure arriving from both sides (Phase 117): **a receipt against `2000` refused by name**, where before it left money on the balance sheet with no bill, no supplier and no due date, with the same receipt against `2050` still going through and both control accounts agreeing after it; and **an imported invoice and bill carrying the functional value the rest of the system reads** — 520000 and 140000 rather than the zero they defaulted to, which had made every migrated company's aging report show nothing while its balance sheet showed receivables — ending with a migrated company whose ledger and subledger agree on both sides on its first day |
 | `tests/coa-proposal.test.ts` | **Whether a proposed chart account is coherent** (Phase 118), no database and no clock: the eight number bands covering 1000–9999 with no gap and no overlap, each carrying prose arguing for itself, and `rangeFor` throwing on a type nobody declared a home for; the bands holding for **every standard account and every industry pack**, so the screen can never refuse a number the software itself installs; and the refusals — no name, a number that is not four digits, a number the application looks up by name, a number already taken, and an expense numbered among the assets — each quoting the band's argument rather than only reporting a violation |
 | `tests/chart-management.test.ts` | Against the database, **the chart a business can finally add to** (Phase 118): an added account reaching `listAccounts` and `categorizableAccounts` — the pickers that are the point of adding one — with the act recorded against whoever did it; a duplicate refused in a sentence rather than as a unique-index violation; permission and tenancy both enforced, with the same number free in another company; and retiring taking an account out of every picker while leaving it on the chart, keeping its number reserved because the entries behind it still point there, refusing outright for an account the software posts into by number, and recording retirement and return as different acts |
+| `tests/refusal-audience.test.ts` | **Whether a refusal can be read by the person it refused** (Phase 119), reading the source rather than calling anything: the three rules that must all hold for a message to count as prose written for a reader, checked against real sentences from this codebase in both directions; a scan that asserts it found throws at all, so a broken parser cannot pass green on an empty list; **no person-facing sentence left thrown as a bare `Error`** anywhere in `src/modules`, and no entry in the fourteen-strong allowlist that has stopped pointing at a real throw — keyed by sentence rather than line number, because an allowlist that goes stale when somebody adds an import is a trap; and, at the other end, `messageFor` showing a `Refusal` verbatim while still replacing a `Failed query:` leak with the caller's fallback, which is the half of ADR 0074 that was always right |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |
