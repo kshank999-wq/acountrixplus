@@ -124,6 +124,39 @@ export const FACE_COLUMNS: readonly FaceColumn[] = [
     functionalColumn: 'functional_remaining_cents',
     because: 'Client money on account, in the currency it was put on account in.',
   },
+  {
+    table: 'invoice_write_offs',
+    column: 'amount_cents',
+    functionalColumn: 'functional_amount_cents',
+    because:
+      'What was written off, in the invoice’s own currency. ADR 0125 traced this and could not ' +
+      'give it a twin; Phase 127 did, because `badDebtSummary` was adding write-offs across ' +
+      'currencies and a recovery had no carried figure to reverse.',
+  },
+  {
+    table: 'invoice_write_offs',
+    column: 'recovered_cents',
+    functionalColumn: 'functional_recovered_cents',
+    because:
+      'What later turned up, in the same currency as the debt. Posting this unconverted is what ' +
+      'left $250 of bad-debt expense on a fully recovered €2,500 write-off (Phase 127).',
+  },
+  {
+    table: 'deposits',
+    column: 'total_cents',
+    functionalColumn: 'functional_total_cents',
+    because:
+      'What the paying-in slip says, in the receipts’ currency — single since Phase 123 refused ' +
+      'to bank two. The twin is what hit the bank, and it is what the ledger carries.',
+  },
+  {
+    table: 'deposits',
+    column: 'receipts_cents',
+    functionalColumn: 'functional_receipts_cents',
+    because:
+      'The receipts’ own sum, before other lines and fees. Crediting Undeposited Funds this ' +
+      'figure rather than its twin left $50 of a €500 receipt in a clearing account (Phase 127).',
+  },
 ]
 
 /** The face column a table/column pair names, or null if it is not one. */

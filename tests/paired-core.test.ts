@@ -67,7 +67,17 @@ describe('why nothing may be recomputed', () => {
 describe('the registry', () => {
   it('names a pair for every table that carries one', () => {
     const tables = [...new Set(PAIRED_COLUMNS.map((pair) => pair.table))].sort()
-    expect(tables).toEqual(['bills', 'credit_notes', 'invoices', 'payments', 'retainers'])
+    // Seven since Phase 127 gave write-offs and deposits the functional twins
+    // their two writes had no figure to post without.
+    expect(tables).toEqual([
+      'bills',
+      'credit_notes',
+      'deposits',
+      'invoice_write_offs',
+      'invoices',
+      'payments',
+      'retainers',
+    ])
   })
 
   it('gives every entry a reason in the terms of its own table', () => {
@@ -119,6 +129,7 @@ describe('the registry', () => {
     ).toEqual([
       'bills_functional_balance_sane',
       'credit_notes_functional_remaining_sane',
+      'invoice_write_offs_functional_sane',
       'invoices_functional_balance_sane',
       'payments_functional_unapplied_sane',
       'retainers_functional_remaining_sane',

@@ -161,6 +161,19 @@ export const ALLOWED_BARE_REFUSALS: readonly {
       'the classification it demands is exactly what that phase found two phases had got wrong.',
   },
   {
+    file: 'src/modules/fx/ledger.ts',
+    message:
+      'No ledger posting basis is declared for X in X. Money reaching debitCents or creditCents '
+      + 'is the company’s own money — say why this is, in src/modules/fx/ledger.ts, or convert it '
+      + 'first.',
+    because:
+      'The eighth, and the same shape as the two above: a registry lookup that refuses rather ' +
+      'than returning undefined, firing only for somebody running the scan it belongs to. Eight ' +
+      'instances of one pattern is now the argument for a RegistryError subclass rather than an ' +
+      'allowlist entry per registry — recorded here as a nomination, because inventing it in the ' +
+      'same commit as the phase that needed it would be a change nobody measured.',
+  },
+  {
     file: 'src/modules/ai/prompts.ts',
     message: 'No prompt registered for "X"',
     because:
