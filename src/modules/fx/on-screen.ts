@@ -72,11 +72,14 @@ export type MoneyBasis =
    *
    * Three tables stored one number with **no currency column and no functional
    * twin** when this basis was added: `invoice_write_offs`, `deposits`, and
-   * `recurring_invoice_occurrences`. Phase 126 closed the third by giving both
-   * recurring-billing tables a currency, so **two remain**. What the number is
-   * in can only be learned by reading the code that wrote it, and the answer
-   * differs for each. Not a synonym for "probably fine" — an entry has to say
-   * where the answer lives, and closing one is a migration per table.
+   * `recurring_invoice_occurrences`. Phase 126 closed the third and Phase 127
+   * closed the other two, so **no entry carries this basis today**.
+   *
+   * It stays in the vocabulary rather than being deleted. The gap it names is
+   * real and will recur the next time a table stores money without saying what
+   * it is in — and ADR 0125 is the record of how much a phase can miss while
+   * calling such a figure "probably fine". It is not a synonym for that: an
+   * entry using it has to say where the answer actually lives.
    */
   | 'unrecorded'
 
@@ -194,6 +197,8 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
     type: 'WriteOff',
     basis: 'document',
     fields: ['amountCents', 'recoveredCents'],
+    // Phase 127 gave the table its own currency column, so the row no longer
+    // has to prove its denomination by a join to the invoice behind it.
     because:
       '`invoice_write_offs.amount_cents` carries no currency column, which is exactly what made ' +
       'this look like the books’ money. The write path settles it: `writeOffInvoice` calls ' +
@@ -204,12 +209,14 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
   {
     file: 'src/app/accounting/deposits/board.tsx',
     type: 'Deposit',
-    basis: 'unrecorded',
+    basis: 'document',
+    fields: ['receiptsCents'],
     because:
-      '`deposits.total_cents` has no currency column. Phase 123 made a deposit single-currency by ' +
-      'refusing to bank receipts that disagree, so the denomination is now well defined — it is ' +
-      'the receipts’ — but nothing records it on the row. The answer lives in the deposit items’ ' +
-      'payments, which is a join away and is why this is `unrecorded` rather than `books`.',
+      'Phase 125 recorded this `unrecorded`: Phase 123 had made a deposit single-currency by ' +
+      'refusing receipts that disagree, so the denomination was well defined and nothing wrote it ' +
+      'down. Phase 127 did, because the posting needed it. `receiptsCents` is the customers’ own ' +
+      'money and wears their currency; `functionalTotalCents` is what the bank account was debited ' +
+      'and is the books’, because a financial account carries no currency of its own.',
   },
   {
     file: 'src/app/accounting/billing/board.tsx',

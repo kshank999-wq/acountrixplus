@@ -262,7 +262,10 @@ describe('the registry is not taken at its word', () => {
    */
   it('every constraint it names is really in the database', async () => {
     const declared = movingConstraints()
-    expect(declared.length).toBe(5)
+    // Six since Phase 127 gave a write-off's recovery its functional twin. The
+    // number is a floor against the list quietly shrinking; the database
+    // answering below is the check that each one is real.
+    expect(declared.length).toBe(6)
 
     const rows = await db.execute<{ table_name: string; constraint_name: string }>(sql`
       SELECT conrelid::regclass::text AS table_name, conname AS constraint_name

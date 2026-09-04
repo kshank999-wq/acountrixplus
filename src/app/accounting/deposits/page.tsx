@@ -63,6 +63,8 @@ export default async function DepositsPage() {
           depositDate: deposit.depositDate,
           totalCents: deposit.totalCents,
           receiptsCents: deposit.receiptsCents,
+          currency: deposit.currency,
+          functionalTotalCents: deposit.functionalTotalCents,
           accountName: deposit.accountName,
           voided: deposit.voidedAt !== null,
         }))}

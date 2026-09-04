@@ -533,6 +533,13 @@
       "when": 1788740008000,
       "tag": "0075_phase126_schedule_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 76,
+      "version": "7",
+      "when": 1788826408000,
+      "tag": "0076_phase127_ledger_functional",
+      "breakpoints": true
     }
   ]
 }

@@ -218,6 +218,10 @@ export function ReceivablesBoard({
       )}
 
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        {/* The company's own money, not a row's (Phase 127). `badDebtSummary`
+            summed face amounts across currencies until this phase gave the
+            table a functional twin; these three now agree with the profit and
+            loss they sit beside, so the default currency is the right one. */}
         <Stat label="Written off this year" value={formatCents(badDebt.writtenOffCents)} tone={badDebt.writtenOffCents > 0 ? 'bad' : undefined} />
         <Stat label="Recovered" value={formatCents(badDebt.recoveredCents)} />
         <Stat label="Net bad debt" value={formatCents(badDebt.netCents)} />
@@ -420,7 +424,8 @@ export function ReceivablesBoard({
                       </p>
                       {row.recoveredOn && (
                         <p className="text-xs text-positive">
-                          Recovered {formatCents(row.recoveredCents ?? 0)} on {row.recoveredOn}
+                          Recovered {formatCents(row.recoveredCents ?? 0, row.currency)} on{' '}
+                          {row.recoveredOn}
                         </p>
                       )}
                     </div>

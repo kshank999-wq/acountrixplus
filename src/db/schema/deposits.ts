@@ -75,6 +75,32 @@ export const deposits = pgTable(
      */
     totalCents: bigint('total_cents', { mode: 'number' }).notNull().default(0),
 
+    /**
+     * The receipts' currency (Phase 127).
+     *
+     * Phase 123 made a deposit single-currency by refusing to bank receipts
+     * that disagree — a paying-in slip goes to one bank account and a bank
+     * credits one currency. So the denomination has been well defined since
+     * then and nothing wrote it down; ADR 0125 called that `unrecorded`.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /**
+     * The same two figures in the company's own money, which is what posts.
+     *
+     * `createDeposit` credited Undeposited Funds the *face* `receiptsCents`
+     * against a balance `recordPayment` had debited in functional money, so
+     * banking a €500 receipt left $50 in a clearing account nothing could
+     * clear. Each receipt is converted at its own recorded rate rather than one
+     * rate for the batch: the receipts were taken on different days and the
+     * ledger carries each at the rate of its own.
+     */
+    functionalReceiptsCents: bigint('functional_receipts_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+    functionalTotalCents: bigint('functional_total_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
+
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',
     }),
@@ -102,6 +128,11 @@ export const deposits = pgTable(
     // A deposit of nothing is not a deposit. A negative one is a withdrawal
     // and belongs somewhere else.
     totalPositive: check('deposits_total_positive', sql`${t.totalCents} > 0`),
+    // The functional twin is money, not an annotation (Phase 116, Phase 127).
+    functionalTotalPositive: check(
+      'deposits_functional_total_positive',
+      sql`${t.functionalTotalCents} > 0`,
+    ),
   }),
 )
 

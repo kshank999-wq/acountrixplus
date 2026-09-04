@@ -21,6 +21,7 @@ import { formatCents } from '@/lib/money'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 import { oneCurrencyOf, refuseMixedCurrency } from '@/modules/fx/addition'
+import { convert } from '@/modules/fx/rates'
 import { functionalCurrency } from '@/modules/fx/service'
 
 /**
@@ -153,6 +154,11 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
           id: payments.id,
           amountCents: payments.amountCents,
           currency: payments.currency,
+          // Phase 127. The rate the money arrived at, fixed when it arrived.
+          // Each receipt converts at its own: a batch of cheques taken on
+          // different days is carried at different rates, and one rate for the
+          // batch would post a figure that matches no receipt in it.
+          exchangeRateMillionths: payments.exchangeRateMillionths,
           financialAccountId: payments.financialAccountId,
         })
         .from(payments)
@@ -185,17 +191,59 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
   // so two currencies in one deposit is not a rounding question — it is two
   // deposits that have not been separated yet. Converting them would invent a
   // number the bank statement will never show.
-  const agreement = oneCurrencyOf(receipts, await functionalCurrency(ctx.companyId))
+  const home = await functionalCurrency(ctx.companyId)
+  const agreement = oneCurrencyOf(receipts, home)
   if (!agreement.agreed) throw refuseMixedCurrency('receipts', agreement.currencies)
+
+  // Phase 127, found by its own tripwire on the first run. A non-receipt line is
+  // an amount somebody typed against a chart account — a bank charge, interest,
+  // a rounding adjustment — and a chart account has no currency, so the figure
+  // is the company's own. On a foreign batch that makes `totalCents` a sum of
+  // euros and dollars: the very thing Phase 123 refused for the receipts, left
+  // open on the line beside them.
+  //
+  // A refusal rather than a conversion, for Phase 123's reason exactly. The
+  // bank statement will show one figure in one currency; inventing the other
+  // half of it from today's rate would put a number on the reconciliation that
+  // nothing at the bank matches.
+  if (otherItems.length > 0 && agreement.currency !== home) {
+    throw new Refusal(
+      `This deposit banks ${agreement.currency} receipts, so a line entered against an account ` +
+        `cannot be added to it — that figure would be ${home}. Bank the receipts on their own ` +
+        'and post the charge separately.',
+    )
+  }
 
   const receiptsCents = receipts.reduce((sum, receipt) => sum + receipt.amountCents, 0)
   const otherCents = otherItems.reduce((sum, item) => sum + item.amountCents, 0)
   const totalCents = receiptsCents + otherCents
 
+  /**
+   * The same two figures in the company's own money (Phase 127).
+   *
+   * The face sums above are what the paying-in slip says and what the customer
+   * handed over. They are *not* what may be posted: `recordPayment` debits
+   * Undeposited Funds the converted `receivedCents`, so crediting it the face
+   * sum left the difference in a clearing account nothing could ever clear —
+   * $50 on a €500 receipt, and `banking.cash_tie_out` disagreeing every night
+   * with no traceable cause.
+   *
+   * Each receipt at its own recorded rate, so this relieves exactly what the
+   * receipts put there. The non-receipt lines are chart-account amounts a
+   * person typed, and a chart account has no currency of its own, so they are
+   * already the books' money.
+   */
+  const functionalReceiptsCents = receipts.reduce(
+    (sum, receipt) => sum + convert(receipt.amountCents, receipt.exchangeRateMillionths),
+    0,
+  )
+  const functionalTotalCents = functionalReceiptsCents + otherCents
+
   if (totalCents <= 0) {
     throw new Refusal(
-      `The deposit comes to ${formatCents(totalCents)}. A deposit has to add up to more than nothing — ` +
-        'check whether a fee was entered larger than the receipts it was taken from.',
+      `The deposit comes to ${formatCents(totalCents, agreement.currency)}. A deposit has to add ` +
+        'up to more than nothing — check whether a fee was entered larger than the receipts it ' +
+        'was taken from.',
     )
   }
 
@@ -215,6 +263,9 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
         memo: input.memo ?? null,
         receiptsCents,
         totalCents,
+        currency: agreement.currency,
+        functionalReceiptsCents,
+        functionalTotalCents,
         createdBy: ctx.userId,
       })
       .returning()
@@ -251,15 +302,15 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
     const lines: JournalLineInput[] = [
       {
         chartAccountId: account.chartAccountId,
-        debitCents: totalCents,
+        debitCents: functionalTotalCents,
         memo: `Deposit ${number}`,
       },
     ]
 
-    if (receiptsCents > 0) {
+    if (functionalReceiptsCents > 0) {
       lines.push({
         chartAccountId: undepositedAccount.id,
-        creditCents: receiptsCents,
+        creditCents: functionalReceiptsCents,
         memo: `${receipts.length} receipt${receipts.length === 1 ? '' : 's'}`,
       })
     }
@@ -385,6 +436,11 @@ export async function listDeposits(ctx: ActorContext, opts: { limit?: number } =
       depositDate: deposits.depositDate,
       totalCents: deposits.totalCents,
       receiptsCents: deposits.receiptsCents,
+      // Phase 127. The receipts are the customers' money and the bank line is
+      // the company's — two figures, two currencies, and the screen shows each
+      // in its own rather than one symbol over both.
+      currency: deposits.currency,
+      functionalTotalCents: deposits.functionalTotalCents,
       memo: deposits.memo,
       voidedAt: deposits.voidedAt,
       accountName: financialAccounts.name,

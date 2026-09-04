@@ -5864,6 +5864,55 @@ refusing to re-denominate a schedule that has already issued invoices, with **no
 caller**, because nothing can update a schedule. Phase 49's own defect, cited two
 paragraphs above where it would have been committed.
 
+### The face amount that reached the ledger (Phase 127)
+
+ADR 0126 nominated giving write-offs and deposits a currency column — the last
+two thirds of ADR 0125's `unrecorded` gap. Verified before adopting, and reading
+*why* the columns mattered found something the nomination had framed as tidiness
+and was not.
+
+**The ledger is kept in one currency**, and two writes were posting a face amount
+into it. Measured before a line was changed:
+
+- **A €2,500 invoice written off and recovered in full left $250 of bad-debt
+  expense on the books forever.** The write-off posted the functional $2,750; the
+  recovery posted the euros as if they were dollars. `badDebtSummary` reported
+  nothing lost while the profit and loss carried $250.
+- **A €500 receipt left $50 in a clearing account nothing could clear.**
+  `recordPayment` debits Undeposited Funds $550; banking it credited $500 — the
+  symptom Phase 123's own comment describes and half fixed.
+
+The missing column was not the defect. It was the reason the defect could not be
+fixed locally: **neither write had a functional figure to post, because neither
+table kept one.** `writeOffInvoice` computed the loss, posted it and threw it
+away — Phase 65's shape and Phase 112's, a third time.
+
+**The vocabulary was already there.** Across the 189 posting sites in
+`src/modules`, narrowed to the 81 in files that read a currency-bearing table,
+money reaching the ledger is called `functionalCents`, `receivedCents`,
+`carriedCents`, `relievedCents`, `realisedCents`, `paidCents`, `lossCents`. The
+two defects were the only sites posting something still named after a document's
+own amount — so the rule is checkable by reading the source, which is what
+`LEDGER_POSTINGS` and its scanner now do for the last hop, where a number becomes
+a journal line and stops being anybody's opinion.
+
+**The scanner found a third gap on its first run**, inside the function being
+repaired: a deposit's non-receipt line is typed against a chart account, which
+has no currency, and on a foreign batch it was being added straight to euros.
+`createDeposit` refuses that combination now, for Phase 123's reason exactly.
+
+**The backfill records what the ledger contains, not what it should have.** For
+a domestic row the two are the same number — which is why this survived 47
+phases. For a foreign one the residue is written down where somebody can see it;
+repairing it is a correction with a date and a reason, not something a migration
+may do behind anybody's back.
+
+This closes `badDebtSummary` (ADR 0125 recorded it as unfixable without the
+column) and the `unrecorded` basis itself: **no entry carries it today.** The
+basis stays in the vocabulary anyway — the gap it names will recur, and ADR 0125
+is the record of how much a phase can miss while calling such a figure probably
+fine.
+
 
 ## Deploying
 
@@ -6012,6 +6061,8 @@ Coverage matches what spec §21 asks for:
 | `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself |
+| `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 81 in 28 functions. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
+| `tests/functional-postings.test.ts` | **The two writes that posted a face amount** (Phase 127), proved against the database: a €2,500 write-off recovered in full leaves the bad-debt account at zero rather than $250, a part recovery comes off at the rate the write-off was carried at, `badDebtSummary` agrees with the account balance beside it, and banking a €500 receipt clears exactly the $550 it put into Undeposited Funds. Plus the refusal this phase's own scanner turned up: a line typed against an account cannot be added to foreign receipts |
 | `tests/schedule-currency.test.ts` | **A recurring schedule bills in a currency** (Phase 126): a schedule takes the company's own unless told otherwise, a EUR one raises an invoice carrying €4,000 face and $4,400 functional, and the occurrence records what its period was billed in — the column ADR 0125 called `unrecorded`. `occurrenceCurrency` prefers the raised invoice over the schedule's intention over the company default. And the forecast, which added four figures across every schedule before a schedule could be foreign, reports one set of totals per currency: two currencies are two answers, never a third number |
 | `tests/deposit-currency.test.ts` | **A paying-in slip is in one currency** (Phase 123): banking a euro receipt together with a dollar one is refused rather than posted as a total in neither, the refusal reaches the person as a sentence rather than "Something went wrong", and the ordinary cases — several receipts in one currency, and a single foreign receipt — still bank |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |

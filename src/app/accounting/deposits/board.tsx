@@ -21,6 +21,10 @@ type Deposit = {
   depositDate: string
   totalCents: number
   receiptsCents: number
+  /** The receipts' own currency (Phase 127). */
+  currency: string
+  /** What hit the bank, in the company's money — what the ledger carries. */
+  functionalTotalCents: number
   accountName: string
   voided: boolean
 }
@@ -330,10 +334,13 @@ export function DepositBoard({
                     <td className="tnum px-4 py-1.5 text-muted">{deposit.depositDate}</td>
                     <td className="px-4 py-1.5">{deposit.accountName}</td>
                     <td className="tnum px-4 py-1.5 text-right text-muted">
-                      {formatCents(deposit.receiptsCents)}
+                      {formatCents(deposit.receiptsCents, deposit.currency)}
                     </td>
                     <td className="tnum px-4 py-1.5 text-right">
-                      {formatCents(deposit.totalCents)}
+                      {/* What the bank account was debited. A financial account
+                          carries no currency of its own, so this is the books'
+                          money — not the receipts' (Phase 127). */}
+                      {formatCents(deposit.functionalTotalCents)}
                     </td>
                     <td className="px-4 py-1.5 text-right">
                       {canRecord && !deposit.voided && (
@@ -360,7 +367,7 @@ export function DepositBoard({
                           confirmSuffix={deposit.number}
                           onConfirm={(reason) => unbank(deposit, reason)}
                         >
-                          The {formatCents(deposit.totalCents)} comes back out of{' '}
+                          The {formatCents(deposit.functionalTotalCents)} comes back out of{' '}
                           {deposit.accountName}, and the receipts that made it go back to waiting
                           to be deposited. Nothing left the business, so a reason is welcome rather
                           than required.

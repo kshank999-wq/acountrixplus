@@ -267,6 +267,29 @@ export const invoiceWriteOffs = pgTable(
     writtenOffOn: date('written_off_on').notNull(),
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
 
+    /**
+     * The invoice's own currency (Phase 127).
+     *
+     * `amount_cents` is the invoice's face amount — `writeOffInvoice` converts
+     * on its way to the ledger and stores the unconverted figure here. ADR 0125
+     * traced that and classified the column `unrecorded`; this writes the answer
+     * down instead of leaving it to be re-derived by reading the write path.
+     */
+    currency: text('currency').notNull().default('USD'),
+    /**
+     * The loss the books actually carry, at the invoice's own rate.
+     *
+     * `writeOffInvoice` has always computed this — `relieveFunctional(invoice,
+     * amountCents).functionalCents` — posted it to bad debt, and thrown it away.
+     * Phase 65 and Phase 112 both found the same shape: a conversion done, used
+     * once, and discarded.
+     *
+     * Keeping it is what lets a recovery reverse the figure that was posted.
+     * Without it `recoverWriteOff` had nothing to reverse but the face amount,
+     * so a fully recovered €2,500 write-off left $250 of expense on the books.
+     */
+    functionalAmountCents: bigint('functional_amount_cents', { mode: 'number' }).notNull(),
+
     /** Required. A write-off without a stated reason is an unexplained loss. */
     reason: text('reason').notNull(),
 
@@ -277,6 +300,16 @@ export const invoiceWriteOffs = pgTable(
     /** Set if the money later arrived after all. */
     recoveredOn: date('recovered_on'),
     recoveredCents: bigint('recovered_cents', { mode: 'number' }),
+    /**
+     * What the recovery took off bad debt, in the company's own money.
+     *
+     * Moves with `recoveredCents` and is never derived from it afterwards —
+     * Phase 116's rule, for the same reason: the difference between converting
+     * the remainder and remaining what was converted is a cent, every time.
+     */
+    functionalRecoveredCents: bigint('functional_recovered_cents', { mode: 'number' })
+      .notNull()
+      .default(0),
     recoveryJournalEntryId: uuid('recovery_journal_entry_id'),
 
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
@@ -297,6 +330,13 @@ export const invoiceWriteOffs = pgTable(
     invoiceUnique: unique('invoice_write_offs_invoice_unique').on(t.invoiceId),
     companyIdx: index('invoice_write_offs_company_idx').on(t.companyId, t.writtenOffOn),
     amountPositive: check('invoice_write_offs_amount_positive', sql`${t.amountCents} > 0`),
+    // Phase 116's shape: the functional twin is real money, not an optional
+    // annotation, so the database refuses a row that leaves it unset or negative
+    // rather than a check noticing later (Phase 116 — a constraint beats a check).
+    functionalSane: check(
+      'invoice_write_offs_functional_sane',
+      sql`${t.functionalAmountCents} > 0 AND ${t.functionalRecoveredCents} >= 0`,
+    ),
     reasonNotBlank: check('invoice_write_offs_reason_not_blank', sql`length(trim(${t.reason})) > 0`),
   }),
 )

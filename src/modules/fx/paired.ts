@@ -158,6 +158,50 @@ export const PAIRED_COLUMNS: readonly PairedColumns[] = [
       'migration that never reached the schema file — and for fifty phases the only one, which ' +
       'is what Phase 116 found.',
   },
+  {
+    table: 'invoice_write_offs',
+    faceColumn: 'amount_cents',
+    functionalColumn: 'functional_amount_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'What was written off, and what the books took as the loss. Fixed: a write-off is decided ' +
+      'once and the expense it raises does not come down — a recovery reverses it on the other ' +
+      'pair rather than reducing this one, so there is no zero for it to reach.',
+  },
+  {
+    table: 'invoice_write_offs',
+    faceColumn: 'recovered_cents',
+    functionalColumn: 'functional_recovered_cents',
+    kind: 'moving',
+    constraint: 'invoice_write_offs_functional_sane',
+    because:
+      'What later turned up, and what came off bad debt for it. Moving, and Phase 127 is what ' +
+      'happens without it: `recoverWriteOff` posted the face amount against a functional expense, ' +
+      'so a fully recovered €2,500 write-off left $250 of loss on the books permanently.',
+  },
+  {
+    table: 'deposits',
+    faceColumn: 'total_cents',
+    functionalColumn: 'functional_total_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'What the paying-in slip says against what hit the bank in the company’s money. Fixed: a ' +
+      'deposit is banked once and reversed whole — `voidDeposit` reverses the entry rather than ' +
+      'reducing the row, so neither side ever walks down.',
+  },
+  {
+    table: 'deposits',
+    faceColumn: 'receipts_cents',
+    functionalColumn: 'functional_receipts_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'The receipts’ own sum against what they relieve from Undeposited Funds. Fixed for the same ' +
+      'reason, and the pair matters because `recordPayment` debits that account in functional ' +
+      'money — crediting it the face sum left $50 of a €500 receipt in a clearing account.',
+  },
 ]
 
 export class PairedColumnsError extends Error {

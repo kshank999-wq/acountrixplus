@@ -19,6 +19,7 @@ import { formatCents } from '@/lib/money'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
 import { functionalCurrency, rateFor } from '@/modules/fx/service'
+import { recoveryFunctional } from '@/modules/fx/ledger'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 
@@ -506,8 +507,8 @@ export async function writeOffInvoice(
 
   if (amountCents > invoice.balanceCents) {
     throw new Refusal(
-      `Invoice ${invoice.number} has ${formatCents(invoice.balanceCents)} outstanding, ` +
-        `so ${formatCents(amountCents)} cannot be written off.`,
+      `Invoice ${invoice.number} has ${formatCents(invoice.balanceCents, invoice.currency)} ` +
+        `outstanding, so ${formatCents(amountCents, invoice.currency)} cannot be written off.`,
     )
   }
 
@@ -538,6 +539,11 @@ export async function writeOffInvoice(
         invoiceId: invoice.id,
         writtenOffOn: input.writtenOffOn,
         amountCents,
+        // Phase 127. `lossCents` is what goes to the ledger and was thrown away
+        // the moment it had been posted, so a recovery had nothing to reverse
+        // but the face amount. Kept now, with the currency it is not in.
+        currency: invoice.currency,
+        functionalAmountCents: lossCents,
         reason: input.reason.trim(),
         createdBy: ctx.userId,
       })
@@ -619,8 +625,8 @@ export async function recoverWriteOff(
   if (input.amountCents <= 0) throw new Refusal('A recovery must be greater than zero.')
   if (input.amountCents > writeOff.amountCents) {
     throw new Refusal(
-      `Only ${formatCents(writeOff.amountCents)} was written off, so ` +
-        `${formatCents(input.amountCents)} cannot be recovered.`,
+      `Only ${formatCents(writeOff.amountCents, writeOff.currency)} was written off, so ` +
+        `${formatCents(input.amountCents, writeOff.currency)} cannot be recovered.`,
     )
   }
 
@@ -636,6 +642,30 @@ export async function recoverWriteOff(
   const badDebtAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.badDebt)
   if (!badDebtAccount) throw new Refusal('Bad Debt (6025) is missing from the chart of accounts.')
 
+  /**
+   * What comes off bad debt (Phase 127).
+   *
+   * Until this, both lines posted `input.amountCents` — the *invoice's* amount,
+   * against an expense `writeOffInvoice` had raised in the company's own money.
+   * A fully recovered €2,500 write-off therefore credited $2,500 against a
+   * $2,750 debit and left $250 of loss on the profit and loss forever, while
+   * `badDebtSummary` reported that nothing had been lost at all.
+   *
+   * At the write-off's own carried rate, and taking the whole remainder on the
+   * last of it, for the two reasons `relieveFunctional` gives: a later rate
+   * would fold a currency movement into bad debt, and rounding three
+   * part-recoveries need not sum back to what was written off.
+   */
+  const recovery = recoveryFunctional(
+    {
+      amountCents: writeOff.amountCents,
+      functionalAmountCents: writeOff.functionalAmountCents,
+      recoveredCents: writeOff.recoveredCents ?? 0,
+      functionalRecoveredCents: writeOff.functionalRecoveredCents,
+    },
+    input.amountCents,
+  )
+
   return db.transaction(async (tx) => {
     const entry = await createJournalEntry(
       ctx,
@@ -646,10 +676,10 @@ export async function recoverWriteOff(
         sourceType: 'write_off_recovery',
         sourceId: writeOff.id,
         lines: [
-          { chartAccountId: bank.chartAccountId, debitCents: input.amountCents },
+          { chartAccountId: bank.chartAccountId, debitCents: recovery.functionalCents },
           // Back out the expense. Not revenue — that was recognized when the
           // invoice was raised and never reversed.
-          { chartAccountId: badDebtAccount.id, creditCents: input.amountCents },
+          { chartAccountId: badDebtAccount.id, creditCents: recovery.functionalCents },
         ],
       },
       tx,
@@ -660,6 +690,8 @@ export async function recoverWriteOff(
       .set({
         recoveredOn: input.recoveredOn,
         recoveredCents: input.amountCents,
+        // Moves with the face figure and is never re-derived from it (Phase 116).
+        functionalRecoveredCents: writeOff.functionalRecoveredCents + recovery.functionalCents,
         recoveryJournalEntryId: entry.id,
       })
       .where(eq(invoiceWriteOffs.id, writeOff.id))
@@ -670,7 +702,11 @@ export async function recoverWriteOff(
         action: 'invoice.write_off_recovered',
         entityType: 'invoice',
         entityId: writeOff.invoiceId,
-        after: { recoveredOn: input.recoveredOn, amountCents: input.amountCents },
+        after: {
+          recoveredOn: input.recoveredOn,
+          amountCents: input.amountCents,
+          functionalCents: recovery.functionalCents,
+        },
       },
       tx,
     )
@@ -727,11 +763,10 @@ export async function listWriteOffs(ctx: ActorContext, opts: { limit?: number } 
       id: invoiceWriteOffs.id,
       invoiceId: invoiceWriteOffs.invoiceId,
       invoiceNumber: invoices.number,
-      // Phase 125. `invoice_write_offs.amount_cents` has no currency column,
-      // which is what made it look like the books' money. `writeOffInvoice`
-      // calls relieveFunctional(invoice, amountCents) and posts the converted
-      // figure to bad debt — so the stored amount is the invoice's own.
-      currency: invoices.currency,
+      // Phase 125 read this off the joined invoice, because the write-off had
+      // no currency column of its own. Phase 127 gave it one — the row now says
+      // what it is denominated in rather than being asked to prove it.
+      currency: invoiceWriteOffs.currency,
       customerName: customers.name,
       writtenOffOn: invoiceWriteOffs.writtenOffOn,
       amountCents: invoiceWriteOffs.amountCents,
@@ -747,7 +782,16 @@ export async function listWriteOffs(ctx: ActorContext, opts: { limit?: number } 
     .limit(opts.limit ?? 50)
 }
 
-/** Bad debt written off in a period, net of anything recovered. */
+/**
+ * Bad debt written off in a period, net of anything recovered.
+ *
+ * In the company's own money, since Phase 127. It summed `amount_cents` and
+ * `recovered_cents` — each in its own invoice's currency — and printed the
+ * result with one symbol, which ADR 0125 recorded in `NAME_COLLISIONS` as
+ * unfixable until the table had a functional twin. It has one now, so this
+ * reads it: the figure a roll-up may add is the figure the ledger carries, and
+ * it now agrees with the profit and loss it sits beside.
+ */
 export async function badDebtSummary(
   ctx: ActorContext,
   range: { startDate: string; endDate: string },
@@ -757,8 +801,8 @@ export async function badDebtSummary(
   const [row] = await db
     .select({
       count: sql<string>`count(*)`,
-      writtenOffCents: sql<string>`coalesce(sum(${invoiceWriteOffs.amountCents}), 0)`,
-      recoveredCents: sql<string>`coalesce(sum(${invoiceWriteOffs.recoveredCents}), 0)`,
+      writtenOffCents: sql<string>`coalesce(sum(${invoiceWriteOffs.functionalAmountCents}), 0)`,
+      recoveredCents: sql<string>`coalesce(sum(${invoiceWriteOffs.functionalRecoveredCents}), 0)`,
     })
     .from(invoiceWriteOffs)
     .where(
