@@ -131,16 +131,20 @@ function carriers(): Carrier[] {
 
 describe('what makes money on a screen a document’s rather than the books’', () => {
   it('names the tables that carry a currency, and no others', () => {
-    // Checked against the schema in Phase 124: billing schedules, proposals,
-    // deposits, contributions, purchase orders, time entries, assets and
-    // statement runs all carry none. If a sixth ever grows one, this list is
-    // where somebody has to notice.
+    // Phase 124 checked five against the schema and said: "If a sixth ever
+    // grows one, this list is where somebody has to notice." Phase 126 grew
+    // two — a recurring schedule records what it bills in, and an occurrence
+    // records what its period was billed in — and this is where it was
+    // noticed. Proposals, deposits, contributions, purchase orders, time
+    // entries, assets and statement runs still carry none.
     expect([...DOCUMENT_TABLES]).toEqual([
       'invoices',
       'bills',
       'creditNotes',
       'payments',
       'retainers',
+      'recurringInvoices',
+      'recurringInvoiceOccurrences',
     ])
   })
 
@@ -224,11 +228,18 @@ describe('the honest remainder', () => {
     }
   })
 
-  it('keeps the unclassified count from growing without somebody saying why', () => {
-    // Phase 121's device: a list with reasons beats a silence. Phase 124 put
-    // this at 19, counted off a list that had already moved; Phase 125 traced
-    // all seventeen and the honest remainder is thirteen, every one of which
-    // reads no face column at all. It may shrink; it must not quietly grow.
-    expect(UNCLASSIFIED_CARRIERS).toBeLessThanOrEqual(13)
+  it('measures the unclassified remainder rather than taking its word for it', () => {
+    // This asserted `<= 13` against a constant of 13 — true whatever the
+    // codebase does, and equally true of Phase 124's wrong 19, which is how
+    // that survived a green suite for a whole phase. Computed now, and
+    // compared exactly: the number may change, but only when somebody changes
+    // it and writes down why.
+    const remainder = carriers().filter(
+      (c) =>
+        !c.hasCurrency &&
+        !SCREEN_MONEY.some((row) => row.file === c.file && row.type === c.type),
+    )
+
+    expect(remainder.map((c) => `${c.file}:${c.type}`).length).toBe(UNCLASSIFIED_CARRIERS)
   })
 })

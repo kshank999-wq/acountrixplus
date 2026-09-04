@@ -115,6 +115,7 @@ import { approveBudget, createBudget, setAccountBudget } from '@/modules/budget/
 import { budgetVsActual } from '@/modules/budget/reporting'
 import { createSchedule, runDueSchedules } from '@/modules/billing/service'
 import { billingForecast } from '@/modules/billing/reporting'
+import { forecastTotals } from '@/modules/billing/currency'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { adjustStock, receiveStock, reconcileInventory, stockOnHand } from '@/modules/inventory/service'
 import { receiveGoods, unbilledReceipts } from '@/modules/inventory/purchasing'
@@ -3073,13 +3074,27 @@ async function main() {
       const waiting = billed.filter((row) => row.skipped?.includes('Waiting'))
       const ahead = await billingForecast(ctx, { from: '2026-08-18', through: '2026-11-30' })
 
+      // Per currency, not added (Phase 126): a schedule carries its own now.
+      const billedTotals = forecastTotals(
+        raised.map((row) => ({
+          scheduleId: row.scheduleId,
+          currency: row.currency,
+          totalCents: row.totalCents,
+          autoRaise: true,
+          overdue: false,
+        })),
+      )
+
       console.log(
         `  Recurring billing: ${raised.length} invoice${raised.length === 1 ? '' : 's'} raised ` +
-          `from schedules for ${formatCentsPlain(
-            raised.reduce((sum, row) => sum + row.totalCents, 0),
-          )}, ${waiting.length} period${waiting.length === 1 ? '' : 's'} waiting for somebody. ` +
-          `${formatCentsPlain(ahead.totalCents)} is forecast to the end of November — owed by ` +
-          'nobody, and posted nowhere.',
+          `from schedules for ${billedTotals
+            .map((row) => `${formatCentsPlain(row.totalCents)} ${row.currency}`)
+            .join(' and ')}, ${waiting.length} period${
+            waiting.length === 1 ? '' : 's'
+          } waiting for somebody. ${ahead.totals
+            .map((row) => `${formatCentsPlain(row.totalCents)} ${row.currency}`)
+            .join(' and ')} is forecast to the end of November — owed by nobody, and posted ` +
+          'nowhere.',
       )
 
       void retainer

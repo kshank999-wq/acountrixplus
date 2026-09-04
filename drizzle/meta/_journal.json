@@ -526,6 +526,13 @@
       "when": 1788740007000,
       "tag": "0074_phase116_paired_money_sane",
       "breakpoints": true
+    },
+    {
+      "idx": 75,
+      "version": "7",
+      "when": 1788740008000,
+      "tag": "0075_phase126_schedule_currency",
+      "breakpoints": true
     }
   ]
 }

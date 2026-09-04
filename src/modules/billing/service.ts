@@ -11,6 +11,8 @@ import {
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { recordAudit } from '@/modules/audit'
 import { createInvoice } from '@/modules/receivables/service'
+import { functionalCurrency } from '@/modules/fx/service'
+import { occurrenceCurrency } from './currency'
 import { firstOccurrence, nextOccurrence, type Cadence } from '@/modules/ledger/recurring'
 import { DomainError } from '@/modules/errors'
 
@@ -60,6 +62,14 @@ export type ScheduleInput = {
   name: string
   memo?: string
   cadence: Cadence
+  /**
+   * What this schedule bills in (Phase 126). Defaults to the company's own.
+   *
+   * Every other way of raising an invoice has offered this since Phase 64. A
+   * schedule could not, so a European customer on a monthly retainer got dollar
+   * invoices — or the schedule was switched off and twelve raised by hand.
+   */
+  currency?: string
   dayOfMonth?: number
   paymentTermsDays?: number
   autoRaise?: boolean
@@ -158,6 +168,7 @@ export async function createSchedule(ctx: ActorContext, input: ScheduleInput) {
         companyId: ctx.companyId,
         customerId: customer.id,
         name,
+        currency: input.currency ?? (await functionalCurrency(ctx.companyId)),
         memo: input.memo?.trim() || null,
         cadence: input.cadence,
         dayOfMonth,
@@ -267,6 +278,8 @@ export type RunResult = {
   invoiceId: string | null
   invoiceNumber: string | null
   totalCents: number
+  /** What the schedule billed in (Phase 126) — the face amount's denomination. */
+  currency: string
   raised: boolean
   /**
    * Whether this run wrote the occurrence row — i.e. whether the period is now
@@ -334,6 +347,7 @@ export async function runDueSchedules(
           invoiceId: null,
           invoiceNumber: null,
           totalCents: 0,
+          currency: current.currency,
           raised: false,
           claimed: false,
           skipped: 'Past its end date — switched off.',
@@ -360,6 +374,7 @@ export async function runDueSchedules(
           invoiceId: null,
           invoiceNumber: null,
           totalCents: 0,
+          currency: current.currency,
           raised: false,
           claimed: false,
           skipped: error instanceof Error ? error.message : String(error),
@@ -436,6 +451,7 @@ async function runOneOccurrence(
         occurredOn,
         wasRaised: false,
         totalCents: 0,
+        currency: schedule.currency,
       })
       .onConflictDoNothing({
         target: [
@@ -455,6 +471,7 @@ async function runOneOccurrence(
       invoiceId: null,
       invoiceNumber: null,
       totalCents: 0,
+      currency: schedule.currency,
       raised: false,
       claimed: Boolean(occurrence),
       skipped: occurrence
@@ -472,6 +489,7 @@ async function runOneOccurrence(
         companyId: ctx.companyId,
         recurringInvoiceId: schedule.id,
         occurredOn,
+        currency: schedule.currency,
         wasRaised: schedule.autoRaise,
         totalCents,
       })
@@ -492,6 +510,7 @@ async function runOneOccurrence(
         invoiceId: null,
         invoiceNumber: null,
         totalCents: 0,
+        currency: schedule.currency,
         raised: false,
         claimed: false,
         skipped: 'Already billed for this date.',
@@ -523,6 +542,7 @@ async function runOneOccurrence(
         invoiceId: null,
         invoiceNumber: null,
         totalCents,
+        currency: schedule.currency,
         raised: false,
         claimed: true,
         skipped: 'Waiting for somebody to raise it.',
@@ -557,6 +577,7 @@ async function runOneOccurrence(
       invoiceId: invoice.id,
       invoiceNumber: invoice.number,
       totalCents,
+      currency: schedule.currency,
       raised: true,
       claimed: true,
     }
@@ -580,6 +601,10 @@ async function raiseInvoiceFor(
     ctx,
     {
       customerId: schedule.customerId,
+      // Phase 126. Until this, a schedule raised the company's currency
+      // whatever the customer trades in — the one invoice path that could not
+      // be foreign.
+      currency: schedule.currency,
       issueDate: occurredOn,
       dueDate: addDays(occurredOn, schedule.paymentTermsDays),
       memo: schedule.memo ?? schedule.name,
@@ -677,6 +702,8 @@ export type ScheduleRow = {
   lastRunOn: string | null
   occurrenceCount: number
   perOccurrenceCents: number
+  /** What it bills in (Phase 126). Fixed when the schedule was set up. */
+  currency: string
 }
 
 /** Every schedule, with what one occurrence of it bills. */
@@ -698,6 +725,7 @@ export async function listSchedules(ctx: ActorContext): Promise<ScheduleRow[]> {
       nextRunOn: recurringInvoices.nextRunOn,
       lastRunOn: recurringInvoices.lastRunOn,
       occurrenceCount: recurringInvoices.occurrenceCount,
+      currency: recurringInvoices.currency,
       perOccurrenceCents: sql<string>`coalesce(sum(
         round(${recurringInvoiceLines.quantityMilli} * ${recurringInvoiceLines.unitPriceCents} / 1000.0)
       ), 0)`,
@@ -743,10 +771,16 @@ export async function scheduleDetail(ctx: ActorContext, scheduleId: string) {
         invoiceNumber: invoices.number,
         invoiceStatus: invoices.status,
         balanceCents: invoices.balanceCents,
-        // Phase 125. `balance_cents` is the face column: a schedule billing a
-        // customer in euros raises euro invoices, and this history is where
-        // somebody reads what it has billed.
+        // `balance_cents` is the face column and this history is where somebody
+        // reads what a schedule has billed (Phase 125).
+        //
+        // Phase 125's comment here claimed "a schedule billing a customer in
+        // euros raises euro invoices". It could not: until Phase 126 a schedule
+        // had no currency and always raised the company's. The column was right
+        // and the reason given for it was wrong — it matters now because a
+        // schedule can finally be foreign.
         invoiceCurrency: invoices.currency,
+        occurrenceCurrency: recurringInvoiceOccurrences.currency,
       })
       .from(recurringInvoiceOccurrences)
       .leftJoin(invoices, eq(invoices.id, recurringInvoiceOccurrences.invoiceId))
@@ -754,7 +788,19 @@ export async function scheduleDetail(ctx: ActorContext, scheduleId: string) {
       .orderBy(desc(recurringInvoiceOccurrences.occurredOn)),
   ])
 
-  return { schedule, lines, history, perOccurrenceCents: scheduleTotalCents(lines) }
+  const home = await functionalCurrency(ctx.companyId)
+
+  return {
+    schedule,
+    lines,
+    // Phase 126. The invoice's currency where one was raised, the occurrence's
+    // otherwise — a fact beats an intention, and both beat the default.
+    history: history.map((row) => ({
+      ...row,
+      currency: occurrenceCurrency(row.invoiceCurrency, row.occurrenceCurrency, home),
+    })),
+    perOccurrenceCents: scheduleTotalCents(lines),
+  }
 }
 
 export { firstOccurrence, nextOccurrence } from '@/modules/ledger/recurring'

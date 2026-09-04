@@ -8,6 +8,7 @@ import {
 } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { nextOccurrence } from '@/modules/ledger/recurring'
+import { forecastTotals, type ForecastTotals } from './currency'
 import { scheduleTotalCents } from './service'
 
 /**
@@ -32,6 +33,8 @@ export type ForecastOccurrence = {
   customerName: string
   dueOn: string
   totalCents: number
+  /** What the schedule bills in (Phase 126). */
+  currency: string
   autoRaise: boolean
   /** Already due when the window opened, and still not billed. */
   overdue: boolean
@@ -41,20 +44,17 @@ export type Forecast = {
   from: string
   through: string
   occurrences: ForecastOccurrence[]
-  totalCents: number
-  /** What is due to be raised without anybody doing anything. */
-  automaticCents: number
-  /** What is waiting for a person. */
-  manualCents: number
   /**
-   * Of the above, what was already due before the window started.
+   * The totals, one set per currency (Phase 126).
    *
-   * Kept as its own figure because it is the interesting one: a period that
-   * has passed and has not been billed is not a forecast, it is a thing
-   * somebody has forgotten. Browser verification found this report hiding one
-   * — the window began today and an overdue quarter simply was not listed.
+   * It was four flat figures until a schedule could be foreign. `overdueCents`
+   * is the interesting one in each set: a period that has passed and has not
+   * been billed is not a forecast, it is a thing somebody has forgotten.
+   * Browser verification found this report hiding one — the window began today
+   * and an overdue quarter simply was not listed.
    */
-  overdueCents: number
+  totals: ForecastTotals[]
+  /** Distinct schedules across every currency; each total has its own count. */
   scheduleCount: number
 }
 
@@ -89,6 +89,7 @@ export async function billingForecast(
       autoRaise: recurringInvoices.autoRaise,
       nextRunOn: recurringInvoices.nextRunOn,
       endsOn: recurringInvoices.endsOn,
+      currency: recurringInvoices.currency,
     })
     .from(recurringInvoices)
     .innerJoin(customers, eq(customers.id, recurringInvoices.customerId))
@@ -137,6 +138,7 @@ export async function billingForecast(
         customerName: schedule.customerName,
         dueOn: due,
         totalCents,
+        currency: schedule.currency,
         autoRaise: schedule.autoRaise,
         overdue: due < from,
       })
@@ -155,16 +157,10 @@ export async function billingForecast(
     from,
     through,
     occurrences,
-    totalCents: occurrences.reduce((sum, row) => sum + row.totalCents, 0),
-    automaticCents: occurrences
-      .filter((row) => row.autoRaise)
-      .reduce((sum, row) => sum + row.totalCents, 0),
-    manualCents: occurrences
-      .filter((row) => !row.autoRaise)
-      .reduce((sum, row) => sum + row.totalCents, 0),
-    overdueCents: occurrences
-      .filter((row) => row.overdue)
-      .reduce((sum, row) => sum + row.totalCents, 0),
+    // Grouped rather than added (Phase 126). A euro retainer and a dollar one
+    // are both real; a report that added them would be the only wrong number
+    // that phase introduced.
+    totals: forecastTotals(occurrences),
     scheduleCount: new Set(occurrences.map((row) => row.scheduleId)).size,
   }
 }
@@ -176,6 +172,14 @@ export type WaitingOccurrence = {
   customerName: string
   occurredOn: string
   totalCents: number
+  /**
+   * What the period will be billed in (Phase 126).
+   *
+   * The occurrence's own column, not the schedule's: an occurrence records what
+   * was decided when the period was claimed, and a schedule re-denominated
+   * afterwards must not restate a period already waiting on somebody's desk.
+   */
+  currency: string
 }
 
 /**
@@ -196,6 +200,7 @@ export async function awaitingRaise(ctx: ActorContext): Promise<WaitingOccurrenc
       customerName: customers.name,
       occurredOn: recurringInvoiceOccurrences.occurredOn,
       totalCents: recurringInvoiceOccurrences.totalCents,
+      currency: recurringInvoiceOccurrences.currency,
     })
     .from(recurringInvoiceOccurrences)
     .innerJoin(

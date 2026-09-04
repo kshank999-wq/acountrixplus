@@ -60,6 +60,16 @@ export const recurringInvoices = pgTable(
     name: text('name').notNull(),
     memo: text('memo'),
 
+    /**
+     * What this schedule bills in (Phase 126).
+     *
+     * Every other way of raising an invoice could be foreign; this one could
+     * not, so a European customer on a monthly retainer got dollar invoices.
+     * Fixed once the schedule has raised anything — see `mayChangeCurrency`,
+     * because the invoices already sent are in the old one.
+     */
+    currency: text('currency').notNull().default('USD'),
+
     cadence: recurringCadenceEnum('cadence').notNull(),
     /**
      * 1–28, the bound Phase 11 chose and for its reason: "the 31st" in
@@ -188,6 +198,15 @@ export const recurringInvoiceOccurrences = pgTable(
     wasRaised: boolean('was_raised').notNull(),
     /** What it billed, kept so a skipped or voided period still says what it meant to be. */
     totalCents: bigint('total_cents', { mode: 'number' }).notNull().default(0),
+    /**
+     * What `totalCents` is denominated in (Phase 126).
+     *
+     * ADR 0125 classified this amount `unrecorded`: the table stored one number
+     * and no currency, so what it meant was knowable only by reading the code
+     * that wrote it. It takes the raised invoice's where there is one and the
+     * schedule's otherwise.
+     */
+    currency: text('currency').notNull().default('USD'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (table) => [

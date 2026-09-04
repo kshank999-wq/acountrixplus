@@ -25,6 +25,8 @@ type Schedule = {
   lastRunOn: string | null
   occurrenceCount: number
   perOccurrenceCents: number
+  /** What it bills in (Phase 126). */
+  currency: string
 }
 
 type Detail = {
@@ -41,10 +43,18 @@ type Detail = {
     invoiceNumber: string | null
     invoiceStatus: string | null
     balanceCents: number | null
-    /** The raised invoice's own currency (Phase 125). */
-    invoiceCurrency: string | null
+    /**
+     * What this period was billed in.
+     *
+     * Phase 125 passed the raised invoice's currency and nothing else, so a
+     * period nobody has raised yet had none. Phase 126 settles it in one place
+     * — `occurrenceCurrency` — and hands the screen a single answer.
+     */
+    currency: string
   }>
   perOccurrenceCents: number
+  /** What the schedule bills in, for the lines and the per-occurrence figure. */
+  currency: string
 }
 
 type Waiting = {
@@ -54,6 +64,7 @@ type Waiting = {
   customerName: string
   occurredOn: string
   totalCents: number
+  currency: string
 }
 
 type Forecast = {
@@ -65,13 +76,19 @@ type Forecast = {
     customerName: string
     dueOn: string
     totalCents: number
+    currency: string
     autoRaise: boolean
     overdue: boolean
   }>
-  totalCents: number
-  automaticCents: number
-  manualCents: number
-  overdueCents: number
+  /** One set per currency (Phase 126) — a forecast cannot add two of them. */
+  totals: Array<{
+    currency: string
+    totalCents: number
+    automaticCents: number
+    manualCents: number
+    overdueCents: number
+    scheduleCount: number
+  }>
   scheduleCount: number
 }
 
@@ -103,6 +120,8 @@ export function BillingBoard({
   canCreate,
   customers,
   accounts,
+  homeCurrency,
+  currencies,
 }: {
   schedules: Schedule[]
   selectedId: string | null
@@ -114,6 +133,10 @@ export function BillingBoard({
   canCreate: boolean
   customers: Array<{ id: string; name: string }>
   accounts: Array<{ id: string; number: string; name: string }>
+  /** The company's own currency — what a schedule bills in unless told otherwise. */
+  homeCurrency: string
+  /** What may be chosen: home, then every currency with a rate on file. */
+  currencies: string[]
 }) {
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -129,6 +152,7 @@ export function BillingBoard({
   const [dayOfMonth, setDayOfMonth] = useState('1')
   const [startsOn, setStartsOn] = useState(new Date().toISOString().slice(0, 10))
   const [autoRaise, setAutoRaise] = useState(true)
+  const [currency, setCurrency] = useState(homeCurrency)
 
   function act(fn: () => Promise<ActionResult>) {
     startTransition(async () => {
@@ -186,7 +210,9 @@ export function BillingBoard({
                   </span>
                 </span>
                 <span className="flex items-center gap-3">
-                  <span className="tabular-nums">{formatCents(row.totalCents)}</span>
+                  <span className="tabular-nums">
+                    {formatCents(row.totalCents, row.currency)}
+                  </span>
                   {canManage && (
                     <button
                       type="button"
@@ -225,26 +251,41 @@ export function BillingBoard({
             </p>
           ) : (
             <>
-              <p className="mt-3 text-sm">
-                <span className="text-muted">Raised automatically</span>{' '}
-                <span className="tabular-nums">{formatCents(forecast.automaticCents)}</span>
-                <span className="text-faint"> · </span>
-                <span className="text-muted">waiting for somebody</span>{' '}
-                <span className="tabular-nums">{formatCents(forecast.manualCents)}</span>
-                <span className="text-faint"> · </span>
-                <span className="text-muted">across</span>{' '}
-                <span className="tabular-nums">
-                  {forecast.scheduleCount} schedule{forecast.scheduleCount === 1 ? '' : 's'}
-                </span>
-                {forecast.overdueCents > 0 && (
-                  <>
-                    <span className="text-faint"> · </span>
-                    <span className="text-danger">
-                      {formatCents(forecast.overdueCents)} already overdue
+              {/* One line per currency (Phase 126). A business billing only in
+                  its own — which is most of them — sees the single line it saw
+                  before; a euro retainer beside a dollar one gets two, because
+                  there is no third number that means anything. */}
+              {forecast.totals.map((total) => (
+                <p key={total.currency} className="mt-3 text-sm">
+                  {forecast.totals.length > 1 && (
+                    <span className="mr-2 rounded bg-raised px-1.5 py-0.5 text-xs font-medium">
+                      {total.currency}
                     </span>
-                  </>
-                )}
-              </p>
+                  )}
+                  <span className="text-muted">Raised automatically</span>{' '}
+                  <span className="tabular-nums">
+                    {formatCents(total.automaticCents, total.currency)}
+                  </span>
+                  <span className="text-faint"> · </span>
+                  <span className="text-muted">waiting for somebody</span>{' '}
+                  <span className="tabular-nums">
+                    {formatCents(total.manualCents, total.currency)}
+                  </span>
+                  <span className="text-faint"> · </span>
+                  <span className="text-muted">across</span>{' '}
+                  <span className="tabular-nums">
+                    {total.scheduleCount} schedule{total.scheduleCount === 1 ? '' : 's'}
+                  </span>
+                  {total.overdueCents > 0 && (
+                    <>
+                      <span className="text-faint"> · </span>
+                      <span className="text-danger">
+                        {formatCents(total.overdueCents, total.currency)} already overdue
+                      </span>
+                    </>
+                  )}
+                </p>
+              ))}
 
               <div className="mt-3 overflow-x-auto">
                 <table className="w-full text-sm">
@@ -272,20 +313,23 @@ export function BillingBoard({
                           {row.autoRaise ? 'automatically' : 'needs a person'}
                         </td>
                         <td className="py-1.5 text-right tabular-nums">
-                          {formatCents(row.totalCents)}
+                          {formatCents(row.totalCents, row.currency)}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                   <tfoot>
-                    <tr className="font-medium">
-                      <td className="py-1.5 pr-3" colSpan={4}>
-                        Forecast total — not owed by anybody
-                      </td>
-                      <td className="py-1.5 text-right tabular-nums">
-                        {formatCents(forecast.totalCents)}
-                      </td>
-                    </tr>
+                    {forecast.totals.map((total) => (
+                      <tr key={total.currency} className="font-medium">
+                        <td className="py-1.5 pr-3" colSpan={4}>
+                          Forecast total{forecast.totals.length > 1 ? ` in ${total.currency}` : ''} —
+                          not owed by anybody
+                        </td>
+                        <td className="py-1.5 text-right tabular-nums">
+                          {formatCents(total.totalCents, total.currency)}
+                        </td>
+                      </tr>
+                    ))}
                   </tfoot>
                 </table>
               </div>
@@ -386,6 +430,28 @@ export function BillingBoard({
                 className="field w-full py-1.5 text-sm"
               />
             </label>
+            {currencies.length > 1 && (
+              <label className="text-xs text-muted">
+                <span className="mb-1 block">Billed in</span>
+                <select
+                  value={currency}
+                  onChange={(event) => setCurrency(event.target.value)}
+                  className="field w-full py-1.5 text-sm"
+                >
+                  {currencies.map((code) => (
+                    <option key={code} value={code}>
+                      {code}
+                      {code === homeCurrency ? ' — your own' : ''}
+                    </option>
+                  ))}
+                </select>
+                <span className="mt-1 block text-faint">
+                  Fixed once it is set up. The invoices this raises are documents a customer holds,
+                  and re-denominating the arrangement under them would leave its own history adding
+                  up to nothing in either currency.
+                </span>
+              </label>
+            )}
             <label className="text-xs text-muted">
               <span className="mb-1 block">How often</span>
               <select
@@ -459,6 +525,7 @@ export function BillingBoard({
                       chartAccountId: accountId,
                       description: description.trim(),
                       amount,
+                      currency,
                     })
                     if (result.ok) {
                       setShowNew(false)
@@ -522,7 +589,7 @@ export function BillingBoard({
                       {row.cadence !== 'weekly' && ` · ${row.dayOfMonth}`}
                     </td>
                     <td className="py-1.5 pr-3 text-right tabular-nums">
-                      {formatCents(row.perOccurrenceCents)}
+                      {formatCents(row.perOccurrenceCents, row.currency)}
                     </td>
                     <td className="py-1.5 pr-3 tabular-nums text-muted">
                       {row.isActive ? row.nextRunOn : '—'}
@@ -564,7 +631,7 @@ export function BillingBoard({
             {CADENCE_LABELS[selected.cadence] ?? selected.cadence} · {selected.customerName} ·
             started {selected.startsOn}
             {selected.endsOn ? ` · ends ${selected.endsOn}` : ''} ·{' '}
-            {formatCents(detail.perOccurrenceCents)} each time
+            {formatCents(detail.perOccurrenceCents, detail.currency)} each time
           </p>
 
           <h4 className="mt-4 text-xs font-semibold uppercase tracking-wide text-muted">
@@ -574,7 +641,9 @@ export function BillingBoard({
             {detail.lines.map((line) => (
               <li key={line.id} className="text-muted">
                 {line.description} —{' '}
-                <span className="tabular-nums">{formatCents(line.unitPriceCents)}</span>
+                <span className="tabular-nums">
+                  {formatCents(line.unitPriceCents, detail.currency)}
+                </span>
                 {line.quantityMilli !== 1000 && (
                   <span className="text-faint"> × {(line.quantityMilli / 1000).toFixed(3)}</span>
                 )}
@@ -612,12 +681,10 @@ export function BillingBoard({
                         {row.invoiceStatus ?? 'not raised'}
                       </td>
                       <td className="py-1.5 pr-3 text-right tabular-nums">
-                        {formatCents(row.totalCents)}
+                        {formatCents(row.totalCents, row.currency)}
                       </td>
                       <td className="py-1.5 text-right tabular-nums">
-                        {row.balanceCents === null
-                          ? '—'
-                          : formatCents(row.balanceCents, row.invoiceCurrency ?? undefined)}
+                        {row.balanceCents === null ? '—' : formatCents(row.balanceCents, row.currency)}
                       </td>
                     </tr>
                   ))}

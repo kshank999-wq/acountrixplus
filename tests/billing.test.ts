@@ -432,9 +432,13 @@ describe('what is coming is a forecast (Phase 37)', () => {
       '2026-02-01',
       '2026-03-01',
     ])
-    expect(forecast.totalCents).toBe(1_500_00)
-    expect(forecast.automaticCents).toBe(1_500_00)
-    expect(forecast.manualCents).toBe(0)
+    // One currency, so one set of totals — the shape Phase 126 gave this
+    // report so a euro retainer and a dollar one could not be added.
+    expect(forecast.totals).toHaveLength(1)
+    expect(forecast.totals[0].currency).toBe('USD')
+    expect(forecast.totals[0].totalCents).toBe(1_500_00)
+    expect(forecast.totals[0].automaticCents).toBe(1_500_00)
+    expect(forecast.totals[0].manualCents).toBe(0)
     expect(forecast.scheduleCount).toBe(1)
 
     // Reported, never posted: no invoice, no receivable, nothing on the ledger.
@@ -466,9 +470,9 @@ describe('what is coming is a forecast (Phase 37)', () => {
       through: '2026-03-31',
     })
 
-    expect(forecast.automaticCents).toBe(1_500_00)
-    expect(forecast.manualCents).toBe(900_00)
-    expect(forecast.totalCents).toBe(2_400_00)
+    expect(forecast.totals[0].automaticCents).toBe(1_500_00)
+    expect(forecast.totals[0].manualCents).toBe(900_00)
+    expect(forecast.totals[0].totalCents).toBe(2_400_00)
   })
 
   it('stops a schedule at its end date rather than forecasting past it', async () => {
@@ -568,7 +572,7 @@ describe('what browser verification caught (Phase 37)', () => {
       '2026-01-01',
       '2026-02-01',
     ])
-    expect(forecast.overdueCents).toBe(1_000_00)
+    expect(forecast.totals[0].overdueCents).toBe(1_000_00)
   })
 
   it('reports nothing overdue once the schedule has caught up', async () => {
@@ -581,7 +585,7 @@ describe('what browser verification caught (Phase 37)', () => {
       through: '2026-04-30',
     })
 
-    expect(forecast.overdueCents).toBe(0)
+    expect(forecast.totals[0].overdueCents).toBe(0)
     expect(forecast.occurrences.map((row) => row.dueOn)).toEqual(['2026-03-01', '2026-04-01'])
   })
 })

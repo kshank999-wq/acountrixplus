@@ -5814,6 +5814,56 @@ amounts across customers, and those are each in their own invoice's currency, so
 the roll-up adds currencies. It needs the table to have a currency column first,
 and `NAME_COLLISIONS` says so plainly rather than excusing it.
 
+### The schedule that could only bill in one currency (Phase 126)
+
+ADR 0125 nominated closing the three `unrecorded` tables and said an occurrence
+"has nothing to take". Going to look at why found the larger thing: **a billing
+schedule had no currency at all.**
+
+Every way of raising an invoice can raise a foreign one except the one that
+raises them unattended. `createInvoice` has taken a currency since Phase 64 and
+the composer offers it; `raiseInvoiceFor` never passed one and
+`recurring_invoices` had no column to pass. A European customer on a monthly
+retainer got dollar invoices, or the schedule was switched off and twelve
+invoices raised by hand — Phase 49's class, in a module finished since Phase 37.
+
+**This corrects ADR 0125.** It claimed "a schedule billing a customer in euros
+raises euro invoices"; a schedule could not bill in euros at all, so the
+company's symbol on that screen had been *correct*, for a worse reason than the
+one the phase was hunting. The repair stands and the reason given for it was
+wrong.
+
+Both recurring-billing tables have a currency now, backfilled from what every
+existing row was already denominated in. `occurrenceCurrency` settles the
+display in one place, and the order is the argument: **the invoice it raised,
+then the schedule, then the company** — a fact beats an intention, and an
+intention beats a default. Verified on seeded data: a €2,500 retainer backdated
+to June raised four euro invoices, each carrying the functional value at its own
+issue date's rate rather than one frozen across the history.
+
+**The defect this phase would have introduced.** The forecast added four figures
+across every schedule — sound while a schedule could only bill one currency, and
+broken the moment it could. Neither tripwire would have caught it: recurring
+lines are not a face table and `reporting.ts` reads no face column. `forecastTotals`
+groups per currency instead, because a forecast reports what has not happened and
+there is nothing wrong with intending to bill in two — the report just cannot add
+them. Grouping, not refusing: refusal is for a write, as a deposit is.
+
+Phase 124 wrote that `DOCUMENT_TABLES` "is where somebody has to notice" if a
+sixth table grew a currency. Two did, both declared — and the `Forecast` entry
+ADR 0125 recorded as `unrecorded` becomes `document`, leaving write-offs and
+deposits as the two that remain.
+
+And a tripwire turned out not to be one. `expect(UNCLASSIFIED_CARRIERS)
+.toBeLessThanOrEqual(13)` against a constant of 13 is true whatever the codebase
+does — equally true of Phase 124's wrong 19, which is how that survived a green
+suite for a whole phase. It is computed and compared exactly now, and reads 12.
+
+`mayChangeCurrency` was written and deleted in the same phase: a real rule
+refusing to re-denominate a schedule that has already issued invoices, with **no
+caller**, because nothing can update a schedule. Phase 49's own defect, cited two
+paragraphs above where it would have been committed.
+
 
 ## Deploying
 
@@ -5961,7 +6011,8 @@ Coverage matches what spec §21 asks for:
 | `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `NOT_YET_PROVEN` is empty since Phase 122 retired `banking.shared_ledger_accounts`, the one entry it ever held, and the test refuses to let the list grow |
 | `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
-| `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the five tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and refuses to let the unclassified count grow |
+| `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself |
+| `tests/schedule-currency.test.ts` | **A recurring schedule bills in a currency** (Phase 126): a schedule takes the company's own unless told otherwise, a EUR one raises an invoice carrying €4,000 face and $4,400 functional, and the occurrence records what its period was billed in — the column ADR 0125 called `unrecorded`. `occurrenceCurrency` prefers the raised invoice over the schedule's intention over the company default. And the forecast, which added four figures across every schedule before a schedule could be foreign, reports one set of totals per currency: two currencies are two answers, never a third number |
 | `tests/deposit-currency.test.ts` | **A paying-in slip is in one currency** (Phase 123): banking a euro receipt together with a dollar one is refused rather than posted as a total in neither, the refusal reaches the person as a sentence rather than "Something went wrong", and the ordinary cases — several receipts in one currency, and a single foreign receipt — still bank |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |

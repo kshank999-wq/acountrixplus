@@ -51,9 +51,14 @@
 /** Where a figure on a screen got its denomination. */
 export type MoneyBasis =
   /**
-   * It came off a document — an invoice, bill, credit note, payment or
-   * retainer. Those five tables carry a `currency` column, two rows of one list
-   * can disagree, and the figure must be shown in its own.
+   * The row it came off carries its own currency, and two rows of one list can
+   * disagree — so the figure must be shown wearing it.
+   *
+   * Five tables when Phase 124 wrote this rule: invoices, bills, credit notes,
+   * payments and retainers. Seven since Phase 126 gave a recurring schedule and
+   * its occurrences one. The name stays `document` because that is still what
+   * the rule *means* — this is money somebody outside the business is quoted,
+   * as against money the books are kept in.
    */
   | 'document'
   /**
@@ -65,11 +70,13 @@ export type MoneyBasis =
   /**
    * The denomination exists but is not written down (Phase 125).
    *
-   * Three tables store one number with **no currency column and no functional
-   * twin**: `invoice_write_offs`, `deposits`, and
-   * `recurring_invoice_occurrences`. What the number is in can only be learned
-   * by reading the code that wrote it, and the answer differs for each. Not a
-   * synonym for "probably fine" — an entry has to say where the answer lives.
+   * Three tables stored one number with **no currency column and no functional
+   * twin** when this basis was added: `invoice_write_offs`, `deposits`, and
+   * `recurring_invoice_occurrences`. Phase 126 closed the third by giving both
+   * recurring-billing tables a currency, so **two remain**. What the number is
+   * in can only be learned by reading the code that wrote it, and the answer
+   * differs for each. Not a synonym for "probably fine" — an entry has to say
+   * where the answer lives, and closing one is a migration per table.
    */
   | 'unrecorded'
 
@@ -105,11 +112,16 @@ export type ScreenMoney = {
 }
 
 /**
- * The five tables that carry a currency, as drizzle properties.
+ * The tables that carry a currency, as drizzle properties.
  *
  * Written out rather than derived from `FACE_COLUMNS` because the question here
  * is about a *table* — does a row of this thing have a currency of its own —
  * rather than about a particular column of it.
+ *
+ * Five when Phase 124 measured it, and its test said out loud that this list is
+ * where somebody has to notice if a sixth ever grows one. Phase 126 grew two:
+ * a recurring schedule now records what it bills in, and each occurrence
+ * records what its period was billed in. Noticed here, as intended.
  */
 export const DOCUMENT_TABLES: readonly string[] = [
   'invoices',
@@ -117,6 +129,8 @@ export const DOCUMENT_TABLES: readonly string[] = [
   'creditNotes',
   'payments',
   'retainers',
+  'recurringInvoices',
+  'recurringInvoiceOccurrences',
 ]
 
 export const SCREEN_MONEY: readonly ScreenMoney[] = [
@@ -167,16 +181,13 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
     file: 'src/app/accounting/billing/board.tsx',
     type: 'Detail',
     basis: 'document',
-    // Only the raised invoice's balance. The schedule's own totals are
-    // `unrecorded` — see the `Forecast` entry below for why.
-    fields: ['balanceCents'],
-    currencyField: 'invoiceCurrency',
     because:
-      'Found by tracing, not by looking. `billing/service.ts` joins a schedule’s occurrences to ' +
-      'the invoices they raised and selects `balanceCents: invoices.balanceCents` — the face ' +
-      'column, straight off the table. A schedule billing in euros raises euro invoices, and this ' +
-      'is the screen showing what it has billed. Phase 124 classified it from the shape of a ' +
-      'billing schedule, which carries no currency, and missed the invoice join underneath.',
+      'Every money field, since Phase 126. Phase 125 narrowed this to `balanceCents` alone — the ' +
+      'raised invoice’s, found by tracing the join in `billing/service.ts` — because a schedule ' +
+      'carried no currency and its own totals were `unrecorded`. It does now, so `unitPriceCents`, ' +
+      '`totalCents` and `perOccurrenceCents` are the schedule’s currency and `balanceCents` is the ' +
+      'raised invoice’s, settled in one field by `occurrenceCurrency`. The narrowing is gone ' +
+      'because the reason for it is.',
   },
   {
     file: 'src/app/accounting/receivables/board.tsx',
@@ -203,40 +214,47 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
   {
     file: 'src/app/accounting/billing/board.tsx',
     type: 'Forecast',
-    basis: 'unrecorded',
+    basis: 'document',
     because:
-      '`recurring_invoice_occurrences.total_cents` has no currency column and a billing schedule ' +
-      'has none either, so an occurrence total is whatever the schedule’s line prices were typed ' +
-      'in as. A forecast adds those across schedules. Nothing in the schema can say what the ' +
-      'total is in; the honest answer is that nobody decided, and this is where that is recorded.',
+      'Phase 125 recorded this `unrecorded`: a billing schedule had no currency column, so an ' +
+      'occurrence total was whatever the line prices were typed in as and a forecast added those ' +
+      'across schedules. Phase 126 gave the schedule one and the forecast reports its totals per ' +
+      'currency rather than adding them, so the denomination is a fact on the row — which is what ' +
+      'this basis means. The gap this entry declared is closed rather than restated.',
   },
 ]
 
 /**
- * Carriers this phase measured but did not classify.
+ * Carriers measured but not classified: undeclared, and carrying no currency.
  *
  * The honest remainder, on the pattern Phase 121 used for the check it could
- * not falsify: a list with reasons beats a silence. Each of these is a prop
- * type carrying money named after a face column, on a screen whose modules
- * touch a document table — so the scan cannot rule it out, and only reading the
- * query behind it can say whether the figure arrives converted.
+ * not falsify: a list with reasons beats a silence. Each is a prop type
+ * carrying money named after a face column, on a screen whose modules touch a
+ * table that has a currency — so the scan cannot rule it out, and only reading
+ * the query behind it can say whether the figure arrives converted.
  *
- * **Phase 125 traced all seventeen** — the number Phase 124 recorded as 19 was
- * counted off a list that had since moved, before two repairs landed and two
- * entries were classified. Four of the seventeen are now declared above: two
- * turned out to be document money that "looked at" had waved through, and two
- * are `unrecorded`.
+ * ## Nothing computed this number until Phase 126
  *
- * The thirteen that remain read **no face column at all** — funds, inventory,
- * properties, the shop, the import wizard, unbilled time and the party and
- * statement roll-ups — so nothing they show can be a document's own currency.
- * They are reached only because a page imports a module that touches one of
- * the five tables somewhere else in the file.
+ * Phase 124 recorded **19**, counted off a list that had since moved; Phase 125
+ * traced all seventeen and put the remainder at **13**, which was right.
  *
- * The number is a tripwire: it may shrink and must never grow without somebody
- * saying why.
+ * But nothing checked it. The test asserted `UNCLASSIFIED_CARRIERS <= 13`
+ * against a constant of 13 — true whatever the codebase does, and equally true
+ * if the figure were 19 again. That is how Phase 124's error survived a green
+ * suite for a whole phase. **A tripwire made of a number nobody measures is not
+ * a tripwire**, however carefully the number was arrived at. The test runs the
+ * scan now and compares exactly, so the figure can be wrong once and not twice.
+ *
+ * Twelve, since Phase 126: `billing/board.tsx`'s `Waiting` — periods claimed on
+ * a schedule and left for a person to raise — was one of the thirteen and now
+ * carries its occurrence's currency. The rest read no face column at all:
+ * funds, inventory, properties, the shop, the import wizard, unbilled time and
+ * the party and statement roll-ups. They are reached only because a page
+ * imports a module that touches a currency-carrying table somewhere else.
+ *
+ * It may shrink. It must never grow without somebody saying why.
  */
-export const UNCLASSIFIED_CARRIERS = 13
+export const UNCLASSIFIED_CARRIERS = 12
 
 /**
  * Call sites where a face-column *name* appears on something that is not one.

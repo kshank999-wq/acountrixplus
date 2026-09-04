@@ -5,6 +5,7 @@ import { listAccounts } from '@/modules/coa/service'
 import { listCustomers } from '@/modules/receivables/service'
 import { listSchedules, scheduleDetail } from '@/modules/billing/service'
 import { awaitingRaise, billingForecast, type Forecast } from '@/modules/billing/reporting'
+import { currencyChoices } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { BillingBoard } from './board'
 
@@ -44,11 +45,12 @@ export default async function BillingPage({
   // form to create one is simply absent, instead of the page failing to load.
   const canPickCustomers = can(actor, 'crm:view')
 
-  const [schedules, waiting, customers, accounts] = await Promise.all([
+  const [schedules, waiting, customers, accounts, currencies] = await Promise.all([
     listSchedules(actor),
     awaitingRaise(actor),
     canPickCustomers ? listCustomers(actor) : Promise.resolve([]),
     listAccounts(actor),
+    currencyChoices(actor),
   ])
 
   const selected = schedules.find((row) => row.id === params.s) ?? schedules[0] ?? null
@@ -85,9 +87,11 @@ export default async function BillingPage({
                   invoiceNumber: row.invoiceNumber,
                   invoiceStatus: row.invoiceStatus,
                   balanceCents: row.balanceCents,
-                  invoiceCurrency: row.invoiceCurrency,
+                  // One answer, settled in `occurrenceCurrency` (Phase 126).
+                  currency: row.currency,
                 })),
                 perOccurrenceCents: detail.perOccurrenceCents,
+                currency: detail.schedule.currency,
               }
             : null
         }
@@ -100,6 +104,8 @@ export default async function BillingPage({
         accounts={accounts
           .filter((account) => ['revenue', 'other_income'].includes(account.type))
           .map((account) => ({ id: account.id, number: account.number, name: account.name }))}
+        homeCurrency={currencies.homeCurrency}
+        currencies={currencies.offerable}
       />
     </AppShell>
   )

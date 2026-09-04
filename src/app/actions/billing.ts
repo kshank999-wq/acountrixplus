@@ -9,6 +9,7 @@ import {
   runDueSchedules,
   setScheduleActive,
 } from '@/modules/billing/service'
+import { forecastTotals } from '@/modules/billing/currency'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 import { messageFor } from '@/modules/errors'
 
@@ -44,6 +45,9 @@ export async function createScheduleAction(input: unknown): Promise<ActionResult
         chartAccountId: z.string().uuid(),
         description: z.string().trim().min(1),
         amount: z.string().trim().min(1),
+        // Phase 126. Absent means the company's own — `createSchedule` reads
+        // that itself rather than this action guessing at it.
+        currency: z.string().trim().length(3).optional(),
       })
       .parse(input)
 
@@ -58,6 +62,7 @@ export async function createScheduleAction(input: unknown): Promise<ActionResult
       autoRaise: parsed.autoRaise,
       startsOn: parsed.startsOn,
       endsOn: parsed.endsOn,
+      currency: parsed.currency,
       lines: [
         {
           chartAccountId: parsed.chartAccountId,
@@ -69,8 +74,9 @@ export async function createScheduleAction(input: unknown): Promise<ActionResult
 
     return (
       `"${schedule.name}" is set up, first due ${schedule.nextRunOn}. ` +
-      `Nothing is owed yet — a schedule is a promise to bill, and ${formatCents(unitPriceCents)} ` +
-      'appears in receivables when that date arrives.'
+      'Nothing is owed yet — a schedule is a promise to bill, and ' +
+      `${formatCents(unitPriceCents, schedule.currency)} appears in receivables when that date ` +
+      'arrives.'
     )
   })
 }
@@ -105,7 +111,19 @@ export async function runDueSchedulesAction(input: unknown): Promise<ActionResul
     if (results.length === 0) return 'Nothing was due.'
 
     const raised = results.filter((row) => row.raised)
-    const totalCents = raised.reduce((sum, row) => sum + row.totalCents, 0)
+
+    // Grouped, not added (Phase 126). A run that raises a euro retainer and a
+    // dollar one has two totals and no third one; before schedules carried a
+    // currency there was only ever one and this was a plain `reduce`.
+    const totals = forecastTotals(
+      raised.map((row) => ({
+        scheduleId: row.scheduleId,
+        currency: row.currency,
+        totalCents: row.totalCents,
+        autoRaise: true,
+        overdue: false,
+      })),
+    )
 
     if (raised.length === 0) {
       return `Nothing raised. ${results.map((row) => row.skipped).filter(Boolean).join(' ')}`
@@ -113,8 +131,9 @@ export async function runDueSchedulesAction(input: unknown): Promise<ActionResul
 
     return (
       `${raised.length} invoice${raised.length === 1 ? '' : 's'} raised, ` +
-      `${formatCents(totalCents)} in total. Running it again bills nothing more — the period is ` +
-      'claimed by the database, not by this button.'
+      `${totals.map((row) => formatCents(row.totalCents, row.currency)).join(' and ')} in total. ` +
+      'Running it again bills nothing more — the period is claimed by the database, not by this ' +
+      'button.'
     )
   })
 }
@@ -126,7 +145,10 @@ export async function raiseOccurrenceAction(input: unknown): Promise<ActionResul
 
     const invoice = await raiseOccurrence(actor, parsed.occurrenceId)
 
-    return `Invoice ${invoice.number} raised for ${formatCents(invoice.totalCents)}. It ages, ` +
+    return (
+      `Invoice ${invoice.number} raised for ` +
+      `${formatCents(invoice.totalCents, invoice.currency)}. It ages, ` +
       'reaches a statement and can be paid like any other.'
+    )
   })
 }
