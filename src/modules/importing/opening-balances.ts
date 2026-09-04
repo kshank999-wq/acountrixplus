@@ -941,12 +941,16 @@ export async function openingReadiness(ctx: ActorContext): Promise<OpeningReadin
       .then((rows) => rows[0] ?? null),
 
     db
-      .select({ total: sql<string>`COALESCE(SUM(${invoices.balanceCents}), 0)` })
+      // Phase 125. `balance_cents` is the face amount, and this sums every open
+      // invoice on the books to compare against one figure the import file
+      // reported — the Phase 115 shape. The functional twin is what may be
+      // added across customers who were not all billed in one currency.
+      .select({ total: sql<string>`COALESCE(SUM(${invoices.functionalBalanceCents}), 0)` })
       .from(invoices)
       .where(scoped(ctx, invoices, sql`${invoices.status} <> 'void'`))
       .then((rows) => Number(rows[0]?.total ?? 0)),
     db
-      .select({ total: sql<string>`COALESCE(SUM(${bills.balanceCents}), 0)` })
+      .select({ total: sql<string>`COALESCE(SUM(${bills.functionalBalanceCents}), 0)` })
       .from(bills)
       .where(scoped(ctx, bills, sql`${bills.status} <> 'void'`))
       .then((rows) => Number(rows[0]?.total ?? 0)),

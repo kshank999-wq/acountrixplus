@@ -5772,6 +5772,48 @@ things in one file share a property name — `plan.remainingCents` is a bank
 balance, not a credit note — because the scan matches by name, which is the same
 limitation ADR 0123 confessed and this phase declares rather than fixes.
 
+### Tracing what the last phase only looked at (Phase 125)
+
+ADR 0124 left a debt and named it: nineteen carriers *looked at* but not traced
+to their query. This phase traces them, on Phase 110's precedent — which
+verified Phase 109's fifteen guessed reach declarations and found real errors.
+
+**The number was wrong: seventeen, not nineteen.** The 19 was counted off a list
+that had already moved — before two repairs landed and two entries were
+classified. The same kind of error Phase 121 owned (fifteen when the answer was
+thirteen): a count asserted from a stale list.
+
+**Two of the seventeen were document money.** `billing/service.ts` joins a
+schedule's occurrences to the invoices they raised and selects
+`balanceCents: invoices.balanceCents` — the face column — into a row rendered
+with the company's symbol. And `invoice_write_offs.amount_cents` has no currency
+column, which is what made it look like the books' money; the write path settles
+it, since `writeOffInvoice` calls `relieveFunctional(invoice, amountCents)` and
+posts the converted figure to bad debt. Both were flagged by Phase 124's scan
+and waved through by its reading.
+
+**A hole in Phase 122's own regex.** `opening-balances.ts` sums
+`invoices.balance_cents` and `bills.balance_cents` inside a raw `sql` template
+as **`SUM(...)`**, and the declared pattern is `sum\(` — lowercase only. Over
+face columns: **30 lowercase, 2 uppercase, and both uppercase ones were
+defects.** The pattern is case-insensitive now and both sums read their
+functional twins.
+
+**The two-way model was wrong.** Three tables store money with no currency column
+*and* no functional twin — write-offs, deposits, recurring occurrences — and the
+right answer differs for each. `unrecorded` is the third basis: the denomination
+exists but is not written down, and the entry says where the answer lives.
+
+**A prop type is not always one kind of money.** `Detail` carries an invoice's
+balance beside the schedule's own totals, so an entry now names which fields the
+basis covers and which field holds the currency — the history calls it
+`invoiceCurrency`, because it belongs to the invoice, not the occurrence.
+
+One finding is recorded rather than fixed: `badDebtSummary` sums write-off
+amounts across customers, and those are each in their own invoice's currency, so
+the roll-up adds currencies. It needs the table to have a currency column first,
+and `NAME_COLLISIONS` says so plainly rather than excusing it.
+
 
 ## Deploying
 

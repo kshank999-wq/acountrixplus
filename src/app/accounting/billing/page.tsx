@@ -85,6 +85,7 @@ export default async function BillingPage({
                   invoiceNumber: row.invoiceNumber,
                   invoiceStatus: row.invoiceStatus,
                   balanceCents: row.balanceCents,
+                  invoiceCurrency: row.invoiceCurrency,
                 })),
                 perOccurrenceCents: detail.perOccurrenceCents,
               }

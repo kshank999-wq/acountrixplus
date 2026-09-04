@@ -41,6 +41,8 @@ type Detail = {
     invoiceNumber: string | null
     invoiceStatus: string | null
     balanceCents: number | null
+    /** The raised invoice's own currency (Phase 125). */
+    invoiceCurrency: string | null
   }>
   perOccurrenceCents: number
 }
@@ -613,7 +615,9 @@ export function BillingBoard({
                         {formatCents(row.totalCents)}
                       </td>
                       <td className="py-1.5 text-right tabular-nums">
-                        {row.balanceCents === null ? '—' : formatCents(row.balanceCents)}
+                        {row.balanceCents === null
+                          ? '—'
+                          : formatCents(row.balanceCents, row.invoiceCurrency ?? undefined)}
                       </td>
                     </tr>
                   ))}

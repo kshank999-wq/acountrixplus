@@ -62,6 +62,16 @@ export type MoneyBasis =
    * default is the right answer rather than a lucky one.
    */
   | 'books'
+  /**
+   * The denomination exists but is not written down (Phase 125).
+   *
+   * Three tables store one number with **no currency column and no functional
+   * twin**: `invoice_write_offs`, `deposits`, and
+   * `recurring_invoice_occurrences`. What the number is in can only be learned
+   * by reading the code that wrote it, and the answer differs for each. Not a
+   * synonym for "probably fine" — an entry has to say where the answer lives.
+   */
+  | 'unrecorded'
 
 /** One prop type that carries money across the server/client boundary. */
 export type ScreenMoney = {
@@ -70,6 +80,26 @@ export type ScreenMoney = {
   /** The prop type declared inside it. */
   type: string
   basis: MoneyBasis
+  /**
+   * Which of the type's money fields the basis applies to (Phase 125).
+   *
+   * A prop type is not always one kind of money. `billing/board.tsx`'s `Detail`
+   * carries a raised invoice's `balanceCents` — a document's — beside the
+   * schedule's own `totalCents` and `perOccurrenceCents`, which no table records
+   * a currency for. Classifying the type as a whole made the check demand a
+   * currency on all three, which would have been a second wrong answer rather
+   * than a fix. Omit to mean every money field in the type.
+   */
+  fields?: readonly string[]
+  /**
+   * The field carrying the currency, when it is not called `currency`.
+   *
+   * A row nested inside a prop type names things for its own context: the
+   * schedule history calls it `invoiceCurrency`, because the row is an
+   * occurrence and the currency belongs to the invoice it raised. Defaults to
+   * `currency`.
+   */
+  currencyField?: string
   /** Why it is that basis, argued from where the data comes from. */
   because: string
 }
@@ -133,6 +163,53 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
       'minimum-balance threshold could be applied to it. A held figure per customer is already ' +
       'in the company’s money before it leaves the module.',
   },
+  {
+    file: 'src/app/accounting/billing/board.tsx',
+    type: 'Detail',
+    basis: 'document',
+    // Only the raised invoice's balance. The schedule's own totals are
+    // `unrecorded` — see the `Forecast` entry below for why.
+    fields: ['balanceCents'],
+    currencyField: 'invoiceCurrency',
+    because:
+      'Found by tracing, not by looking. `billing/service.ts` joins a schedule’s occurrences to ' +
+      'the invoices they raised and selects `balanceCents: invoices.balanceCents` — the face ' +
+      'column, straight off the table. A schedule billing in euros raises euro invoices, and this ' +
+      'is the screen showing what it has billed. Phase 124 classified it from the shape of a ' +
+      'billing schedule, which carries no currency, and missed the invoice join underneath.',
+  },
+  {
+    file: 'src/app/accounting/receivables/board.tsx',
+    type: 'WriteOff',
+    basis: 'document',
+    fields: ['amountCents', 'recoveredCents'],
+    because:
+      '`invoice_write_offs.amount_cents` carries no currency column, which is exactly what made ' +
+      'this look like the books’ money. The write path settles it: `writeOffInvoice` calls ' +
+      '`relieveFunctional(invoice, amountCents)` and posts `relief.functionalCents` to bad debt, ' +
+      'so the stored figure is the invoice’s own and only the ledger sees a converted one. The ' +
+      'comment above that line calls a write-off "the one balance reduction that converts exactly".',
+  },
+  {
+    file: 'src/app/accounting/deposits/board.tsx',
+    type: 'Deposit',
+    basis: 'unrecorded',
+    because:
+      '`deposits.total_cents` has no currency column. Phase 123 made a deposit single-currency by ' +
+      'refusing to bank receipts that disagree, so the denomination is now well defined — it is ' +
+      'the receipts’ — but nothing records it on the row. The answer lives in the deposit items’ ' +
+      'payments, which is a join away and is why this is `unrecorded` rather than `books`.',
+  },
+  {
+    file: 'src/app/accounting/billing/board.tsx',
+    type: 'Forecast',
+    basis: 'unrecorded',
+    because:
+      '`recurring_invoice_occurrences.total_cents` has no currency column and a billing schedule ' +
+      'has none either, so an occurrence total is whatever the schedule’s line prices were typed ' +
+      'in as. A forecast adds those across schedules. Nothing in the schema can say what the ' +
+      'total is in; the honest answer is that nobody decided, and this is where that is recorded.',
+  },
 ]
 
 /**
@@ -144,16 +221,22 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
  * touch a document table — so the scan cannot rule it out, and only reading the
  * query behind it can say whether the figure arrives converted.
  *
- * Every one of them was **looked at** and none is a screen where a foreign
- * document is listed beside a domestic one; they are roll-ups, job budgets,
- * till counts and import plans reached through a shared module. But "looked at"
- * is not "traced to its query", which is what the two classified `document`
- * entries got, and the difference is worth being honest about.
+ * **Phase 125 traced all seventeen** — the number Phase 124 recorded as 19 was
+ * counted off a list that had since moved, before two repairs landed and two
+ * entries were classified. Four of the seventeen are now declared above: two
+ * turned out to be document money that "looked at" had waved through, and two
+ * are `unrecorded`.
  *
- * The number is a tripwire: it may shrink as entries are traced and moved into
- * `SCREEN_MONEY`, and it must never grow without somebody saying why.
+ * The thirteen that remain read **no face column at all** — funds, inventory,
+ * properties, the shop, the import wizard, unbilled time and the party and
+ * statement roll-ups — so nothing they show can be a document's own currency.
+ * They are reached only because a page imports a module that touches one of
+ * the five tables somewhere else in the file.
+ *
+ * The number is a tripwire: it may shrink and must never grow without somebody
+ * saying why.
  */
-export const UNCLASSIFIED_CARRIERS = 19
+export const UNCLASSIFIED_CARRIERS = 13
 
 /**
  * Call sites where a face-column *name* appears on something that is not one.
@@ -169,6 +252,18 @@ export const UNCLASSIFIED_CARRIERS = 19
 export type NameCollision = { file: string; expression: string; because: string }
 
 export const NAME_COLLISIONS: readonly NameCollision[] = [
+  {
+    file: 'src/app/accounting/receivables/board.tsx',
+    expression: 'badDebt.recoveredCents',
+    because:
+      'A different object from the `WriteOff` row beside it: `badDebtSummary` sums ' +
+      '`invoice_write_offs.recovered_cents` across every write-off. It is excused from **this** ' +
+      'check because it is not a document row — and it is not excused from being wrong. Those ' +
+      'stored amounts are each in their own invoice’s currency (see the `WriteOff` entry), so the ' +
+      'roll-up adds currencies. Phase 122’s scanner never saw it because `invoice_write_offs` is ' +
+      'not a face table. It is the first thing giving that table a currency column would fix, and ' +
+      'it is recorded here rather than quietly excused.',
+  },
   {
     file: 'src/app/accounting/payables/board.tsx',
     expression: 'plan.remainingCents',

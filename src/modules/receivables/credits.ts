@@ -727,6 +727,11 @@ export async function listWriteOffs(ctx: ActorContext, opts: { limit?: number } 
       id: invoiceWriteOffs.id,
       invoiceId: invoiceWriteOffs.invoiceId,
       invoiceNumber: invoices.number,
+      // Phase 125. `invoice_write_offs.amount_cents` has no currency column,
+      // which is what made it look like the books' money. `writeOffInvoice`
+      // calls relieveFunctional(invoice, amountCents) and posts the converted
+      // figure to bad debt — so the stored amount is the invoice's own.
+      currency: invoices.currency,
       customerName: customers.name,
       writtenOffOn: invoiceWriteOffs.writtenOffOn,
       amountCents: invoiceWriteOffs.amountCents,

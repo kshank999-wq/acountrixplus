@@ -104,6 +104,7 @@ export default async function ReceivablesPage() {
           customerName: row.customerName,
           writtenOffOn: row.writtenOffOn,
           amountCents: row.amountCents,
+          currency: row.currency,
           reason: row.reason,
           recoveredOn: row.recoveredOn,
           recoveredCents: row.recoveredCents,

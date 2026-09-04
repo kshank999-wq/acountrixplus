@@ -18,10 +18,22 @@ import { PAIRED_COLUMNS } from '@/modules/fx/paired'
  * was written, two of them deciding money rather than describing it.
  */
 
+/**
+ * The file declaring the addition forms is not scanned (Phase 125).
+ *
+ * `addition.ts` holds a `looksLike` example of each pattern, so it matches
+ * itself — which is exactly what Phase 123's test already excludes for the same
+ * reason. Phase 125 made the SQL pattern case-insensitive, the example grew a
+ * `SUM(...)`, and this scanner started reporting the documentation. One rule,
+ * applied in both places.
+ */
+const DECLARES_THE_FORMS = 'src/modules/fx/addition.ts'
+
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
     const path = join(dir, entry)
     if (statSync(path).isDirectory()) return sourceFiles(path)
+    if (path === DECLARES_THE_FORMS) return []
     return path.endsWith('.ts') ? [path] : []
   })
 }

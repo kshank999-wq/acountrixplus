@@ -45,6 +45,8 @@ type WriteOff = {
   customerName: string
   writtenOffOn: string
   amountCents: number
+  /** What that amount is in — the invoice's own currency (Phase 125). */
+  currency: string
   reason: string
   recoveredOn: string | null
   recoveredCents: number | null
@@ -423,7 +425,7 @@ export function ReceivablesBoard({
                       )}
                     </div>
                     <div className="flex shrink-0 items-start gap-2">
-                      <span className="tnum text-sm">{formatCents(row.amountCents)}</span>
+                      <span className="tnum text-sm">{formatCents(row.amountCents, row.currency)}</span>
                       {canManage && !row.recoveredOn && banks.length > 0 && (
                         <button
                           className="btn px-2 py-1 text-xs"

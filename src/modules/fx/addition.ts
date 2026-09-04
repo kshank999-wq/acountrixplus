@@ -70,8 +70,11 @@ export type AdditionForm = {
 export const ADDITION_FORMS: readonly AdditionForm[] = [
   {
     key: 'sql_sum',
-    pattern: String.raw`sum\(\s*\$\{(\w+)\.(\w+)\}`,
-    looksLike: 'sum(${invoices.balanceCents})',
+    // Case-insensitive since Phase 125. The pattern read `sum(` and matched
+    // lowercase only, so two live sums written `SUM(` inside a raw `sql`
+    // template were invisible to it from the day it was written.
+    pattern: String.raw`[sS][uU][mM]\(\s*\$\{(\w+)\.(\w+)\}`,
+    looksLike: 'sum(${invoices.balanceCents}) — or SUM(...) inside a raw sql template',
     because:
       'The SQL aggregate, added to the database query. The only form Phase 122 looked for, ' +
       'which is why its file could say "it reads the source" while three sums in the other ' +

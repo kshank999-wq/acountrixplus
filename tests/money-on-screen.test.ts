@@ -179,7 +179,12 @@ describe('reading the boundary, both sides', () => {
         const declared = SCREEN_MONEY.find(
           (row) => row.file === c.file && row.type === c.type,
         )
-        return declared?.basis === 'document' && !c.hasCurrency
+        if (declared?.basis !== 'document') return false
+        // A nested row names the currency for its own context, so the entry
+        // says which field to look for (Phase 125).
+        const named = declared.currencyField ?? 'currency'
+        const body = readFileSync(c.file, 'utf8')
+        return !new RegExp(`^\\s*${named}\\??:`, 'm').test(body)
       })
       .map((c) => `${c.file} type ${c.type} [${c.cents.join(', ')}]`)
 
@@ -193,7 +198,8 @@ describe('reading the boundary, both sides', () => {
       const carrier = found.find((c) => c.file === row.file && c.type === row.type)
       if (!carrier) continue
 
-      for (const prop of carrier.cents) {
+      const fields = row.fields ?? carrier.cents
+      for (const prop of carrier.cents.filter((c) => fields.includes(c))) {
         // A one-argument formatCents of one of this type's own money fields
         // takes the 'USD' default, whatever the document actually says.
         for (const m of src.matchAll(
@@ -219,9 +225,10 @@ describe('the honest remainder', () => {
   })
 
   it('keeps the unclassified count from growing without somebody saying why', () => {
-    // Phase 121's device: a list with reasons beats a silence. These are
-    // carriers the scan cannot rule out and this phase did not trace to their
-    // query. It may shrink; it must not quietly grow.
-    expect(UNCLASSIFIED_CARRIERS).toBeLessThanOrEqual(19)
+    // Phase 121's device: a list with reasons beats a silence. Phase 124 put
+    // this at 19, counted off a list that had already moved; Phase 125 traced
+    // all seventeen and the honest remainder is thirteen, every one of which
+    // reads no face column at all. It may shrink; it must not quietly grow.
+    expect(UNCLASSIFIED_CARRIERS).toBeLessThanOrEqual(13)
   })
 })

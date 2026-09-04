@@ -103,6 +103,15 @@ function currencyAware(file: string, line: number): boolean {
 }
 
 describe('the forms money is added in', () => {
+  it('matches a sum whatever case it is written in (Phase 125)', () => {
+    // The pattern read `sum(` and matched lowercase only. Two live sums over
+    // face columns were written `SUM(` inside a raw `sql` template and were
+    // invisible to the tripwire from the day it was written.
+    const sqlSum = new RegExp(additionFormFor('sql_sum').pattern)
+    expect(sqlSum.test('sum(${invoices.balanceCents})')).toBe(true)
+    expect(sqlSum.test('COALESCE(SUM(${invoices.balanceCents}), 0)')).toBe(true)
+  })
+
   it('names more than the one Phase 122 looked for', () => {
     expect(ADDITION_FORMS.map((row) => row.key)).toEqual(['sql_sum', 'js_reduce'])
   })

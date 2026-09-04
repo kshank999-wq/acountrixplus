@@ -743,6 +743,10 @@ export async function scheduleDetail(ctx: ActorContext, scheduleId: string) {
         invoiceNumber: invoices.number,
         invoiceStatus: invoices.status,
         balanceCents: invoices.balanceCents,
+        // Phase 125. `balance_cents` is the face column: a schedule billing a
+        // customer in euros raises euro invoices, and this history is where
+        // somebody reads what it has billed.
+        invoiceCurrency: invoices.currency,
       })
       .from(recurringInvoiceOccurrences)
       .leftJoin(invoices, eq(invoices.id, recurringInvoiceOccurrences.invoiceId))
