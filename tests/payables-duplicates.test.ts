@@ -301,6 +301,51 @@ describe('the bills already entered twice', () => {
     expect(exposure.unpaidCents).toBe(120_000)
   })
 
+  /**
+   * Phase 123. `duplicateExposure` is the right-hand side of the
+   * `payables.duplicate_bills` register check, and it adds pairs **across
+   * suppliers** — so it added `bills.total_cents`, the face amount, and a
+   * €4,000 pair plus a $4,000 pair came out as "8,000" of nothing on the
+   * integrity page. That is the Phase 115 defect, and Phase 122's tripwire
+   * could not see it because this addition is a `reduce`, not a `sum()`.
+   */
+  it('totals a euro pair and a dollar pair in one currency, not neither', async () => {
+    const { putRate } = await import('@/modules/fx/service')
+    await putRate(fixture.ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-08-01',
+      rateMillionths: 1_083_500,
+      source: 'manual',
+    })
+
+    const home = await aVendor('Northern Supplies')
+    await aBill(home.id)
+    await aBill(home.id, { acknowledgeDuplicate: true })
+
+    const abroad = await createVendor(fixture.ctx, { name: 'Bremen Werkzeug GmbH' })
+    for (const first of [true, false]) {
+      await createBill(fixture.ctx, {
+        vendorId: abroad.id,
+        currency: 'EUR',
+        acknowledgeDuplicate: !first,
+        issueDate: '2026-08-01',
+        dueDate: '2026-09-01',
+        lines: [
+          { chartAccountId: expenseAccountId, description: 'Werkzeug', unitPriceCents: 60_000 },
+        ],
+      })
+    }
+
+    const exposure = await duplicateExposure(fixture.ctx)
+
+    expect(exposure.pairs).toBe(2)
+    // The euro pair is worth 60,000 EUR, which at 1.0835 is 65,010 in company
+    // currency — not 60,000. Face addition would have said 120,000; the
+    // functional figure is 120,000 + 65,010.
+    expect(exposure.totalCents).toBe(120_000 + 65_010)
+    expect(exposure.unpaidCents).toBe(120_000 + 65_010)
+  })
+
   it('does not pair bills from different suppliers', async () => {
     const one = await aVendor('Northern Supplies')
     const two = await aVendor('Harbour Plant Hire')

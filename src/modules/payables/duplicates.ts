@@ -42,6 +42,17 @@ export type DuplicatePair = {
   totalCents: number
   /** Whether the later one is still owed, which is what makes it urgent. */
   suspectBalanceCents: number
+  /** What the supplier invoiced in. Both bills of a pair are one supplier's. */
+  currency: string
+  /**
+   * The same two figures in company currency (Phase 123).
+   *
+   * A pair is shown in the supplier's own currency, because that is the
+   * document somebody is about to go and look at. A *total across pairs* can
+   * only be the functional one, and `duplicateExposure` adds across suppliers.
+   */
+  functionalTotalCents: number
+  functionalBalanceCents: number
   why: string
 }
 
@@ -72,6 +83,13 @@ export async function suspectedDuplicateBills(
       issueDate: bills.issueDate,
       totalCents: bills.totalCents,
       balanceCents: bills.balanceCents,
+      currency: bills.currency,
+      // Phase 123. The pair is shown to a person in the currency the supplier
+      // invoiced in, but `duplicateExposure` adds pairs across suppliers into
+      // one figure for the integrity register, and two suppliers are two
+      // currencies. The functional twin is what may be added.
+      functionalTotalCents: bills.functionalTotalCents,
+      functionalBalanceCents: bills.functionalBalanceCents,
     })
     .from(bills)
     .innerJoin(vendors, eq(vendors.id, bills.vendorId))
@@ -116,6 +134,9 @@ export async function suspectedDuplicateBills(
         suspectIssueDate: row.issueDate,
         totalCents: row.totalCents,
         suspectBalanceCents: row.balanceCents,
+        currency: row.currency,
+        functionalTotalCents: row.functionalTotalCents,
+        functionalBalanceCents: row.functionalBalanceCents,
         why: match.why,
       })
 
@@ -135,6 +156,14 @@ export async function suspectedDuplicateBills(
  * Two numbers rather than one, because they mean different things. The total
  * is what would have been overstated if every pair is real; the unpaid figure
  * is what can still be stopped, and it is the one worth acting on today.
+ *
+ * **Both are functional (Phase 123.)** This is the right-hand side of the
+ * `payables.duplicate_bills` register check, and it adds pairs across
+ * suppliers. Until Phase 123 it added `bills.total_cents` — the face amount —
+ * so a €4,000 pair and a $4,000 pair were reported as "8,000" of nothing, on
+ * the integrity page, in the company's currency symbol. That is the Phase 115
+ * defect exactly, and it survived Phase 122's tripwire because this addition is
+ * a `reduce` rather than a `sum()`.
  */
 export async function duplicateExposure(
   ctx: ActorContext,
@@ -143,8 +172,8 @@ export async function duplicateExposure(
 
   return {
     pairs: pairs.length,
-    totalCents: pairs.reduce((sum, pair) => sum + pair.totalCents, 0),
-    unpaidCents: pairs.reduce((sum, pair) => sum + pair.suspectBalanceCents, 0),
+    totalCents: pairs.reduce((sum, pair) => sum + pair.functionalTotalCents, 0),
+    unpaidCents: pairs.reduce((sum, pair) => sum + pair.functionalBalanceCents, 0),
   }
 }
 

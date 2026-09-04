@@ -9,6 +9,8 @@ type Receipt = {
   id: string
   paymentDate: string
   amountCents: number
+  /** What that amount is denominated in — a receipt's face currency (Phase 123). */
+  currency: string
   customerName: string | null
   reference: string | null
 }
@@ -60,9 +62,26 @@ export function DepositBoard({
   /** Which deposit has its unbank confirmation open (Phase 70). */
   const [unbanking, setUnbanking] = useState<string | null>(null)
 
+  const chosen = useMemo(() => waiting.filter((r) => selected.has(r.id)), [waiting, selected])
+
+  /**
+   * The currencies in the current selection (Phase 123).
+   *
+   * `amountCents` is a face amount, so a running total across two currencies is
+   * not a number in either — the same reason `createDeposit` refuses one. The
+   * server refusal is the guarantee; this is so the person finds out while they
+   * are still ticking boxes rather than after they press the button.
+   */
+  const currencies = useMemo(
+    () => [...new Set(chosen.map((r) => r.currency))].sort(),
+    [chosen],
+  )
+  const oneCurrency = currencies.length <= 1
+  const currency = currencies[0] ?? 'USD'
+
   const grossCents = useMemo(
-    () => waiting.filter((r) => selected.has(r.id)).reduce((sum, r) => sum + r.amountCents, 0),
-    [waiting, selected],
+    () => chosen.reduce((sum, r) => sum + r.amountCents, 0),
+    [chosen],
   )
   const feeCents = fee.trim() ? parseAmountToCents(fee) : 0
   const netCents = grossCents - (feeCents ?? 0)
@@ -153,7 +172,7 @@ export function DepositBoard({
                   <td className="px-4 py-1.5">{receipt.customerName ?? '—'}</td>
                   <td className="px-4 py-1.5 text-muted">{receipt.reference ?? '—'}</td>
                   <td className="tnum px-4 py-1.5 text-right">
-                    {formatCents(receipt.amountCents)}
+                    {formatCents(receipt.amountCents, receipt.currency)}
                   </td>
                 </tr>
               ))}
@@ -233,19 +252,30 @@ export function DepositBoard({
               <dt className="text-muted">
                 {selected.size} receipt{selected.size === 1 ? '' : 's'}
               </dt>
-              <dd className="tnum">{formatCents(grossCents)}</dd>
+              <dd className="tnum">
+                {oneCurrency ? formatCents(grossCents, currency) : '—'}
+              </dd>
             </div>
             {feeCents ? (
               <div className="flex justify-between">
                 <dt className="text-muted">Fee</dt>
-                <dd className="tnum text-danger">−{formatCents(feeCents)}</dd>
+                <dd className="tnum text-danger">−{formatCents(feeCents, currency)}</dd>
               </div>
             ) : null}
             <div className="flex justify-between font-semibold">
               <dt>What the bank will show</dt>
-              <dd className="tnum">{formatCents(netCents)}</dd>
+              <dd className="tnum">
+                {oneCurrency ? formatCents(netCents, currency) : '—'}
+              </dd>
             </div>
           </dl>
+
+          {oneCurrency ? null : (
+            <p className="mt-3 text-sm text-danger">
+              Those receipts are in {currencies.join(' and ')}. A bank credits one currency at a
+              time, so bank each currency separately.
+            </p>
+          )}
 
           <button
             onClick={record}

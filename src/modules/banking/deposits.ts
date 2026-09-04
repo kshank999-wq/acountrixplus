@@ -20,6 +20,8 @@ import {
 import { formatCents } from '@/lib/money'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
+import { oneCurrencyOf, refuseMixedCurrency } from '@/modules/fx/addition'
+import { functionalCurrency } from '@/modules/fx/service'
 
 /**
  * Bank deposits (spec §13).
@@ -94,6 +96,11 @@ export async function undepositedReceipts(ctx: ActorContext) {
       id: payments.id,
       paymentDate: payments.paymentDate,
       amountCents: payments.amountCents,
+      // Phase 123. `amountCents` is the face amount, so the row has to say what
+      // it is denominated in. The seed's own books hold a €4,000 SEPA transfer
+      // waiting beside two dollar cheques, and this list rendered it as
+      // "$4,000.00" — the number right, the currency invented.
+      currency: payments.currency,
       reference: payments.reference,
       memo: payments.memo,
       customerName: customers.name,
@@ -145,6 +152,7 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
         .select({
           id: payments.id,
           amountCents: payments.amountCents,
+          currency: payments.currency,
           financialAccountId: payments.financialAccountId,
         })
         .from(payments)
@@ -164,6 +172,21 @@ export async function createDeposit(ctx: ActorContext, input: CreateDepositInput
         'waiting to be deposited.',
     )
   }
+
+  // Phase 123. `payments.amount_cents` is the face amount — the one face column
+  // with no functional twin at all — so adding receipts only means something if
+  // they are all in one currency. Until this check existed, banking a €500 and
+  // a $500 receipt together debited the bank "1000" and credited Undeposited
+  // Funds "1000", and `banking.cash_tie_out` reported a difference in the
+  // morning that nobody could trace back to a cause.
+  //
+  // A refusal rather than a conversion (Phase 117: a refusal beats a check).
+  // A paying-in slip goes to one bank account and a bank credits one currency,
+  // so two currencies in one deposit is not a rounding question — it is two
+  // deposits that have not been separated yet. Converting them would invent a
+  // number the bank statement will never show.
+  const agreement = oneCurrencyOf(receipts, await functionalCurrency(ctx.companyId))
+  if (!agreement.agreed) throw refuseMixedCurrency('receipts', agreement.currencies)
 
   const receiptsCents = receipts.reduce((sum, receipt) => sum + receipt.amountCents, 0)
   const otherCents = otherItems.reduce((sum, item) => sum + item.amountCents, 0)

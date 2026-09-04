@@ -53,6 +53,7 @@ export default async function DepositsPage() {
           id: receipt.id,
           paymentDate: receipt.paymentDate,
           amountCents: receipt.amountCents,
+          currency: receipt.currency,
           customerName: receipt.customerName,
           reference: receipt.reference,
         }))}
