@@ -5726,6 +5726,52 @@ registry of patterns always matches itself, so the declaring file is excluded by
 rule — tightening the regex until the example slipped through would have been
 the dishonest fix.
 
+### The currency that stopped at the boundary (Phase 124)
+
+ADR 0123 nominated this and said why it could not reach it: a client component
+receives a plain type rather than reading a drizzle table, so nothing followed
+the prop across the server/client boundary — the deposits fix was "found by
+looking at the screen." Looking at the screen is not a strategy.
+
+Measured: **92 client components, 94 prop types carrying money, 17 with a
+currency beside it and 77 without.** As with Phase 123's 145 reduces, the raw
+count is not the finding — most of that money is the company's own.
+
+Checked against the schema rather than assumed, **only five tables carry a
+`currency` column**: invoices, bills, credit notes, payments, retainers. Billing
+schedules, proposals, deposits, contributions, purchase orders, time entries,
+assets and statement runs carry none. So: **a currency travels with a document,
+and only a document has one.** `formatCents(cents, currency = 'USD')` is right
+about the books and wrong about a document, and the two look identical at the
+call site.
+
+The scan reads the **pair** — the client component and the server file that
+renders it — following the page's imports one hop into the modules, because
+`src/app` has held no business logic since Phase 1. Scanning the page alone
+found four carriers and none of the known defects, which is how the missing hop
+was noticed. Two repairs: the **suspected duplicate bills** on the invoices
+screen (Phase 123 gave `DuplicatePair` a currency and never passed it on, so a
+€4,000 pair sat beside a dollar pair under one symbol) and the **open vendor
+credit notes** on the payables screen. Verified in the browser with a €600
+credit from a German supplier on Ridgeline's books: the row now reads **€600.00**
+beside **$660.00** where the books' figure is wanted. It read "$600.00" before.
+
+**One asymmetry looks like the defect and is not.** `settings/chasing` has a
+`DueRow` with a currency; `settings/statements` has a `DueRow` without. Different
+rows: chasing lists individual overdue invoices — documents — while statements
+lists a customer, whose balance `statement-run.ts` builds from
+`invoices.functional_balance_cents` (Phase 56/65). Already converted, so the
+company's symbol is correct. Recording *why* a suspicious asymmetry is right is
+the point of the registry — the next person finds the answer instead of
+"fixing" it.
+
+`UNCLASSIFIED_CARRIERS` records **19** the scan cannot rule out and this phase
+did not trace to their query; the number may shrink and must not quietly grow
+(Phase 121's device). `NAME_COLLISIONS` carries the one case where two different
+things in one file share a property name — `plan.remainingCents` is a bank
+balance, not a credit note — because the scan matches by name, which is the same
+limitation ADR 0123 confessed and this phase declares rather than fixes.
+
 
 ## Deploying
 
@@ -5873,6 +5919,7 @@ Coverage matches what spec §21 asks for:
 | `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `NOT_YET_PROVEN` is empty since Phase 122 retired `banking.shared_ledger_accounts`, the one entry it ever held, and the test refuses to let the list grow |
 | `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
+| `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the five tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and refuses to let the unclassified count grow |
 | `tests/deposit-currency.test.ts` | **A paying-in slip is in one currency** (Phase 123): banking a euro receipt together with a dollar one is refused rather than posted as a total in neither, the refusal reaches the person as a sentence rather than "Something went wrong", and the ordinary cases — several receipts in one currency, and a single foreign receipt — still bank |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |

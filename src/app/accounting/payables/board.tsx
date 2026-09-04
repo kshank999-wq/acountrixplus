@@ -45,6 +45,8 @@ type Credit = {
   vendorId: string
   vendorName: string
   remainingCents: number
+  /** A credit note is a document — it is in whatever the supplier credited. */
+  currency: string
 }
 
 type PayRun = {
@@ -626,7 +628,7 @@ export function PayablesBoard({
                     <option value="">Choose…</option>
                     {credits.map((row) => (
                       <option key={row.id} value={row.id}>
-                        {row.number} — {row.vendorName} — {formatCents(row.remainingCents)} left
+                        {row.number} — {row.vendorName} — {formatCents(row.remainingCents, row.currency)} left
                       </option>
                     ))}
                   </select>

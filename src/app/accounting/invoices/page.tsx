@@ -132,6 +132,8 @@ export default async function InvoicesPage() {
           suspectIssueDate: pair.suspectIssueDate,
           totalCents: pair.totalCents,
           suspectBalanceCents: pair.suspectBalanceCents,
+          // Phase 124. Bills carry a currency; two suppliers are two of them.
+          currency: pair.currency,
           why: pair.why,
         }))}
         owedByCustomers={owedByCustomers}

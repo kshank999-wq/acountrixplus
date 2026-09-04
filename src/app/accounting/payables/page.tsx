@@ -93,6 +93,7 @@ export default async function PayablesPage() {
           vendorId: row.vendorId ?? '',
           vendorName: row.vendorName,
           remainingCents: row.remainingCents,
+          currency: row.currency,
         }))}
         policy={policy}
         runs={runs.map((row) => ({

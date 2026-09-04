@@ -171,6 +171,9 @@ export async function openVendorCredits(ctx: ActorContext) {
       vendorName: vendors.name,
       totalCents: creditNotes.totalCents,
       remainingCents: creditNotes.remainingCents,
+      // Phase 124. A credit note is a document and carries its own currency;
+      // the list somebody chooses from has to say which.
+      currency: creditNotes.currency,
     })
     .from(creditNotes)
     .innerJoin(vendors, eq(vendors.id, creditNotes.vendorId))

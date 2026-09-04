@@ -55,6 +55,8 @@ type Duplicate = {
   suspectIssueDate: string
   totalCents: number
   suspectBalanceCents: number
+  /** What the supplier invoiced in. Both bills of a pair are one supplier's. */
+  currency: string
   why: string
 }
 
@@ -261,11 +263,11 @@ export function InvoicesBoard({
                         {pair.suspectIssueDate}
                       </span>
                     </td>
-                    <td className="tnum px-4 py-2 text-right">{formatCents(pair.totalCents)}</td>
+                    <td className="tnum px-4 py-2 text-right">{formatCents(pair.totalCents, pair.currency)}</td>
                     <td className="tnum px-4 py-2 text-right">
                       {pair.suspectBalanceCents > 0 ? (
                         <span className="text-danger">
-                          {formatCents(pair.suspectBalanceCents)}
+                          {formatCents(pair.suspectBalanceCents, pair.currency)}
                         </span>
                       ) : (
                         <span className="text-faint">paid</span>
