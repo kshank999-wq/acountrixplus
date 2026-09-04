@@ -201,6 +201,16 @@ export const ALLOWED_BARE_REFUSALS: readonly {
       'a source type; only a developer editing the registry can.',
   },
   {
+    file: 'src/modules/integrity/falsifiable.ts',
+    message:
+      'No falsifier is declared for the check "X". A check has to say what would make it ' +
+      'disagree before it is worth running, or it is a green light with nothing behind it.',
+    because:
+      'The registry device a fourth time. Addressed to whoever adds a check to the register ' +
+      'without saying what would make it fail — a developer editing the register, never anybody ' +
+      'looking at a page.',
+  },
+  {
     file: 'src/modules/errors/missing.ts',
     message:
       'No record kind is declared for "X". A lookup has to say what it was looking for before ' +
