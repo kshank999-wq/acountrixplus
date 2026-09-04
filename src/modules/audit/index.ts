@@ -20,6 +20,10 @@ export type AuditAction =
   | 'rule.delete'
   | 'rule.apply'
   | 'account.create'
+  // Retiring an account takes it out of every picker without deleting the
+  // heading its own history is filed under (Phase 118).
+  | 'account.retire'
+  | 'account.restore'
   | 'account.update'
   // Ledger and closing controls (spec §13)
   | 'journal.post'

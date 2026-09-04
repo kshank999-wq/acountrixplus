@@ -2,9 +2,11 @@ import { and, asc, eq, inArray } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { chartAccounts } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
+import { DomainError } from '@/modules/errors'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { industryPack, type Industry } from './industry'
 import { STANDARD_ACCOUNTS, SYSTEM_ACCOUNTS, type AccountTemplate } from './standard'
+import { proposeAccount } from './proposal'
 
 /**
  * Builds the full account list for an industry: the standard chart plus the
@@ -122,17 +124,55 @@ export type CreateAccountInput = {
   parentId?: string | null
 }
 
-/** Creates a custom account (spec §5 allows full customization). */
+/**
+ * A refusal written for whoever proposed the account.
+ *
+ * `DomainError` rather than `Error`, because `messageFor` denies by default:
+ * anything that is not a `DomainError` reaches the browser as "Something went
+ * wrong", which is exactly what the first browser pass showed for all four
+ * refusals — the sentences were being thrown away one layer above the screen.
+ */
+export class ChartError extends DomainError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'ChartError'
+  }
+}
+
+/**
+ * Creates a custom account (spec §5 allows full customization).
+ *
+ * **Reachable at last (Phase 118).** Written in Phase 1 and called by nothing
+ * for 117 phases — there was no screen showing the chart of accounts at all,
+ * so a business could neither see nor extend its own. It also validated
+ * nothing: a duplicate number reached the unique index and came back as a raw
+ * Postgres error, and an expense could be numbered among the assets. The
+ * refusals arrive with the screen, because a screen that accepts anything is
+ * how a chart of accounts stops being one.
+ */
 export async function createAccount(ctx: ActorContext, input: CreateAccountInput) {
   requirePermission(ctx, 'accounting:journal')
+
+  const existing = await db
+    .select({ number: chartAccounts.number })
+    .from(chartAccounts)
+    .where(scoped(ctx, chartAccounts))
+
+  const verdict = proposeAccount({
+    proposal: { number: input.number, name: input.name, type: input.type },
+    taken: existing.map((row) => row.number),
+    reserved: Object.values(SYSTEM_ACCOUNTS),
+  })
+
+  if (!verdict.ok) throw new ChartError(verdict.why)
 
   return db.transaction(async (tx) => {
     const [account] = await tx
       .insert(chartAccounts)
       .values({
         companyId: ctx.companyId,
-        number: input.number,
-        name: input.name,
+        number: verdict.number,
+        name: verdict.name,
         type: input.type,
         subtype: input.subtype ?? null,
         description: input.description ?? null,
@@ -163,4 +203,57 @@ export async function accountsByIds(ctx: ActorContext, ids: string[]) {
     .select()
     .from(chartAccounts)
     .where(scoped(ctx, chartAccounts, inArray(chartAccounts.id, ids)))
+}
+
+/**
+ * Retires an account, or brings one back (Phase 118).
+ *
+ * Not a delete: the journal entries behind it still point at it, and a chart
+ * that loses an account loses the heading its own history was filed under.
+ * Retiring takes it out of every picker — `listAccounts({ activeOnly: true })`
+ * and `categorizableAccounts` both read `is_active` — while the reports that
+ * walk the ledger keep reporting it, which is what a business that stopped
+ * using an account actually wants.
+ *
+ * A system account cannot be retired. The application looks those up by number
+ * and posts into them without asking, so retiring one would hide an account
+ * that is still being used from every screen that offers a choice.
+ */
+export async function setAccountRetired(
+  ctx: ActorContext,
+  input: { accountId: string; retired: boolean },
+) {
+  requirePermission(ctx, 'accounting:journal')
+
+  const [account] = await db
+    .select()
+    .from(chartAccounts)
+    .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, input.accountId)))
+    .limit(1)
+
+  if (!account) throw new ChartError('That account is not on this chart.')
+
+  if (account.isSystem && input.retired) {
+    throw new ChartError(
+      `${account.number} ${account.name} is one of the accounts this application posts into by ` +
+        'number. Retiring it would take it out of every picker while the software kept using ' +
+        'it, so it stays.',
+    )
+  }
+
+  const [updated] = await db
+    .update(chartAccounts)
+    .set({ isActive: !input.retired })
+    .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, input.accountId)))
+    .returning()
+
+  await recordAudit(ctx, {
+    action: input.retired ? 'account.retire' : 'account.restore',
+    entityType: 'chart_account',
+    entityId: account.id,
+    before: { isActive: account.isActive },
+    after: { isActive: updated.isActive },
+  })
+
+  return updated
 }

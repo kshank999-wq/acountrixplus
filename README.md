@@ -5367,6 +5367,69 @@ Ridgeline Construction, and Ridgeline was fine. Two of the seven demo companies
 had been reporting a fault every night since the seed was written. All seven
 reconcile now, checked across all seven.
 
+### The chart nobody could add to (Phase 118)
+
+Nothing was wrong with the books this time — all seven companies reconcile, every
+check comes back clean — so the measurement moved to reachability, Phase 49's
+defect class. Counting every use of each write in `src/modules/coa/service.ts`
+across `src/` and `tests/`, minus its own definition:
+
+```
+installChartOfAccounts   12 uses
+listAccounts             31 uses
+accountByNumber          40 uses
+createAccount             0 uses
+```
+
+`createAccount` was written in **Phase 1**, doc-commented *"Creates a custom
+account (spec §5 allows full customization)"*, and called by nothing for 117
+phases. What was missing was not one function: **there was no chart-of-accounts
+screen at all.** The chart is read as a dropdown in fourteen places — the
+journal, the bookkeeping inbox, budgets, dimensions, cost codes, the drawer, the
+takings import, the mobile sync route — and managed in none. `/settings/accounts`,
+which sounds like the place, is the *bank* accounts screen from Phase 40. A
+business could not see the accounts its own balance sheet is built from, add one,
+or retire one it had stopped using.
+
+`createAccount` also validated nothing, so the refusals arrive **with** the
+screen rather than after it — a refusal beats a check (ADR 0117), and a refusal
+that arrives later is a migration. `src/modules/coa/proposal.ts` declares one
+number band per account type, **measured from the chart this application installs**
+rather than copied from a book, with a test asserting every standard and
+industry-pack account still falls inside its own band so the screen can never
+refuse a number the software itself uses:
+
+| Type | Band | Measured in the installed chart |
+|---|---|---|
+| asset | 1000–1999 | 1000–1510 |
+| liability | 2000–2999 | 2000–2590 |
+| equity | 3000–3999 | 3000–3900 |
+| revenue | 4000–4999 | 4000–4990 |
+| cost of sales | 5000–5999 | 5000–5450 |
+| expense | 6000–6999 | 6000–6950 |
+| other income | 7000–8999 | 7100–8200 |
+| other expense | 9000–9999 | 9000–9200 |
+
+Each band carries prose arguing for itself, `rangeFor` throws on a type nobody
+declared a home for, and every refusal quotes the prose rather than only
+reporting a violation: *"1042 is outside 6000–6999, where expenses live. The
+overheads: rent, insurance, software, wages that are not on a job. An account
+whose number contradicts its type is a trap for whoever inherits the books."*
+Retiring flips `is_active` rather than deleting — a retired account keeps its
+number, because the entries behind it still point there — and a system account
+cannot be retired, because the software posts into it by number without asking.
+
+**The browser found a defect thirty-three passing tests could not.** The first
+browser pass showed `Something went wrong.` for all four refusals: `ChartError`
+extended `Error`, and `messageFor` denies by default (ADR 0074), so the four
+sentences this phase exists to write were discarded one layer above the screen.
+No test could see it, because every test calls the service directly. That is the
+same failure as the feature itself — something correct that nothing reached.
+
+**Measured, not fixed:** 298 deliberate refusals in `src/modules` still throw
+plain `Error` against 60 classes extending `DomainError`, Phase 117's own
+`receiveStock` refusal among them.
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5506,6 +5569,8 @@ Coverage matches what spec §21 asks for:
 | `tests/paired-money.test.ts` | Against the database (Phase 116): **a €1,000 invoice paid in three €250 instalments carrying $270.86 against a balance that recomputes to $270.88** — correct books that the retired check called a fault, with the control-account check agreeing on them because it compares documents against the ledger rather than against themselves; the fixed pair agreeing on a one-line invoice, which is why this stayed hidden, and **parting company on two lines**; and the constraint refusing a settled document that still carries functional money — named, not merely thrown — on a retainer where it has existed since Phase 66 and on an invoice where it had not, while an ordinary four-instalment settlement passes; plus **the registry asked in both directions**, since a constraint the registry does not name is exactly how the retainer one went fifty phases unmentioned |
 | `tests/receipt-credit.test.ts` | **The one class of account a stock receipt may never be credited to** (Phase 117): both control accounts named and only those, each with the argument rather than a bare number; the refusal naming the account, saying there is nobody to pay it to, and pointing at `2050`; and the deny-list holding open everything else on purpose — goods received not invoiced, work in process, a bank account for stock bought outright, opening balance equity — because the legitimate credits are varied and enumerating them would refuse the next honest one |
 | `tests/control-account-integrity.test.ts` | Against the database, ADR 0031's failure arriving from both sides (Phase 117): **a receipt against `2000` refused by name**, where before it left money on the balance sheet with no bill, no supplier and no due date, with the same receipt against `2050` still going through and both control accounts agreeing after it; and **an imported invoice and bill carrying the functional value the rest of the system reads** — 520000 and 140000 rather than the zero they defaulted to, which had made every migrated company's aging report show nothing while its balance sheet showed receivables — ending with a migrated company whose ledger and subledger agree on both sides on its first day |
+| `tests/coa-proposal.test.ts` | **Whether a proposed chart account is coherent** (Phase 118), no database and no clock: the eight number bands covering 1000–9999 with no gap and no overlap, each carrying prose arguing for itself, and `rangeFor` throwing on a type nobody declared a home for; the bands holding for **every standard account and every industry pack**, so the screen can never refuse a number the software itself installs; and the refusals — no name, a number that is not four digits, a number the application looks up by name, a number already taken, and an expense numbered among the assets — each quoting the band's argument rather than only reporting a violation |
+| `tests/chart-management.test.ts` | Against the database, **the chart a business can finally add to** (Phase 118): an added account reaching `listAccounts` and `categorizableAccounts` — the pickers that are the point of adding one — with the act recorded against whoever did it; a duplicate refused in a sentence rather than as a unique-index violation; permission and tenancy both enforced, with the same number free in another company; and retiring taking an account out of every picker while leaving it on the chart, keeping its number reserved because the entries behind it still point there, refusing outright for an account the software posts into by number, and recording retirement and return as different acts |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |
