@@ -311,17 +311,24 @@ export async function businessInsights(ctx: ActorContext) {
     .from(bankTransactions)
     .where(scoped(ctx, bankTransactions))
 
-  // Revenue concentration: the largest client's share of invoiced revenue.
+  /**
+   * Revenue concentration: the largest client's share of invoiced revenue.
+   *
+   * On the **functional** total since Phase 122. This added `total_cents`
+   * across currencies and divided, so on multi-currency books the share it
+   * advised a business on was arithmetic over incomparable things — a euro
+   * invoice counting the same as a dollar one of the same face value.
+   */
   const byCustomer = await db
     .select({
       name: customers.name,
-      total: sql<string>`coalesce(sum(${invoices.totalCents}), 0)`,
+      total: sql<string>`coalesce(sum(${invoices.functionalTotalCents}), 0)`,
     })
     .from(invoices)
     .innerJoin(customers, eq(customers.id, invoices.customerId))
     .where(scoped(ctx, invoices, sql`${invoices.status} <> 'void'`))
     .groupBy(customers.name)
-    .orderBy(sql`coalesce(sum(${invoices.totalCents}), 0) desc`)
+    .orderBy(sql`coalesce(sum(${invoices.functionalTotalCents}), 0) desc`)
 
   const invoicedTotal = byCustomer.reduce((sum, row) => sum + Number(row.total), 0)
   const topCustomer = byCustomer[0]

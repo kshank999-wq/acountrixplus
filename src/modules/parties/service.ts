@@ -475,7 +475,10 @@ export async function setCustomerActive(
     const [position] = await db
       .select({
         openDocuments: sql<string>`count(*) filter (where ${inArray(invoices.status, [...OPEN_STATUSES])})`,
-        balanceCents: sql<string>`coalesce(sum(${invoices.balanceCents}), 0)`,
+        // The functional balance since Phase 122: this summed face amounts
+        // across currencies, so a customer holding a €500 and a $500 open
+        // invoice was refused with a figure that was neither.
+        balanceCents: sql<string>`coalesce(sum(${invoices.functionalBalanceCents}), 0)`,
       })
       .from(invoices)
       .where(and(eq(invoices.companyId, ctx.companyId), eq(invoices.customerId, customerId)))
@@ -504,7 +507,8 @@ export async function setVendorActive(
     const [position] = await db
       .select({
         openDocuments: sql<string>`count(*) filter (where ${inArray(bills.status, [...OPEN_STATUSES])})`,
-        balanceCents: sql<string>`coalesce(sum(${bills.balanceCents}), 0)`,
+        // Functional, for the reason above.
+        balanceCents: sql<string>`coalesce(sum(${bills.functionalBalanceCents}), 0)`,
       })
       .from(bills)
       .where(and(eq(bills.companyId, ctx.companyId), eq(bills.vendorId, vendorId)))

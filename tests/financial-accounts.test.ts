@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { and, eq, sql } from 'drizzle-orm'
+import { and, eq } from 'drizzle-orm'
 import { db } from '@/db'
 import { bankTransactions, chartAccounts, financialAccounts } from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
@@ -10,7 +10,6 @@ import {
   listFinancialAccounts,
   renameFinancialAccount,
   setFinancialAccountActive,
-  sharedLedgerAccounts,
 } from '@/modules/banking/accounts'
 import { connectInstitution } from '@/modules/banking/sync'
 import { commitStatementImport, planStatementImport } from '@/modules/importing/statements'
@@ -37,9 +36,6 @@ let fixture: Fixture
 beforeEach(async () => {
   fixture = await createCompanyFixture({ name: 'Accounts Co' })
 })
-
-/** Thrown to roll a transaction back after reading what it set up. */
-class Rollback extends Error {}
 
 async function chartFor(financialAccountId: string) {
   const [row] = await db
@@ -201,9 +197,11 @@ describe('one account, one ledger account', () => {
     const accounts = await listFinancialAccounts(connected.ctx)
     expect(accounts.length).toBeGreaterThan(1)
 
+    // This line was followed by `sharedLedgerAccounts(...) === []` until Phase
+    // 122 retired both the query and its check. It says the same thing, and it
+    // says it about the data rather than about a second reading of the data.
     const numbers = accounts.map((account) => account.chartAccountNumber)
     expect(new Set(numbers).size).toBe(numbers.length)
-    expect(await sharedLedgerAccounts(connected.ctx)).toEqual([])
   })
 })
 
@@ -355,65 +353,37 @@ describe('the ledger against the bank, per account', () => {
 })
 
 describe('the integrity checks', () => {
-  it('reports no shared ledger accounts on books that never had one', async () => {
-    await createFinancialAccount(fixture.ctx, { name: 'Deposit Account', kind: 'savings' })
-
-    const check = INTEGRITY_CHECKS.find((c) => c.key === 'banking.shared_ledger_accounts')!
-    const outcome = await check.run(fixture.ctx, '2026-12-31')
-
-    expect(outcome.agrees).toBe(true)
-    expect(outcome.leftCents).toBe(0)
-  })
-
   /**
-   * The state the check exists for: books migrated from before the constraint
-   * existed. Making one now needs the constraint out of the way, so the whole
-   * thing happens inside a transaction that is rolled back — the constraint is
-   * deferred to the transaction and nothing survives it.
+   * `banking.shared_ledger_accounts` had three tests here, from Phase 40 until
+   * Phase 122 retired it. The middle one is why: to see the state the check
+   * hunted, it had to `ALTER TABLE ... DROP CONSTRAINT` inside a transaction it
+   * then rolled back. Nothing short of that could produce a sharing pair —
+   * `financial_accounts_chart_account_unique` refuses new ones, and the
+   * migration that added it repaired the old ones in the same commit. A test
+   * that has to take the database apart to give a check something to find is
+   * the check telling you it has nothing to find.
+   *
+   * What is left below is the pair's surviving sibling, which reads live books
+   * and reports a real number.
    */
-  it('names both accounts when a pair does share one', async () => {
-    let found: Array<{ chartAccountNumber: string; names: string[] }> = []
+  it('refuses to hold two bank accounts on one ledger account', async () => {
+    // The constraint, asserted directly, in place of the check that used to
+    // report after the fact. A constraint beats a check (Phase 116).
+    const [existing] = await db
+      .select({ chartAccountId: financialAccounts.chartAccountId })
+      .from(financialAccounts)
+      .where(eq(financialAccounts.id, fixture.financialAccountId))
 
-    await db
-      .transaction(async (tx) => {
-        await tx.execute(
-          sql`ALTER TABLE financial_accounts DROP CONSTRAINT financial_accounts_chart_account_unique`,
-        )
-
-        const [existing] = await tx
-          .select({ chartAccountId: financialAccounts.chartAccountId })
-          .from(financialAccounts)
-          .where(eq(financialAccounts.id, fixture.financialAccountId))
-
-        await tx.insert(financialAccounts).values({
-          companyId: fixture.companyId,
-          chartAccountId: existing.chartAccountId,
-          name: 'Shadow Account',
-          kind: 'savings',
-        })
-
-        found = await sharedLedgerAccounts(fixture.ctx, tx)
-
-        // Thrown after reading, so the dropped constraint and the extra row
-        // both disappear with the rollback.
-        throw new Rollback()
-      })
-      .catch((error) => {
-        if (!(error instanceof Rollback)) throw error
-      })
-
-    expect(found).toHaveLength(1)
-    expect(found[0].chartAccountNumber).toBe('1000')
-    expect(found[0].names).toContain('Shadow Account')
-
-    // And the rollback really did put it back.
-    expect(await sharedLedgerAccounts(fixture.ctx)).toEqual([])
-  })
-
-  it('is registered as a fault, because nothing legitimately produces one', async () => {
-    const check = INTEGRITY_CHECKS.find((c) => c.key === 'banking.shared_ledger_accounts')!
-    expect(check.severity).toBe('fault')
-    expect(check.module).toBeNull()
+    await expect(
+      db.insert(financialAccounts).values({
+        companyId: fixture.companyId,
+        chartAccountId: existing.chartAccountId,
+        name: 'Shadow Account',
+        kind: 'savings',
+      }),
+    ).rejects.toMatchObject({
+      cause: { constraint_name: 'financial_accounts_chart_account_unique' },
+    })
   })
 
   it('reports the tie-out as a position rather than a fault', async () => {

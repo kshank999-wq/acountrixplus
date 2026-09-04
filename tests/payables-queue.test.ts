@@ -6,6 +6,7 @@ import { createCompanyFixture, type Fixture } from './helpers'
 import { createBill, createVendor, recordPayment } from '@/modules/receivables/service'
 import { createFinancialAccount } from '@/modules/banking/accounts'
 import { createVendorCredit } from '@/modules/receivables/vendor-credits'
+import { putRate } from '@/modules/fx/service'
 import { applyVendorCredit } from '@/modules/receivables/vendor-credits'
 import {
   accountsWithBalances,
@@ -14,6 +15,7 @@ import {
   payableQueue,
   totalPayable,
   vendorCreditBalances,
+  vendorCreditKey,
 } from '@/modules/payables/queue'
 import { applicationOrder, groupBySupplier, planRun } from '@/modules/payables/run'
 import { accountByNumber } from '@/modules/coa/service'
@@ -292,11 +294,58 @@ describe('a vendor credit', () => {
       reason: 'Two pallets returned',
     })
 
+    // Keyed by supplier *and* currency since Phase 122: two credits from one
+    // supplier in two currencies are two balances, and adding them made a
+    // number that came off a payment.
     const balances = await vendorCreditBalances(fixture.ctx)
-    expect(balances.get(vendor)).toBe(50_000)
+    expect(balances.get(vendorCreditKey(vendor, 'USD'))).toBe(50_000)
+    expect(balances.get(vendor)).toBeUndefined()
 
     const queue = await payableQueue(fixture.ctx)
     expect(queue.every((row) => row.vendorCreditCents === 50_000)).toBe(true)
+  })
+
+  /**
+   * Phase 122. `vendorCreditBalances` summed `remaining_cents` grouped by
+   * supplier alone, and the pay run nets that total against what is owed. A
+   * €500 credit and a $500 credit made "1000" of nothing, and that number came
+   * off a payment — the one currency-blind sum in the codebase that decided
+   * money rather than describing it.
+   */
+  it('keeps a euro credit and a dollar credit apart', async () => {
+    await putRate(fixture.ctx, {
+      baseCurrency: 'EUR',
+      rateDate: '2026-07-01',
+      rateMillionths: 1_083_500,
+      source: 'manual',
+    })
+
+    const vendor = await aVendor('Bremen Werkzeug GmbH')
+    const dollars = await aBill(vendor, 50_000, '2026-08-01')
+    const euros = await createBill(fixture.ctx, {
+      vendorId: vendor,
+      issueDate: '2026-07-01',
+      dueDate: '2026-08-01',
+      currency: 'EUR',
+      acknowledgeDuplicate: true,
+      lines: [{ chartAccountId: expenseId, description: 'Werkzeug', unitPriceCents: 40_000 }],
+    })
+
+    for (const bill of [dollars, euros]) {
+      await createVendorCredit(fixture.ctx, {
+        vendorId: vendor,
+        billId: bill.id,
+        issueDate: '2026-07-02',
+        reason: 'Returned',
+      })
+    }
+
+    const balances = await vendorCreditBalances(fixture.ctx)
+
+    // Two answers, each one currency, rather than one answer that is neither.
+    expect(balances.get(vendorCreditKey(vendor, 'USD'))).toBe(50_000)
+    expect(balances.get(vendorCreditKey(vendor, 'EUR'))).toBe(40_000)
+    expect([...balances.values()]).toHaveLength(2)
   })
 
   it('can be spent against another of that supplier’s bills', async () => {
@@ -363,6 +412,8 @@ describe('a vendor credit', () => {
     })
 
     expect(await openVendorCredits(fixture.ctx)).toHaveLength(0)
-    expect((await vendorCreditBalances(fixture.ctx)).get(vendor)).toBeUndefined()
+    expect(
+      (await vendorCreditBalances(fixture.ctx)).get(vendorCreditKey(vendor, 'USD')),
+    ).toBeUndefined()
   })
 })

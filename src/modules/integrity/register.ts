@@ -3,7 +3,7 @@ import type { ActorContext } from '@/modules/tenancy/context'
 import type { IndustryModule } from '@/modules/coa/industry'
 
 import { giftCardPosition, payoutPosition } from '@/modules/appointments/reporting'
-import { cashTieOut, sharedLedgerAccounts } from '@/modules/banking/accounts'
+import { cashTieOut } from '@/modules/banking/accounts'
 import { reconcileFixedAssets } from '@/modules/assets/service'
 import { netAssets } from '@/modules/funds/reporting'
 import { reconcileInventory } from '@/modules/inventory/service'
@@ -124,12 +124,14 @@ export type IntegrityCheck = {
   /**
    * What the two numbers are (Phase 94).
    *
-   * Almost every check compares money, so money is the default. Two do not:
-   * `banking.shared_ledger_accounts` counts accounts against ledger lines, and
-   * `parties.shared_addresses` counts parties against addresses. Rendering
-   * either as currency produces "$0.01 apart" for two customers on one email —
-   * a sentence that is not merely unhelpful but false, in a register whose
-   * whole job is telling somebody the truth about their books.
+   * Almost every check compares money, so money is the default. One does not:
+   * `parties.shared_addresses` counts parties against addresses. Rendering that
+   * as currency produces "$0.01 apart" for two customers on one email — a
+   * sentence that is not merely unhelpful but false, in a register whose whole
+   * job is telling somebody the truth about their books.
+   *
+   * There were two until Phase 122, when `banking.shared_ledger_accounts` —
+   * which counted accounts against ledger lines — was retired.
    */
   unit?: 'money' | 'count'
   /** Why a difference here means what it means. Shown next to the number. */
@@ -197,40 +199,37 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
       }
     },
   },
-  {
-    key: 'banking.shared_ledger_accounts',
-    // Counts, not money — and said so since Phase 94, which is when the page
-    // stopped rendering them as currency.
-    unit: 'count',
-    label: 'Bank accounts that share one ledger account',
-    compares: 'Bank accounts against the ledger accounts they post to',
-    module: null,
-    severity: 'fault',
-    meaning:
-      'Two bank accounts on one ledger account give the balance sheet a single figure covering ' +
-      'both, so it can never say what either holds — which is the only question a bank statement ' +
-      'asks, and neither account can be tied out. A unique index refuses new pairs; this catches ' +
-      'books that were migrated with one already in place.',
-    asAt: { reach: 'any_date', because: "It counts bank accounts against the ledger accounts they name. That is a fact about how the chart is wired rather than a balance, so it reads the same on any date." },
-    run: async (ctx) => {
-      const shared = await sharedLedgerAccounts(ctx)
-      const accounts = shared.reduce((sum, entry) => sum + entry.names.length, 0)
-
-      return {
-        agrees: shared.length === 0,
-        // Counts, not money. The number that matters is how many real accounts
-        // are hidden behind how few ledger lines.
-        leftCents: accounts,
-        rightCents: shared.length,
-        detail:
-          shared.length === 0
-            ? undefined
-            : shared
-                .map((entry) => `${entry.chartAccountNumber}: ${entry.names.join(' and ')}`)
-                .join('; '),
-      }
-    },
-  },
+  /**
+   * `banking.shared_ledger_accounts` was here, and was retired in Phase 121–122.
+   *
+   * It counted bank accounts sharing one ledger account. Phase 121 could not
+   * write a falsifier for it, and the reason turned out to be conclusive: the
+   * check and `financial_accounts_chart_account_unique` arrived in **the same
+   * commit** (Phase 40), and that migration says in as many words what it does
+   * first —
+   *
+   * > The unique constraint at the bottom is the fix. It cannot be added to
+   * > books that already have a sharing pair, so this repairs them first.
+   *
+   * So the migration removed every historical pair, and the constraint has
+   * refused every new one since. The check's own `meaning` said it was for
+   * "books that were migrated with one already in place" — but those were
+   * repaired by the migration that installed the check, in the same commit.
+   *
+   * It has therefore been unable to find anything from the moment it was
+   * written, 82 phases ago, and it ran on every company every night saying so.
+   * Retired on Phase 116's argument for `fx.conversions`: a check that cannot
+   * report anything is not reassurance, it is a line of green nobody can learn
+   * from. Phase 116 put the general form of it — **a constraint beats a
+   * check** — and here the constraint arrived in the same commit as the check.
+   *
+   * `sharedLedgerAccounts` is gone with it. Its own doc comment claimed it was
+   * "kept as a query rather than only a constraint" for migrated books, and the
+   * migration that installed the constraint had already repaired those. Nothing
+   * else called it: this register was its only caller in 82 phases, which is
+   * Phase 49's rule read backwards — a function whose one caller is retired is
+   * a feature that no longer exists.
+   */
   {
     key: 'banking.cash_tie_out',
     label: 'What each bank account holds, against its feed',

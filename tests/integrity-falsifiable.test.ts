@@ -59,26 +59,6 @@ async function journalAgainst(fixture: Fixture, number: string, cents = 25_000) 
 const SCENARIOS: Record<string, Scenario> = {
   'ledger.receivables': {},
   'ledger.payables': {},
-  'banking.shared_ledger_accounts': {
-    // The check counts how the chart is wired, so the falsifier writes the row
-    // a migration would: a second account on a ledger account already in use.
-    falsify: async (fixture) => {
-      const [existing] = await db
-        .select()
-        .from(financialAccounts)
-        .where(eq(financialAccounts.id, fixture.financialAccountId))
-        .limit(1)
-
-      await db.insert(financialAccounts).values({
-        companyId: fixture.companyId,
-        chartAccountId: existing.chartAccountId,
-        name: 'Second Current Account',
-        mask: '9911',
-        kind: 'checking',
-        providerAccountId: 'test-checking-002',
-      })
-    },
-  },
   'banking.cash_tie_out': {},
   'payments.in_transit': {},
   'payables.duplicate_bills': {
@@ -197,14 +177,10 @@ const SCENARIOS: Record<string, Scenario> = {
  * meant to shrink rather than to sit here.
  */
 const NOT_YET_PROVEN: Record<string, string> = {
-  'banking.shared_ledger_accounts':
-    'Cannot be falsified at all, and that is the finding. ' +
-    '`financial_accounts_chart_account_unique` refuses the second row — from the application ' +
-    'and from a migration alike — so the state this check looks for is one the database will ' +
-    'not hold. Either the constraint is newer than the check and quietly made it moot, in which ' +
-    'case it should be retired the way Phase 116 retired fx.conversions, or the check is for ' +
-    'books that predate the constraint, in which case it should say so. Deciding which is a ' +
-    'phase of its own, and this entry is what stops the question being forgotten.',
+  // Empty since Phase 122. `banking.shared_ledger_accounts` was the only entry
+  // and it has been retired rather than proven: it arrived in the same commit
+  // as the unique index that makes its subject impossible, so no falsifier
+  // could ever have reached it.
 }
 
 function findingFor(findings: Finding[], key: string): Finding {
@@ -241,7 +217,6 @@ describe('every check declares how it can fail', () => {
     const withoutAccount = FALSIFIERS.filter((row) => row.account === null).map((row) => row.key)
     expect(withoutAccount.sort()).toEqual(
       [
-        'banking.shared_ledger_accounts',
         'funds.untagged_contributions',
         'parties.shared_addresses',
         'payables.duplicate_bills',
@@ -263,7 +238,7 @@ describe('the declared falsifier actually falsifies', () => {
     // errors that run exposed were corrected. Every entry here says what
     // stopped it, because "unproven" with no reason is how a gap becomes
     // permanent.
-    expect(Object.keys(NOT_YET_PROVEN).length).toBeLessThanOrEqual(1)
+    expect(Object.keys(NOT_YET_PROVEN).length).toBe(0)
     for (const [key, why] of Object.entries(NOT_YET_PROVEN)) {
       expect(FALSIFIERS.map((row) => row.key), key).toContain(key)
       expect(why.length, key).toBeGreaterThan(120)

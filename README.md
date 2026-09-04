@@ -4184,7 +4184,8 @@ one email address displayed as *"$0.01 apart"* — not merely unhelpful but fals
 in a register whose whole job is telling the truth about the books. A check now
 declares its `unit`; counting checks say "worth a look" and leave the specifics
 to their detail line. `banking.shared_ledger_accounts` had the same problem
-unnoticed since Phase 40 and is fixed with it.
+unnoticed since Phase 40 and was fixed with it — and was itself retired in
+Phase 122, leaving `parties.shared_addresses` the only counting check.
 
 ### The duplicate the screen could not see (Phase 95)
 
@@ -5618,7 +5619,9 @@ at the control account.
   one the database will not hold. Either the constraint quietly made the check
   moot and it should be retired the way Phase 116 retired `fx.conversions`, or
   the check is for books that predate it and should say so. It stays in
-  `NOT_YET_PROVEN` with the question written down.
+  `NOT_YET_PROVEN` with the question written down. **Phase 122 settled it: the
+  constraint's own migration repaired those books, so it is the first case, and
+  the check is retired.**
 
 **Nineteen of twenty proven; one recorded with its reason.**
 
@@ -5627,6 +5630,57 @@ check's *declared* level — as if it were the result, and reported every check
 failing on every company; `agrees` is the result, and read correctly all seven
 are clean. The first falsification sweep said fifteen unproven; a wider window
 found two more genuine cases, so the number is thirteen.
+
+### The sums that still added currencies (Phase 122)
+
+Phase 65 closed *"the three sums that still add currencies"*. Phase 115 found
+the integrity register doing it. Phase 116 gave every face amount a functional
+twin and a constraint keeping the pair honest. Three phases across fifty, each
+closing instances of one defect — and nothing had ever asked how many were left.
+
+Asking it, over every `sum()` of a face-amount column in `src/modules`:
+
+```
+currency-aware   4
+currency-blind   8   in six files
+```
+
+**Two of the eight decided money rather than describing it.**
+`vendorCreditBalances` totals what each supplier owes back and the pay run nets
+that against what is owed them — so a €500 credit and a $500 credit made "1000"
+of nothing, and that number came off a payment. It is keyed by supplier **and
+currency** now. `assistants.ts` computed revenue concentration, the largest
+client's share, by adding invoice totals across currencies and dividing; it
+reads the functional twin. The rest report: two deactivation refusals (now
+functional), two till takings (argued safe), and one cash-basis sum that was
+computed and never read, which is deleted rather than repaired.
+
+`src/modules/fx/comparable.ts` names the nine face columns and the rule — group
+by currency, sum the functional twin, or argue from the code that the rows are
+provably one currency — and `tests/comparable-sums.test.ts` reads the source and
+enforces it. The two excused sums are both in the cash drawer, and the excuse is
+**verified in the code rather than argued from what a till is like**:
+`takeCounterPayment` never passes a currency to `recordPayment`.
+
+`payments.amount_cents` is the trap in four of the eight sites: it has no
+functional twin at all, so the only way to make it comparable is `convert()` at
+read time. That is why the list is written out rather than derived from
+`PAIRED_COLUMNS`.
+
+**`banking.shared_ledger_accounts` is retired**, which settles the question
+Phase 121 recorded. The check and `financial_accounts_chart_account_unique`
+arrived in the *same commit*, and that migration repairs every existing sharing
+pair before adding the constraint — so the "migrated books" the check existed
+for were repaired by the migration that installed it. It has been unable to find
+anything since it was written, and ran nightly on every company saying so. **A
+constraint beats a check** (Phase 116), and here the constraint arrived first.
+`sharedLedgerAccounts` goes with it: the register was its only caller in 82
+phases. Its three tests are replaced by one that asserts the constraint refuses
+the insert — the previous best test had to `DROP CONSTRAINT` inside a
+rolled-back transaction to give the check anything to find, which is the check
+telling you the state cannot occur.
+
+The register is **nineteen** checks, and `NOT_YET_PROVEN` is empty.
 
 
 ## Deploying
@@ -5772,7 +5826,8 @@ Coverage matches what spec §21 asks for:
 | `tests/chart-management.test.ts` | Against the database, **the chart a business can finally add to** (Phase 118): an added account reaching `listAccounts` and `categorizableAccounts` — the pickers that are the point of adding one — with the act recorded against whoever did it; a duplicate refused in a sentence rather than as a unique-index violation; permission and tenancy both enforced, with the same number free in another company; and retiring taking an account out of every picker while leaving it on the chart, keeping its number reserved because the entries behind it still point there, refusing outright for an account the software posts into by number, and recording retirement and return as different acts |
 | `tests/refusal-audience.test.ts` | **Whether a refusal can be read by the person it refused** (Phase 119), reading the source rather than calling anything: the three rules that must all hold for a message to count as prose written for a reader, checked against real sentences from this codebase in both directions; a scan that asserts it found throws at all, so a broken parser cannot pass green on an empty list; **no person-facing sentence left thrown as a bare `Error`** anywhere in `src/modules`, and no entry in the fourteen-strong allowlist that has stopped pointing at a real throw — keyed by sentence rather than line number, because an allowlist that goes stale when somebody adds an import is a trap; and, at the other end, `messageFor` showing a `Refusal` verbatim while still replacing a `Failed query:` leak with the caller's fallback, which is the half of ADR 0074 that was always right |
 | `tests/missing-record.test.ts` | **What a failed lookup is allowed to say** (Phase 120), no database and no clock: the 45 record kinds named the way a screen names them rather than the way a table does, each recording whether its lookup is tenant-scoped, with `kindFor` throwing on a kind nobody declared; the sentence reading as person-facing by the Phase 119 rules for every kind, saying where the reader is and what to do; and **the disclosure rule made testable** — every declared kind held against all four forbidden phrases in singular and plural, and a tenant-scoped kind's sentence compared against an open one's with the noun elided, because 49 of these lookups sit behind a `scoped()` query and a difference between the two shapes would itself tell an attacker which case they had hit |
-| `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `banking.shared_ledger_accounts` stays on a one-entry `NOT_YET_PROVEN` list the test refuses to let grow, because a unique index makes the state it hunts one the database will not hold |
+| `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `NOT_YET_PROVEN` is empty since Phase 122 retired `banking.shared_ledger_accounts`, the one entry it ever held, and the test refuses to let the list grow |
+| `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |

@@ -103,16 +103,31 @@ export async function payableQueue(
   return rows.map((row) => ({
     ...row,
     bucket: bucketFor(row.dueDate, asOf),
-    vendorCreditCents: credits.get(row.vendorId) ?? 0,
+    // In the bill's own currency: a credit raised in another one cannot
+    // settle it, so offering it here would be the netting error again.
+    vendorCreditCents: credits.get(vendorCreditKey(row.vendorId, row.currency)) ?? 0,
   }))
 }
 
+/** Key for a supplier's credit in one currency. See `vendorCreditBalances`. */
+export function vendorCreditKey(vendorId: string, currency: string): string {
+  return `${vendorId}:${currency}`
+}
+
 /**
- * Credit each supplier is still holding for us.
+ * Credit each supplier is still holding for us, per currency.
  *
  * Surfaced beside what is owed because it is the same money seen from the other
  * side, and a business paying a supplier in full while holding an unused credit
  * from them is paying twice for something it already sent back.
+ *
+ * **Per currency since Phase 122.** This summed `remaining_cents` across every
+ * credit a supplier had, in whatever currency each was raised in, and the pay
+ * run netted the total off what was owed. A €500 credit and a $500 credit came
+ * back as "1000" of nothing, and that number came off a payment. Phase 62
+ * settled the rule this now follows: money held in dollars settles nothing
+ * denominated in euro, so a credit is only ever offered against a bill in its
+ * own currency.
  */
 export async function vendorCreditBalances(
   ctx: ActorContext,
@@ -120,6 +135,7 @@ export async function vendorCreditBalances(
   const rows = await db
     .select({
       vendorId: creditNotes.vendorId,
+      currency: creditNotes.currency,
       remainingCents: sql<string>`sum(${creditNotes.remainingCents})`,
     })
     .from(creditNotes)
@@ -131,14 +147,14 @@ export async function vendorCreditBalances(
         gt(creditNotes.remainingCents, 0),
       ),
     )
-    .groupBy(creditNotes.vendorId)
+    .groupBy(creditNotes.vendorId, creditNotes.currency)
 
   // `vendorId` is nullable on the table — exactly one of customer/vendor is
   // set, matching `party` — and the filter above already guarantees which.
   return new Map(
     rows
       .filter((row): row is typeof row & { vendorId: string } => row.vendorId !== null)
-      .map((row) => [row.vendorId, Number(row.remainingCents)]),
+      .map((row) => [vendorCreditKey(row.vendorId, row.currency), Number(row.remainingCents)]),
   )
 }
 

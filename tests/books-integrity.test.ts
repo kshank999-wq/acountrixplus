@@ -143,10 +143,9 @@ describe('the register names every check there is (Phase 33)', () => {
     expect(faults.sort()).toEqual([
       'appointments.gift_cards',
       'assets.register',
-      // Nothing legitimately puts two bank accounts on one ledger account —
-      // a unique index refuses new ones, and this catches migrated books
-      // (Phase 40).
-      'banking.shared_ledger_accounts',
+      // `banking.shared_ledger_accounts` was a fault here from Phase 40 until
+      // Phase 122. The unique index refuses new pairs and the migration that
+      // added it repaired the old ones, so it never had anything to find.
       'cash_drawer.open_tills',
       // Receiving stock credits 2050 and the bill debits it — the same event
       // from either end, so a difference is never a timing artefact. Nothing
@@ -200,10 +199,11 @@ describe('running the checks (Phase 33)', () => {
     // no functional figure in this system is a conversion of one.
     expect(run.findings.map((row) => row.key).sort()).toEqual([
       'assets.register',
-      // Every company has bank accounts, or should — neither banking check is
-      // gated on an industry (Phase 40).
+      // Every company has bank accounts, or should — the banking check is not
+      // gated on an industry (Phase 40). Its sibling
+      // `banking.shared_ledger_accounts` was ungated here too until Phase 122
+      // retired it.
       'banking.cash_tie_out',
-      'banking.shared_ledger_accounts',
       'ledger.payables',
       'ledger.receivables',
       // Ungated: any company can enter the same customer twice, and the check

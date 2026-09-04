@@ -42,6 +42,10 @@
  * document behind it is precisely the difference the check must see.
  *
  * The other three do not compare a balance at all, and each says so.
+ *
+ * Nineteen, not twenty, since Phase 122 retired `banking.shared_ledger_accounts`
+ * — the one no falsifier could reach, because a unique index added in the same
+ * commit as the check made its subject impossible.
  */
 
 /** What must make one check disagree, and why that is the thing worth proving. */
@@ -81,16 +85,6 @@ export const FALSIFIERS: readonly Falsifier[] = [
       'The same failure from the other side, and Phase 117 found it live: a payable with no ' +
       'supplier, no due date and no bill number, which nobody could pay because the report they ' +
       'would pay from did not know about it.',
-  },
-  {
-    key: 'banking.shared_ledger_accounts',
-    account: null,
-    how: 'Point a second bank account at a ledger account another bank account already uses.',
-    because:
-      'Not a balance: a count of how the chart is wired. Two accounts on one ledger line give ' +
-      'the balance sheet a single figure covering both, so neither can ever be tied out. A ' +
-      'unique index refuses new pairs, so the falsifier has to write the row the way a migration ' +
-      'would.',
   },
   {
     key: 'banking.cash_tie_out',

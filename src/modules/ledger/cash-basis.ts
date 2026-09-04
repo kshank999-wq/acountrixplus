@@ -750,8 +750,13 @@ export async function cashBasisCaveats(
 
     db
       .select({
+        // The count alone. This also summed `amount_cents` across every
+        // currency a payment might have been taken in, and nothing ever read
+        // the result — a figure that was both incomparable and unused, which
+        // is Phase 65's defect and Phase 115's in one line. Deleted rather
+        // than converted: converting a number with no reader would only make
+        // it a correct number nobody wants.
         count: sql<string>`count(*)`,
-        total: sql<string>`coalesce(sum(${payments.amountCents}), 0)`,
       })
       .from(payments)
       .where(

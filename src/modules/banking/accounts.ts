@@ -567,42 +567,36 @@ export async function cashTieOut(ctx: ActorContext): Promise<CashTieOut[]> {
 }
 
 /**
- * Bank accounts that share a ledger account with another one.
+ * `sharedLedgerAccounts` and the `banking.shared_ledger_accounts` check lived
+ * here from Phase 40 until Phase 122, and are gone.
  *
- * Kept as a query rather than only a constraint because the constraint can
- * only refuse *new* ones, and a company migrated from before this existed may
- * already have a pair. The integrity check reports them; the repair is a
- * person's decision, because splitting them means deciding which of the
- * postings belonged to which account.
+ * The query grouped this company's bank accounts by ledger account and returned
+ * the groups with more than one name in them. Its doc comment gave the reason
+ * it existed:
+ *
+ * > Kept as a query rather than only a constraint because the constraint can
+ * > only refuse *new* ones, and a company migrated from before this existed may
+ * > already have a pair.
+ *
+ * That sentence is the whole argument, and it is false about this codebase. The
+ * constraint and the query arrived in **the same commit**, and the migration
+ * that installed the constraint says what it does before adding it:
+ *
+ * > The unique constraint at the bottom is the fix. It cannot be added to books
+ * > that already have a sharing pair, so this repairs them first: each account
+ * > after the first gets a ledger account of its own.
+ *
+ * So the migrated books the query was kept for were repaired by the migration
+ * that kept it, and every book since has been refused a pair by
+ * `financial_accounts_chart_account_unique`. There has never been a moment when
+ * this query could return a row — Phase 121 tried to write a falsifier for the
+ * check and found it had to `DROP CONSTRAINT` to construct one.
+ *
+ * A constraint beats a check (Phase 116), and here the constraint arrived first.
+ * `new Set(numbers).size === numbers.length` in the tests says what the query
+ * said, without a nightly run on every company reporting green about a state
+ * the database will not hold.
  */
-export async function sharedLedgerAccounts(
-  ctx: ActorContext,
-  exec: Executor = db,
-): Promise<Array<{ chartAccountNumber: string; names: string[] }>> {
-  requirePermission(ctx, 'accounting:view')
-
-  const rows = await exec
-    .select({
-      number: chartAccounts.number,
-      name: financialAccounts.name,
-      chartAccountId: financialAccounts.chartAccountId,
-    })
-    .from(financialAccounts)
-    .innerJoin(chartAccounts, eq(chartAccounts.id, financialAccounts.chartAccountId))
-    .where(scoped(ctx, financialAccounts))
-    .orderBy(chartAccounts.number, financialAccounts.name)
-
-  const byChart = new Map<string, { number: string; names: string[] }>()
-  for (const row of rows) {
-    const entry = byChart.get(row.chartAccountId) ?? { number: row.number, names: [] }
-    entry.names.push(row.name)
-    byChart.set(row.chartAccountId, entry)
-  }
-
-  return [...byChart.values()]
-    .filter((entry) => entry.names.length > 1)
-    .map((entry) => ({ chartAccountNumber: entry.number, names: entry.names }))
-}
 
 /** Kept for the rare case where an account was attached to the wrong ledger line. */
 export async function ledgerAccountsAvailable(ctx: ActorContext) {
