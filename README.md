@@ -5567,6 +5567,68 @@ a null dereference somewhere downstream, in 74 places. A scripted edit is only
 as good as the pass that reads its output.
 
 
+### The checks that had only ever agreed (Phase 121)
+
+ADR 0120's nomination checked out and was not worth a phase — `src/lib` and
+`src/db` hold **two** person-facing bare throws, both naming environment
+variables, both belonging in the allowlist. The books were clean too: the
+register across all seven seeded companies reported **0 faults and 0 checks that
+threw**. So the measurement turned on the register itself. How many of its
+checks has anything ever seen *fail*?
+
+```
+proven to disagree at least once    7
+only ever seen to agree            13
+```
+
+A check that has only ever been seen to agree is a green light with no wiring
+behind it, and this codebase has been bitten by that twice — Phase 115's
+`receivables.customer_credit` comparing euros with dollars after eighty phases
+of agreeing, and Phase 117's `inventory.goods_received` whose subject was broken
+in the seed. Both by accident, phases apart.
+
+The register already states what each check **compares**, what a difference
+**means**, and how far back it **reaches** (Phase 109, verified in Phase 110).
+It never stated **what would make it disagree**. `falsifiable.ts` now does, for
+all twenty, and a test applies each: agrees before, disagrees after. Seventeen
+of the twenty reconcile a subledger against one named ledger account, so their
+falsifier is the act the check exists to catch — a hand-written entry straight
+at the control account.
+
+**Fifteen passed on the first run. The other five each taught something:**
+
+- **`inventory.lots` — the register named the wrong account.** Its `compares`
+  line read *"Σ open lots against 1300"*. `1300` is **Prepaid Expenses**; the
+  inventory account is `1400`, which the code has always read. The check was
+  right and its description — the line a business reads on the integrity page —
+  was wrong. The falsifier trusted the prose and failed, which is exactly what a
+  falsifier is for: **it makes the prose checkable.**
+- **`parties.shared_addresses` — "address" means the email one.** It selects id,
+  name and email and clashes on those; nothing in it reads a postal address.
+- **`funds.untagged_contributions` reads two named accounts**, contribution and
+  grant revenue, not revenue at large.
+- **`payables.duplicate_bills` has two of its three routes closed by design.** A
+  repeated reference is refused outright and cannot be overridden; two bills
+  that *both* carry references are never warned about, because the supplier has
+  already said they are two documents. What is left — and what the check is
+  therefore for — is the *unreferenced* resemblance somebody proceeded past.
+- **`banking.shared_ledger_accounts` cannot be falsified at all**, and that is
+  the finding. `financial_accounts_chart_account_unique` refuses the second row
+  from the application and from a migration alike, so the state it looks for is
+  one the database will not hold. Either the constraint quietly made the check
+  moot and it should be retired the way Phase 116 retired `fx.conversions`, or
+  the check is for books that predate it and should say so. It stays in
+  `NOT_YET_PROVEN` with the question written down.
+
+**Nineteen of twenty proven; one recorded with its reason.**
+
+**Two corrections, both mine.** The first integrity probe read `severity` — each
+check's *declared* level — as if it were the result, and reported every check
+failing on every company; `agrees` is the result, and read correctly all seven
+are clean. The first falsification sweep said fifteen unproven; a wider window
+found two more genuine cases, so the number is thirteen.
+
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -5710,6 +5772,7 @@ Coverage matches what spec §21 asks for:
 | `tests/chart-management.test.ts` | Against the database, **the chart a business can finally add to** (Phase 118): an added account reaching `listAccounts` and `categorizableAccounts` — the pickers that are the point of adding one — with the act recorded against whoever did it; a duplicate refused in a sentence rather than as a unique-index violation; permission and tenancy both enforced, with the same number free in another company; and retiring taking an account out of every picker while leaving it on the chart, keeping its number reserved because the entries behind it still point there, refusing outright for an account the software posts into by number, and recording retirement and return as different acts |
 | `tests/refusal-audience.test.ts` | **Whether a refusal can be read by the person it refused** (Phase 119), reading the source rather than calling anything: the three rules that must all hold for a message to count as prose written for a reader, checked against real sentences from this codebase in both directions; a scan that asserts it found throws at all, so a broken parser cannot pass green on an empty list; **no person-facing sentence left thrown as a bare `Error`** anywhere in `src/modules`, and no entry in the fourteen-strong allowlist that has stopped pointing at a real throw — keyed by sentence rather than line number, because an allowlist that goes stale when somebody adds an import is a trap; and, at the other end, `messageFor` showing a `Refusal` verbatim while still replacing a `Failed query:` leak with the caller's fallback, which is the half of ADR 0074 that was always right |
 | `tests/missing-record.test.ts` | **What a failed lookup is allowed to say** (Phase 120), no database and no clock: the 45 record kinds named the way a screen names them rather than the way a table does, each recording whether its lookup is tenant-scoped, with `kindFor` throwing on a kind nobody declared; the sentence reading as person-facing by the Phase 119 rules for every kind, saying where the reader is and what to do; and **the disclosure rule made testable** — every declared kind held against all four forbidden phrases in singular and plural, and a tenant-scoped kind's sentence compared against an open one's with the noun elided, because 49 of these lookups sit behind a `scoped()` query and a difference between the two shapes would itself tell an attacker which case they had hit |
+| `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `banking.shared_ledger_accounts` stays on a one-entry `NOT_YET_PROVEN` list the test refuses to let grow, because a unique index makes the state it hunts one the database will not hold |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |
 | `tests/aging-report.test.ts` | Against the database: **a euro invoice aged at 270875 where the report used to say 250000**, with "Invoiced €2,500.00" beside the name and nothing extra said for a home-currency customer; a euro invoice and a dollar one adding into one honest total; bills aged the same way; an overdue foreign invoice in the right bucket at the right value; and the pair that closes ADR 0106's open question — **the aging report and the control account tying exactly when no credit is outstanding, and differing by exactly the unapplied credits when one is**, with the figure the report predicts for the balance sheet equal to the one the control account actually reports; a credit issued after the report date not counted, and one company's credits kept out of another's reconciliation |
 | `tests/control-account-composition.test.ts` | **A credit note declared as *decreasing* 1100 and a vendor credit as decreasing 2000**, which is the whole defect in two assertions; **a document kind nobody declared raising rather than returning zero**, because a silent zero is how the credit note stayed out of this sum for seventy-five phases; every posting arguing for itself in prose, and the one that was missing saying why it was easy to miss; each kind declared against exactly one account; **a credit taken off the customer who holds it** with both documents still counted; a party who nets to nothing dropped and one who nets *negative* kept, because that is money the business owes them; worst first with a tie broken by name; **the reconciliation agreeing once the credit is counted and still catching an entry posted straight at the control account**; a kind with no documents left out rather than shown as a zero; and the sentence pluralising noun and count together |

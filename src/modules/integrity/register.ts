@@ -537,7 +537,7 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
   {
     key: 'inventory.lots',
     label: 'The stock on the shelf, against the balance sheet',
-    compares: 'Σ open lots against 1300',
+    compares: 'Σ open lots against 1400, and any account an item names for itself',
     module: 'inventory',
     severity: 'fault',
     meaning:

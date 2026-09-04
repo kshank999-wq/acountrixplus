@@ -87,12 +87,21 @@ const SCENARIOS: Record<string, Scenario> = {
     falsify: async (fixture) => {
       const { createVendor, createBill } = await import('@/modules/receivables/service')
       const vendor = await createVendor(fixture.ctx, { name: 'Ridge Supplies' })
+      const expense = await accountByNumber(fixture.companyId, '6000')
+      // A repeated *reference* is refused outright and cannot be overridden —
+      // "there is nothing for a person to know that the supplier's own
+      // numbering does not already say". So the state this check hunts is the
+      // other kind: two references that look like the same invoice. The second
+      // is a warning, which a person may proceed past, and that is exactly the
+      // one worth a second pair of eyes later.
+      // Neither carries a supplier reference: two referenced bills are
+      // deliberately left alone, because the supplier has already said they
+      // are two documents.
       for (const number of ['B-1', 'B-2']) {
-        const expense = await accountByNumber(fixture.companyId, '6000')
         await createBill(fixture.ctx, {
           vendorId: vendor.id,
           number,
-          vendorReference: 'INV-4471',
+          acknowledgeDuplicate: number !== 'B-1',
           issueDate: '2026-04-01',
           dueDate: '2026-05-01',
           lines: [
@@ -104,13 +113,11 @@ const SCENARIOS: Record<string, Scenario> = {
   },
   'parties.shared_addresses': {
     falsify: async (fixture) => {
+      // "Address" here is the email address: the check selects id, name and
+      // email and clashes on those. Nothing in it reads a postal address,
+      // which the first run of this file discovered by trying one.
       for (const name of ['Ash Court Ltd', 'Ash Court Trading']) {
-        await createCustomer(fixture.ctx, {
-          name,
-          addressLine1: '12 Ash Court',
-          city: 'Leeds',
-          postalCode: 'LS1 4AB',
-        })
+        await createCustomer(fixture.ctx, { name, email: 'accounts@ashcourt.test' })
       }
     },
   },
@@ -133,7 +140,10 @@ const SCENARIOS: Record<string, Scenario> = {
     // Two subledgers rather than a subledger and a ledger: revenue against the
     // contributions that name a fund.
     falsify: async (fixture) => {
-      const revenue = await accountByNumber(fixture.companyId, '4000')
+      // 4500 Contribution Revenue: the check counts lines on the two
+      // contribution accounts that carry no Fund dimension, not revenue at
+      // large.
+      const revenue = await accountByNumber(fixture.companyId, '4500')
       const bank = await accountByNumber(fixture.companyId, '1000')
       await postManualEntry(fixture.ctx, {
         entryDate: '2026-04-02',
@@ -188,28 +198,13 @@ const SCENARIOS: Record<string, Scenario> = {
  */
 const NOT_YET_PROVEN: Record<string, string> = {
   'banking.shared_ledger_accounts':
-    'Cannot be falsified at all. `financial_accounts_chart_account_unique` refuses the second ' +
-    'row, from the application and from a migration alike, so the state this check looks for ' +
-    'is one the database will not hold. Either the check is unreachable and should be retired ' +
-    'the way Phase 116 retired fx.conversions, or the constraint is newer than the check and ' +
-    'nobody noticed it made the check moot. That is a phase of its own.',
-  'payables.duplicate_bills':
-    "Phase 47's refusal blocks the second bill outright, so the falsifier has to go through " +
-    '`acknowledgeDuplicate` — a person deliberately saying it really is a separate invoice. ' +
-    'That is a different act from the one this check hunts, and getting the scenario right ' +
-    'means deciding which of the two the check is actually for.',
-  'parties.shared_addresses':
-    'Two customers at one address did not move it. Either the match is stricter than the fields ' +
-    'this scenario set, or the check reads something else — and which it is decides whether the ' +
-    'check works at all.',
-  'funds.untagged_contributions':
-    'It agrees when `untaggedContributionCents` is zero, and revenue posted to 4000 did not ' +
-    'count as contribution revenue. The scenario is probably naming the wrong account, but ' +
-    'until that is settled the check is unproven.',
-  'inventory.lots':
-    'An entry straight at 1300 did not move it, which is the one result here that looks like a ' +
-    'defect rather than a scenario error: 1300 is the account the register says it reconciles ' +
-    'against.',
+    'Cannot be falsified at all, and that is the finding. ' +
+    '`financial_accounts_chart_account_unique` refuses the second row — from the application ' +
+    'and from a migration alike — so the state this check looks for is one the database will ' +
+    'not hold. Either the constraint is newer than the check and quietly made it moot, in which ' +
+    'case it should be retired the way Phase 116 retired fx.conversions, or the check is for ' +
+    'books that predate the constraint, in which case it should say so. Deciding which is a ' +
+    'phase of its own, and this entry is what stops the question being forgotten.',
 }
 
 function findingFor(findings: Finding[], key: string): Finding {
@@ -264,9 +259,11 @@ describe('the declared falsifier actually falsifies', () => {
   const proven = FALSIFIERS.filter((row) => !NOT_YET_PROVEN[row.key])
 
   it('leaves a shrinking list of checks nobody has driven to disagree', () => {
-    // Fifteen of twenty on the first run. Every entry here says what stopped
-    // it, because "unproven" with no reason is how a gap becomes permanent.
-    expect(Object.keys(NOT_YET_PROVEN).length).toBeLessThanOrEqual(5)
+    // Fifteen of twenty on the first run; nineteen once the four scenario
+    // errors that run exposed were corrected. Every entry here says what
+    // stopped it, because "unproven" with no reason is how a gap becomes
+    // permanent.
+    expect(Object.keys(NOT_YET_PROVEN).length).toBeLessThanOrEqual(1)
     for (const [key, why] of Object.entries(NOT_YET_PROVEN)) {
       expect(FALSIFIERS.map((row) => row.key), key).toContain(key)
       expect(why.length, key).toBeGreaterThan(120)

@@ -113,20 +113,27 @@ export const FALSIFIERS: readonly Falsifier[] = [
   {
     key: 'payables.duplicate_bills',
     account: null,
-    how: 'Enter the same supplier reference twice for one supplier.',
+    how:
+      'Enter two unreferenced bills from one supplier for the same amount on one day, ' +
+      'proceeding past the warning.',
     because:
       'The only check with nothing on its right-hand side: it sums what it suspects against ' +
-      'zero. So the falsifier is the suspicion itself — the same invoice entered twice, which ' +
-      'Phase 47 found is how a supplier gets paid twice.',
+      'zero. Two routes are closed to it by design — a repeated reference is refused outright ' +
+      'and cannot be overridden, and two bills that both carry references are never warned ' +
+      'about, because the supplier has already said they are two documents. What is left, and ' +
+      'what this check is therefore for, is the unreferenced resemblance somebody chose to ' +
+      'proceed past. Phase 121 established that by trying the other two and being turned back.',
   },
   {
     key: 'parties.shared_addresses',
     account: null,
-    how: 'Give two customers the same postal address.',
+    how: 'Give two customers the same email address.',
     because:
-      'A count, not money. Two parties at one address are usually one party entered twice, and ' +
-      'until Phase 94 nobody was told. It is a position because a genuine shared address exists ' +
-      '— two departments of one council — so the check reports rather than accuses.',
+      'A count, not money — and the address is the **email** one. The check selects id, name and ' +
+      'email and clashes on those; nothing in it reads a postal address, which Phase 121 found ' +
+      'by writing a falsifier that set one and watching the check stay green. Two parties on one ' +
+      'address are usually one party entered twice, and it reports rather than accuses because a ' +
+      'genuine share exists — two departments of one council.',
   },
   {
     key: 'assets.register',
@@ -164,7 +171,7 @@ export const FALSIFIERS: readonly Falsifier[] = [
   {
     key: 'funds.untagged_contributions',
     account: null,
-    how: 'Record contribution revenue without tagging it to a fund.',
+    how: 'Post to 4500 Contribution Revenue with no Fund dimension on the line.',
     because:
       'The one check comparing two subledgers rather than a subledger and a ledger: revenue ' +
       'against the contributions that name a fund. An untagged gift is restricted money the ' +
@@ -172,8 +179,8 @@ export const FALSIFIERS: readonly Falsifier[] = [
   },
   {
     key: 'inventory.lots',
-    account: '1300',
-    how: 'Post a manual journal entry that debits 1300 with no open lot behind it.',
+    account: '1400',
+    how: 'Post a manual journal entry that debits 1400 with no open lot behind it.',
     because:
       'Stock on hand is a physical fact. A ledger balance with no lot behind it means the ' +
       'valuation cannot be walked back to anything countable on a shelf.',
