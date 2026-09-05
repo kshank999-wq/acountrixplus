@@ -19,6 +19,7 @@ import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { settleInvoiceWithoutCash } from '@/modules/receivables/service'
 import { PropertyError, propertyDimension } from './service'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Security deposits (spec §5 "tenants", §13, §19).
@@ -153,7 +154,10 @@ export async function receiveDeposit(
 
     if (!bank) throw new PropertyError('That account does not exist.')
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'holding this deposit', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.occurredOn,
@@ -162,7 +166,7 @@ export async function receiveDeposit(
         sourceType: 'lease_deposit',
         sourceId: input.leaseId,
         lines: [
-          { chartAccountId: bank.chartAccountId, debitCents: input.amountCents },
+          { chartAccountId: bankGl, debitCents: input.amountCents },
           {
             chartAccountId: liability.id,
             creditCents: input.amountCents,
@@ -250,7 +254,10 @@ export async function refundDeposit(
 
     if (!bank) throw new PropertyError('That account does not exist.')
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'returning this deposit', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.occurredOn,
@@ -260,7 +267,7 @@ export async function refundDeposit(
         sourceId: input.leaseId,
         lines: [
           { chartAccountId: liability.id, debitCents: input.amountCents },
-          { chartAccountId: bank.chartAccountId, creditCents: input.amountCents },
+          { chartAccountId: bankGl, creditCents: input.amountCents },
         ],
       },
       tx,

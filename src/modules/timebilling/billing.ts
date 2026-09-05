@@ -29,6 +29,7 @@ import { DomainError, Refusal } from '@/modules/errors'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { heldAcrossAt, type Position } from './retainer-position'
 import { missing } from '@/modules/errors/missing'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Turning recorded work into an invoice (spec §5).
@@ -531,7 +532,10 @@ export async function receiveRetainer(
       })
       .returning()
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'receiving this retainer', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.receivedOn,
@@ -548,7 +552,7 @@ export async function receiveRetainer(
         // (Phase 66). The ledger is never in the client's currency; posting the
         // face amount would put €10,000 on a dollar balance sheet.
         lines: [
-          { chartAccountId: account.chartAccountId, debitCents: functionalCents },
+          { chartAccountId: bankGl, debitCents: functionalCents },
           { chartAccountId: heldAccount.id, creditCents: functionalCents },
         ],
       },
@@ -1069,7 +1073,10 @@ export async function refundRetainer(
     const fxAccount =
       settlement.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'refunding this retainer', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,
@@ -1081,7 +1088,7 @@ export async function refundRetainer(
         sourceId: retainer.id,
         lines: [
           { chartAccountId: heldAccount.id, debitCents: settlement.releasedCents },
-          { chartAccountId: account.chartAccountId, creditCents: paidCents },
+          { chartAccountId: bankGl, creditCents: paidCents },
           ...(fxAccount
             ? [
                 settlement.realisedCents > 0

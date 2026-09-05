@@ -19,6 +19,7 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DocumentError } from './service'
 import { drawFrom, mayUse } from './overpayment'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Spending or refunding what a customer overpaid (spec §13, Phase 53).
@@ -431,7 +432,10 @@ export async function refundCredit(
 
     const held = await overpaymentAccount(ctx.companyId)
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'refunding this credit', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,
@@ -445,7 +449,7 @@ export async function refundCredit(
         // left it, and the gap named where a gap belongs (Phase 67).
         lines: [
           { chartAccountId: held.id, debitCents: settlement.releasedCents },
-          { chartAccountId: account.chartAccountId, creditCents: paidCents },
+          { chartAccountId: bankGl, creditCents: paidCents },
           ...(settlement.realisedCents === 0
             ? []
             : [

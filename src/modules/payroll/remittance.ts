@@ -15,6 +15,7 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { PAYROLL_ACCOUNTS } from './accounts'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Remitting what was withheld (spec §13, §19).
@@ -229,7 +230,10 @@ export async function recordRemittance(
       })
       .returning()
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'remitting this liability', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.paidOn,
@@ -241,7 +245,7 @@ export async function recordRemittance(
           // No expense on either side. The cost was recognized when the
           // payroll ran or the sale was made.
           { chartAccountId: input.liabilityAccountId, debitCents: input.amountCents },
-          { chartAccountId: bank.chartAccountId, creditCents: input.amountCents },
+          { chartAccountId: bankGl, creditCents: input.amountCents },
         ],
       },
       tx,

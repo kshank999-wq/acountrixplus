@@ -7,6 +7,7 @@ import { requireModule } from '@/modules/industry/modules'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { FundError, fundAccounts, fundDimensionId, requireFund } from './service'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Money in, to a fund (spec §5, "Nonprofit — grants, donors").
@@ -248,7 +249,10 @@ export async function receivePledge(
 
     const dimension = { [await fundDimensionFor(ctx)]: fund.dimensionValueId }
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'recording this contribution', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.receivedOn,
@@ -257,7 +261,7 @@ export async function receivePledge(
         sourceType: 'contribution',
         sourceId: row.id,
         lines: [
-          { chartAccountId: bank.chartAccountId, debitCents: input.amountCents, dimensions: dimension },
+          { chartAccountId: bankGl, debitCents: input.amountCents, dimensions: dimension },
           {
             chartAccountId: receivableId,
             creditCents: input.amountCents,

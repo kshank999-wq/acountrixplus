@@ -17,13 +17,13 @@ import { isForeign } from './rates'
  * > lands on is held in a currency nobody asked about.**
  *
  * Nineteen postings in fourteen functions land on a bank account's ledger
- * account. Measured across
- * `src/modules`, `financial_accounts.currency` is read in seven places — the
- * bank feed, three screens, the accounts module, the AI retrieval and the sync.
- * **Not one of the ten that needed it is among them.** The three that do read it
- * are the bank feed, its transfer pair, its restatement and banking deposits.
- * The feed learned
- * to ask in Phase 128; nothing else did.
+ * account. Measured across `src/modules`, `financial_accounts.currency` is read
+ * in seven places — the bank feed, three screens, the accounts module, the AI
+ * retrieval and the sync. **Not one of the ten that need it is among them.**
+ *
+ * Four of the fourteen know the account they post to: the feed, its transfer
+ * pair, its restatement, and banking deposits. Every one of those is the feed or
+ * something built on it. The feed learned to ask in Phase 128; nothing else did.
  *
  * ## What goes wrong
  *
@@ -42,8 +42,8 @@ import { isForeign } from './rates'
  * ## Why this refuses rather than converts
  *
  * Phase 117's rule: a refusal beats a check. Converting the ten would mean ten
- * new rate decisions, ten UI changes and ten ways to get it wrong,
- * built speculatively for accounts that mostly do not exist yet. Refusing means
+ * new rate decisions, ten UI changes and ten ways to get it wrong, built
+ * speculatively for accounts that mostly do not exist yet. Refusing means
  * a business with a euro account is told which paths cannot yet handle it,
  * instead of being given entries nobody can defend.
  *

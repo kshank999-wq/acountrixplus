@@ -22,6 +22,7 @@ import { functionalCurrency, rateFor } from '@/modules/fx/service'
 import { recoveryFunctional } from '@/modules/fx/ledger'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Credit notes and write-offs (spec §13).
@@ -667,7 +668,10 @@ export async function recoverWriteOff(
   )
 
   return db.transaction(async (tx) => {
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'banking this recovery', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.recoveredOn,
@@ -676,7 +680,7 @@ export async function recoverWriteOff(
         sourceType: 'write_off_recovery',
         sourceId: writeOff.id,
         lines: [
-          { chartAccountId: bank.chartAccountId, debitCents: recovery.functionalCents },
+          { chartAccountId: bankGl, debitCents: recovery.functionalCents },
           // Back out the expense. Not revenue — that was recognized when the
           // invoice was raised and never reversed.
           { chartAccountId: badDebtAccount.id, creditCents: recovery.functionalCents },

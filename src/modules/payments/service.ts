@@ -27,6 +27,7 @@ import {
   type SweepSummary,
 } from './reconcile'
 import type { ProviderPaymentStatus } from './provider'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Taking a card payment, and following the money until it reaches the bank
@@ -707,7 +708,10 @@ export async function importPayouts(
         .onConflictDoNothing({ target: payoutItems.checkoutId })
     }
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, settings.payoutFinancialAccountId, 'banking this payout', db)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: batch.arrivalDate,
@@ -716,7 +720,7 @@ export async function importPayouts(
         sourceType: 'payout',
         sourceId: saved.id,
         lines: [
-          { chartAccountId: bank.chartAccountId, debitCents: batch.amountCents },
+          { chartAccountId: bankGl, debitCents: batch.amountCents },
           { chartAccountId: inTransit.id, creditCents: batch.amountCents },
         ],
       },

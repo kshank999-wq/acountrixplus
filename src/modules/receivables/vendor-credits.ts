@@ -24,6 +24,7 @@ import { convert } from '@/modules/fx/rates'
 import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
 import { mayUse } from './overpayment'
 import { DomainError, Refusal } from '@/modules/errors'
+import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 
 /**
  * Vendor credits (spec §13: "vendors, bills, **credits**, payments, aging").
@@ -546,7 +547,10 @@ export async function refundVendorCredit(
 
     const fxAccount = recovery.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
-    const entry = await createJournalEntry(
+        // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'banking this supplier refund', tx)
+
+const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,
@@ -559,7 +563,7 @@ export async function refundVendorCredit(
         sourceType: 'vendor_credit_refund',
         sourceId: note.id,
         lines: [
-          { chartAccountId: account.chartAccountId, debitCents: recovery.receivedCents },
+          { chartAccountId: bankGl, debitCents: recovery.receivedCents },
           { chartAccountId: apAccount.id, creditCents: recovery.relievedCents },
           ...(fxAccount
             ? [
