@@ -118,6 +118,25 @@ Its four cases are **ported** rather than deleted. Two assertions went with it,
 about `grossCents` and `feeCents`: nothing read those, and `payouts` stores
 `expected_cents` rather than the halves.
 
+## Proved against the database
+
+`in-transit-postings.test.ts` runs a euro invoice through the card path end to
+end. Measured, on the mock's own fee schedule:
+
+```
+CHECKOUT currency=EUR gross=10000 fee=320  fnGross=11000 fnFee=352
+PAYOUT   currency=EUR amount=9680 rate=1100000 functional=10648
+```
+
+$110.00 charged, $3.52 relieved, $106.48 taken out — **`1250` reaches zero.**
+The old way credited the face $3.20 and $96.80 against a converted $110.00 debit
+and left exactly **$10.00** behind. The figure in this ADR is that measurement,
+not a hand-worked example, and the test asserts it in both directions so it is
+not a check that only ever agrees (Phase 121).
+
+The confirming suite came back **191 files / 3696 tests, 0 failures**, clean
+first time.
+
 ## What this does not do
 
 **It does not settle a foreign payout into a foreign account.** Phase 133 still
@@ -125,11 +144,6 @@ refuses that, and rightly — a euro payout into a euro account should not be
 converted at all, and nothing yet says so. This phase handles the case a
 business actually hits first: a foreign charge settling into the account the
 books are kept in.
-
-**It has no test against the database yet.** The core is proved without one and
-the six affected suites pass, but the pattern every recent phase has followed —
-a second test that runs the same rule through Postgres — is not here. That is a
-stated gap, not an oversight, and it is the first thing the next stretch owes.
 
 **It leaves the dev database un-migratable.** Found in passing and unrelated to
 this phase: `accountrix` has the columns from migrations 0075–0077 but its
