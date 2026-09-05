@@ -92,54 +92,7 @@ export function describeSchedule(schedule: FeeSchedule): string {
   return `${percent}% + ${fixed} per payment`
 }
 
-export type PayoutItem = {
-  paymentId: string
-  grossCents: number
-  feeCents: number
-}
 
-export type PayoutCheck = {
-  /** What the payments in this batch came to before fees. */
-  grossCents: number
-  feeCents: number
-  /** What the batch should therefore deposit. */
-  expectedCents: number
-  /** What the processor says it deposited. */
-  reportedCents: number
-  /** Reported minus expected. Zero is the only good answer. */
-  differenceCents: number
-  balances: boolean
-  count: number
-}
-
-/**
- * Whether a payout equals the payments it claims to settle.
- *
- * Checked rather than assumed, because a payout is the one number in this
- * whole flow that arrives from outside and is posted to the bank. If it
- * disagrees with its own items, one of three things has happened — a refund
- * or chargeback netted off the batch, a fee schedule that is not what the
- * company thinks it is, or a payment recorded twice — and all three are worth
- * a person's attention before the entry posts, not after.
- */
-export function payoutReconciliation(input: {
-  reportedCents: number
-  items: PayoutItem[]
-}): PayoutCheck {
-  const grossCents = input.items.reduce((sum, item) => sum + item.grossCents, 0)
-  const feeCents = input.items.reduce((sum, item) => sum + item.feeCents, 0)
-  const expectedCents = grossCents - feeCents
-
-  return {
-    grossCents,
-    feeCents,
-    expectedCents,
-    reportedCents: input.reportedCents,
-    differenceCents: input.reportedCents - expectedCents,
-    balances: input.reportedCents === expectedCents,
-    count: input.items.length,
-  }
-}
 
 /**
  * How much of an invoice a payment may settle.

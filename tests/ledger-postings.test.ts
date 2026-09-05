@@ -103,7 +103,12 @@ describe('what the ledger will accept', () => {
     // 103 in 36 from Phase 129 until Phase 130 added `restatePosting`, which
     // reads the original entry's lines back and posts the difference — so it
     // contributes both reads and writes to the scan.
-    expect(postingSites().length).toBe(111)
+    //
+    // 112 since Phase 134 gave the card payout a third line. The bank takes the
+    // arrival rate, the clearing account is relieved at the capture rate, and
+    // the gap between them is a realised exchange gain — so where there were two
+    // named figures there are now three.
+    expect(postingSites().length).toBe(112)
     expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(37)
   })
 

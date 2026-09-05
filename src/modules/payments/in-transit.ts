@@ -107,6 +107,8 @@ export type PayoutSettlement = {
   expectedCents: number
   /** Reported less expected, both face, both the same currency. */
   differenceCents: number
+  /** How many payments this batch settled. Named on the entry's memo. */
+  count: number
 }
 
 export type PayoutOutcome =
@@ -178,6 +180,7 @@ export function payoutSettlement(input: {
       balances: differenceCents === 0,
       expectedCents,
       differenceCents,
+      count: input.items.length,
     },
   }
 }

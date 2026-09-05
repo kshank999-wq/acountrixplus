@@ -4,7 +4,6 @@ import {
   describeSchedule,
   feeFor,
   payableAmount,
-  payoutReconciliation,
 } from '@/modules/payments/settlement'
 
 /**
@@ -94,51 +93,6 @@ describe('describeSchedule', () => {
   })
 })
 
-describe('payoutReconciliation', () => {
-  const items = [
-    { paymentId: 'a', grossCents: 100_000, feeCents: 2_930 },
-    { paymentId: 'b', grossCents: 50_000, feeCents: 1_480 },
-    { paymentId: 'c', grossCents: 25_000, feeCents: 755 },
-  ]
-
-  it('agrees when the batch is what its payments come to', () => {
-    const check = payoutReconciliation({ reportedCents: 169_835, items })
-
-    expect(check.grossCents).toBe(175_000)
-    expect(check.feeCents).toBe(5_165)
-    expect(check.expectedCents).toBe(169_835)
-    expect(check.differenceCents).toBe(0)
-    expect(check.balances).toBe(true)
-    expect(check.count).toBe(3)
-  })
-
-  /**
-   * The payout is the one figure in this flow that arrives from outside and
-   * posts to a bank account. A disagreement means a refund netted off, a fee
-   * schedule that is not what the company believes, or a double-counted
-   * payment — all worth a person's attention before it posts.
-   */
-  it('reports the difference rather than absorbing it', () => {
-    // A $200 refund netted off the batch.
-    const check = payoutReconciliation({ reportedCents: 149_835, items })
-
-    expect(check.balances).toBe(false)
-    expect(check.differenceCents).toBe(-20_000)
-    expect(check.expectedCents).toBe(169_835)
-  })
-
-  it('signs the difference so somebody can tell which way it went', () => {
-    expect(payoutReconciliation({ reportedCents: 170_000, items }).differenceCents).toBe(165)
-    expect(payoutReconciliation({ reportedCents: 169_000, items }).differenceCents).toBe(-835)
-  })
-
-  it('copes with an empty batch', () => {
-    const check = payoutReconciliation({ reportedCents: 0, items: [] })
-    expect(check.balances).toBe(true)
-    expect(check.expectedCents).toBe(0)
-    expect(check.count).toBe(0)
-  })
-})
 
 describe('payableAmount', () => {
   it('offers the whole balance by default', () => {

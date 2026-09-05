@@ -19,9 +19,10 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { appBaseUrl } from '@/modules/notify/transactional'
 import { getPaymentSettings } from './settings'
 import { getPaymentProvider } from './registry'
-import { feeFor, payableAmount, payoutReconciliation } from './settlement'
-import { PARITY } from './in-transit'
-import { convert } from '@/modules/fx/rates'
+import { feeFor, payableAmount } from './settlement'
+import { PARITY, payoutSettlement } from './in-transit'
+import { convert, isForeign } from '@/modules/fx/rates'
+import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
 import {
   EMPTY_SWEEP,
   STALE_AFTER_DAYS,
@@ -602,6 +603,16 @@ export type PayoutImport = {
   notYetArrived: number
   /** Batches whose items do not add up. Worth a person's attention. */
   discrepancies: Array<{ providerPayoutId: string; differenceCents: number }>
+  /**
+   * Batches left unimported because the payments matched to them are in another
+   * currency (Phase 134).
+   *
+   * Its own list rather than a discrepancy, because it is a different kind of
+   * wrong and needs a different act. A discrepancy is a batch that posted and
+   * whose figures a person should look at; this is a batch that did **not**
+   * post, because an entry built on the wrong items is worse than no entry.
+   */
+  mismatched: Array<{ providerPayoutId: string; why: string }>
 }
 
 /**
@@ -661,6 +672,7 @@ export async function importPayouts(
     postedCents: 0,
     notYetArrived: 0,
     discrepancies: [],
+    mismatched: [],
   }
 
   for (const batch of reported) {
@@ -682,14 +694,44 @@ export async function importPayouts(
           )
       : []
 
-    const check = payoutReconciliation({
-      reportedCents: batch.amountCents,
+    // The rate on the day the money landed, and what the three accounts each
+    // take (Phase 134). Parity when the payout is already in the company's own
+    // money, so a domestic business goes through the same arithmetic and gets
+    // the figures it has always had.
+    const home = await functionalCurrency(ctx.companyId, db)
+    const arrivalRate = isForeign(batch.currency, home)
+      ? (await rateFor(ctx, batch.currency, batch.arrivalDate)).rateMillionths
+      : PARITY
+
+    const outcome = payoutSettlement({
+      faceCents: batch.amountCents,
+      currency: batch.currency,
+      arrivalRateMillionths: arrivalRate,
       items: matched.map((row) => ({
-        paymentId: row.providerPaymentId ?? row.id,
         grossCents: row.grossCents,
         feeCents: row.feeCents,
+        currency: row.currency,
+        // What the capture and its fee actually put through the clearing
+        // account. Read rather than recomputed, so the relief matches the
+        // charge to the cent; the face figure for a row written before this
+        // phase, which is what that row really posted.
+        carriedGrossCents: row.functionalGrossCents ?? row.grossCents,
+        carriedFeeCents: row.functionalFeeCents ?? row.feeCents,
       })),
     })
+
+    if (!outcome.ok) {
+      // Payments matched to the wrong payout. Left unimported and counted
+      // rather than posted, because an entry built on the wrong items is worse
+      // than no entry — Phase 117's rule.
+      result.mismatched.push({
+        providerPayoutId: batch.providerPayoutId,
+        why: outcome.why,
+      })
+      continue
+    }
+
+    const check = outcome.settlement
 
     // `onConflictDoNothing` on (company, provider payout id) is what makes a
     // re-run import nothing rather than post the deposit twice. The database
@@ -705,6 +747,9 @@ export async function importPayouts(
         currency: batch.currency,
         expectedCents: check.expectedCents,
         differenceCents: check.differenceCents,
+        // Phase 134: what the bank took for it, and the rate that says so.
+        rateMillionths: arrivalRate,
+        functionalAmountCents: check.bankCents,
       })
       .onConflictDoNothing({ target: [payouts.companyId, payouts.providerPayoutId] })
       .returning()
@@ -746,8 +791,31 @@ export async function importPayouts(
         sourceType: 'payout',
         sourceId: saved.id,
         lines: [
-          { chartAccountId: bankGl, debitCents: batch.amountCents },
-          { chartAccountId: inTransit.id, creditCents: batch.amountCents },
+          // What actually landed, at the arrival rate.
+          { chartAccountId: bankGl, debitCents: check.bankCents },
+          // What the clearing account was charged, at the capture rate. Not a
+          // fresh conversion: an account relieved at a rate other than the one
+          // it was charged at can never reach zero (Phase 134).
+          { chartAccountId: inTransit.id, creditCents: check.clearedCents },
+          // The days the processor held the money. A realised gain or loss,
+          // named where a gain belongs rather than left in a clearing account
+          // as a residue nobody can explain — Phase 35's rule, and Phase 67's
+          // for held money.
+          ...(check.gainCents !== 0
+            ? [
+                check.gainCents > 0
+                  ? {
+                      chartAccountId: await ensureFxAccount(ctx, db),
+                      creditCents: check.gainCents,
+                      memo: 'Exchange gain on card payout',
+                    }
+                  : {
+                      chartAccountId: await ensureFxAccount(ctx, db),
+                      debitCents: -check.gainCents,
+                      memo: 'Exchange loss on card payout',
+                    },
+              ]
+            : []),
         ],
       },
       db,
@@ -756,7 +824,7 @@ export async function importPayouts(
     await db.update(payouts).set({ journalEntryId: entry.id }).where(eq(payouts.id, saved.id))
 
     result.imported++
-    result.postedCents += batch.amountCents
+    result.postedCents += check.bankCents
 
     if (!check.balances) {
       result.discrepancies.push({

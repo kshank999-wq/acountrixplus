@@ -341,13 +341,16 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
   {
     file: 'src/modules/payments/service.ts',
     symbol: 'importPayouts',
-    basis: 'domestic',
+    basis: 'converted',
     because:
-      '`batch.amountCents` is what the processor says it paid into a bank account, in the currency ' +
-      '`payouts.currency` records. **Corrected in Phase 128**: the entry said nothing recorded ' +
-      'another currency, and both `payouts` and the `financial_accounts` row it lands in do. ' +
-      'Domestic only while those agree with the company’s own — a fact about the data, not a ' +
-      'guarantee from the schema.',
+      'A card payout reaching the bank. **Corrected twice.** Phase 128 fixed a claim that nothing ' +
+      'recorded another currency. It left standing a hedge — "domestic only while those agree with ' +
+      'the company’s own, a fact about the data, not a guarantee from the schema" — and Phase 133 ' +
+      'enforced only the `financial_accounts` half of it. Phase 134 closed the rest: the bank line ' +
+      'takes `check.bankCents`, the payout converted at the arrival rate; the clearing account is ' +
+      'credited `check.clearedCents`, exactly what the capture and fee entries put into it at the ' +
+      'capture rate; and the gap between the two is posted as a realised exchange gain rather than ' +
+      'left in a clearing account that could never reach zero.',
   },
   {
     file: 'src/modules/ledger/posting.ts',

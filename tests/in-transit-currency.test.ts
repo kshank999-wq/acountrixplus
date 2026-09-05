@@ -177,6 +177,74 @@ describe('what a payout does to the three accounts', () => {
   })
 })
 
+describe('the batch arithmetic payoutReconciliation used to do', () => {
+  /**
+   * Ported from `settlement.test.ts` when `payoutReconciliation` was retired
+   * (Phase 134). It answered the same question as `payoutSettlement` in one
+   * currency, and two answers to one question is the defect. The two
+   * assertions it made about `grossCents` and `feeCents` are gone with it —
+   * nothing read those, and `payouts` stores `expected_cents`, not the halves.
+   */
+  const items = [
+    { grossCents: 100_000, feeCents: 2_930 },
+    { grossCents: 50_000, feeCents: 1_480 },
+    { grossCents: 25_000, feeCents: 755 },
+  ].map((row) =>
+    carriedFor({ ...row, currency: 'USD', captureRateMillionths: PARITY }),
+  )
+
+  function settle(reportedCents: number) {
+    const outcome = payoutSettlement({
+      faceCents: reportedCents,
+      currency: 'USD',
+      items,
+      arrivalRateMillionths: PARITY,
+    })
+    if (!outcome.ok) throw new Error(outcome.why)
+    return outcome.settlement
+  }
+
+  it('agrees when the batch is what its payments come to', () => {
+    const check = settle(169_835)
+
+    expect(check.expectedCents).toBe(169_835)
+    expect(check.differenceCents).toBe(0)
+    expect(check.balances).toBe(true)
+    expect(check.count).toBe(3)
+  })
+
+  it('reports the difference rather than absorbing it', () => {
+    // A $200 refund netted off the batch. The payout is the one figure in this
+    // flow that arrives from outside and posts to a bank account, so a
+    // disagreement is worth a person's attention before it posts.
+    const check = settle(149_835)
+
+    expect(check.balances).toBe(false)
+    expect(check.differenceCents).toBe(-20_000)
+    expect(check.expectedCents).toBe(169_835)
+  })
+
+  it('signs the difference so somebody can tell which way it went', () => {
+    expect(settle(170_000).differenceCents).toBe(165)
+    expect(settle(169_000).differenceCents).toBe(-835)
+  })
+
+  it('copes with an empty batch', () => {
+    const outcome = payoutSettlement({
+      faceCents: 0,
+      currency: 'USD',
+      items: [],
+      arrivalRateMillionths: PARITY,
+    })
+
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) return
+    expect(outcome.settlement.balances).toBe(true)
+    expect(outcome.settlement.expectedCents).toBe(0)
+    expect(outcome.settlement.count).toBe(0)
+  })
+})
+
 describe('a payout that cannot be settled', () => {
   it('refuses a batch holding two currencies, and says it is the matching', () => {
     // Not a rate problem. A processor settles one currency per batch, so this
