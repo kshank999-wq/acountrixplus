@@ -70,14 +70,22 @@ describe('the registry', () => {
     // Eight since Phase 129 gave `bank_transactions` the pair it was the last
     // money reaching the ledger without — which is why both the posting and
     // the tie-out were deriving that rate rather than reading it.
+    //
+    // Ten since Phase 134. `bank_transactions` was the last money reaching the
+    // ledger without a pair; `checkouts` and `payouts` are money reaching one
+    // *account* without one, and the difference is why that claim was true and
+    // this defect survived it. `1250 Payments in Transit` was charged a
+    // converted figure and relieved of two face ones.
     expect(tables).toEqual([
       'bank_transactions',
       'bills',
+      'checkouts',
       'credit_notes',
       'deposits',
       'invoice_write_offs',
       'invoices',
       'payments',
+      'payouts',
       'retainers',
     ])
   })

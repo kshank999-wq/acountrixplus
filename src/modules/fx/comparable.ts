@@ -166,6 +166,33 @@ export const FACE_COLUMNS: readonly FaceColumn[] = [
       'has no currency of its own and inherits the account’s. The twin is what the books took for ' +
       'it, written down at the moment of posting since Phase 129 rather than derived twice.',
   },
+  {
+    table: 'checkouts',
+    column: 'gross_cents',
+    functionalColumn: 'functional_gross_cents',
+    because:
+      'What the customer was asked to pay, in the invoice’s currency — `checkouts.currency` is ' +
+      '`invoice.currency`, so a euro invoice paid by card makes a euro checkout. The twin is what ' +
+      'the capture debited to `1250 Payments in Transit` (Phase 134).',
+  },
+  {
+    table: 'checkouts',
+    column: 'fee_cents',
+    functionalColumn: 'functional_fee_cents',
+    because:
+      'What the processor kept, in the same currency it charged. Its own twin rather than a share ' +
+      'of the gross, because the fee is posted as a separate entry and the clearing account has to ' +
+      'be relieved of what each entry actually put through it.',
+  },
+  {
+    table: 'payouts',
+    column: 'amount_cents',
+    functionalColumn: 'functional_amount_cents',
+    because:
+      'What the processor says it deposited, in its own currency — the figure the bank statement ' +
+      'will show. The twin is what the bank account took for it at the arrival rate, which is a ' +
+      'different rate from the capture and the gap between them is a realised gain.',
+  },
 ]
 
 /** The face column a table/column pair names, or null if it is not one. */

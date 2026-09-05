@@ -118,6 +118,23 @@ export const checkouts = pgTable(
     currency: text('currency').notNull().default('USD'),
 
     /**
+     * What the two capture entries actually put through the ledger (Phase 134).
+     *
+     * `1250 Payments in Transit` is charged the gross and relieved of the fee at
+     * capture, then relieved of the rest when the payout lands days later at a
+     * different rate. It can only reach zero if it gives up exactly what it was
+     * charged, so what was charged is written down rather than recomputed from
+     * a rate table that has grown since — which is the defect Phase 129 found in
+     * the bank feed, in a different module.
+     *
+     * Null on rows written before this phase. Those posted their face figure
+     * whatever currency it was in, and the backfill records that rather than
+     * repairing it, so a check can see it.
+     */
+    functionalGrossCents: bigint('functional_gross_cents', { mode: 'number' }),
+    functionalFeeCents: bigint('functional_fee_cents', { mode: 'number' }),
+
+    /**
      * The accounting payment this became.
      *
      * Null while pending, and null for ever on a failure. Unique where set:
@@ -194,6 +211,18 @@ export const payouts = pgTable(
      */
     expectedCents: bigint('expected_cents', { mode: 'number' }).notNull().default(0),
     differenceCents: bigint('difference_cents', { mode: 'number' }).notNull().default(0),
+
+    /**
+     * What the bank actually received, and the rate on the day (Phase 134).
+     *
+     * Phase 129's shape and Phase 129's reason: the entry and the nightly check
+     * read one stored fact rather than asking a growing rate table the same
+     * question twice and getting two answers. `rate_millionths` is exactly
+     * 1,000,000 for a payout already in the company's own money, which is what
+     * every row backfilled by this phase's migration carries.
+     */
+    rateMillionths: bigint('rate_millionths', { mode: 'number' }),
+    functionalAmountCents: bigint('functional_amount_cents', { mode: 'number' }),
 
     journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
       onDelete: 'set null',

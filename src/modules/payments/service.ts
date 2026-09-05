@@ -759,11 +759,33 @@ export async function importPayouts(
 
 // --- Reading ---------------------------------------------------------------
 
-/** What the processor is still holding, according to our own records. */
+/**
+ * What the processor is still holding, in the company's own money.
+ *
+ * The **functional** twins, since Phase 134. This summed `gross_cents -
+ * fee_cents` across every unsettled checkout regardless of currency, and was
+ * compared against `1250 Payments in Transit`, whose balance the ledger keeps
+ * in the company's money — so a euro checkout made the two sides differ by the
+ * exchange difference and the check reported it as a discrepancy in a currency
+ * it could not state.
+ *
+ * Phase 122's rule, and the sum that its own scan had been excusing: the
+ * currency-aware window read forty lines and found `currency:` in
+ * `recentCheckouts` below, which is a different function.
+ *
+ * `sum` over a NULL skips the row, so the figures are coalesced per row rather
+ * than per total — a checkout written after this phase with no functional twin
+ * would otherwise vanish from the total silently, which is the shape of defect
+ * this whole sequence has been closing. Falling back to the face figure keeps
+ * such a row *in* the comparison, where it shows up as the difference it is.
+ */
 export async function heldByProcessor(companyId: string): Promise<number> {
   const [row] = await db
     .select({
-      cents: sql<string>`coalesce(sum(${checkouts.grossCents} - ${checkouts.feeCents}), 0)`,
+      cents: sql<string>`coalesce(sum(
+        coalesce(${checkouts.functionalGrossCents}, ${checkouts.grossCents})
+        - coalesce(${checkouts.functionalFeeCents}, ${checkouts.feeCents})
+      ), 0)`,
     })
     .from(checkouts)
     .leftJoin(payoutItems, eq(payoutItems.checkoutId, checkouts.id))

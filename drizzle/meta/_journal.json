@@ -547,6 +547,13 @@
       "when": 1788912808000,
       "tag": "0077_phase129_posted_rate",
       "breakpoints": true
+    },
+    {
+      "idx": 78,
+      "version": "7",
+      "when": 1788999208000,
+      "tag": "0078_phase134_in_transit_currency",
+      "breakpoints": true
     }
   ]
 }

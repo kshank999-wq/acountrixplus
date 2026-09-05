@@ -73,11 +73,34 @@ function faceSums(): Site[] {
   return sites
 }
 
-/** Does the query around this sum name a currency at all? */
+/**
+ * Does the query around this sum name a currency at all?
+ *
+ * Bounded by the enclosing function rather than by a count of lines (Phase
+ * 134). The window used to be `line - 15` to `line + 26`, and it leaked:
+ * `heldByProcessor` sums `checkouts.gross_cents - fee_cents` with no currency
+ * anywhere in it, and was excused because `recentCheckouts` — a different
+ * function, two boundaries below — selects `currency: checkouts.currency` on
+ * line 790, twenty-four lines past the sum.
+ *
+ * That is the failure Phase 128 found in the posting scan, Phase 131 in the
+ * screen scan and Phase 133 in the bank-posting scan, in its fourth form: a
+ * scan whose reach is wrong. The first three *missed* sites; this one
+ * **excused** one, which is worse, because a miss leaves a site undeclared and
+ * an excuse makes the scan report all clear.
+ */
 function currencyAware(file: string, line: number): boolean {
-  const lines = readFileSync(file, 'utf8').split('\n')
-  const window = lines.slice(Math.max(0, line - 15), line + 26).join('\n')
-  return /\.currency|currency:|groupBy\([^)]*currency|eq\(\w+\.currency/.test(window)
+  const src = readFileSync(file, 'utf8')
+  const lines = src.split('\n')
+
+  // The offset the sum sits at, then the span of the function containing it.
+  const offset = lines.slice(0, line).join('\n').length
+  const starts = [...src.matchAll(/^(?:export )?(?:async )?function \w+/gm)].map((m) => m.index!)
+  const from = starts.filter((start) => start <= offset).pop() ?? 0
+  const to = starts.find((start) => start > offset) ?? src.length
+
+  const body = src.slice(from, to)
+  return /\.currency|currency:|groupBy\([^)]*currency|eq\(\w+\.currency/.test(body)
 }
 
 describe('what counts as a face amount', () => {

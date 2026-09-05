@@ -217,6 +217,46 @@ export const PAIRED_COLUMNS: readonly PairedColumns[] = [
       'resolved to — and since posting is idempotent by voiding and re-posting, re-categorising a ' +
       '€500 charge silently turned $550 of cost into $575 with no correction record.',
   },
+  {
+    table: 'checkouts',
+    faceColumn: 'gross_cents',
+    functionalColumn: 'functional_gross_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'What the customer was charged against what the capture actually debited to `1250 Payments ' +
+      'in Transit` (Phase 134). Fixed: a checkout is captured once and reversed whole rather than ' +
+      'walked down. The pair exists because the clearing account has to be relieved of exactly ' +
+      'what it was charged — a payout arrives days later at a different rate, and an account ' +
+      'relieved at a rate other than the one it was charged at can never reach zero, which is the ' +
+      'only thing a clearing account is for.',
+  },
+  {
+    table: 'checkouts',
+    faceColumn: 'fee_cents',
+    functionalColumn: 'functional_fee_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'What the processor kept against what `postFee` actually took out of the same account. Its ' +
+      'own pair rather than being derived from the gross, because the two are posted as separate ' +
+      'entries and the relief has to match each of them. `LEDGER_POSTINGS` called this site ' +
+      '`domestic` on the argument that it was "a fact about the data rather than about the ' +
+      'schema" — this column is that hedge turned into a fact about the schema.',
+  },
+  {
+    table: 'payouts',
+    faceColumn: 'amount_cents',
+    functionalColumn: 'functional_amount_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'What the processor says it sent against what the bank account actually took for it. Fixed: ' +
+      'a payout lands once. Unlike the two above it is converted at the *arrival* rate rather ' +
+      'than the capture rate, and the gap between the two is a realised foreign exchange gain — ' +
+      'Phase 67’s rule for retainers, applied to the money a processor holds instead of the money ' +
+      'a client does.',
+  },
 ]
 
 export class PairedColumnsError extends Error {
