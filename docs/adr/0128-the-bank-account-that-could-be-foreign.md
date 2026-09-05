@@ -156,6 +156,18 @@ after the fact, and then the tie-out disagrees for a reason it cannot explain.
 That is the next phase's shape, and it is the only thing the repaired check still
 cannot catch.
 
+> **Corrected in Phase 129, twice.** *"Unless somebody edits a rate"* is wrong —
+> nobody has to edit anything. `rateFor` walks backwards to the most recent rate
+> on or before a date, so **adding** a rate for a day that had none changes what
+> an older question resolves to, and entering rates as they are published is the
+> ordinary way the table is kept.
+>
+> And *"the only thing the repaired check still cannot catch"* understates it as
+> a reporting problem. `syncLedgerForTransaction` is idempotent by voiding and
+> re-posting, so the re-derivation **rewrites the books**: re-categorising a
+> €500 charge turned $550 of cost into $575 with no correction record. See ADR
+> 0129.
+
 **It does not make the feed multi-currency.** A `bank_transactions` row still has
 no currency of its own and still takes the account's, which is right: money in a
 bank is denominated by the bank.

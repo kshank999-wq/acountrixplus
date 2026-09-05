@@ -5962,6 +5962,62 @@ compares the set against `information_schema.columns`. A fourteenth table cannot
 be forgotten; it can only be declared or fail. Same shape as `paired-money` since
 Phase 116, for the same reason.
 
+### The rate that was not written down (Phase 129)
+
+ADR 0128 nominated its own last gap — `bank_transactions` posts at a rate it
+does not record, so `buildLines` derives one to post and `cashTieOut` derives one
+to check, independently. It is the only money reaching the ledger with no rate
+beside it; every other moving amount has carried its pair since Phase 116.
+
+Measuring how the two answers come apart showed the nomination had **understated
+its own case twice**, and ADR 0128 carries the correction.
+
+It claimed the answers diverge only if somebody edits a rate. Nobody has to edit
+anything. `rateFor` walks *backwards* to the most recent rate on or before a
+date — deliberately, so a rate published later never restates the past — which
+means **adding** a rate for a day that had none changes what an *older* question
+resolves to. Entering rates as they are published is the ordinary way the table
+is kept:
+
+```
+rate on 2026-09-10 before: 1100000     (resolved from a rate dated 2026-03-01)
+after posting    feed -50000  books -55000  ledger -55000  diff     0
+... somebody enters the rate for 2026-09-01, which nothing had ...
+rate on 2026-09-10 after:  1150000
+after new rate   feed -50000  books -57500  ledger -55000  diff -2500
+```
+
+And it framed this as a reporting problem. It is not.
+`syncLedgerForTransaction` is idempotent by **voiding and re-posting**, so the
+re-derivation rewrites the books:
+
+```
+posted at 1.10:              55000
+after an unrelated recateg:  57500
+CHANGED by 2500 with no correction record
+```
+
+Moving a transaction to a different expense account silently restates what it
+was worth. Phase 70 settled that a change to the books says what it is and why;
+this said nothing, because nobody decided it.
+
+**The rule: a rate is resolved once, on the day it is first needed, and is then
+a fact about that posting.** `rateFor` answers what is on file for a day — a
+question about the table now. A posting needs what this money went into the
+books at — a question about the past, with one right answer once answered. A
+rate entered later is still right for anything not yet posted; only a posting
+already made is fixed.
+
+The backfill records **what the ledger contains**, read off the journal entry
+each transaction produced rather than off the rate table — Phase 127's rule, and
+the only source that does not overwrite the evidence of Phase 128's defect. That
+evidence is the point: with no rate on the row, a foreign transaction posted at
+its face value was indistinguishable from a correct one. `banking.posted_at_face`
+reports them now, which is the honest half of a repair two ADRs had to leave
+open — a person cannot correct what nothing can show them. It is a `position`
+rather than a `fault`, because a currency really can sit at parity and then a
+correct row looks exactly like a damaged one.
+
 
 ## Deploying
 
@@ -6112,6 +6168,8 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself |
 | `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 103 in 36 functions. Since Phase 128 that narrowing comes from `carrierProperties()`, derived from the schema; Phase 127's own hand-typed list of nine tables reached only 81 sites in 28 functions, and the four it missed hid the bank feed. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
 | `tests/functional-postings.test.ts` | **The two writes that posted a face amount** (Phase 127), proved against the database: a €2,500 write-off recovered in full leaves the bad-debt account at zero rather than $250, a part recovery comes off at the rate the write-off was carried at, `badDebtSummary` agrees with the account balance beside it, and banking a €500 receipt clears exactly the $550 it put into Undeposited Funds. Plus the refusal this phase's own scanner turned up: a line typed against an account cannot be added to foreign receipts |
+| `tests/posted-rate.test.ts` | **A rate is answered once** (Phase 129): `rateForPosting` takes today's answer the first time and keeps what it posted at every time after, stable however often it is re-posted, treating a zero or negative stored rate as absent rather than honouring it and posting a real bank movement as nothing. `rateFromPosted` divides what the ledger took by what the statement said — how the backfill reads history rather than asking the rate table what it would say now — cancelling the sign and reading a face-value posting as parity, which is how Phase 128's damage shows up. `bookedAtFace` catches euros posted as dollars without ever accusing a domestic account, where the two are equal by definition |
+| `tests/posted-rate-kept.test.ts` | **The same rule against the database** (Phase 129): a posting records the rate it used and what the books took, parity on a domestic account rather than a blank, and nothing at all for a transaction still in the inbox. Then the defect in one test — a rate entered for a day that had none, and a transaction re-categorised afterwards keeps its $550 instead of silently becoming $575; stable over three re-posts; the nightly check still agreeing because both sides read one stored fact; and a transaction posting for the *first* time after that rate lands correctly using it. Both legs of a transfer carry the rate, signed the way each statement reads it. And `postedAtFace` finds a foreign transaction whose books value equals its statement value, leaves a converted one alone, and never accuses a domestic account |
 | `tests/currency-carriers.test.ts` | **The registry is asked, and the database answers** (Phase 128): `CURRENCY_CARRIERS` names every table with a `currency` column, and the test compares that set against `information_schema.columns` — excluding `companies`, the functional currency the others are measured against. Phase 127's hand-typed list named nine of thirteen, which took twenty-two posting sites out of reach of its own scan. Each entry argues whose currency it is; the drizzle property is derived from the table name and checked rather than assumed, since the scan matches on one and this test on the other; an undeclared table throws. Plus `bankTransactionFunctional` — a no-op at parity, €500 at 1.10 giving 55000, `null` rather than a guessed rate, and rounding to the cent |
 | `tests/foreign-bank-account.test.ts` | **A bank account can be foreign and the ledger cannot** (Phase 128), against the database: a €500 charge on a euro account posts $550 of expense where it posted $500 before, a domestic account is unchanged to the cent (which is why nobody noticed), a day with no rate refuses with `RateError` and posts nothing, and a split converts at the same rate as the transaction it belongs to so the entry cannot be a cent out against itself. A transfer between accounts in different currencies is refused — the bank takes one amount out and puts a different one in — while two euro accounts sweep at one rate. And the check that had been comparing a number with itself: feed −€500, books −$550, ledger −$550, difference zero; `null` and a count of transactions rather than agreement when a day has no rate |
 | `tests/schedule-currency.test.ts` | **A recurring schedule bills in a currency** (Phase 126): a schedule takes the company's own unless told otherwise, a EUR one raises an invoice carrying €4,000 face and $4,400 functional, and the occurrence records what its period was billed in — the column ADR 0125 called `unrecorded`. `occurrenceCurrency` prefers the raised invoice over the schedule's intention over the company default. And the forecast, which added four figures across every schedule before a schedule could be foreign, reports one set of totals per currency: two currencies are two answers, never a third number |
