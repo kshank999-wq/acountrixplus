@@ -186,6 +186,19 @@ export const ALLOWED_BARE_REFUSALS: readonly {
       'information_schema fails first.',
   },
   {
+    file: 'src/modules/fx/inherited.ts',
+    message:
+      'No currency inheritance is declared for "X". If it holds money and cannot exist without a ' +
+      'row that carries a currency, declare it in src/modules/fx/inherited.ts and say which of ' +
+      'its columns are that currency and which are the books’.',
+    because:
+      'The tenth, and it cost exactly what the ninth said the next one would. The nomination is ' +
+      'no longer a prediction: `RegistryError` would replace ten entries that differ only in ' +
+      'which registry they name, and this phase paid the toll rather than building it, because a ' +
+      'phase that invents an abstraction while proving it is needed has measured nothing. The ' +
+      'audience is a developer: the schema comparison beside it fails first and louder.',
+  },
+  {
     file: 'src/modules/ai/prompts.ts',
     message: 'No prompt registered for "X"',
     because:

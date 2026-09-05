@@ -112,6 +112,20 @@ matching, which is honest about what it can see: a sign is not a denomination,
 and hiding a figure behind a call the checker cannot read is how a check becomes
 decorative.
 
+## The tenth allowlist entry, and what it costs
+
+`inheritedFor` throws on an undeclared table — the device Phase 101 set and every
+registry since has used. Phase 119's tripwire caught it in the confirming suite,
+because the sentence it throws is written for a person and `Error` is not
+`Refusal`. So `REFUSAL_AUDIENCE` gains a tenth entry.
+
+ADR 0127 raised a `RegistryError` subclass as a nomination at eight. ADR 0128
+made it nine and wrote *"each new registry costs a tenth."* This phase is that
+tenth, and it paid the toll on purpose: inventing the abstraction inside the
+phase that proves it is needed would be a change nobody measured, which is the
+rule this project has kept since Phase 104. It is now the best-evidenced
+nomination on the board — ten entries differing only in which registry they name.
+
 ## What this does not do
 
 **It does not give a reconciliation a currency column.** It does not need one:
