@@ -6189,6 +6189,48 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The account where three currencies met (Phase 134)
+
+ADR 0133 nominated `importPayouts` as the shortest road out of its ten
+refusals. Measuring it showed the nomination understated the defect, and the
+correction is recorded in ADR 0133 rather than claimed here: `batch.currency`
+was written to `payouts.currency` and **never read again**, so a euro payout
+into a *domestic* account posted €X as $X — which Phase 133's guard cannot
+catch, because it asks about the account and never about the money.
+
+Phase 44 built `1250 Payments in Transit` on three lines. Measured, they were
+not in the same money. `recordPayment` debits a **converted** figure; `postFee`
+credited the face fee and `importPayouts` the face payout. A €100 charge with a
+€5 fee at 1.10 leaves **$10.00** in the account that is not a balance, not a fee
+and not a gain, and no report names it.
+
+Both offending sites were declared `domestic` in `LEDGER_POSTINGS`, and both
+arguments end the same way — "a fact about the data rather than about the
+schema". Both were corrected in Phase 128, and both corrections fixed the
+*description* of where the currency lives while leaving the *posting*
+unconverted. This is Phase 110 and 125's class at its most legible: a
+declaration arguing from a fact it **admits is not guaranteed**. The new columns
+are those hedges turned into facts about the schema.
+
+The bank now takes the arrival rate, the clearing account is relieved of exactly
+what it was charged at the capture rate — an account relieved at another rate
+can never reach zero, which is the only thing a clearing account is for — and
+the gap is a realised exchange gain, Phase 67's rule for retainers applied to
+money a processor holds. `clearedCents` sums what the earlier entries actually
+posted rather than recomputing: three €3.33 charges convert to 1098 where their
+€9.99 total converts to 1099, and recomputing would leave a correct batch a cent
+adrift, indistinguishable from a real discrepancy.
+
+Underneath it, a **fourth** instance of the scan-reach failure. Phase 122's
+`currencyAware` read a fixed forty-line window and excused `heldByProcessor` —
+which sums `gross_cents - fee_cents` with no currency in it — because
+`recentCheckouts`, a different function twenty-four lines below, selects
+`currency:`. Phases 128, 131 and 133 each found a scan that *missed* sites; this
+one **excused** one, which is worse, because a miss leaves an absence and an
+excuse reports all clear. Bounded by the enclosing function it catches that site
+and only that site. `payoutReconciliation` was then retired as Phase 49's class,
+its cases ported onto `payoutSettlement`.
+
 ### The currency of the account money lands in (Phase 133)
 
 ADR 0131 named a defect and ADR 0132 named it again without building it —
@@ -6394,6 +6436,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
+| `tests/in-transit-currency.test.ts` | **The account where three currencies met** (Phase 134): the arithmetic that says why `1250 Payments in Transit` could not reach zero on a foreign checkout. The defect stated as a number — charged $110.00 converted and relieved of $5.00 + $95.00 face, keeping $10.00 that is not a balance, a fee or a gain — and zero once all three speak the same money. The bank takes the arrival rate and the clearing account the capture rate, with the gap a realised gain: captured at 1.10 and settled at 1.12, €95 lands as 10640 against 10450 relieved, a gain of 190. **The parts summed rather than the sum converted** — three €3.33 charges give 1098 where their total converts to 1099, and recomputing would leave a correct batch a cent adrift, which reads exactly like a real discrepancy. A domestic payout at exactly the figures it always had, which is why a hundred and thirty phases of card payments are untouched. Refuses a batch holding two currencies as a **matching** error rather than a missing rate, because a processor settles one currency per batch and sending somebody to the rate table would fix the wrong thing; refuses a rate of nothing, inherited from `convert` rather than re-checked. Plus the four cases ported from `payoutReconciliation` when it was retired as Phase 49's class |
 | `tests/bank-side.test.ts` | **The currency of the account money lands in** (Phase 133): `mayPostToBank` lets a domestic account through untouched — the reason this went unnoticed — and refuses a foreign one in a sentence naming the account, both currencies, the act and what to do instead. Then it reads the source for every place money reaches a bank account's ledger account, in both spellings, because the ledger resolves it through a helper and matching only the direct form missed four functions including the bank feed. Nineteen postings in fourteen functions, measured rather than bounded — after eleven and thirteen were written from a grep and from the registry — each with a declared handling, no declaration pointing at code that has moved, and exactly four that convert |
 | `tests/bank-guard.test.ts` | **The same rule against the database** (Phase 133): the one function all ten refusing paths call. It finds the ledger account, asks the company what money it keeps its books in, hands it over for a domestic account and refuses a euro one — as a `Refusal`, so Phase 119's mechanism carries the sentence to the person who chose the account rather than replacing it with "Something went wrong." The act is named in the refusal, so two paths sharing the guard do not produce the same sentence, and the missing-row refusal survived the lookup and the question being merged into one call |
 | `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 103 in 36 functions. Since Phase 128 that narrowing comes from `carrierProperties()`, derived from the schema; Phase 127's own hand-typed list of nine tables reached only 81 sites in 28 functions, and the four it missed hid the bank feed. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
