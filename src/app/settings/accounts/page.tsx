@@ -1,9 +1,10 @@
 import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
-import { cashTieOut, listFinancialAccounts } from '@/modules/banking/accounts'
+import { cashTieOut, listFinancialAccounts, postedAtFace } from '@/modules/banking/accounts'
 import { SETTINGS_NAV } from '../nav'
 import { AccountsBoard } from './board'
+import { Restatements } from './restatements'
 
 export const dynamic = 'force-dynamic'
 
@@ -30,9 +31,12 @@ export default async function AccountsPage() {
     )
   }
 
-  const [accounts, tieOut] = await Promise.all([
+  const [accounts, tieOut, atFace] = await Promise.all([
     listFinancialAccounts(actor),
     can(actor, 'accounting:view') ? cashTieOut(actor) : Promise.resolve([]),
+    // Only somebody who may post a journal entry can restate one, so nobody
+    // else is shown a list they cannot act on (Phase 130).
+    can(actor, 'accounting:journal') ? postedAtFace(actor) : Promise.resolve([]),
   ])
 
   const byAccount = new Map(tieOut.map((row) => [row.financialAccountId, row]))
@@ -50,6 +54,9 @@ export default async function AccountsPage() {
           tieOut: byAccount.get(account.id) ?? null,
         }))}
         canManage={can(actor, 'accounting:journal')}
+      />
+      <Restatements
+        rows={atFace.map(({ financialAccountId: _account, ...row }) => row)}
       />
     </AppShell>
   )

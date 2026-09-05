@@ -100,8 +100,11 @@ describe('what the ledger will accept', () => {
     // a constant of 13). `toBeGreaterThan(50)` was true of the narrowing that
     // missed four tables and would have stayed true if it missed eight more.
     // Change the code and this number moves; change it deliberately and say so.
-    expect(postingSites().length).toBe(103)
-    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(36)
+    // 103 in 36 from Phase 129 until Phase 130 added `restatePosting`, which
+    // reads the original entry's lines back and posts the difference — so it
+    // contributes both reads and writes to the scan.
+    expect(postingSites().length).toBe(111)
+    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(37)
   })
 
   it('has a declared basis for every one of them', () => {

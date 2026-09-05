@@ -57,6 +57,7 @@ export type CorrectionKind =
   | 'deposit.void'
   | 'approval.withdraw'
   | 'party.merge'
+  | 'posting.restate'
 
 /**
  * What a correction actually disturbs, which is what decides the rule above.
@@ -86,6 +87,24 @@ export type Reach =
    * This one cannot, and afterwards there is only one record to read.
    */
   | 'cannot_be_undone'
+  /**
+   * Only our own records move, and they move a figure somebody may already
+   * have been told (Phase 130).
+   *
+   * The fifth, added for the same reason as the fourth: restating a posting is
+   * none of the others and the rule above needed a clause rather than an
+   * exception. No cash moved — the bank statement is unchanged and always was
+   * right — and no letter went out, so `internal` was the literal answer. But
+   * `internal` is the one reach that asks for no reason, and this moves a
+   * number that may already be on a trial balance handed to a bank, a return
+   * already filed, or management accounts already circulated. Nothing left the
+   * business at the time; something may leave it afterwards carrying a
+   * different figure.
+   *
+   * Unlike a merge it *can* be taken back — restate it again — so it is not
+   * `cannot_be_undone` either.
+   */
+  | 'restates_the_past'
 
 export type Correction = {
   kind: CorrectionKind
@@ -141,6 +160,18 @@ const CORRECTIONS: Record<CorrectionKind, Correction> = {
     title: 'Withdraw this approval',
     done: 'Approval withdrawn',
     reasonPrompt: null,
+  },
+  'posting.restate': {
+    kind: 'posting.restate',
+    reach: 'restates_the_past',
+    // Nothing else here is "Restate", and the word is the accountant's own for
+    // putting a past figure right without pretending the first one never was.
+    verb: 'Restate the posting',
+    title: 'Restate what this went into the books at',
+    done: 'Posting restated',
+    reasonPrompt:
+      'Why is this figure wrong? The original entry stays where it is and the difference is ' +
+      'posted beside it.',
   },
   'party.merge': {
     kind: 'party.merge',

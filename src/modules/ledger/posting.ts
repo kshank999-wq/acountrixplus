@@ -40,6 +40,15 @@ import { Refusal } from '@/modules/errors'
 const POSTABLE_STATES = new Set(['categorized', 'reconciled'])
 
 /**
+ * Every `source_type` the ledger derives from a bank transaction.
+ *
+ * Named here rather than spelled at each call site so that adding a third kind
+ * has to answer whether unposting should take it with the others — the
+ * question Phase 130 had to ask about restatements and nearly missed.
+ */
+export const DERIVED_SOURCE_TYPES = ['bank_transaction', 'bank_transaction_restatement'] as const
+
+/**
  * The entry a transaction produces, and what it went into the books at.
  *
  * The rate travels back with the lines so the caller can write it down (Phase
@@ -82,10 +91,7 @@ export async function syncLedgerForTransaction(
 
   if (!transaction) throw missing('transaction')
 
-  const existing = await entryForSource(ctx, 'bank_transaction', transactionId, exec)
-  if (existing) {
-    await voidJournalEntry(ctx, existing.id, exec)
-  }
+  await voidDerivedEntries(ctx, transactionId, exec)
 
   const built = await buildLines(ctx, transaction, exec)
   if (!built) return { posted: false }
@@ -372,8 +378,37 @@ export async function unpostTransaction(
   transactionId: string,
   exec: Executor,
 ): Promise<void> {
-  const existing = await entryForSource(ctx, 'bank_transaction', transactionId, exec)
-  if (existing) await voidJournalEntry(ctx, existing.id, exec)
+  await voidDerivedEntries(ctx, transactionId, exec)
+}
+
+/**
+ * Everything the ledger derived from this transaction, voided (Phase 130).
+ *
+ * The posting **and any restatement of it**. A restatement is a second entry
+ * carrying the difference between what the books took and what a person said
+ * they should have taken — and the transaction's stored rate carries that
+ * decision too, since Phase 129 keeps it.
+ *
+ * So a rebuild already posts the corrected figure. Leaving the correcting
+ * entry beside it would count the difference twice, which is why they go
+ * together: the record of *why* survives on the audit trail and on the voided
+ * entry itself, and what is not allowed is for the two to stand together and
+ * overstate the account.
+ */
+async function voidDerivedEntries(
+  ctx: ActorContext,
+  transactionId: string,
+  exec: Executor,
+): Promise<void> {
+  for (const sourceType of DERIVED_SOURCE_TYPES) {
+    // One at a time: `entryForSource` returns a single posted entry, and a
+    // restatement of a restatement would be a second row of the same kind.
+    let entry = await entryForSource(ctx, sourceType, transactionId, exec)
+    while (entry) {
+      await voidJournalEntry(ctx, entry.id, exec)
+      entry = await entryForSource(ctx, sourceType, transactionId, exec)
+    }
+  }
 }
 
 /** The GL account a bank or credit-card account posts through. */

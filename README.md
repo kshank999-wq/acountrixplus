@@ -6033,6 +6033,54 @@ function Phase 122 repaired for invoices and bills, whose cash line survived
 because `bank_transactions` had no twin to switch to until now.
 
 
+### The repair three ADRs declined to build (Phase 130)
+
+ADR 0129 nominated nothing, so the phase was measured. Three consecutive ADRs
+end with the same sentence — 0127 *"it does not repair the books of anybody who
+already hit this"*, 0128 *"it does not repair books already affected"*, 0129
+*"it does not repair the rows the backfill exposes"*. Each was right that a
+repair is a dated correction rather than something a migration does behind
+anybody's back; none built one. Phase 31 taught and Phase 33 wrote down what a
+follow-up repeated across consecutive ADRs usually means, and nothing blocks it
+any more: Phase 129 put the rate on the row, which is what a correction needs in
+order to know what it is correcting.
+
+A restatement is a **second entry**, dated the day the decision is made,
+carrying the difference and a reason. The original stays exactly as it was —
+repairing by re-posting would reintroduce Phase 129's defect wearing the clothes
+of a fix, and keeping the original is what lets a closed period refuse the
+correction through Phase 92's existing machinery. The difference is allocated
+across the original entry's category lines with the bank line taking their sum,
+which is Phase 35's rule for converting a document.
+
+**A new `Reach` had to be argued rather than assumed.** Restating did not move
+money and did not reach anybody, so `internal` was the literal answer — but
+`internal` is the one reach that asks for no reason, and this moves a figure
+somebody may already have been told: a trial balance handed to a bank, a return
+already filed. It can also be taken back, so it is not `cannot_be_undone`
+either. Hence `restates_the_past`. Because `mustSayWhy` is written as
+`reach !== 'internal'` rather than as a list, the new reach requires a reason
+**by default** — and the comment on that function says it was written that way
+"so a fifth reach added later has to be argued into silence rather than falling
+into it." First time that has been tested; it held.
+
+**A restatement is subsumed by a re-post.** After restating, the stored pair
+carries the corrected rate, so a later re-categorisation rebuilds the entry *at
+that rate* — and leaving the correcting entry beside it would count the
+difference twice. Unposting takes everything derived from the transaction, the
+restatement included; the reason survives on the audit record and on the voided
+entry. That interaction is a test of its own, and it is the defect this phase
+would have shipped without tracing it.
+
+Browser-verified on seeded data: the confirm button stays disabled until a
+reason is given, and afterwards the screen reads *"Restated from $300.00 to
+$330.00. $30.00 added in a correcting entry dated today; the original is
+untouched."* The browser also found a wart worth fixing — correcting the **last**
+row unmounted the whole section and took the confirmation with it, so the one
+moment somebody most needs to be told was the one moment nothing was said. The
+notice outlives the list now.
+
+
 ## Deploying
 
 For Vercel and Supabase, see **[docs/DEPLOY.md](docs/DEPLOY.md)**. The two things
@@ -6182,6 +6230,8 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself |
 | `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 103 in 36 functions. Since Phase 128 that narrowing comes from `carrierProperties()`, derived from the schema; Phase 127's own hand-typed list of nine tables reached only 81 sites in 28 functions, and the four it missed hid the bank feed. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
 | `tests/functional-postings.test.ts` | **The two writes that posted a face amount** (Phase 127), proved against the database: a €2,500 write-off recovered in full leaves the bad-debt account at zero rather than $250, a part recovery comes off at the rate the write-off was carried at, `badDebtSummary` agrees with the account balance beside it, and banking a €500 receipt clears exactly the $550 it put into Undeposited Funds. Plus the refusal this phase's own scanner turned up: a line typed against an account cannot be added to foreign receipts |
+| `tests/restate.test.ts` | **What a correcting entry would carry** (Phase 130): the difference between what the books hold and what they should, up or down; each part of a split scaled and the parts totalled — Phase 35's rule — so the entry cannot be a cent out against itself; and, when three parts cannot divide evenly, the figure reported is their sum rather than the ideal total, because the sum is what the ledger gets. Refuses the figure already held, a change too small to move a cent, a restatement to nothing, and an entry whose parts do not add up to the whole — that last because scaling would silently decide which side was right. `mayRestate` turns away a transaction still in the inbox and says to categorise it instead |
+| `tests/restate-posting.test.ts` | **The same against the database** (Phase 130): restating a face-value €800 posts $80 and leaves **two** live entries — the original untouched and the correction beside it. The stored pair moves with the books, so the tie-out still agrees, and `banking.posted_at_face` stops reporting the row. Down as well as up; allocated part by part across a split. It refuses with no reason, in the words that asked for one; refuses a transaction that never posted; refuses a rate that leaves the books where they are. And the interaction that would have shipped a defect: after a restatement, re-categorising rebuilds at the **restated** rate — so the correcting entry must go with the original, or the $80 lands twice |
 | `tests/posted-rate.test.ts` | **A rate is answered once** (Phase 129): `rateForPosting` takes today's answer the first time and keeps what it posted at every time after, stable however often it is re-posted, treating a zero or negative stored rate as absent rather than honouring it and posting a real bank movement as nothing. `rateFromPosted` divides what the ledger took by what the statement said — how the backfill reads history rather than asking the rate table what it would say now — cancelling the sign and reading a face-value posting as parity, which is how Phase 128's damage shows up. `bookedAtFace` catches euros posted as dollars without ever accusing a domestic account, where the two are equal by definition |
 | `tests/posted-rate-kept.test.ts` | **The same rule against the database** (Phase 129): a posting records the rate it used and what the books took, parity on a domestic account rather than a blank, and nothing at all for a transaction still in the inbox. Then the defect in one test — a rate entered for a day that had none, and a transaction re-categorised afterwards keeps its $550 instead of silently becoming $575; stable over three re-posts; the nightly check still agreeing because both sides read one stored fact; and a transaction posting for the *first* time after that rate lands correctly using it. Both legs of a transfer carry the rate, signed the way each statement reads it. And `postedAtFace` finds a foreign transaction whose books value equals its statement value, leaves a converted one alone, and never accuses a domestic account |
 | `tests/currency-carriers.test.ts` | **The registry is asked, and the database answers** (Phase 128): `CURRENCY_CARRIERS` names every table with a `currency` column, and the test compares that set against `information_schema.columns` — excluding `companies`, the functional currency the others are measured against. Phase 127's hand-typed list named nine of thirteen, which took twenty-two posting sites out of reach of its own scan. Each entry argues whose currency it is; the drizzle property is derived from the table name and checked rather than assumed, since the scan matches on one and this test on the other; an undeclared table throws. Plus `bankTransactionFunctional` — a no-op at parity, €500 at 1.10 giving 55000, `null` rather than a guessed rate, and rounding to the cent |

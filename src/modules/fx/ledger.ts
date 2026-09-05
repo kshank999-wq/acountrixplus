@@ -360,6 +360,20 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
       're-categorising silently restate what the movement was worth.',
   },
   {
+    file: 'src/modules/ledger/restate.ts',
+    symbol: 'restatePosting',
+    basis: 'converted',
+    because:
+      'Putting a posting right at a rate a person supplied (Phase 130). The figure aimed at is ' +
+      '`bankTransactionFunctional(amountCents, toRateMillionths)` — the face amount converted, ' +
+      'exactly as `buildLines` would have converted it — and what actually posts is the ' +
+      '*difference* between that and what the books already hold, allocated across the original ' +
+      'entry’s own lines. So every amount here is functional twice over: a conversion of a face ' +
+      'amount, less a figure that was already ledger money. The `journalLines.debitCents` and ' +
+      '`creditCents` the scan also finds at this site are the original entry being read back, ' +
+      'not posted — they are what the difference is taken from.',
+  },
+  {
     file: 'src/modules/ledger/posting.ts',
     symbol: 'syncLedgerForTransferPair',
     basis: 'converted',

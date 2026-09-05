@@ -8,7 +8,9 @@ import {
   renameFinancialAccount,
   setFinancialAccountActive,
 } from '@/modules/banking/accounts'
+import { restatePosting } from '@/modules/ledger/restate'
 import { messageFor } from '@/modules/errors'
+import { formatCents } from '@/lib/money'
 
 /** Server actions for the bank accounts screen (spec §3, §5). */
 
@@ -87,5 +89,46 @@ export async function setAccountActiveAction(input: unknown): Promise<ActionResu
     return parsed.isActive
       ? 'Reopened.'
       : 'Closed. Nothing was deleted — its transactions and reconciliations are all still there.'
+  })
+}
+
+
+/**
+ * Putting a posting right at a rate a person supplies (Phase 130).
+ *
+ * The rate is typed as a decimal because that is how a rate is written down
+ * anywhere else — on a broker's note, in a spreadsheet, on the FX screen. It
+ * becomes millionths here, once, rather than asking somebody to count zeroes.
+ */
+const restateSchema = z.object({
+  transactionId: z.string().uuid(),
+  rate: z
+    .number()
+    .positive('An exchange rate has to be greater than zero.')
+    .finite('Give the rate as a number.'),
+  reason: z.string().trim().max(500).optional(),
+})
+
+export async function restatePostingAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = restateSchema.parse(input)
+
+    const result = await restatePosting(actor, {
+      transactionId: parsed.transactionId,
+      toRateMillionths: Math.round(parsed.rate * 1_000_000),
+      reason: parsed.reason ?? '',
+      // The day the decision is made, never the day the money moved — which is
+      // what makes it a correction rather than a quiet edit, and what lets a
+      // closed period refuse it.
+      correctionDate: new Date().toISOString().slice(0, 10),
+    })
+
+    const direction = result.deltaCents > 0 ? 'added' : 'taken off'
+    return (
+      `Restated from ${formatCents(result.fromCents)} to ${formatCents(result.toCents)}. ` +
+      `${formatCents(Math.abs(result.deltaCents))} ${direction} in a correcting entry dated today; ` +
+      'the original is untouched.'
+    )
   })
 }

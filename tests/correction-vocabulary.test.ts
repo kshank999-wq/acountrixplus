@@ -24,6 +24,10 @@ const ALL: CorrectionKind[] = [
   'deposit.void',
   'approval.withdraw',
   'party.merge',
+  // Phase 130. The only one that neither moves money nor reaches anybody and
+  // still has to say why: it restates a figure somebody may already have been
+  // told, which is a fifth `Reach` rather than a bend in an existing one.
+  'posting.restate',
 ]
 
 describe('one phrase, one meaning', () => {

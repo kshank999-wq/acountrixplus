@@ -14,6 +14,14 @@ export type AuditAction =
   | 'transaction.unexclude'
   | 'transaction.transfer_mark'
   | 'transaction.note'
+  /**
+   * A posting put right at a rate a person supplied (Phase 130).
+   *
+   * On the transaction rather than on the correcting entry, because the
+   * question somebody asks later is "why does this movement carry that
+   * figure?" and the transaction is what they are looking at.
+   */
+  | 'posting.restate'
   | 'transaction.import'
   | 'rule.create'
   | 'rule.update'
