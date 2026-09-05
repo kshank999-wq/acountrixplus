@@ -128,10 +128,15 @@ describe('every registry refuses the same way', () => {
   const thrown = thrownRegistries()
 
   it('finds the throws to check, so a broken scan cannot pass silently', () => {
-    // Measured, not bounded (Phase 126's lesson). Eleven: ten that each held an
-    // allowlist entry, plus RETENTION_POLICIES, which held none and was found
-    // by measuring for this phase rather than by reading the list.
-    expect(thrown.length).toBe(11)
+    // Measured, not bounded (Phase 126's lesson). Eleven at Phase 132: ten that
+    // each held an allowlist entry, plus RETENTION_POLICIES, which held none and
+    // was found by measuring rather than by reading the list.
+    //
+    // Twelve since Phase 133, and the number is the point. `BANK_POSTINGS` was
+    // written a phase later by somebody who never read this file, and this
+    // assertion is what noticed — the first time the device has caught a
+    // registry rather than described one.
+    expect(thrown.length).toBe(12)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
@@ -147,6 +152,14 @@ describe('every registry refuses the same way', () => {
 
   it('includes the one that was never in the allowlist', () => {
     expect(thrown.map((row) => row.registry)).toContain('RETENTION_POLICIES')
+  })
+
+  it('includes the one written after this rule existed', () => {
+    // `BANK_POSTINGS` is Phase 133's, and it reached this shape by being
+    // written against the file beside it rather than against this test. That is
+    // the device working: the twelfth registry inherited the rule instead of
+    // needing an allowlist entry, and the count above is what proved it.
+    expect(thrown.map((row) => row.registry)).toContain('BANK_POSTINGS')
   })
 
   it('leaves an exception list that is genuinely miscellaneous', () => {

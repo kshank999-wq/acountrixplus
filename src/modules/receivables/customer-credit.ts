@@ -432,10 +432,15 @@ export async function refundCredit(
 
     const held = await overpaymentAccount(ctx.companyId)
 
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'refunding this credit', tx)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'refunding this credit',
+      tx,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,

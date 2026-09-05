@@ -668,10 +668,15 @@ export async function recoverWriteOff(
   )
 
   return db.transaction(async (tx) => {
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'banking this recovery', tx)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'banking this recovery',
+      tx,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.recoveredOn,

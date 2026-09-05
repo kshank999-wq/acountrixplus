@@ -708,10 +708,15 @@ export async function importPayouts(
         .onConflictDoNothing({ target: payoutItems.checkoutId })
     }
 
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, settings.payoutFinancialAccountId, 'banking this payout', db)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      settings.payoutFinancialAccountId,
+      'banking this payout',
+      db,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: batch.arrivalDate,

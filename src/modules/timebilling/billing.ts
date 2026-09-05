@@ -532,10 +532,15 @@ export async function receiveRetainer(
       })
       .returning()
 
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'receiving this retainer', tx)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'receiving this retainer',
+      tx,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.receivedOn,
@@ -1073,10 +1078,15 @@ export async function refundRetainer(
     const fxAccount =
       settlement.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'refunding this retainer', tx)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'refunding this retainer',
+      tx,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,

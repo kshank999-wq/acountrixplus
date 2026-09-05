@@ -87,6 +87,30 @@ into `glAccountId` and post that. A scan that cannot see the thing it is
 modelled on is the failure Phase 128 found in the posting scan and Phase 131 in
 the screen scan.
 
+## Verified in a browser, and what the confirming suite caught
+
+`/properties` → Deposits held → "Take, return or keep" offers all four of
+Ridgeline's accounts, Frankfurt Current among them, because the picker is built
+from `listFinancialAccounts` with no currency filter. Choosing it and pressing
+"Take it" puts the refusal on the screen word for word:
+
+> Frankfurt Current is held in EUR and these books are kept in USD, so holding
+> this deposit would put a USD figure against an account that moves in EUR —
+> without recording what actually left it. Use a USD account, or post it by hand
+> as a journal entry that says what the rate was.
+
+Nothing was written: `deposit_movements` still holds only the seeded row, and
+the register and the ledger still agree at $1,750. That is the whole claim —
+the sentence survives `messageFor`, and the refusal lands before the write.
+
+**The confirming suite went red on `registry-error.test.ts`, and that is the
+best thing in this phase.** Phase 132 asserted a measured count of eleven
+`RegistryError` throws. `BANK_POSTINGS` was written a phase later, against the
+file beside it, by somebody who never opened that test — and the count caught
+it: `expected 12 to be 11`. The first time the device has *caught* a registry
+rather than described one. The count is now twelve and a second assertion names
+`BANK_POSTINGS`, so the twelfth is recorded rather than merely counted.
+
 ## What this does not do
 
 **It does not convert anything.** Ten paths refuse where they used to post. A
@@ -105,3 +129,16 @@ currency of its own, so `importPayouts` is the path closest to converting — an
 nothing compares that currency to the account's. It refuses rather than trusting
 that a processor settles into a matching account, and closing that properly is
 the one of the ten with the shortest road out.
+
+Measured after the fact, that nomination was understated, and the correction
+belongs here rather than in the phase that acts on it. `batch.currency` is
+written to `payouts.currency` and **never read again**; the entry posts
+`batch.amountCents` to both legs unconverted. So a euro payout into a *domestic*
+account posts €X as $X — Phase 127's original defect, which this phase's guard
+does not catch, because `mayPostToBank` asks about the account and never about
+the money. `LEDGER_POSTINGS` declares this site `domestic` on an argument that
+says so out loud — "a fact about the data, not a guarantee from the schema" —
+and this phase enforced only the `financial_accounts` half of that fact.
+`checkouts` carries a currency too, and `heldByProcessor` sums across all of
+them ungrouped, so the in-transit account cannot be made to clear. Every
+`.currency` in `src/modules/payments/` is written or displayed; none is compared.

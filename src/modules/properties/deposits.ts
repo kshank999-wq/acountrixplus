@@ -154,10 +154,10 @@ export async function receiveDeposit(
 
     if (!bank) throw new PropertyError('That account does not exist.')
 
-        // Phase 133: the ledger account, and whether this account may take it.
+    // Phase 133: the ledger account, and whether this account may take it.
     const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'holding this deposit', tx)
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.occurredOn,
@@ -254,10 +254,15 @@ export async function refundDeposit(
 
     if (!bank) throw new PropertyError('That account does not exist.')
 
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'returning this deposit', tx)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'returning this deposit',
+      tx,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.occurredOn,

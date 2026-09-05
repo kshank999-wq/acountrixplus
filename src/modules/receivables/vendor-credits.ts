@@ -547,10 +547,15 @@ export async function refundVendorCredit(
 
     const fxAccount = recovery.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
-        // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'banking this supplier refund', tx)
+    // Phase 133: the ledger account, and whether this account may take it.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'banking this supplier refund',
+      tx,
+    )
 
-const entry = await createJournalEntry(
+    const entry = await createJournalEntry(
       ctx,
       {
         entryDate: input.refundedOn,
