@@ -20,6 +20,8 @@ import { appBaseUrl } from '@/modules/notify/transactional'
 import { getPaymentSettings } from './settings'
 import { getPaymentProvider } from './registry'
 import { feeFor, payableAmount, payoutReconciliation } from './settlement'
+import { PARITY } from './in-transit'
+import { convert } from '@/modules/fx/rates'
 import {
   EMPTY_SWEEP,
   STALE_AFTER_DAYS,
@@ -324,18 +326,37 @@ export async function postCapturedCheckout(checkoutId: string): Promise<SettleRe
     applications: [{ invoiceId: row.invoice.id, amountCents: applyCents }],
   })
 
+  // What the capture actually put through `1250 Payments in Transit`, in the
+  // company's money (Phase 134).
+  //
+  // `applyCents` rather than the checkout's gross, because that is the figure
+  // `recordPayment` debited — capped at the outstanding balance a few lines
+  // above. The clearing account has to be relieved of what it was charged, so
+  // what it was charged is what gets written down.
+  //
+  // The rate comes off the payment rather than being looked up again: Phase
+  // 129's rule, that a posting records the rate it used, so the entry and the
+  // check read one stored fact instead of asking a growing table twice.
+  const captureRate = payment.exchangeRateMillionths ?? PARITY
+  const carriedGrossCents = convert(applyCents, captureRate)
+  const carriedFeeCents = convert(row.checkout.feeCents, captureRate)
+
   // Attach it, and let the database refuse a second attempt. If this update
   // loses to a concurrent one, the unique constraint throws rather than
   // leaving two payments claiming the same charge.
   await db
     .update(checkouts)
-    .set({ paymentId: payment.id })
+    .set({
+      paymentId: payment.id,
+      functionalGrossCents: carriedGrossCents,
+      functionalFeeCents: carriedFeeCents,
+    })
     .where(and(eq(checkouts.id, checkoutId), isNull(checkouts.paymentId)))
 
   if (row.checkout.feeCents > 0) {
     await postFee(ctx, {
       checkoutId,
-      feeCents: row.checkout.feeCents,
+      feeCents: carriedFeeCents,
       invoiceNumber: row.invoice.number,
     })
   }

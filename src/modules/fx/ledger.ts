@@ -327,13 +327,16 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
   {
     file: 'src/modules/payments/service.ts',
     symbol: 'postFee',
-    basis: 'domestic',
+    basis: 'converted',
     because:
-      'A card processor’s fee. **Corrected in Phase 128**: this said `financial_accounts` carries ' +
-      'no currency column, which is false and has been since the banking schema was written. ' +
-      '`checkouts.currency` records what the customer was asked to pay and the processor charges ' +
-      'its fee in the same, so `input.feeCents` is that currency — domestic only while the account ' +
-      'is, which is a fact about the data rather than about the schema.',
+      'A card processor’s fee. **Corrected twice.** Phase 128 fixed a false claim that ' +
+      '`financial_accounts` carries no currency column. It left standing a second one: that this ' +
+      'was `domestic` "while the account is, which is a fact about the data rather than about the ' +
+      'schema" — an argument that admits it is not guaranteed. Phase 134 made it a fact about the ' +
+      'schema. `input.feeCents` is now the fee converted at the rate the capture settled at, ' +
+      'stored on `checkouts.functional_fee_cents`, because the clearing account this credits was ' +
+      'debited a converted figure and can only reach zero if it is relieved of what it was ' +
+      'charged.',
   },
   {
     file: 'src/modules/payments/service.ts',
