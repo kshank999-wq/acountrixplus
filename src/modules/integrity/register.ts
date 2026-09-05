@@ -249,12 +249,19 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
     run: async (ctx) => {
       const rows = await cashTieOut(ctx)
       const ledger = rows.reduce((sum, row) => sum + row.ledgerCents, 0)
-      const feed = rows.reduce((sum, row) => sum + row.feedCents, 0)
+      // The functional side of the feed, not `feedCents` — which is each
+      // account's own currency, and summing those across a dollar account and
+      // a euro one added currencies (Phase 122's defect, Phase 128's fix).
+      const feed = rows.reduce((sum, row) => sum + (row.feedFunctionalCents ?? 0), 0)
       const waiting = rows.reduce((sum, row) => sum + row.uncategorizedCount, 0)
-      const apart = rows.filter((row) => row.differenceCents !== 0)
+      const apart = rows.filter((row) => row.differenceCents !== null && row.differenceCents !== 0)
+      const unanswerable = rows.filter((row) => row.differenceCents === null)
 
       return {
-        agrees: apart.length === 0,
+        // An account whose feed cannot be converted is not agreement; it is
+        // the check saying it cannot tell, which Phase 121 counts as a
+        // disagreement rather than a green light.
+        agrees: apart.length === 0 && unanswerable.length === 0,
         leftCents: feed,
         rightCents: ledger,
         detail: (() => {
@@ -264,8 +271,16 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
             parts.push(
               apart
                 .slice(0, 3)
-                .map((row) => `${row.accountName} ${formatCents(row.differenceCents)}`)
+                .map((row) => `${row.accountName} ${formatCents(row.differenceCents ?? 0)}`)
                 .join(', ') + (apart.length > 3 ? ` and ${apart.length - 3} more` : ''),
+            )
+          }
+          if (unanswerable.length > 0) {
+            const missing = unanswerable.reduce((sum, row) => sum + row.unconvertibleCount, 0)
+            parts.push(
+              `${unanswerable.map((row) => row.accountName).join(', ')}: ${missing} transaction` +
+                `${missing === 1 ? '' : 's'} on a day with no ` +
+                `${unanswerable[0].currency} rate on file, so neither side can be compared`,
             )
           }
           if (waiting > 0) {

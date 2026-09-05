@@ -5913,6 +5913,55 @@ basis stays in the vocabulary anyway — the gap it names will recur, and ADR 01
 is the record of how much a phase can miss while calling such a figure probably
 fine.
 
+### The bank account that could be foreign (Phase 128)
+
+Phase 127's scan narrowed to files that read a currency-bearing table, by a list
+of nine table names typed out by hand. `information_schema` says there are
+**thirteen**, once `companies` — the functional currency, the thing the others
+are measured against — is set aside. `financial_accounts`, `checkouts`, `payouts`
+and `refunds` were missing, and the first of those has carried a `currency`
+column since the banking schema was written.
+
+Widening the scan takes it from 81 sites to **103**. Among the twenty-two newly
+in reach is `ledger/posting.ts`, where money **first enters the books**:
+
+```ts
+const magnitude = Math.abs(transaction.amountCents)   // the account's currency
+```
+
+`bank_transactions` has no currency of its own; it inherits the account's, and
+`createFinancialAccount` genuinely stores one. So **every categorised transaction
+on a foreign account posted a face amount into the functional ledger** — a €500
+charge became $500 of expense instead of $550 — from the day the bank feed was
+built.
+
+`banking.cash_tie_out` agreed all the while, because it compares the ledger
+against `sum(bank_transactions.amount_cents)` and the defect made both sides the
+same euros. ADR 0121's own falsifier entry names what that is — *"one number
+being compared with itself"* — as the thing it guards against; a falsifier proves
+a check can move, not that both sides are in the same units. So the tie-out is
+part of the fix rather than a consequence: it converts the feed side too, a day
+at a time at the rate the posting used, and reports the account's currency, the
+face figure, the converted figure and a difference between two comparable
+numbers. A domestic account short-circuits before the query and its numbers are
+unchanged. Browser-verified on seeded data: `1001 Frankfurt Current` shows
+−$550.00 in the ledger against −€500.00 from the feed, with "−$550.00 in the
+books" under it.
+
+Three refusals rather than guesses: no rate on the day money moved leaves the
+transaction in the feed (Phase 117), a transfer between accounts in different
+currencies is two categorisations rather than one entry (Phase 123's answer, one
+layer down), and a tie-out that cannot convert says so instead of reporting
+agreement.
+
+Four declarations one phase old claimed `financial_accounts` carries no currency
+column. That is the Phase 110 failure — a declaration argued from a schema fact
+that is not a fact — and it is why the fix is that **the list is not a list**:
+`fx/carriers.ts` declares all thirteen with an argument each, and its test
+compares the set against `information_schema.columns`. A fourteenth table cannot
+be forgotten; it can only be declared or fail. Same shape as `paired-money` since
+Phase 116, for the same reason.
+
 
 ## Deploying
 
@@ -6061,8 +6110,10 @@ Coverage matches what spec §21 asks for:
 | `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself |
-| `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 81 in 28 functions. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
+| `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 103 in 36 functions. Since Phase 128 that narrowing comes from `carrierProperties()`, derived from the schema; Phase 127's own hand-typed list of nine tables reached only 81 sites in 28 functions, and the four it missed hid the bank feed. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
 | `tests/functional-postings.test.ts` | **The two writes that posted a face amount** (Phase 127), proved against the database: a €2,500 write-off recovered in full leaves the bad-debt account at zero rather than $250, a part recovery comes off at the rate the write-off was carried at, `badDebtSummary` agrees with the account balance beside it, and banking a €500 receipt clears exactly the $550 it put into Undeposited Funds. Plus the refusal this phase's own scanner turned up: a line typed against an account cannot be added to foreign receipts |
+| `tests/currency-carriers.test.ts` | **The registry is asked, and the database answers** (Phase 128): `CURRENCY_CARRIERS` names every table with a `currency` column, and the test compares that set against `information_schema.columns` — excluding `companies`, the functional currency the others are measured against. Phase 127's hand-typed list named nine of thirteen, which took twenty-two posting sites out of reach of its own scan. Each entry argues whose currency it is; the drizzle property is derived from the table name and checked rather than assumed, since the scan matches on one and this test on the other; an undeclared table throws. Plus `bankTransactionFunctional` — a no-op at parity, €500 at 1.10 giving 55000, `null` rather than a guessed rate, and rounding to the cent |
+| `tests/foreign-bank-account.test.ts` | **A bank account can be foreign and the ledger cannot** (Phase 128), against the database: a €500 charge on a euro account posts $550 of expense where it posted $500 before, a domestic account is unchanged to the cent (which is why nobody noticed), a day with no rate refuses with `RateError` and posts nothing, and a split converts at the same rate as the transaction it belongs to so the entry cannot be a cent out against itself. A transfer between accounts in different currencies is refused — the bank takes one amount out and puts a different one in — while two euro accounts sweep at one rate. And the check that had been comparing a number with itself: feed −€500, books −$550, ledger −$550, difference zero; `null` and a count of transactions rather than agreement when a day has no rate |
 | `tests/schedule-currency.test.ts` | **A recurring schedule bills in a currency** (Phase 126): a schedule takes the company's own unless told otherwise, a EUR one raises an invoice carrying €4,000 face and $4,400 functional, and the occurrence records what its period was billed in — the column ADR 0125 called `unrecorded`. `occurrenceCurrency` prefers the raised invoice over the schedule's intention over the company default. And the forecast, which added four figures across every schedule before a schedule could be foreign, reports one set of totals per currency: two currencies are two answers, never a third number |
 | `tests/deposit-currency.test.ts` | **A paying-in slip is in one currency** (Phase 123): banking a euro receipt together with a dollar one is refused rather than posted as a total in neither, the refusal reaches the person as a sentence rather than "Something went wrong", and the ordinary cases — several receipts in one currency, and a single foreign receipt — still bank |
 | `tests/aging-currency.test.ts` | **A euro invoice aged at what it is worth rather than at its face value** — 270875, not 250000 — and a mixed-currency total that is a number in one currency instead of no currency at all; the report naming the currency every figure in it is in; **a foreign row carrying what the customer was actually invoiced**, so nobody quotes the home-currency figure at somebody never billed it, with two foreign currencies kept apart in a fixed order and the home-currency part of a mixed customer left out of the note; a document worth nothing in the company's own money skipped on the *functional* figure, since that is the one being aged; the bucket boundaries either side of every threshold, and the functional figure landing in the bucket rather than the face value; **unapplied credits left out of every bucket but stating what the balance sheet should read**, and a reconciling sentence whose noun, three verbs, pronoun and "each" all agree on the count — asserted in both directions after the first draft shipped "1 credit note … They already reduce" |

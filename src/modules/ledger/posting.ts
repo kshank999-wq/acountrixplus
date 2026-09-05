@@ -8,6 +8,9 @@ import {
 import type { ActorContext } from '@/modules/tenancy/context'
 import { createJournalEntry, entryForSource, voidJournalEntry, type JournalLineInput } from './journal'
 import { missing } from '@/modules/errors/missing'
+import { bankTransactionFunctional } from '@/modules/fx/carriers'
+import { rateFor } from '@/modules/fx/service'
+import { Refusal } from '@/modules/errors'
 
 /**
  * Derives ledger entries from bank transactions (ADR 0001).
@@ -106,7 +109,33 @@ async function buildLines(
 
   const glAccountId = await bankGlAccount(transaction.financialAccountId, exec)
   const isOutflow = transaction.amountCents < 0
-  const magnitude = Math.abs(transaction.amountCents)
+
+  /**
+   * What the ledger takes, in the company's own money (Phase 128).
+   *
+   * `bank_transactions` has no currency of its own; it inherits the account's,
+   * and `financial_accounts.currency` has existed since the banking schema was
+   * first written. Until this, `Math.abs(transaction.amountCents)` went
+   * straight into `debitCents` — so every categorised transaction on a euro
+   * account put euros into a ledger kept in dollars. `banking.cash_tie_out`
+   * agreed all the while, because the feed side it compares against is the
+   * same face amount; `cashTieOut` converts that side too now, at the rate
+   * used here, or the fix would turn a blind check into a nightly false alarm.
+   *
+   * Phase 127's scan could not see it: its list of currency-bearing tables was
+   * typed by hand and left `financial_accounts` out. `fx/carriers.ts` is now
+   * the list, and its test asks the schema rather than a person.
+   *
+   * `rateFor` refuses when the account is foreign and no rate covers the day
+   * the money moved, and that refusal is allowed to reach the person
+   * categorising the transaction — the same answer Phase 64 gave an invoice
+   * that cannot be raised without one, in a sentence that already says what to
+   * do about it. A domestic account short-circuits at 1,000,000, which is why
+   * the multiplication was a no-op for everybody who ever ran this.
+   */
+  const toBooks = await booksConverter(ctx, transaction.financialAccountId, transaction.postedDate, exec)
+
+  const magnitude = toBooks(Math.abs(transaction.amountCents))
   if (magnitude === 0) return null
 
   // A split carries its own category lines; the bank side is one line for the
@@ -128,7 +157,10 @@ async function buildLines(
     // Each split carries its own job and cost code, so a single card charge
     // covering two sites lands on both jobs without a second document.
     const categoryLines: JournalLineInput[] = splits.map((split) => {
-      const amount = Math.abs(split.amountCents)
+      // Each split at the same rate as its parent: they are one movement of
+      // money on one day, and converting them apart could leave the entry a
+      // cent out against the bank line above.
+      const amount = toBooks(Math.abs(split.amountCents))
       const dimensions = {
         projectId: split.projectId ?? transaction.projectId,
         costCodeId: split.projectId ? split.costCodeId : transaction.costCodeId,
@@ -214,7 +246,37 @@ export async function syncLedgerForTransferPair(
 
   const source = outgoing.amountCents < 0 ? outgoing : incoming
   const destination = outgoing.amountCents < 0 ? incoming : outgoing
-  const magnitude = Math.abs(source.amountCents)
+
+  /**
+   * One movement, one currency (Phase 128).
+   *
+   * A transfer posts a single magnitude to both legs, which is only a movement
+   * of money if both accounts hold the same thing. Between a euro account and
+   * a dollar one it is a *conversion*: the bank takes one amount out and puts a
+   * different one in, and the difference is a realised gain or loss somebody
+   * has to decide to recognise.
+   *
+   * Refused rather than converted, on Phase 117's rule and Phase 123's
+   * precedent for a deposit of two currencies. Posting the source magnitude to
+   * both sides would balance the entry and misstate both accounts; converting
+   * one side at today's rate would invent a figure neither bank statement
+   * shows. Two accounts in two currencies is two transactions.
+   */
+  const [sourceAccount, destinationAccount] = await Promise.all([
+    accountCurrency(source.financialAccountId, exec),
+    accountCurrency(destination.financialAccountId, exec),
+  ])
+
+  if (sourceAccount !== destinationAccount) {
+    throw new Refusal(
+      `Those accounts are held in ${sourceAccount} and ${destinationAccount}, so this is a ` +
+        'currency conversion rather than a transfer — the bank takes one amount out and puts a ' +
+        'different one in. Categorise each side on its own.',
+    )
+  }
+
+  const toBooks = await booksConverter(ctx, source.financialAccountId, source.postedDate, exec)
+  const magnitude = toBooks(Math.abs(source.amountCents))
   if (magnitude === 0) return { posted: false }
 
   const sourceGl = await bankGlAccount(source.financialAccountId, exec)
@@ -253,6 +315,42 @@ export async function unpostTransaction(
 }
 
 /** The GL account a bank or credit-card account posts through. */
+/**
+ * How to put an account's money into the books (Phase 128).
+ *
+ * One rate for the whole transaction, fetched once: a transaction and its
+ * splits are one movement of money on one day, and converting them at
+ * separately-fetched rates could leave the entry a cent out against itself.
+ */
+async function booksConverter(
+  ctx: ActorContext,
+  financialAccountId: string,
+  onDate: string,
+  exec: Executor,
+): Promise<(faceCents: number) => number> {
+  const [account] = await exec
+    .select({ currency: financialAccounts.currency })
+    .from(financialAccounts)
+    .where(eq(financialAccounts.id, financialAccountId))
+    .limit(1)
+
+  if (!account) throw missing('financialAccount')
+
+  const { rateMillionths } = await rateFor(ctx, account.currency, onDate, exec)
+  return (faceCents) => bankTransactionFunctional(faceCents, rateMillionths) as number
+}
+
+async function accountCurrency(financialAccountId: string, exec: Executor): Promise<string> {
+  const [account] = await exec
+    .select({ currency: financialAccounts.currency })
+    .from(financialAccounts)
+    .where(eq(financialAccounts.id, financialAccountId))
+    .limit(1)
+
+  if (!account) throw missing('financialAccount')
+  return account.currency
+}
+
 async function bankGlAccount(financialAccountId: string, exec: Executor): Promise<string> {
   const [account] = await exec
     .select({ chartAccountId: financialAccounts.chartAccountId })

@@ -174,6 +174,18 @@ export const ALLOWED_BARE_REFUSALS: readonly {
       'same commit as the phase that needed it would be a change nobody measured.',
   },
   {
+    file: 'src/modules/fx/carriers.ts',
+    message:
+      'No currency carrier is declared for "X". If it has a currency column, declare it in ' +
+      'src/modules/fx/carriers.ts and say whose currency it is; if it does not, do not ask.',
+    because:
+      'The ninth, one phase after the eighth, and the nomination above is now measured rather ' +
+      'than argued: nine allowlist entries say the same thing in nine ways, and each new registry ' +
+      'costs a tenth. This one is addressed to whoever asks about a table the schema has and the ' +
+      'registry has not — which is a developer, since the test that compares the two against ' +
+      'information_schema fails first.',
+  },
+  {
     file: 'src/modules/ai/prompts.ts',
     message: 'No prompt registered for "X"',
     because:

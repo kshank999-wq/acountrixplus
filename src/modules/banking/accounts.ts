@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from 'drizzle-orm'
+import { and, eq, ne, notInArray, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   bankTransactions,
@@ -10,6 +10,8 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DomainError } from '@/modules/errors'
+import { RateError, functionalCurrency, isForeign, rateFor } from '@/modules/fx/service'
+import { bankTransactionFunctional } from '@/modules/fx/carriers'
 import { bandFor, ledgerNameFor, nextAccountNumber, type FinancialAccountKind } from './numbering'
 
 /**
@@ -487,21 +489,44 @@ export type CashTieOut = {
   financialAccountId: string
   accountName: string
   chartAccountNumber: string
+  /**
+   * The currency the account is held in, which is the currency `feedCents` is
+   * in (Phase 128). Money in a bank is denominated by the bank, not by us.
+   */
+  currency: string
   /** What the ledger says the account holds, from its own chart account. */
   ledgerCents: number
   /** What the feed says, summing the rows that have actually been posted. */
   feedCents: number
   /**
-   * The feed less the ledger, in that order.
+   * The same rows in the books' own money, or `null` when they cannot all be
+   * converted (Phase 128).
+   *
+   * Equal to `feedCents` for a domestic account, and the only figure that can
+   * honestly be set beside `ledgerCents` for a foreign one.
+   */
+  feedFunctionalCents: number | null
+  /**
+   * The feed less the ledger, in that order, both in the books' own money —
+   * or `null` when the feed side could not be converted.
    *
    * Matches the integrity register's own convention — `differenceCents` there
    * is `leftCents - rightCents`, and left is the subledger side. Computing it
    * the other way round here put the opposite sign on the same word in the
    * summary and the detail of one finding.
    */
-  differenceCents: number
+  differenceCents: number | null
   /** Rows sitting in the inbox, which explain a difference rather than being one. */
   uncategorizedCount: number
+  /**
+   * Posted-eligible rows on a foreign account with no rate covering the day
+   * they moved (Phase 128).
+   *
+   * They cannot have reached the ledger either — `buildLines` refuses the same
+   * way — so they are the reason a difference is unanswerable rather than a
+   * difference themselves.
+   */
+  unconvertibleCount: number
 }
 
 /**
@@ -515,6 +540,27 @@ export type CashTieOut = {
  * posted, and money can enter a bank account from an invoice payment that
  * never appeared in the feed. So the uncategorised count is reported beside
  * it, and the judgement is left to a person.
+ *
+ * ## The two sides have to be in the same currency (Phase 128)
+ *
+ * The ledger is kept in the company's own money. The feed is in the account's,
+ * and an account can be foreign. Until Phase 128 that difference was invisible
+ * here for the worst possible reason: `buildLines` posted the face amount, so
+ * **both sides were euros and the check agreed while the ledger was wrong**. A
+ * check that cannot disagree is Phase 121's whole subject.
+ *
+ * Fixing the posting makes the ledger side dollars, so the feed side has to
+ * follow — converted a day at a time, at the same rate `buildLines` used for
+ * that day, which is the only rate that can reproduce what was posted. A
+ * domestic account short-circuits and its numbers are byte-for-byte what they
+ * were.
+ *
+ * This is not tautological, which is what makes it still a check: a row in the
+ * feed that never posted, a row posted then uncategorised, an invoice payment
+ * that moved the ledger without a feed row, and a manual journal all still show
+ * up. What it cannot catch is a rate edited after the posting — a bank
+ * transaction posts at a rate it does not record, unlike every other moving
+ * money column since Phase 116.
  */
 export async function cashTieOut(ctx: ActorContext): Promise<CashTieOut[]> {
   requirePermission(ctx, 'accounting:view')
@@ -551,19 +597,90 @@ export async function cashTieOut(ctx: ActorContext): Promise<CashTieOut[]> {
 
     const ledgerCents = Number(ledger?.cents ?? 0)
     const feedCents = Number(feed?.cents ?? 0)
+    const converted = await feedInFunctional(ctx, account, feedCents)
 
     results.push({
       financialAccountId: account.id,
       accountName: account.name,
       chartAccountNumber: account.chartAccountNumber,
+      currency: account.currency,
       ledgerCents,
       feedCents,
-      differenceCents: feedCents - ledgerCents,
+      feedFunctionalCents: converted.cents,
+      differenceCents: converted.cents === null ? null : converted.cents - ledgerCents,
       uncategorizedCount: Number(feed?.uncategorized ?? 0),
+      unconvertibleCount: converted.unconvertibleCount,
     })
   }
 
   return results
+}
+
+/**
+ * The posted side of one account's feed, in the books' own money (Phase 128).
+ *
+ * A day at a time, because that is how `buildLines` converts: one rate for the
+ * whole of one movement, taken from the day it moved. Summing the face amounts
+ * first and converting once would use one day's rate for a year of them.
+ */
+async function feedInFunctional(
+  ctx: ActorContext,
+  account: { id: string; currency: string },
+  feedCents: number,
+): Promise<{ cents: number | null; unconvertibleCount: number }> {
+  const home = await functionalCurrency(ctx.companyId)
+
+  // The rate is 1,000,000 and every multiplication a no-op, so this returns
+  // exactly the number this function has returned since Phase 40 — and skips
+  // a query per account for every company that has never held a foreign one.
+  if (!isForeign(account.currency, home)) {
+    return { cents: feedCents, unconvertibleCount: 0 }
+  }
+
+  const days = await db
+    .select({
+      postedDate: bankTransactions.postedDate,
+      cents: sql<string>`sum(${bankTransactions.amountCents})`,
+      rows: sql<string>`count(*)`,
+    })
+    .from(bankTransactions)
+    .where(
+      scoped(
+        ctx,
+        bankTransactions,
+        and(
+          eq(bankTransactions.financialAccountId, account.id),
+          notInArray(bankTransactions.reviewState, [
+            'new',
+            'suggested',
+            'needs_review',
+            'excluded',
+          ]),
+        ),
+      ),
+    )
+    .groupBy(bankTransactions.postedDate)
+
+  let cents = 0
+  let unconvertibleCount = 0
+
+  for (const day of days) {
+    let rateMillionths: number
+    try {
+      ;({ rateMillionths } = await rateFor(ctx, account.currency, day.postedDate))
+    } catch (error) {
+      // No rate for that day, so nothing on it reached the ledger either.
+      // Counting the rows rather than guessing a rate is the same answer
+      // `buildLines` gives, and leaves the difference honestly unanswerable.
+      if (!(error instanceof RateError)) throw error
+      unconvertibleCount += Number(day.rows)
+      continue
+    }
+
+    cents += bankTransactionFunctional(Number(day.cents), rateMillionths) as number
+  }
+
+  return { cents: unconvertibleCount > 0 ? null : cents, unconvertibleCount }
 }
 
 /**

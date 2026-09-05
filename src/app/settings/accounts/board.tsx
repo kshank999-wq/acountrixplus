@@ -12,10 +12,16 @@ import {
 import { formatCents } from '@/lib/money'
 
 type TieOut = {
+  /** The books' own money, always — the ledger is kept in one currency. */
   ledgerCents: number
+  /** The account's own currency, which is the bank's rather than ours. */
+  currency: string
   feedCents: number
-  differenceCents: number
+  /** The same rows in the books' money, or null when a day has no rate. */
+  feedFunctionalCents: number | null
+  differenceCents: number | null
   uncategorizedCount: number
+  unconvertibleCount: number
 }
 
 type Account = {
@@ -376,7 +382,23 @@ function AccountRow({
       <td className="tnum px-4 py-2 text-right">
         {account.tieOut ? (
           <>
-            {formatCents(account.tieOut.feedCents)}
+            {formatCents(account.tieOut.feedCents, account.tieOut.currency)}
+            {/* What the bank says is in the bank's currency; the column beside
+                it is the ledger's. On a foreign account the two are only
+                comparable once this is converted, so say the converted figure
+                rather than leaving the reader to assume they match. */}
+            {account.tieOut.feedFunctionalCents !== null &&
+              account.tieOut.feedFunctionalCents !== account.tieOut.feedCents && (
+                <span className="block text-xs font-normal text-muted">
+                  {formatCents(account.tieOut.feedFunctionalCents)} in the books
+                </span>
+              )}
+            {account.tieOut.feedFunctionalCents === null && (
+              <span className="block text-xs font-normal text-warning">
+                {account.tieOut.unconvertibleCount} on a day with no{' '}
+                {account.tieOut.currency} rate
+              </span>
+            )}
             {account.tieOut.uncategorizedCount > 0 && (
               <span className="block text-xs font-normal text-muted">
                 {account.tieOut.uncategorizedCount} still in the inbox

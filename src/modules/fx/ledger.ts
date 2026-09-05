@@ -327,18 +327,101 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
     symbol: 'postFee',
     basis: 'domestic',
     because:
-      'A card processor’s fee, against a clearing account. `financial_accounts` carries no currency ' +
-      'column — Phase 40 gave each one a ledger account, not a denomination — so the processor ' +
-      'settles and charges in the account’s own money.',
+      'A card processor’s fee. **Corrected in Phase 128**: this said `financial_accounts` carries ' +
+      'no currency column, which is false and has been since the banking schema was written. ' +
+      '`checkouts.currency` records what the customer was asked to pay and the processor charges ' +
+      'its fee in the same, so `input.feeCents` is that currency — domestic only while the account ' +
+      'is, which is a fact about the data rather than about the schema.',
   },
   {
     file: 'src/modules/payments/service.ts',
     symbol: 'importPayouts',
     basis: 'domestic',
     because:
-      '`batch.amountCents` is what the processor says it paid into a bank account, read back from ' +
-      'its own report. Same construction as the fee: the account it lands in has one currency and ' +
-      'nothing records another.',
+      '`batch.amountCents` is what the processor says it paid into a bank account, in the currency ' +
+      '`payouts.currency` records. **Corrected in Phase 128**: the entry said nothing recorded ' +
+      'another currency, and both `payouts` and the `financial_accounts` row it lands in do. ' +
+      'Domestic only while those agree with the company’s own — a fact about the data, not a ' +
+      'guarantee from the schema.',
+  },
+  {
+    file: 'src/modules/ledger/posting.ts',
+    symbol: 'buildLines',
+    basis: 'converted',
+    because:
+      'Where money first enters the books, and the largest instance of Phase 127’s defect — which ' +
+      'Phase 127 could not see, because its list of currency-bearing tables was typed by hand and ' +
+      'left `financial_accounts` out. `bank_transactions` has no currency of its own and inherits ' +
+      'the account’s, so `Math.abs(amountCents)` put euros into a dollar ledger on every ' +
+      'categorised transaction of every foreign account. `toBooks` converts at the rate on the day ' +
+      'the money moved, and `rateFor` refuses rather than guessing when none covers it.',
+  },
+  {
+    file: 'src/modules/ledger/posting.ts',
+    symbol: 'syncLedgerForTransferPair',
+    basis: 'converted',
+    because:
+      'The same conversion for a transfer, plus a refusal the single-leg case does not need: one ' +
+      'magnitude posts to both legs, which is only a movement of money if both accounts hold the ' +
+      'same currency. Between a euro account and a dollar one the bank takes one amount out and ' +
+      'puts a different one in, and that difference is a realised gain nobody has decided to ' +
+      'recognise — so it is two transactions, not one (Phase 117, and Phase 123’s deposit).',
+  },
+  {
+    file: 'src/modules/funds/contributions.ts',
+    symbol: 'recordContribution',
+    basis: 'domestic',
+    because:
+      'A donation, typed against a fund. `contributions` and `funds` carry no currency column — ' +
+      'restriction is about what money may be spent on rather than what it is denominated in ' +
+      '(Phase 26) — so the figure is the company’s own by construction. Newly in reach of this ' +
+      'scan in Phase 128, which is the first time anybody asked.',
+  },
+  {
+    file: 'src/modules/funds/contributions.ts',
+    symbol: 'receivePledge',
+    basis: 'domestic',
+    because:
+      'A promise to give, recognised when it is made rather than when it arrives. Same ' +
+      'construction as the contribution it becomes: no table in the funds module records a ' +
+      'currency, so a pledge is in the company’s own money and there is nothing to convert.',
+  },
+  {
+    file: 'src/modules/payroll/remittance.ts',
+    symbol: 'recordRemittance',
+    basis: 'domestic',
+    because:
+      'Paying over what was withheld. No payroll table carries a currency — a payroll run is ' +
+      'computed by a provider in the jurisdiction the company files in — so the liability and the ' +
+      'payment that clears it are both the books’ money. Reached by this scan only because the ' +
+      'module reads `financial_accounts` to find the bank it pays from.',
+  },
+  {
+    file: 'src/modules/properties/deposits.ts',
+    symbol: 'receiveDeposit',
+    basis: 'domestic',
+    because:
+      'A security deposit is somebody else’s money held against a lease (Phase 23), and neither ' +
+      '`leases` nor the deposit tables record a currency. The figure is the company’s own; the ' +
+      'module reaches this scan through the bank account it is banked into, which does have one.',
+  },
+  {
+    file: 'src/modules/properties/deposits.ts',
+    symbol: 'refundDeposit',
+    basis: 'domestic',
+    because:
+      'Giving the deposit back, against the same liability it created. Same construction and the ' +
+      'same tables: what was held is what is returned, in the currency it was held in, and no ' +
+      'row in the properties module records that as anything but the company’s own.',
+  },
+  {
+    file: 'src/modules/properties/deposits.ts',
+    symbol: 'applyDeposit',
+    basis: 'domestic',
+    because:
+      'Keeping some of the deposit against what the tenant owes, which turns held money into ' +
+      'revenue. The lease it is applied to carries no currency either, so both sides of the entry ' +
+      'are the books’ money and the deduction needs no conversion.',
   },
   {
     file: 'src/modules/ledger/cash-basis.ts',

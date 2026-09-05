@@ -93,7 +93,9 @@ export const FALSIFIERS: readonly Falsifier[] = [
     because:
       'A position rather than a fault, because money legitimately reaches a bank ledger account ' +
       'without a feed row. Proving it can move at all is what says the two sides are really ' +
-      'being read, rather than one number being compared with itself.',
+      'being read, rather than one number being compared with itself — which Phase 128 found ' +
+      'was literally true for a foreign account, where both sides were the same face amount and ' +
+      'the check agreed to the cent while the ledger held euros.',
   },
   {
     key: 'payments.in_transit',

@@ -216,7 +216,9 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
       'refusing receipts that disagree, so the denomination was well defined and nothing wrote it ' +
       'down. Phase 127 did, because the posting needed it. `receiptsCents` is the customers’ own ' +
       'money and wears their currency; `functionalTotalCents` is what the bank account was debited ' +
-      'and is the books’, because a financial account carries no currency of its own.',
+      'and is the books’ — not because a financial account has no currency of its own, which ' +
+      'Phase 127 claimed and Phase 128 found false, but because the ledger is kept in one ' +
+      'currency and that is the side of the pair the ledger took.',
   },
   {
     file: 'src/app/accounting/billing/board.tsx',

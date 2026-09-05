@@ -6,6 +6,7 @@ import {
   ledgerPostingFor,
   recoveryFunctional,
 } from '@/modules/fx/ledger'
+import { carrierProperties } from '@/modules/fx/carriers'
 
 /**
  * Only the company's own money reaches the ledger (Phase 127).
@@ -21,18 +22,16 @@ import {
  * in `tests/functional-postings.test.ts`; this file is what stops a third.
  */
 
-/** The tables whose rows carry a currency of their own (Phase 124, 126, 127). */
-const CURRENCY_TABLES = [
-  'invoices',
-  'bills',
-  'creditNotes',
-  'payments',
-  'retainers',
-  'recurringInvoices',
-  'recurringInvoiceOccurrences',
-  'invoiceWriteOffs',
-  'deposits',
-]
+/**
+ * The tables whose rows carry a currency, from the registry the schema checks.
+ *
+ * This was nine names typed out here (Phase 127). The schema has thirteen, and
+ * the four missing ones — `financial_accounts` above all — took twenty-two
+ * posting sites out of the scan's reach, including the bank feed. It comes from
+ * `fx/carriers.ts` now, whose own test asks `information_schema` whether the
+ * list is complete (Phase 128).
+ */
+const CURRENCY_TABLES = carrierProperties()
 
 /**
  * The file that declares the rule is not scanned by it.
@@ -66,9 +65,13 @@ type Site = { file: string; symbol: string; line: number; expression: string }
  * Every place a named value reaches `debitCents` or `creditCents`, in a module
  * that also reads a currency-bearing table.
  *
- * The narrowing is Phase 123's, and it is what turns 189 sites into 81 in 28
+ * The narrowing is Phase 123's, and it is what turns 189 sites into 103 in 36
  * functions. A payroll run posts money too; nothing in its file can be foreign,
  * so asking it to argue would be noise rather than rigour.
+ *
+ * It read 81 in 28 until Phase 128, because `CURRENCY_TABLES` was a list of
+ * nine names typed by a person and the schema has thirteen. It comes from
+ * `carrierProperties()` now, which is checked against `information_schema`.
  */
 function postingSites(): Site[] {
   const sites: Site[] = []
@@ -93,7 +96,12 @@ function postingSites(): Site[] {
 
 describe('what the ledger will accept', () => {
   it('finds posting sites to check, so a broken scan cannot pass silently', () => {
-    expect(postingSites().length).toBeGreaterThan(50)
+    // Measured, not bounded (Phase 126's lesson about `<= 13` asserted against
+    // a constant of 13). `toBeGreaterThan(50)` was true of the narrowing that
+    // missed four tables and would have stayed true if it missed eight more.
+    // Change the code and this number moves; change it deliberately and say so.
+    expect(postingSites().length).toBe(103)
+    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(36)
   })
 
   it('has a declared basis for every one of them', () => {
