@@ -34,6 +34,12 @@ export default async function ReconcilePage() {
   const finished = history.filter((row) => row.status !== 'in_progress')
   const accountName = new Map(accounts.map((account) => [account.id, account.name]))
 
+  // A statement balance is in the bank's money, and this list spans accounts
+  // (Phase 131). Falling back to the company's own is the honest answer when
+  // the account is gone: the figure is still what it always was, and there is
+  // nothing left to say it was in anything else.
+  const accountCurrency = new Map(accounts.map((account) => [account.id, account.currency]))
+
   return (
     <AppShell
       actor={actor}
@@ -57,7 +63,11 @@ export default async function ReconcilePage() {
                     <span className="tnum text-muted">{row.statementEndDate}</span>
                   </span>
                   <span className="tnum text-xs text-muted">
-                    Statement {formatCents(row.statementEndingBalanceCents)}
+                    Statement{' '}
+                    {formatCents(
+                      row.statementEndingBalanceCents,
+                      accountCurrency.get(row.financialAccountId),
+                    )}
                   </span>
                 </Link>
               </li>
@@ -108,7 +118,10 @@ export default async function ReconcilePage() {
                     </td>
                     <td className="tnum px-4 py-1.5">{row.statementEndDate}</td>
                     <td className="tnum px-4 py-1.5 text-right">
-                      {formatCents(row.statementEndingBalanceCents)}
+                      {formatCents(
+                        row.statementEndingBalanceCents,
+                        accountCurrency.get(row.financialAccountId),
+                      )}
                     </td>
                     <td className="tnum px-4 py-1.5 text-right">{row.clearedCount ?? 0}</td>
                     <td className="px-4 py-1.5">

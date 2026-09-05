@@ -12,6 +12,8 @@ type Transaction = {
   description: string
   merchantName: string | null
   suggestedAccountId: string | null
+  /** The account's, because a transaction has none of its own (Phase 131). */
+  currency: string
 }
 
 type Account = { id: string; number: string; name: string }
@@ -158,7 +160,7 @@ export function ReviewDeck({
       <div className="card p-4">
         <p className="text-xs text-muted">{current.postedDate}</p>
         <p className={`tnum mt-1 text-2xl font-semibold ${outflow ? '' : 'text-positive'}`}>
-          {formatCents(Math.abs(current.amountCents))}
+          {formatCents(Math.abs(current.amountCents), current.currency)}
           <span className="ml-2 text-xs font-normal text-muted">
             {outflow ? 'out' : 'in'}
           </span>

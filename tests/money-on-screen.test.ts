@@ -9,6 +9,8 @@ import {
   nameCollisionFor,
   screenMoneyFor,
 } from '@/modules/fx/on-screen'
+import { FACE_COLUMNS } from '@/modules/fx/comparable'
+import { INHERITED_CURRENCY, denominatedProperties } from '@/modules/fx/inherited'
 
 /**
  * Money reaching a screen says what it is denominated in (Phase 124).
@@ -18,28 +20,48 @@ import {
  * boundary. This does, by reading the **pair** — the client component and the
  * server file that renders it.
  *
- * The rule, checked against the schema rather than assumed: only `invoices`,
- * `bills`, `credit_notes`, `payments` and `retainers` carry a currency column.
- * A figure off one of those is a document's own money and must be shown in its
- * own currency; everything else is the company's, and `formatCents`' default is
+ * The rule: a figure off a row that carries a currency — **or borrows one from
+ * a row it cannot exist without** — is a document's own money and must be shown
+ * wearing it; everything else is the company's, and `formatCents`' default is
  * right for it.
+ *
+ * The second clause is Phase 131's, and both halves of the question were being
+ * answered from lists typed by hand until then. This file said "only
+ * `invoices`, `bills`, `credit_notes`, `payments` and `retainers` carry a
+ * currency column" and named `deposits` among the tables that carry none, which
+ * had been false since Phase 127. Both lists come from registries the schema
+ * checks now.
  */
 
 /**
  * The property names a face column arrives under.
  *
- * `FACE_COLUMNS` (Phase 122) in camelCase: what a row of `invoices`, `bills`,
- * `credit_notes`, `payments` or `retainers` calls its own money.
+ * Seven, typed out, until Phase 131 — which is the same defect as the table
+ * list beside it and was found the same way. Derived now from the two
+ * registries that answer the question: `FACE_COLUMNS` (Phase 122), what a row
+ * with a currency calls its own money, and `INHERITED_CURRENCY` (Phase 131),
+ * what a row that borrows one calls it. That is what brings a reconciliation's
+ * three statement balances into the scan.
  */
 const FACE_PROPERTIES = [
-  'totalCents',
-  'balanceCents',
-  'remainingCents',
-  'unappliedCents',
-  'amountCents',
-  'suspectBalanceCents',
-  'closingBalanceCents',
-]
+  ...new Set([
+    ...FACE_COLUMNS.map((row) => row.column),
+    ...INHERITED_CURRENCY.flatMap((row) => row.faceColumns),
+  ]),
+].map((column) => column.replace(/_(\w)/g, (_, c: string) => c.toUpperCase()))
+
+/**
+ * Names a screen gives a document's money that no column has.
+ *
+ * Two, and neither is derivable because neither is a column: a duplicate-bill
+ * pair's balance and a statement's closing balance are both computed in a
+ * module and named for the screen. They were in the hand-typed list Phase 131
+ * replaced, and they stay — declared as the exception rather than lost in the
+ * derivation.
+ */
+const SCREEN_NAMED_FACE = ['suspectBalanceCents', 'closingBalanceCents']
+
+const ALL_FACE_PROPERTIES = [...FACE_PROPERTIES, ...SCREEN_NAMED_FACE]
 
 function sourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -116,7 +138,7 @@ function carriers(): Carrier[] {
       // some module it imports says nothing about whether *this* row is a
       // document — a drawer count and a job budget both arrive that way. The
       // field name is what ties the figure back to a table that has a currency.
-      if (!cents.some((c) => FACE_PROPERTIES.includes(c))) continue
+      if (!cents.some((c) => ALL_FACE_PROPERTIES.includes(c))) continue
       found.push({
         file,
         type,
@@ -130,22 +152,19 @@ function carriers(): Carrier[] {
 }
 
 describe('what makes money on a screen a document’s rather than the books’', () => {
-  it('names the tables that carry a currency, and no others', () => {
+  it('takes the tables from the registries rather than a list typed here', () => {
     // Phase 124 checked five against the schema and said: "If a sixth ever
-    // grows one, this list is where somebody has to notice." Phase 126 grew
-    // two — a recurring schedule records what it bills in, and an occurrence
-    // records what its period was billed in — and this is where it was
-    // noticed. Proposals, deposits, contributions, purchase orders, time
-    // entries, assets and statement runs still carry none.
-    expect([...DOCUMENT_TABLES]).toEqual([
-      'invoices',
-      'bills',
-      'creditNotes',
-      'payments',
-      'retainers',
-      'recurringInvoices',
-      'recurringInvoiceOccurrences',
-    ])
+    // grows one, this list is where somebody has to notice." Nobody did.
+    // Phase 126 grew two and came back; Phase 127 grew two more and did not;
+    // Phase 128 found four that had been there for years and fixed the sibling
+    // scan instead. Seven against a schema of thirteen, and the eight tables
+    // that borrow a currency were never in reach at all.
+    expect([...DOCUMENT_TABLES]).toEqual([...denominatedProperties()])
+
+    // The two that matter most, pinned by name: neither carries a currency
+    // column, and one of them is the bank feed.
+    expect(DOCUMENT_TABLES).toContain('bankTransactions')
+    expect(DOCUMENT_TABLES).toContain('reconciliations')
   })
 
   it('argues each classification from where the data comes from', () => {
@@ -206,12 +225,27 @@ describe('reading the boundary, both sides', () => {
       for (const prop of carrier.cents.filter((c) => fields.includes(c))) {
         // A one-argument formatCents of one of this type's own money fields
         // takes the 'USD' default, whatever the document actually says.
+        //
+        // Through one `Math.abs`, since Phase 131. The mobile review deck
+        // writes `formatCents(Math.abs(current.amountCents))` and this matched
+        // the bare form only — so bringing the deck into reach would have found
+        // it and passed it. Thirteen call sites in `src/app` wrap money that
+        // way, and a sign is not a denomination: hiding a figure behind a call
+        // the checker cannot read is how a check becomes decorative.
+        //
+        // Both closing brackets, or the `Math.abs` branch matches the fixed
+        // call too — found by this test failing on the repair it had just
+        // asked for.
         for (const m of src.matchAll(
-          new RegExp(`formatCents\\(\\s*(\\w+)\\.${prop}\\s*\\)`, 'g'),
+          new RegExp(
+            `formatCents\\(\\s*(?:Math\\.abs\\(\\s*(\\w+)\\.${prop}\\s*\\)|(\\w+)\\.${prop})\\s*\\)`,
+            'g',
+          ),
         )) {
           // The scan matches by property name, so one file's two different
           // things can collide. An exemption has to argue what the money is.
-          if (nameCollisionFor(row.file, `${m[1]}.${prop}`)) continue
+          const object = m[1] ?? m[2]
+          if (nameCollisionFor(row.file, `${object}.${prop}`)) continue
           wrong.push(`${row.file}:${src.slice(0, m.index!).split('\n').length} ${m[0]}`)
         }
       }

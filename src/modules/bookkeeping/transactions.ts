@@ -116,6 +116,11 @@ export async function listInbox(ctx: ActorContext, filters: InboxFilters = {}) {
       financialAccountId: bankTransactions.financialAccountId,
       financialAccountName: financialAccounts.name,
       financialAccountMask: financialAccounts.mask,
+      // The row's own denomination (Phase 131). `bank_transactions` has no
+      // currency column and takes the account's, and the inbox is not filtered
+      // to one account by default — so two rows of this list can genuinely
+      // disagree, which is what makes it a face amount rather than the books'.
+      currency: financialAccounts.currency,
     })
     .from(bankTransactions)
     .leftJoin(chartAccounts, eq(chartAccounts.id, bankTransactions.chartAccountId))

@@ -50,6 +50,7 @@ export default async function ReviewPage() {
         description: row.description,
         merchantName: row.merchantName,
         suggestedAccountId: row.reviewState === 'suggested' ? row.chartAccountId : null,
+        currency: row.currency,
       }))}
       accounts={accounts.map((account) => ({
         id: account.id,

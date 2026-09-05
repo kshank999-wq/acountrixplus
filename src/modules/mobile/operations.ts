@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { and, eq } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
-import { bankTransactions } from '@/db/schema'
+import { bankTransactions, financialAccounts } from '@/db/schema'
 import type { ActorContext } from '@/modules/tenancy/context'
 import {
   categorize,
@@ -189,8 +189,14 @@ export async function reviewQueue(
       merchantName: bankTransactions.merchantName,
       reviewState: bankTransactions.reviewState,
       chartAccountId: bankTransactions.chartAccountId,
+      // One string per row, and it is what a review screen needs most: the
+      // deck shows an amount and asks somebody to categorise it, and a figure
+      // wearing the wrong symbol is a worse thing to hand a phone than a
+      // slightly larger payload (Phase 131).
+      currency: financialAccounts.currency,
     })
     .from(bankTransactions)
+    .innerJoin(financialAccounts, eq(financialAccounts.id, bankTransactions.financialAccountId))
     .where(
       and(
         eq(bankTransactions.companyId, ctx.companyId),

@@ -11,6 +11,14 @@ import {
 
 type Summary = {
   id: string
+  /**
+   * The account's, because a reconciliation has none of its own (Phase 131).
+   *
+   * Every figure on this screen is off a bank statement or a sum of
+   * transactions on it, so all of them wear this — including the difference,
+   * which is a subtraction of two amounts already in it.
+   */
+  currency: string
   statementStartDate: string
   statementEndDate: string
   statementEndingBalanceCents: number
@@ -135,12 +143,25 @@ export function ReconcileWorkspace({
         </div>
 
         <dl className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Figure label="Opening balance" cents={summary.beginningBalanceCents} />
-          <Figure label="Statement ending" cents={summary.statementEndingBalanceCents} />
-          <Figure label="Cleared balance" cents={live.clearedBalanceCents} />
+          <Figure
+            label="Opening balance"
+            cents={summary.beginningBalanceCents}
+            currency={summary.currency}
+          />
+          <Figure
+            label="Statement ending"
+            cents={summary.statementEndingBalanceCents}
+            currency={summary.currency}
+          />
+          <Figure
+            label="Cleared balance"
+            cents={live.clearedBalanceCents}
+            currency={summary.currency}
+          />
           <Figure
             label="Difference"
             cents={live.differenceCents}
+            currency={summary.currency}
             tone={live.differenceCents === 0 ? 'good' : 'warn'}
           />
         </dl>
@@ -222,7 +243,7 @@ export function ReconcileWorkspace({
                       row.amountCents >= 0 ? 'text-positive' : ''
                     }`}
                   >
-                    {formatCents(row.amountCents)}
+                    {formatCents(row.amountCents, summary.currency)}
                   </span>
                 </label>
               </li>
@@ -250,10 +271,12 @@ export function ReconcileWorkspace({
 function Figure({
   label,
   cents,
+  currency,
   tone,
 }: {
   label: string
   cents: number
+  currency: string
   tone?: 'good' | 'warn'
 }) {
   return (
@@ -264,7 +287,7 @@ function Figure({
           tone === 'good' ? 'text-positive' : tone === 'warn' ? 'text-warning' : ''
         }`}
       >
-        {formatCents(cents)}
+        {formatCents(cents, currency)}
       </dd>
     </div>
   )

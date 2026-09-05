@@ -30,6 +30,16 @@ export type InboxRow = {
   financialAccountId: string
   financialAccountName: string
   financialAccountMask: string | null
+  /**
+   * The account's, because a transaction has none of its own (Phase 131).
+   *
+   * Until this the inbox rendered every row with `formatCents`' default, so a
+   * euro account's statement came out with a dollar sign — on the screen this
+   * application is mostly used through, since Phase 1. Phase 124's scan could
+   * not see it: it asked whether `bank_transactions` carried a currency, and
+   * the answer is no and always will be.
+   */
+  currency: string
 }
 
 export type AccountOption = { id: string; number: string; name: string }
@@ -423,7 +433,7 @@ function RowGroup(props: RowProps) {
 
   const amount = (
     <span className={`tnum font-medium ${isCredit ? 'text-positive' : ''}`}>
-      {formatCents(row.amountCents)}
+      {formatCents(row.amountCents, row.currency)}
     </span>
   )
 

@@ -23,6 +23,18 @@ import { missing } from '@/modules/errors/missing'
 export type ReconciliationSummary = {
   id: string
   financialAccountId: string
+  /**
+   * The account's currency, because a reconciliation has none of its own
+   * (Phase 131).
+   *
+   * Every figure below is off a bank statement or a sum of transactions on
+   * one, and a statement is printed in the bank's money. They were correct and
+   * unlabelled: the session is self-consistent in that currency, and nothing
+   * here ever converted anything. It is carried on the summary rather than
+   * looked up beside it so the screen cannot end up guessing when the lookup
+   * misses.
+   */
+  currency: string
   statementStartDate: string
   statementEndDate: string
   statementEndingBalanceCents: number
@@ -225,6 +237,17 @@ export async function summarize(
 
   if (!session) throw missing('reconciliation')
 
+  // The account's, because the session has no currency of its own (Phase 131).
+  // Read here rather than joined onto the select above, which four functions in
+  // this file share verbatim and none of the others needs.
+  const [account] = await db
+    .select({ currency: financialAccounts.currency })
+    .from(financialAccounts)
+    .where(eq(financialAccounts.id, session.financialAccountId))
+    .limit(1)
+
+  if (!account) throw missing('financialAccount')
+
   const [cleared] = await db
     .select({
       total: sql<string>`coalesce(sum(${bankTransactions.amountCents}), 0)`,
@@ -262,6 +285,7 @@ export async function summarize(
   return {
     id: session.id,
     financialAccountId: session.financialAccountId,
+    currency: account.currency,
     statementStartDate: session.statementStartDate,
     statementEndDate: session.statementEndDate,
     statementEndingBalanceCents: session.statementEndingBalanceCents,

@@ -6080,6 +6080,62 @@ row unmounted the whole section and took the confirmation with it, so the one
 moment somebody most needs to be told was the one moment nothing was said. The
 notice outlives the list now.
 
+### The currency one join away (Phase 131)
+
+ADR 0130 nominated the write-off and deposit residues. Measuring it turned up
+something better: **the scan that decides whether a screen serves foreign money
+was asking a list of seven tables typed by hand, and the schema has thirteen.**
+That is Phase 128's defect one file over — that phase replaced a hand-typed list
+of nine in the posting scan and never looked at its sibling. The prose was worse
+than the list: `on-screen.ts` and its test both said `deposits` carries no
+currency column, and it has since Phase 127 added one in the same migration as
+the write-offs ADR 0130 was pointing at. Phase 110's failure again — a
+declaration argued from a schema fact that is not a fact.
+
+**But widening the list does not fix it, and that is the phase.** `bank_transactions`
+has no currency column and never will; it takes the account's. Phase 128 wrote
+exactly that down in prose and made no rule of it, so three screens were outside
+the scan by construction and had shown a foreign account's money with a dollar
+sign since Phase 1: the transaction inbox, the reconciliation workspace, and the
+mobile review deck.
+
+`INHERITED_CURRENCY` is the rule that sentence should have been. The test is a
+**mandatory** foreign key to a currency carrier — a nullable one is a link, not a
+denomination, which is why a time entry's rate is the company's money whether or
+not it is ever billed. Thirteen tables qualify, asked of `information_schema`,
+and each splits its `%_cents` columns into the parent's money and the books'
+against every such column the table actually has. Three answer *the books'* —
+inventory cost frozen onto an invoice, a remittance measured against a ledger
+balance, and the functional twin Phase 129 put beside a bank transaction — and
+those are the entries that make it a registry rather than a list.
+
+Nothing about the arithmetic changed. A reconciliation session is self-consistent
+in the bank's money and `summarize` converts nothing; every figure was correct and
+unlabelled, which is the failure Phase 124 exists to stop and the one it could not
+reach. `ReconciliationSummary` carries the account's currency now rather than the
+page looking it up beside the figures.
+
+**The scan sees through `Math.abs`.** The deck writes
+`formatCents(Math.abs(current.amountCents))` and the check matched the bare form
+only, so widening the tables alone would have brought the deck into reach and
+still passed it. Thirteen call sites in `src/app` wrap money that way. Writing
+that unwrap immediately caught its own overreach — the new branch matched the
+*repaired* call too, because it stopped at the inner bracket.
+
+Browser-verified against a euro account on seeded data: the inbox reads €300.00,
+€800.00, €500.00 and shows three euro rows beside seventeen dollar ones in the
+same list; a reconciliation on that account reads €0.00 opening, €1,000.00
+statement, €1,000.00 difference with all three transactions in euro; and the deck
+reads €500.00.
+
+The unclassified remainder Phase 124 built moves from 12 to 21 — and that growth
+is the thing being said why for. Nine more pages came into reach (budgets, the
+asset register, dimensions, proposals, the chart of accounts, the takings board)
+and every one shows the company's own money, reached only because a page imports
+a module that touches `bank_transactions` somewhere else. Counting them beats
+writing nine arguments that all say "a ledger balance is the ledger's money" and
+burying the six that say something.
+
 
 ## Deploying
 
@@ -6227,7 +6283,8 @@ Coverage matches what spec §21 asks for:
 | `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `NOT_YET_PROVEN` is empty since Phase 122 retired `banking.shared_ledger_accounts`, the one entry it ever held, and the test refuses to let the list grow |
 | `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
-| `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself |
+| `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
+| `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/ledger-postings.test.ts` | **Only the company's own money reaches the ledger** (Phase 127): reads `src/modules` for every named value passed to `debitCents` or `creditCents`, narrowed to files that also read a currency-bearing table — 189 sites down to 103 in 36 functions. Since Phase 128 that narrowing comes from `carrierProperties()`, derived from the schema; Phase 127's own hand-typed list of nine tables reached only 81 sites in 28 functions, and the four it missed hid the bank feed. Each function declares its basis (`converted`, `domestic`, `ledger`) and argues it from where the number comes from; an undeclared one throws. A site declared `converted` may not post something still named after a document's own amount, which is the shape of both defects this phase fixed. Holds the declarations honest in both directions, and makes a per-expression exemption name itself in its own argument |
 | `tests/functional-postings.test.ts` | **The two writes that posted a face amount** (Phase 127), proved against the database: a €2,500 write-off recovered in full leaves the bad-debt account at zero rather than $250, a part recovery comes off at the rate the write-off was carried at, `badDebtSummary` agrees with the account balance beside it, and banking a €500 receipt clears exactly the $550 it put into Undeposited Funds. Plus the refusal this phase's own scanner turned up: a line typed against an account cannot be added to foreign receipts |
 | `tests/restate.test.ts` | **What a correcting entry would carry** (Phase 130): the difference between what the books hold and what they should, up or down; each part of a split scaled and the parts totalled — Phase 35's rule — so the entry cannot be a cent out against itself; and, when three parts cannot divide evenly, the figure reported is their sum rather than the ideal total, because the sum is what the ledger gets. Refuses the figure already held, a change too small to move a cent, a restatement to nothing, and an entry whose parts do not add up to the whole — that last because scaling would silently decide which side was right. `mayRestate` turns away a transaction still in the inbox and says to categorise it instead |
