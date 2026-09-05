@@ -6136,6 +6136,58 @@ a module that touches `bank_transactions` somewhere else. Counting them beats
 writing nine arguments that all say "a ledger balance is the ledger's money" and
 burying the six that say something.
 
+### Ten answers to one question (Phase 132)
+
+Chosen by the project's own rule, applied to its own record. Phase 31 taught and
+Phase 33 wrote down what a follow-up repeated across consecutive ADRs usually
+means, and Phase 130 acted on it at three. ADR 0127 raised a `RegistryError`
+subclass as a nomination at eight allowlist entries, ADR 0128 made it nine and
+said *"each new registry costs a tenth"*, ADR 0131 was that tenth. Unlike Phase
+130's, this one arrives already measured.
+
+Phase 101 set a device this codebase has used **eleven** times: a registry of
+named data where every entry argues for itself, and a lookup that throws on an
+undeclared key rather than returning `undefined`. Each threw a bare `Error`
+whose sentence explains what to declare — prose, so Phase 119's classifier read
+it as written for a person, so each registry bought itself an exception. Ten
+entries differing only in which registry they name. **An exception granted ten
+times is not an exception; it is a category the model does not have.**
+
+**The eleventh was never in the list.** `policyFor` has thrown
+`No retention policy named X` since Phase 101 and has no allowlist entry — not
+because anybody argued it away, but because its sentence is a fragment, so
+`audienceOf` called it an operator's and the rule never asked. The eleventh
+instance of the device was invisible to the rule about the device. Two stale
+claims came with it: the sixth entry named *"prompts, retention policies, record
+kinds and falsifiers"* as its predecessors, and retention policies were never
+there; and the list's docstring said "fourteen" while the list held **twenty-one**
+— true when Phase 119 wrote it, untrue from Phase 120 onward, and nobody
+counted. It is eleven now, and a test counts it.
+
+`Refusal`'s own prose argues against inventing error classes — *"the ceremony of
+a type system without the use of one"* — and that objection is answered rather
+than dodged: this is **one** class, it **subtracts** ceremony (ten entries go,
+and the twelfth registry costs nothing), and the tripwire that matched these by
+file path and exact message text matches them by shape now. Matching by text was
+brittle in a way that bit twice, in Phase 120 and again in Phase 131.
+
+`Audience` gains a third value, `maintainer`, on Phase 130's precedent for adding
+one rather than bending the nearest: a registry refusal is prose, so the rules
+read it as a person's; and an operator can restart a process or set an
+environment variable, neither of which declares a missing entry.
+
+The line that keeps the rule honest is that six sentences look like this device
+and are not — `Unknown bank provider "x". Registered: mock` and its siblings. A
+registry key is a literal in this repository; a provider key comes from
+configuration, and an operator can produce an unknown one by typing it. They stay
+`operator`, and the test asserts it.
+
+Nothing reaches a screen that did not before: `RegistryError` extends `Error`,
+not `DomainError`, because an undeclared key is a defect in this repository
+rather than something a person did. The phase's own test caught two things while
+being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant is
+`POSTINGS`, and this section citing a count nobody had measured.
+
 
 ## Deploying
 
@@ -6278,7 +6330,8 @@ Coverage matches what spec §21 asks for:
 | `tests/control-account-integrity.test.ts` | Against the database, ADR 0031's failure arriving from both sides (Phase 117): **a receipt against `2000` refused by name**, where before it left money on the balance sheet with no bill, no supplier and no due date, with the same receipt against `2050` still going through and both control accounts agreeing after it; and **an imported invoice and bill carrying the functional value the rest of the system reads** — 520000 and 140000 rather than the zero they defaulted to, which had made every migrated company's aging report show nothing while its balance sheet showed receivables — ending with a migrated company whose ledger and subledger agree on both sides on its first day |
 | `tests/coa-proposal.test.ts` | **Whether a proposed chart account is coherent** (Phase 118), no database and no clock: the eight number bands covering 1000–9999 with no gap and no overlap, each carrying prose arguing for itself, and `rangeFor` throwing on a type nobody declared a home for; the bands holding for **every standard account and every industry pack**, so the screen can never refuse a number the software itself installs; and the refusals — no name, a number that is not four digits, a number the application looks up by name, a number already taken, and an expense numbered among the assets — each quoting the band's argument rather than only reporting a violation |
 | `tests/chart-management.test.ts` | Against the database, **the chart a business can finally add to** (Phase 118): an added account reaching `listAccounts` and `categorizableAccounts` — the pickers that are the point of adding one — with the act recorded against whoever did it; a duplicate refused in a sentence rather than as a unique-index violation; permission and tenancy both enforced, with the same number free in another company; and retiring taking an account out of every picker while leaving it on the chart, keeping its number reserved because the entries behind it still point there, refusing outright for an account the software posts into by number, and recording retirement and return as different acts |
-| `tests/refusal-audience.test.ts` | **Whether a refusal can be read by the person it refused** (Phase 119), reading the source rather than calling anything: the three rules that must all hold for a message to count as prose written for a reader, checked against real sentences from this codebase in both directions; a scan that asserts it found throws at all, so a broken parser cannot pass green on an empty list; **no person-facing sentence left thrown as a bare `Error`** anywhere in `src/modules`, and no entry in the fourteen-strong allowlist that has stopped pointing at a real throw — keyed by sentence rather than line number, because an allowlist that goes stale when somebody adds an import is a trap; and, at the other end, `messageFor` showing a `Refusal` verbatim while still replacing a `Failed query:` leak with the caller's fallback, which is the half of ADR 0074 that was always right |
+| `tests/refusal-audience.test.ts` | **Whether a refusal can be read by the person it refused** (Phase 119), reading the source rather than calling anything: the three rules that must all hold for a message to count as prose written for a reader, checked against real sentences from this codebase in both directions; a scan that asserts it found throws at all, so a broken parser cannot pass green on an empty list; **no person-facing sentence left thrown as a bare `Error`** anywhere in `src/modules`, and no entry in the eleven-strong allowlist that has stopped pointing at a real throw — keyed by sentence rather than line number, because an allowlist that goes stale when somebody adds an import is a trap; and, at the other end, `messageFor` showing a `Refusal` verbatim while still replacing a `Failed query:` leak with the caller's fallback, which is the half of ADR 0074 that was always right |
+| `tests/registry-error.test.ts` | **One answer to how a registry refuses** (Phase 132): `RegistryError` carries the registry and the key beside the sentence — the one thing eleven bare `Error`s never had — and does **not** extend `DomainError`, so `messageFor` still replaces it with the caller's fallback; an undeclared key is a defect in this repository rather than something a person did. The three voices a registry writes in are read as `maintainer` and each argues for itself, while the six `Unknown X provider` sentences beside them stay the operator's they have always been — a registry key is a literal in this repository, a provider key comes from configuration. Then the counts, measured rather than bounded: eleven throws, every one naming a registry constant that really exists in the file it throws from (which caught a `CONTROL_ACCOUNTS` that was called `POSTINGS`), the eleventh being `RETENTION_POLICIES`, which was never in the allowlist at all, and an exception list back down to eleven entries with no registry refusal among them |
 | `tests/missing-record.test.ts` | **What a failed lookup is allowed to say** (Phase 120), no database and no clock: the 45 record kinds named the way a screen names them rather than the way a table does, each recording whether its lookup is tenant-scoped, with `kindFor` throwing on a kind nobody declared; the sentence reading as person-facing by the Phase 119 rules for every kind, saying where the reader is and what to do; and **the disclosure rule made testable** — every declared kind held against all four forbidden phrases in singular and plural, and a tenant-scoped kind's sentence compared against an open one's with the noun elided, because 49 of these lookups sit behind a `scoped()` query and a difference between the two shapes would itself tell an attacker which case they had hit |
 | `tests/integrity-falsifiable.test.ts` | **Every check driven to disagree** (Phase 121): the falsifier map covering the register exactly in both directions, an argument stated for each rather than just an account number, and an account named only where the check reconciles against one; then, for nineteen of the twenty — build books, assert the check agrees, make the change its falsifier declares, assert it disagrees. Thirteen of them had never been asserted to report `agrees: false` by anything before. `NOT_YET_PROVEN` is empty since Phase 122 retired `banking.shared_ledger_accounts`, the one entry it ever held, and the test refuses to let the list grow |
 | `tests/comparable-sums.test.ts` | **No sum adds two currencies together** (Phase 122): reads `src/modules` as source, finds every `sum()` of one of the nine face-amount columns, and fails any that neither groups by currency nor sums the functional twin nor carries an entry in `SAFE_FACE_SUMS` arguing from the code that its rows are provably one currency. Eight were live when it was written, two of them deciding money. Also holds the excuse list honest in both directions — no entry may point at a sum that has moved or gone |

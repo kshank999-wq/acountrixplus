@@ -1,3 +1,5 @@
+import { RegistryError } from '@/modules/errors/registry'
+
 /**
  * Which tables carry a currency, asked of the schema rather than remembered
  * (Phase 128).
@@ -206,10 +208,13 @@ export function carrierFor(table: string): CurrencyCarrier {
   const found = CURRENCY_CARRIERS.find((row) => row.table === table)
 
   if (!found) {
-    throw new Error(
-      `No currency carrier is declared for "${table}". If it has a currency column, declare it ` +
+    throw new RegistryError({
+      registry: 'CURRENCY_CARRIERS',
+      key: table,
+      message:
+        `No currency carrier is declared for "${table}". If it has a currency column, declare it ` +
         'in src/modules/fx/carriers.ts and say whose currency it is; if it does not, do not ask.',
-    )
+    })
   }
 
   return found

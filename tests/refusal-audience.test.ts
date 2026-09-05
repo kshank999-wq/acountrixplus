@@ -6,6 +6,7 @@ import {
   AUDIENCE_RULES,
   audienceOf,
 } from '@/modules/errors/audience'
+import { RegistryError, registryShaped } from '@/modules/errors/registry'
 import { DomainError, Refusal, messageFor } from '@/modules/errors'
 
 /**
@@ -125,6 +126,21 @@ describe('the module layer, read as source', () => {
   // stale the moment somebody adds an import above it is not an allowlist, it
   // is a trap.
   const key = (file: string, message: string) => `${file} ${message}`
+
+  it('leaves no registry refusal thrown as a bare Error', () => {
+    // The rule that replaced ten allowlist entries (Phase 132). A Phase 101
+    // registry refuses an undeclared key with prose explaining what to
+    // declare; `audienceOf` read that as a person's, so each registry bought
+    // itself an exception, and the twelfth would have bought an eleventh.
+    //
+    // Both halves matter. This says a registry-shaped sentence must be a
+    // `RegistryError`; the `maintainer` audience says it must not be shown.
+    const bare = sites
+      .filter((site) => registryShaped(site.message))
+      .map((site) => `${site.file}:${site.line}  ${site.message}`)
+
+    expect(bare).toEqual([])
+  })
 
   it('leaves no person-facing sentence thrown as a bare Error', () => {
     const allowed = new Set(ALLOWED_BARE_REFUSALS.map((row) => key(row.file, row.message)))

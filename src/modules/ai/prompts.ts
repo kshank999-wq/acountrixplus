@@ -4,6 +4,7 @@ import { aiPrompts } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { Refusal } from '@/modules/errors'
+import { RegistryError } from '@/modules/errors/registry'
 
 /**
  * The prompt registry (spec §12: "Central prompt/template registry with
@@ -241,7 +242,13 @@ export async function resolvePrompt(
     (a, b) => b.version - a.version,
   )[0]
 
-  if (!builtIn) throw new Error(`No prompt registered for "${key}"`)
+  if (!builtIn) {
+    throw new RegistryError({
+      registry: 'BUILT_IN_PROMPTS',
+      key,
+      message: `No prompt registered for "${key}"`,
+    })
+  }
 
   return {
     key,

@@ -1,3 +1,5 @@
+import { registryShaped } from './registry'
+
 /**
  * Who a thrown message was written for (Phase 119).
  *
@@ -56,6 +58,24 @@
  * for it. The heuristic got those fourteen wrong — they read as prose because
  * somebody was explaining something, but the explanation is for whoever
  * maintains this, and two of them name environment variables.
+ *
+ * ## What Phase 132 took back out
+ *
+ * The list had grown from fourteen to **twenty-one**, and ten of those were one
+ * pattern: a Phase 101 registry refusing a key nobody declared. Each new
+ * registry cost an entry, and three ADRs said so before anything was done about
+ * it. They are gone, leaving eleven; `RegistryError` and the `maintainer`
+ * audience say what they were saying, once.
+ *
+ * Two claims here were wrong and are corrected rather than left standing. The
+ * sixth of those ten named *"prompts, retention policies, record kinds and
+ * falsifiers"* as the entries before it — **retention policies were never in
+ * the list at all.** `policyFor` has thrown `No retention policy named X` since
+ * Phase 101 and slipped the rule because its sentence is a fragment, so
+ * `audienceOf` called it an operator's and nobody was asked. And the docstring
+ * on the list below still said "fourteen" while the list held twenty-one — the
+ * same kind of number nobody measured that Phase 126 found in
+ * `UNCLASSIFIED_CARRIERS`. It is counted in a test now.
  */
 
 export type Audience =
@@ -63,6 +83,25 @@ export type Audience =
   | 'person'
   /** Written for whoever maintains this, and unsafe or meaningless on a screen. */
   | 'operator'
+  /**
+   * Written for whoever is editing this repository (Phase 132).
+   *
+   * The third value, and it is added rather than bent for the reason Phase 130
+   * added a fifth `Reach`: the two that existed were both wrong for it, and
+   * picking the closer wrong one is how a model stops describing anything.
+   *
+   * A registry refusal is prose — it explains what to declare and where — so
+   * the rules above read it as a person's, correctly by their own lights and
+   * wrongly in fact. It is not an operator's either: an operator can restart a
+   * process or set an environment variable, and neither declares a missing
+   * entry. Only somebody editing the source can, and the eleven sentences that
+   * carry this audience all say so in their own words.
+   *
+   * Ten of the eleven were held as exceptions in `ALLOWED_BARE_REFUSALS`, one
+   * per registry, for thirteen phases. An exception granted ten times is not an
+   * exception; it is a category the model did not have.
+   */
+  | 'maintainer'
 
 /**
  * What makes a thrown message a sentence somebody was meant to read.
@@ -111,8 +150,14 @@ export const AUDIENCE_RULES: readonly AudienceRule[] = [
  * Every rule must hold for a message to count as person-facing: the rules are
  * *evidence that somebody wrote prose*, and any one of them alone is too easy
  * to satisfy by accident.
+ *
+ * A registry's refusal is asked about first, because it is prose and would
+ * otherwise be read as a person's — which is what cost ten allowlist entries
+ * between Phase 101 and Phase 131. `registryShaped` is the more specific
+ * question and so it goes first; the rules below then decide the rest.
  */
 export function audienceOf(message: string): Audience {
+  if (registryShaped(message)) return 'maintainer'
   return AUDIENCE_RULES.every((rule) => rule.holds(message)) ? 'person' : 'operator'
 }
 
@@ -125,6 +170,14 @@ export function audienceOf(message: string): Audience {
  * clicked. Showing them would be the leak ADR 0074 exists to prevent — two of
  * them name environment variables.
  *
+ * **Eleven** after Phase 132. This docstring said "fourteen" — true when Phase
+ * 119 wrote it, and untrue from Phase 120 onward while the list grew to
+ * twenty-one and nobody counted. `tests/registry-error.test.ts` counts it now.
+ * The ten it lost were all one thing and a rule covers them: see
+ * `RegistryError`. What is left is genuinely miscellaneous — configuration,
+ * crypto envelopes, invariants — which is what an exception list should look
+ * like.
+ *
  * Each entry argues for itself rather than merely being listed, on the Phase
  * 101 device, and `tests/refusal-audience.test.ts` fails if one of these sites
  * stops existing or if a new bare person-facing throw appears without an entry
@@ -136,75 +189,6 @@ export const ALLOWED_BARE_REFUSALS: readonly {
   message: string
   because: string
 }[] = [
-  {
-    file: 'src/modules/fx/addition.ts',
-    message:
-      'No addition form is declared for "X". A tripwire that scans for sums has to say which '
-      + 'forms of sum it scans for, or its guarantee is narrower than it reads.',
-    because:
-      'The sixth registry lookup to trip this rule, after prompts, retention policies, record ' +
-      'kinds and falsifiers. It reads as prose because it is explaining a rule to whoever is ' +
-      'adding a third way of summing money — and that person is a maintainer holding a failing ' +
-      'test, not somebody who clicked something. A key nobody declared cannot reach a screen: ' +
-      'the keys are literals in this repository.',
-  },
-  {
-    file: 'src/modules/fx/on-screen.ts',
-    message:
-      'No basis is declared for X in X. Money reaching a screen has to say whether it came off '
-      + 'a document — which carries its own currency — or out of the books, which are in the '
-      + 'company’s. Nothing else can tell the two apart at the call site.',
-    because:
-      'The same shape as its sibling above, and the seventh overall. It fires when a prop type ' +
-      'carrying money has not been classified, which only ever happens while somebody is running ' +
-      'the scan that found it. Phase 125 is the reason to keep it a throw rather than a return: ' +
-      'the classification it demands is exactly what that phase found two phases had got wrong.',
-  },
-  {
-    file: 'src/modules/fx/ledger.ts',
-    message:
-      'No ledger posting basis is declared for X in X. Money reaching debitCents or creditCents '
-      + 'is the company’s own money — say why this is, in src/modules/fx/ledger.ts, or convert it '
-      + 'first.',
-    because:
-      'The eighth, and the same shape as the two above: a registry lookup that refuses rather ' +
-      'than returning undefined, firing only for somebody running the scan it belongs to. Eight ' +
-      'instances of one pattern is now the argument for a RegistryError subclass rather than an ' +
-      'allowlist entry per registry — recorded here as a nomination, because inventing it in the ' +
-      'same commit as the phase that needed it would be a change nobody measured.',
-  },
-  {
-    file: 'src/modules/fx/carriers.ts',
-    message:
-      'No currency carrier is declared for "X". If it has a currency column, declare it in ' +
-      'src/modules/fx/carriers.ts and say whose currency it is; if it does not, do not ask.',
-    because:
-      'The ninth, one phase after the eighth, and the nomination above is now measured rather ' +
-      'than argued: nine allowlist entries say the same thing in nine ways, and each new registry ' +
-      'costs a tenth. This one is addressed to whoever asks about a table the schema has and the ' +
-      'registry has not — which is a developer, since the test that compares the two against ' +
-      'information_schema fails first.',
-  },
-  {
-    file: 'src/modules/fx/inherited.ts',
-    message:
-      'No currency inheritance is declared for "X". If it holds money and cannot exist without a ' +
-      'row that carries a currency, declare it in src/modules/fx/inherited.ts and say which of ' +
-      'its columns are that currency and which are the books’.',
-    because:
-      'The tenth, and it cost exactly what the ninth said the next one would. The nomination is ' +
-      'no longer a prediction: `RegistryError` would replace ten entries that differ only in ' +
-      'which registry they name, and this phase paid the toll rather than building it, because a ' +
-      'phase that invents an abstraction while proving it is needed has measured nothing. The ' +
-      'audience is a developer: the schema comparison beside it fails first and louder.',
-  },
-  {
-    file: 'src/modules/ai/prompts.ts',
-    message: 'No prompt registered for "X"',
-    because:
-      'A prompt key that is not in the registry means code asked for a prompt nobody wrote. ' +
-      'No user action produces it and no user action would fix it.',
-  },
   {
     file: 'src/modules/auth/secret-box.ts',
     message: 'Stored secret is not in a form this version can read.',
@@ -246,41 +230,6 @@ export const ALLOWED_BARE_REFUSALS: readonly {
     because:
       'A handler enqueued without a company is a registration mistake in this codebase. The ' +
       'sentence is addressed to whoever registered the handler, and says so.',
-  },
-  {
-    file: 'src/modules/ledger/as-at.ts',
-    message: 'Nothing declares how a X settles a document.',
-    because:
-      'The Phase 101 registry throw: a settlement kind exists that nothing declared. It is ' +
-      'the "make a new table answer the question" device speaking to the developer adding ' +
-      'the kind, not to anybody who clicked something.',
-  },
-  {
-    file: 'src/modules/ledger/control-account.ts',
-    message: 'Nothing declares how a X moves X.',
-    because:
-      'The same registry device, for what moves a control account. A person cannot declare ' +
-      'a source type; only a developer editing the registry can.',
-  },
-  {
-    file: 'src/modules/integrity/falsifiable.ts',
-    message:
-      'No falsifier is declared for the check "X". A check has to say what would make it ' +
-      'disagree before it is worth running, or it is a green light with nothing behind it.',
-    because:
-      'The registry device a fourth time. Addressed to whoever adds a check to the register ' +
-      'without saying what would make it fail — a developer editing the register, never anybody ' +
-      'looking at a page.',
-  },
-  {
-    file: 'src/modules/errors/missing.ts',
-    message:
-      'No record kind is declared for "X". A lookup has to say what it was looking for before ' +
-      'it can tell somebody it failed.',
-    because:
-      'The registry device a third time, and this one caught itself: Phase 120 committed ' +
-      'missing.ts and the full suite failed on this very rule, because the sentence reads as ' +
-      'prose. It is addressed to whoever adds a record type without declaring its noun.',
   },
   {
     file: 'src/modules/jobs/billing.ts',

@@ -1,4 +1,5 @@
 import { CURRENCY_CARRIERS } from './carriers'
+import { RegistryError } from '@/modules/errors/registry'
 
 /**
  * Money on a row that has no currency of its own (Phase 131).
@@ -270,11 +271,14 @@ export function inheritedFor(table: string): InheritedCurrency {
   const found = INHERITED_CURRENCY.find((row) => row.table === table)
 
   if (!found) {
-    throw new Error(
-      `No currency inheritance is declared for "${table}". If it holds money and cannot exist ` +
+    throw new RegistryError({
+      registry: 'INHERITED_CURRENCY',
+      key: table,
+      message:
+        `No currency inheritance is declared for "${table}". If it holds money and cannot exist ` +
         'without a row that carries a currency, declare it in src/modules/fx/inherited.ts and say ' +
         'which of its columns are that currency and which are the books’.',
-    )
+    })
   }
 
   return found

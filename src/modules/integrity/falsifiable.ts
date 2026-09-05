@@ -1,3 +1,5 @@
+import { RegistryError } from '@/modules/errors/registry'
+
 /**
  * How each check can be made to fail (Phase 121).
  *
@@ -257,10 +259,13 @@ export const FALSIFIERS: readonly Falsifier[] = [
 export function falsifierFor(key: string): Falsifier {
   const falsifier = FALSIFIERS.find((row) => row.key === key)
   if (!falsifier) {
-    throw new Error(
-      `No falsifier is declared for the check "${key}". A check has to say what would make it ` +
+    throw new RegistryError({
+      registry: 'FALSIFIERS',
+      key,
+      message:
+        `No falsifier is declared for the check "${key}". A check has to say what would make it ` +
         'disagree before it is worth running, or it is a green light with nothing behind it.',
-    )
+    })
   }
   return falsifier
 }

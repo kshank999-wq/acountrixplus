@@ -50,6 +50,7 @@
  */
 
 import { formatCents } from '@/lib/money'
+import { RegistryError } from '@/modules/errors/registry'
 
 /** A way a document's outstanding balance goes down. */
 export type SettlementKind = 'payment' | 'credit_note' | 'write_off' | 'retainer'
@@ -117,7 +118,13 @@ export const SETTLEMENT_PATHS: readonly SettlementPath[] = [
 /** The paths, by kind, so a caller cannot invent one. */
 export function pathFor(kind: SettlementKind): SettlementPath {
   const path = SETTLEMENT_PATHS.find((entry) => entry.kind === kind)
-  if (!path) throw new Error(`Nothing declares how a ${kind} settles a document.`)
+  if (!path) {
+    throw new RegistryError({
+      registry: 'SETTLEMENT_PATHS',
+      key: kind,
+      message: `Nothing declares how a ${kind} settles a document.`,
+    })
+  }
   return path
 }
 

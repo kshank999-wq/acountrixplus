@@ -55,6 +55,7 @@
  */
 
 import { Refusal } from '@/modules/errors'
+import { RegistryError } from '@/modules/errors/registry'
 
 /** A syntactic form in which this codebase adds money up. */
 export type AdditionForm = {
@@ -95,10 +96,13 @@ export const ADDITION_FORMS: readonly AdditionForm[] = [
 export function additionFormFor(key: string): AdditionForm {
   const form = ADDITION_FORMS.find((row) => row.key === key)
   if (!form) {
-    throw new Error(
-      `No addition form is declared for "${key}". A tripwire that scans for sums has to say ` +
+    throw new RegistryError({
+      registry: 'ADDITION_FORMS',
+      key,
+      message:
+        `No addition form is declared for "${key}". A tripwire that scans for sums has to say ` +
         'which forms of sum it scans for, or its guarantee is narrower than it reads.',
-    )
+    })
   }
   return form
 }

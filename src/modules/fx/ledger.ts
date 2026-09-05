@@ -1,3 +1,5 @@
+import { RegistryError } from '@/modules/errors/registry'
+
 /**
  * What money the ledger will accept (Phase 127).
  *
@@ -490,11 +492,14 @@ export function ledgerPostingFor(file: string, symbol: string): LedgerPosting {
   const found = LEDGER_POSTINGS.find((row) => row.file === file && row.symbol === symbol)
 
   if (!found) {
-    throw new Error(
-      `No ledger posting basis is declared for ${symbol} in ${file}. ` +
+    throw new RegistryError({
+      registry: 'LEDGER_POSTINGS',
+      key: `${file}:${symbol}`,
+      message:
+        `No ledger posting basis is declared for ${symbol} in ${file}. ` +
         'Money reaching debitCents or creditCents is the company’s own money — say why this ' +
         'is, in src/modules/fx/ledger.ts, or convert it first.',
-    )
+    })
   }
 
   return found

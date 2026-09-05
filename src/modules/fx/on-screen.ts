@@ -1,4 +1,5 @@
 import { denominatedProperties } from './inherited'
+import { RegistryError } from '@/modules/errors/registry'
 
 /**
  * Money on a screen, and what it is denominated in (Phase 124).
@@ -418,11 +419,14 @@ export function nameCollisionFor(file: string, expression: string): NameCollisio
 export function screenMoneyFor(file: string, type: string): ScreenMoney {
   const found = SCREEN_MONEY.find((row) => row.file === file && row.type === type)
   if (!found) {
-    throw new Error(
-      `No basis is declared for ${type} in ${file}. Money reaching a screen has to say whether ` +
+    throw new RegistryError({
+      registry: 'SCREEN_MONEY',
+      key: `${file}:${type}`,
+      message:
+        `No basis is declared for ${type} in ${file}. Money reaching a screen has to say whether ` +
         'it came off a document — which carries its own currency — or out of the books, which ' +
         'are in the company’s. Nothing else can tell the two apart at the call site.',
-    )
+    })
   }
   return found
 }

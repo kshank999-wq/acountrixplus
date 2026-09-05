@@ -1,4 +1,5 @@
 import { Refusal } from './index'
+import { RegistryError } from './registry'
 
 /**
  * What "not found" means, and why it must not say more (Phase 120).
@@ -148,10 +149,13 @@ export const RECORD_KINDS: readonly RecordKind[] = [
 export function kindFor(key: string): RecordKind {
   const kind = RECORD_KINDS.find((row) => row.key === key)
   if (!kind) {
-    throw new Error(
-      `No record kind is declared for "${key}". A lookup has to say what it was looking for ` +
+    throw new RegistryError({
+      registry: 'RECORD_KINDS',
+      key,
+      message:
+        `No record kind is declared for "${key}". A lookup has to say what it was looking for ` +
         'before it can tell somebody it failed.',
-    )
+    })
   }
   return kind
 }

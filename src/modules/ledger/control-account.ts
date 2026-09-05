@@ -49,6 +49,7 @@
  */
 
 import { formatCents } from '@/lib/money'
+import { RegistryError } from '@/modules/errors/registry'
 
 /** The two accounts that summarise a subledger of documents. */
 export type ControlAccount = 'receivables' | 'payables'
@@ -123,7 +124,11 @@ export function postingsFor(account: ControlAccount): Posting[] {
 export function signFor(account: ControlAccount, kind: DocumentKind): 1 | -1 {
   const posting = postingsFor(account).find((row) => row.kind === kind)
   if (!posting) {
-    throw new Error(`Nothing declares how a ${kind} moves ${account}.`)
+    throw new RegistryError({
+      registry: 'POSTINGS',
+      key: `${account}/${kind}`,
+      message: `Nothing declares how a ${kind} moves ${account}.`,
+    })
   }
   return posting.direction === 'increases' ? 1 : -1
 }

@@ -1,3 +1,5 @@
+import { RegistryError } from '@/modules/errors/registry'
+
 /**
  * What the application keeps, for how long, and why (spec §19: "Backups,
  * point-in-time recovery strategy, **retention policy**, and tested restore
@@ -241,7 +243,16 @@ export const NEVER_SWEPT = [
 
 export function policyFor(kind: RetentionKind): RetentionPolicy {
   const policy = RETENTION_POLICIES.find((entry) => entry.kind === kind)
-  if (!policy) throw new Error(`No retention policy named ${kind}`)
+  if (!policy) {
+    // The eleventh registry lookup, and the one that was never in the
+    // allowlist (Phase 132): its sentence is a fragment, so `audienceOf` read
+    // it as an operator's and the rule about this device never asked.
+    throw new RegistryError({
+      registry: 'RETENTION_POLICIES',
+      key: kind,
+      message: `No retention policy named ${kind}`,
+    })
+  }
   return policy
 }
 
