@@ -101,7 +101,7 @@ describe('the register names every check there is (Phase 33)', () => {
     }
   })
 
-  it('classifies the three positions that legitimately differ as positions', () => {
+  it('classifies every position that legitimately differs as a position', () => {
     const positions = INTEGRITY_CHECKS.filter((check) => check.severity === 'position').map(
       (check) => check.key,
     )
@@ -116,6 +116,12 @@ describe('the register names every check there is (Phase 33)', () => {
       // recorded against an invoice moves the ledger with no feed row, and
       // rows still in the inbox have not posted (Phase 40).
       'banking.cash_tie_out',
+      // A currency can genuinely sit at parity on the day money moved, so a
+      // correctly posted foreign transaction and one posted at its face value
+      // look identical — and the rate table cannot settle it, because the
+      // answer it gives today is not the answer that was used (Phase 129).
+      // Worth a person's eye, never an accusation (Phase 130 acts on it).
+      'banking.posted_at_face',
       'funds.untagged_contributions',
       // A parent company and its subsidiary genuinely may share an accounts
       // inbox, so two customers on one address is ambiguous rather than broken
@@ -204,6 +210,10 @@ describe('running the checks (Phase 33)', () => {
       // `banking.shared_ledger_accounts` was ungated here too until Phase 122
       // retired it.
       'banking.cash_tie_out',
+      // Ungated for the same reason as its sibling above: any company can hold
+      // a foreign account, and the check finds nothing until one of its
+      // transactions went into the books at its face value (Phase 129).
+      'banking.posted_at_face',
       'ledger.payables',
       'ledger.receivables',
       // Ungated: any company can enter the same customer twice, and the check
