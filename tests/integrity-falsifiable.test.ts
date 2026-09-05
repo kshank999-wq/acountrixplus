@@ -61,6 +61,34 @@ const SCENARIOS: Record<string, Scenario> = {
   'ledger.payables': {},
   'banking.cash_tie_out': {},
   'payments.in_transit': {},
+  'banking.posted_at_face': {
+    // No ledger side to journal against: the check reads what a transaction
+    // records about its own posting. Before Phase 129 wrote the rate down,
+    // this state was indistinguishable from a correct one.
+    falsify: async (fixture) => {
+      const { createFinancialAccount } = await import('@/modules/banking/accounts')
+      const { bankTransactions } = await import('@/db/schema')
+      const account = await createFinancialAccount(fixture.ctx, {
+        name: 'Frankfurt Current',
+        kind: 'checking',
+        currency: 'EUR',
+      })
+
+      // €500 that went into a dollar ledger as $500 — Phase 128's defect,
+      // written onto the row the way the backfill records real history.
+      await db.insert(bankTransactions).values({
+        companyId: fixture.companyId,
+        financialAccountId: account.id,
+        providerTransactionId: 'falsify-eur',
+        postedDate: '2026-04-02',
+        amountCents: -50_000,
+        description: 'Werkzeug GmbH',
+        reviewState: 'categorized',
+        rateMillionths: 1_000_000,
+        functionalAmountCents: -50_000,
+      })
+    },
+  },
   'payables.duplicate_bills': {
     // The one check with nothing on its right-hand side, so the falsifier is
     // the suspicion itself.
@@ -212,11 +240,15 @@ describe('every check declares how it can fail', () => {
   })
 
   it('names an account only where the check reconciles against one', () => {
-    // The three that compare a count, a column against its rows, or two
-    // subledgers carry their falsifier entirely in prose.
+    // The ones that compare a count, a column against its rows, two
+    // subledgers, or a row against itself carry their falsifier entirely in
+    // prose. Four until Phase 129 added `banking.posted_at_face`, which reads
+    // what a transaction records about its own posting and so has no ledger
+    // side to journal against.
     const withoutAccount = FALSIFIERS.filter((row) => row.account === null).map((row) => row.key)
     expect(withoutAccount.sort()).toEqual(
       [
+        'banking.posted_at_face',
         'funds.untagged_contributions',
         'parties.shared_addresses',
         'payables.duplicate_bills',

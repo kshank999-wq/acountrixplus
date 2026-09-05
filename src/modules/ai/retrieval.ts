@@ -6,6 +6,7 @@ import {
   companies,
   companyProfiles,
   serviceItems,
+  financialAccounts,
 } from '@/db/schema'
 import { can, scoped, type ActorContext } from '@/modules/tenancy/context'
 import type { Permission } from '@/modules/permissions'
@@ -120,7 +121,20 @@ export async function recentTransactions(
 
 export type InboxShape = {
   uncategorizedCount: number
-  uncategorizedTotalCents: number
+  /**
+   * What is waiting, one line per currency (Phase 129).
+   *
+   * A single total was a sum of `amount_cents` across every account, and an
+   * account can be foreign — so a company banking in euros and dollars got the
+   * two added together and handed to the assistant, which stated the result
+   * with a dollar sign. Phase 122's defect, reaching a person through a
+   * sentence rather than a report.
+   *
+   * Grouping is the only honest repair here: these rows have **not posted**,
+   * so unlike everywhere else there is no functional twin to sum instead. A
+   * transaction still in the inbox has been converted by nobody.
+   */
+  uncategorizedTotals: Array<{ currency: string; cents: number }>
   topMerchants: Array<{ name: string; count: number }>
 }
 
@@ -130,12 +144,17 @@ export async function inboxShape(ctx: ActorContext): Promise<InboxShape> {
     ctx,
     'bookkeeping:view',
     async () => {
-      const [totals] = await db
+      const totals = await db
         .select({
+          currency: financialAccounts.currency,
           count: sql<string>`count(*)`,
           total: sql<string>`coalesce(sum(${bankTransactions.amountCents}), 0)`,
         })
         .from(bankTransactions)
+        .innerJoin(
+          financialAccounts,
+          eq(financialAccounts.id, bankTransactions.financialAccountId),
+        )
         .where(
           scoped(
             ctx,
@@ -143,6 +162,8 @@ export async function inboxShape(ctx: ActorContext): Promise<InboxShape> {
             inArray(bankTransactions.reviewState, ['new', 'suggested', 'needs_review']),
           ),
         )
+        .groupBy(financialAccounts.currency)
+        .orderBy(financialAccounts.currency)
 
       const merchants = await db
         .select({
@@ -162,12 +183,15 @@ export async function inboxShape(ctx: ActorContext): Promise<InboxShape> {
         .limit(5)
 
       return {
-        uncategorizedCount: Number(totals?.count ?? 0),
-        uncategorizedTotalCents: Number(totals?.total ?? 0),
+        uncategorizedCount: totals.reduce((sum, row) => sum + Number(row.count), 0),
+        uncategorizedTotals: totals.map((row) => ({
+          currency: row.currency,
+          cents: Number(row.total),
+        })),
         topMerchants: merchants.map((row) => ({ name: row.name, count: Number(row.count) })),
       }
     },
-    { uncategorizedCount: 0, uncategorizedTotalCents: 0, topMerchants: [] },
+    { uncategorizedCount: 0, uncategorizedTotals: [], topMerchants: [] },
   )
 }
 

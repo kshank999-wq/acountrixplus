@@ -10,10 +10,12 @@ import {
   jsonb,
   unique,
   index,
+  check,
   pgEnum,
   foreignKey,
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import { companies } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { reconciliations } from './ledger'
@@ -157,10 +159,38 @@ export const bankTransactions = pgTable(
      */
     raw: jsonb('raw').$type<Record<string, unknown>>(),
 
+    /**
+     * What this movement went into the books at, and the rate that made it so
+     * (Phase 129).
+     *
+     * Null until it posts, and then **fixed**. A bank transaction has no
+     * currency of its own — it inherits the account's — so this is the
+     * conversion rather than the denomination, and it is the pair every other
+     * moving amount has carried since Phase 116.
+     *
+     * Written rather than re-derived because `rateFor` walks backwards to the
+     * most recent rate on or before a date: entering a rate for a day that had
+     * none changes what an *older* question resolves to. Since posting is
+     * idempotent by voiding and re-posting, re-deriving meant re-categorising a
+     * transaction silently restated what it was worth — a change to the books
+     * with no reason and no date, which Phase 70 settled is not allowed.
+     */
+    rateMillionths: bigint('rate_millionths', { mode: 'number' }),
+    functionalAmountCents: bigint('functional_amount_cents', { mode: 'number' }),
+
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    // Both or neither. A functional amount with no rate cannot be checked
+    // against anything, and a rate with no amount was never used to post. A
+    // stored rate is positive: zero would put a real bank movement into the
+    // books as nothing at all.
+    ratePairSane: check(
+      'bank_transactions_rate_pair_sane',
+      sql`(${t.rateMillionths} is null and ${t.functionalAmountCents} is null)
+          or (${t.rateMillionths} > 0 and ${t.functionalAmountCents} is not null)`,
+    ),
     // The dedup guarantee.
     dedupUnique: unique('bank_transactions_dedup_unique').on(
       t.companyId,

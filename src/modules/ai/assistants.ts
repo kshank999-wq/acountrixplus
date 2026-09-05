@@ -306,8 +306,22 @@ export async function businessInsights(ctx: ActorContext) {
     .from(bills)
     .where(scoped(ctx, bills, sql`${bills.status} <> 'void'`))
 
+  /**
+   * Cash, in the company's own money (Phase 129).
+   *
+   * This summed `amount_cents` across every account, and an account can be
+   * foreign — so on multi-currency books the figure handed to the assistant was
+   * euros added to dollars, and it advised the business on that. The same
+   * defect Phase 122 fixed two queries above for invoices and bills; the cash
+   * line survived because `bank_transactions` had no functional twin to switch
+   * to until this phase gave it one.
+   *
+   * Summing the twin means only what has **posted** counts, which is the
+   * honest reading: a transaction still in the inbox has been converted by
+   * nobody, so there is no rate at which it could join a total.
+   */
   const [cash] = await db
-    .select({ total: sql<string>`coalesce(sum(${bankTransactions.amountCents}), 0)` })
+    .select({ total: sql<string>`coalesce(sum(${bankTransactions.functionalAmountCents}), 0)` })
     .from(bankTransactions)
     .where(scoped(ctx, bankTransactions))
 

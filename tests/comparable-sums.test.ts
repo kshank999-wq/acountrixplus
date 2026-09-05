@@ -124,14 +124,14 @@ describe('the module layer, read as source', () => {
     expect(blind).toEqual([])
   })
 
-  it('keeps every excused sum pointing at one that is still there', () => {
-    const present = new Set(sites.map((site) => `${site.file}:${site.symbol}`))
-    const stale = SAFE_FACE_SUMS.filter(
-      (row) => !present.has(`${row.file}:${row.symbol}`),
-    ).map((row) => `${row.file}:${row.symbol}`)
-
-    expect(stale).toEqual([])
-  })
+  /**
+   * Staleness moved to `money-addition.test.ts` in Phase 129.
+   *
+   * `SAFE_FACE_SUMS` excuses sites in both forms, and this scan reads only the
+   * SQL one — so it reported a live `reduce` excuse as stale, which meant a
+   * reduce could not be excused here at all. The scan that sees both forms is
+   * the only one that can tell whether an entry still points at something.
+   */
 
   it('argues each excuse from the code, not from what the thing is like', () => {
     for (const row of SAFE_FACE_SUMS) {

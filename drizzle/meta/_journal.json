@@ -540,6 +540,13 @@
       "when": 1788826408000,
       "tag": "0076_phase127_ledger_functional",
       "breakpoints": true
+    },
+    {
+      "idx": 77,
+      "version": "7",
+      "when": 1788912808000,
+      "tag": "0077_phase129_posted_rate",
+      "breakpoints": true
     }
   ]
 }

@@ -3,7 +3,7 @@ import type { ActorContext } from '@/modules/tenancy/context'
 import type { IndustryModule } from '@/modules/coa/industry'
 
 import { giftCardPosition, payoutPosition } from '@/modules/appointments/reporting'
-import { cashTieOut } from '@/modules/banking/accounts'
+import { cashTieOut, postedAtFace } from '@/modules/banking/accounts'
 import { reconcileFixedAssets } from '@/modules/assets/service'
 import { netAssets } from '@/modules/funds/reporting'
 import { reconcileInventory } from '@/modules/inventory/service'
@@ -288,6 +288,54 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
           }
           return parts.length > 0 ? parts.join('; ') : undefined
         })(),
+      }
+    },
+  },
+  {
+    key: 'banking.posted_at_face',
+    label: 'Foreign transactions that went into the books at their face value',
+    compares: 'Σ foreign bank transactions whose functional amount equals their own against nothing',
+    module: null,
+    // A position, not a fault, and the reason is that no fact can settle it.
+    // A currency can sit at parity on the day money moved, and then a correct
+    // row is indistinguishable from a damaged one — the rate table cannot be
+    // asked, because the answer it gives today is not the answer that was
+    // used. Reporting a suspicion as a broken book is how a check gets
+    // ignored; this says "look at these", which is true.
+    severity: 'position',
+    // A count, like `parties.shared_addresses` and for the same reason. The
+    // amounts are each in whatever currency their account is held in, so no
+    // total exists: adding them is the defect Phase 122 built `comparable-sums`
+    // to stop, and converting them needs the rate this check exists to doubt.
+    // Rendered as money it read "$0.00 apart" — which looks exactly like
+    // agreement, on a check that is disagreeing.
+    unit: 'count',
+    meaning:
+      'Until Phase 128 every categorised transaction on a foreign bank account posted its face ' +
+      'amount into a ledger kept in the company’s own money — €500 of cost entered as $500. ' +
+      'Phase 129 wrote the rate down, which is what makes those rows findable at all: before it, ' +
+      'a face-posted transaction and a correctly converted one looked identical. Nothing here is ' +
+      'proof, and nothing here is repaired automatically — putting a posting right is a ' +
+      'correction with a date and a reason, and it belongs to whoever owns the books.',
+    asAt: { reach: 'today_only', because: 'Verified: it reads what each transaction currently records as its posted rate, which is a fact about the row as it stands rather than a balance at a date, so a past date would be answered from today’s rows.' },
+    run: async (ctx) => {
+      const rows = await postedAtFace(ctx)
+
+      return {
+        agrees: rows.length === 0,
+        // How many rows, not how much money — see `unit` above.
+        leftCents: rows.length,
+        rightCents: 0,
+        detail:
+          rows.length === 0
+            ? undefined
+            : `${rows.length} transaction${rows.length === 1 ? '' : 's'} on ` +
+              `${[...new Set(rows.map((row) => row.accountName))].join(', ')} — ` +
+              rows
+                .slice(0, 3)
+                .map((row) => `${row.postedDate} ${formatCents(row.amountCents, row.currency)}`)
+                .join(', ') +
+              (rows.length > 3 ? ` and ${rows.length - 3} more` : ''),
       }
     },
   },

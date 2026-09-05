@@ -354,7 +354,10 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
       'left `financial_accounts` out. `bank_transactions` has no currency of its own and inherits ' +
       'the account’s, so `Math.abs(amountCents)` put euros into a dollar ledger on every ' +
       'categorised transaction of every foreign account. `toBooks` converts at the rate on the day ' +
-      'the money moved, and `rateFor` refuses rather than guessing when none covers it.',
+      'the money moved, and `rateFor` refuses rather than guessing when none covers it. Since ' +
+      'Phase 129 that rate is **read** from the transaction when it has already posted, and only ' +
+      'asked for once: posting is idempotent by voiding and re-posting, so re-deriving it made ' +
+      're-categorising silently restate what the movement was worth.',
   },
   {
     file: 'src/modules/ledger/posting.ts',

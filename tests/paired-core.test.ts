@@ -67,9 +67,11 @@ describe('why nothing may be recomputed', () => {
 describe('the registry', () => {
   it('names a pair for every table that carries one', () => {
     const tables = [...new Set(PAIRED_COLUMNS.map((pair) => pair.table))].sort()
-    // Seven since Phase 127 gave write-offs and deposits the functional twins
-    // their two writes had no figure to post without.
+    // Eight since Phase 129 gave `bank_transactions` the pair it was the last
+    // money reaching the ledger without — which is why both the posting and
+    // the tie-out were deriving that rate rather than reading it.
     expect(tables).toEqual([
+      'bank_transactions',
       'bills',
       'credit_notes',
       'deposits',

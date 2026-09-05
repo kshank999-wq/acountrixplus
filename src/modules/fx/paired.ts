@@ -202,6 +202,21 @@ export const PAIRED_COLUMNS: readonly PairedColumns[] = [
       'reason, and the pair matters because `recordPayment` debits that account in functional ' +
       'money — crediting it the face sum left $50 of a €500 receipt in a clearing account.',
   },
+  {
+    table: 'bank_transactions',
+    faceColumn: 'amount_cents',
+    functionalColumn: 'functional_amount_cents',
+    kind: 'fixed',
+    constraint: null,
+    because:
+      'What the statement says against what the books took for it (Phase 129) — the last money ' +
+      'reaching the ledger with no pair beside it. Fixed: a bank movement happens once and is ' +
+      'never partly settled, so neither side walks down. The pair exists because both sides were ' +
+      'being derived instead of read: `rateFor` walks backwards to the most recent rate on or ' +
+      'before a date, so entering a rate for a day that had none changed what an older question ' +
+      'resolved to — and since posting is idempotent by voiding and re-posting, re-categorising a ' +
+      '€500 charge silently turned $550 of cost into $575 with no correction record.',
+  },
 ]
 
 export class PairedColumnsError extends Error {

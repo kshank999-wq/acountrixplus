@@ -116,6 +116,13 @@ Writing the rate down makes it visible, and `banking.posted_at_face` reports it.
 That is the honest half of the repair: a person cannot correct what nothing can
 show them.
 
+It reports a **count**, not a total. The amounts are each in whatever currency
+their account is held in, so no sum of them exists — adding them is the defect
+Phase 122 built `comparable-sums` to stop, and converting them needs the rate
+this check exists to doubt. Rendered as money the first draft read *"$0.00
+apart"*, which looks exactly like agreement on a check that is disagreeing;
+`unit: 'count'` is the field ADR 0094 added for precisely that.
+
 **It is a `position`, not a `fault`.** A currency really can sit at parity on the
 day money moved, and then a correct row looks exactly like a damaged one. No
 fact separates them — the rate table can no longer be asked, because the answer

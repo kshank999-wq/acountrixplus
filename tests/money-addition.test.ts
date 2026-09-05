@@ -7,7 +7,7 @@ import {
   oneCurrencyOf,
   refuseMixedCurrency,
 } from '@/modules/fx/addition'
-import { FACE_COLUMNS, safeFaceSumFor } from '@/modules/fx/comparable'
+import { FACE_COLUMNS, SAFE_FACE_SUMS, safeFaceSumFor } from '@/modules/fx/comparable'
 
 /**
  * Money is added two ways, and both get looked at (Phase 123).
@@ -149,6 +149,20 @@ describe('reading the source in both forms', () => {
       .map((site) => `${site.file}:${site.line} ${site.symbol} — ${site.form} over ${site.what}`)
 
     expect(blind).toEqual([])
+  })
+
+  it('keeps every excused sum pointing at one that is still there', () => {
+    // Lives here rather than beside the SQL scan (Phase 129). `SAFE_FACE_SUMS`
+    // excuses sites in **both** forms, but `comparable-sums` only reads the
+    // SQL one — so it called a perfectly live `reduce` excuse stale, and a
+    // reduce could never be excused at all. Only the scan that sees both forms
+    // can judge whether an entry still points at something.
+    const present = new Set(sites.map((site) => `${site.file}:${site.symbol}`))
+    const stale = SAFE_FACE_SUMS.filter(
+      (row) => !present.has(`${row.file}:${row.symbol}`),
+    ).map((row) => `${row.file}:${row.symbol}`)
+
+    expect(stale).toEqual([])
   })
 })
 

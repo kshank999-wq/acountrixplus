@@ -9,6 +9,7 @@ import type { ActorContext } from '@/modules/tenancy/context'
 import { createJournalEntry, entryForSource, voidJournalEntry, type JournalLineInput } from './journal'
 import { missing } from '@/modules/errors/missing'
 import { bankTransactionFunctional } from '@/modules/fx/carriers'
+import { keptRate } from '@/modules/fx/posted-rate'
 import { rateFor } from '@/modules/fx/service'
 import { Refusal } from '@/modules/errors'
 
@@ -37,6 +38,20 @@ import { Refusal } from '@/modules/errors'
 
 /** Review states whose transactions belong in the ledger. */
 const POSTABLE_STATES = new Set(['categorized', 'reconciled'])
+
+/**
+ * The entry a transaction produces, and what it went into the books at.
+ *
+ * The rate travels back with the lines so the caller can write it down (Phase
+ * 129). Deriving it here and again anywhere else is what let a re-categorised
+ * transaction restate its own cost.
+ */
+type PostedLines = {
+  lines: JournalLineInput[]
+  rateMillionths: number
+  /** Signed the way the statement reads it, matching `amountCents`. */
+  functionalCents: number
+}
 
 /**
  * Brings the ledger in line with a bank transaction's current state.
@@ -72,8 +87,8 @@ export async function syncLedgerForTransaction(
     await voidJournalEntry(ctx, existing.id, exec)
   }
 
-  const lines = await buildLines(ctx, transaction, exec)
-  if (!lines) return { posted: false }
+  const built = await buildLines(ctx, transaction, exec)
+  if (!built) return { posted: false }
 
   const entry = await createJournalEntry(
     ctx,
@@ -83,12 +98,40 @@ export async function syncLedgerForTransaction(
       source: 'bank_transaction',
       sourceType: 'bank_transaction',
       sourceId: transactionId,
-      lines,
+      lines: built.lines,
     },
     exec,
   )
 
+  // Written after the entry exists, so the row never claims a rate for a
+  // posting that failed. On a re-post `rateForPosting` has already handed back
+  // the rate that is here, so this rewrites it with itself.
+  await recordPostedRate(exec, transactionId, {
+    rateMillionths: built.rateMillionths,
+    functionalCents: built.functionalCents,
+  })
+
   return { posted: true, entryId: entry.id }
+}
+
+/**
+ * Writes down what a posting went into the books at (Phase 129).
+ *
+ * Signed the way the statement reads it, so face and functional agree on
+ * direction and a tie-out can add the column up without re-deriving anything.
+ */
+async function recordPostedRate(
+  exec: Executor,
+  transactionId: string,
+  posted: { rateMillionths: number; functionalCents: number },
+): Promise<void> {
+  await exec
+    .update(bankTransactions)
+    .set({
+      rateMillionths: posted.rateMillionths,
+      functionalAmountCents: posted.functionalCents,
+    })
+    .where(eq(bankTransactions.id, transactionId))
 }
 
 /**
@@ -103,7 +146,7 @@ async function buildLines(
   ctx: ActorContext,
   transaction: typeof bankTransactions.$inferSelect,
   exec: Executor,
-): Promise<JournalLineInput[] | null> {
+): Promise<PostedLines | null> {
   if (transaction.isTransfer) return null
   if (!POSTABLE_STATES.has(transaction.reviewState)) return null
 
@@ -133,10 +176,15 @@ async function buildLines(
    * do about it. A domestic account short-circuits at 1,000,000, which is why
    * the multiplication was a no-op for everybody who ever ran this.
    */
-  const toBooks = await booksConverter(ctx, transaction.financialAccountId, transaction.postedDate, exec)
+  const books = await booksConverter(ctx, transaction, exec)
+  const toBooks = books.toBooks
 
   const magnitude = toBooks(Math.abs(transaction.amountCents))
   if (magnitude === 0) return null
+  const posted = {
+    rateMillionths: books.rateMillionths,
+    functionalCents: transaction.amountCents < 0 ? -magnitude : magnitude,
+  }
 
   // A split carries its own category lines; the bank side is one line for the
   // total, which is why the split amounts must sum exactly to the parent.
@@ -184,7 +232,7 @@ async function buildLines(
       ? { chartAccountId: glAccountId, creditCents: magnitude }
       : { chartAccountId: glAccountId, debitCents: magnitude }
 
-    return [...categoryLines, bankLine]
+    return { lines: [...categoryLines, bankLine], ...posted }
   }
 
   if (!transaction.chartAccountId) return null
@@ -196,15 +244,18 @@ async function buildLines(
     costCodeId: transaction.costCodeId,
   }
 
-  return isOutflow
-    ? [
-        { chartAccountId: transaction.chartAccountId, debitCents: magnitude, ...dimensions },
-        { chartAccountId: glAccountId, creditCents: magnitude },
-      ]
-    : [
-        { chartAccountId: glAccountId, debitCents: magnitude },
-        { chartAccountId: transaction.chartAccountId, creditCents: magnitude, ...dimensions },
-      ]
+  return {
+    lines: isOutflow
+      ? [
+          { chartAccountId: transaction.chartAccountId, debitCents: magnitude, ...dimensions },
+          { chartAccountId: glAccountId, creditCents: magnitude },
+        ]
+      : [
+          { chartAccountId: glAccountId, debitCents: magnitude },
+          { chartAccountId: transaction.chartAccountId, creditCents: magnitude, ...dimensions },
+        ],
+    ...posted,
+  }
 }
 
 /**
@@ -275,8 +326,8 @@ export async function syncLedgerForTransferPair(
     )
   }
 
-  const toBooks = await booksConverter(ctx, source.financialAccountId, source.postedDate, exec)
-  const magnitude = toBooks(Math.abs(source.amountCents))
+  const books = await booksConverter(ctx, source, exec)
+  const magnitude = books.toBooks(Math.abs(source.amountCents))
   if (magnitude === 0) return { posted: false }
 
   const sourceGl = await bankGlAccount(source.financialAccountId, exec)
@@ -301,6 +352,17 @@ export async function syncLedgerForTransferPair(
     exec,
   )
 
+  // Both legs, so neither can be re-derived apart from the other (Phase 129).
+  // They are the same money on the same day in the same currency — Phase 128
+  // refuses the pair otherwise — so one rate covers both, signed the way each
+  // statement reads its own side.
+  for (const leg of [source, destination]) {
+    await recordPostedRate(exec, leg.id, {
+      rateMillionths: books.rateMillionths,
+      functionalCents: leg.amountCents < 0 ? -magnitude : magnitude,
+    })
+  }
+
   return { posted: true, entryId: entry.id }
 }
 
@@ -324,20 +386,38 @@ export async function unpostTransaction(
  */
 async function booksConverter(
   ctx: ActorContext,
-  financialAccountId: string,
-  onDate: string,
+  transaction: Pick<
+    typeof bankTransactions.$inferSelect,
+    'financialAccountId' | 'postedDate' | 'rateMillionths'
+  >,
   exec: Executor,
-): Promise<(faceCents: number) => number> {
+): Promise<{ toBooks: (faceCents: number) => number; rateMillionths: number }> {
   const [account] = await exec
     .select({ currency: financialAccounts.currency })
     .from(financialAccounts)
-    .where(eq(financialAccounts.id, financialAccountId))
+    .where(eq(financialAccounts.id, transaction.financialAccountId))
     .limit(1)
 
   if (!account) throw missing('financialAccount')
 
-  const { rateMillionths } = await rateFor(ctx, account.currency, onDate, exec)
-  return (faceCents) => bankTransactionFunctional(faceCents, rateMillionths) as number
+  /**
+   * A rate already recorded wins over anything the table says today (Phase
+   * 129).
+   *
+   * `rateFor` is still asked when nothing has been recorded, and it still
+   * refuses rather than guessing — but it is asked **once**. Re-posting is how
+   * this function is normally reached, since `syncLedgerForTransaction` voids
+   * and rebuilds on every re-categorisation, and re-deriving there silently
+   * restated the books whenever the rate table had grown in between.
+   */
+  const rateMillionths =
+    keptRate(transaction.rateMillionths) ??
+    (await rateFor(ctx, account.currency, transaction.postedDate, exec)).rateMillionths
+
+  return {
+    rateMillionths,
+    toBooks: (faceCents) => bankTransactionFunctional(faceCents, rateMillionths) as number,
+  }
 }
 
 async function accountCurrency(financialAccountId: string, exec: Executor): Promise<string> {

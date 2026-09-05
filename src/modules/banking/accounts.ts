@@ -10,8 +10,8 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { DomainError } from '@/modules/errors'
-import { RateError, functionalCurrency, isForeign, rateFor } from '@/modules/fx/service'
-import { bankTransactionFunctional } from '@/modules/fx/carriers'
+import { functionalCurrency, isForeign } from '@/modules/fx/service'
+import { bookedAtFace } from '@/modules/fx/posted-rate'
 import { bandFor, ledgerNameFor, nextAccountNumber, type FinancialAccountKind } from './numbering'
 
 /**
@@ -637,11 +637,17 @@ async function feedInFunctional(
     return { cents: feedCents, unconvertibleCount: 0 }
   }
 
-  const days = await db
+  const [totals] = await db
     .select({
-      postedDate: bankTransactions.postedDate,
-      cents: sql<string>`sum(${bankTransactions.amountCents})`,
-      rows: sql<string>`count(*)`,
+      // The stored figure, never re-derived (Phase 129). Asking `rateFor`
+      // again answers a question about the rate table as it stands now, and
+      // that is a different question from what this money went into the books
+      // at — they come apart the moment somebody enters a rate for a day that
+      // did not have one, which is the ordinary way the table is kept.
+      cents: sql<string>`coalesce(sum(${bankTransactions.functionalAmountCents}), 0)`,
+      unposted: sql<string>`count(*) filter (
+        where ${bankTransactions.functionalAmountCents} is null
+      )`,
     })
     .from(bankTransactions)
     .where(
@@ -659,28 +665,89 @@ async function feedInFunctional(
         ),
       ),
     )
-    .groupBy(bankTransactions.postedDate)
 
-  let cents = 0
-  let unconvertibleCount = 0
+  const unconvertibleCount = Number(totals?.unposted ?? 0)
 
-  for (const day of days) {
-    let rateMillionths: number
-    try {
-      ;({ rateMillionths } = await rateFor(ctx, account.currency, day.postedDate))
-    } catch (error) {
-      // No rate for that day, so nothing on it reached the ledger either.
-      // Counting the rows rather than guessing a rate is the same answer
-      // `buildLines` gives, and leaves the difference honestly unanswerable.
-      if (!(error instanceof RateError)) throw error
-      unconvertibleCount += Number(day.rows)
-      continue
-    }
-
-    cents += bankTransactionFunctional(Number(day.cents), rateMillionths) as number
+  return {
+    cents: unconvertibleCount > 0 ? null : Number(totals?.cents ?? 0),
+    unconvertibleCount,
   }
+}
 
-  return { cents: unconvertibleCount > 0 ? null : cents, unconvertibleCount }
+/** One transaction whose books value equals its statement value. */
+export type PostedAtFace = {
+  transactionId: string
+  financialAccountId: string
+  accountName: string
+  /** The account's own currency — the one the amount is denominated in. */
+  currency: string
+  postedDate: string
+  description: string
+  amountCents: number
+}
+
+/**
+ * Foreign transactions that went into the books at their face value.
+ *
+ * This is Phase 128's defect read off the rows: euros put into a dollar ledger
+ * as though they were dollars. Every foreign bank transaction posted before
+ * that phase is one of these, and until Phase 129 wrote the rate down there was
+ * no way to tell one from a correctly posted row — which is why ADR 0127 and
+ * ADR 0128 could both only say *we do not repair books already affected*.
+ *
+ * ## Why it reports rather than accuses
+ *
+ * A currency can sit at parity on the day money moved, and then a correct row
+ * looks exactly like a damaged one. No fact separates them: the rate table
+ * cannot be asked, because the answer it gives today is not the answer that was
+ * used. So this names what to look at and a person decides — the honesty
+ * `banking.cash_tie_out` has carried since Phase 40, and the reason both are
+ * `position` rather than `fault`.
+ *
+ * Repairing one is a correction with a date and a reason through Phase 70's
+ * vocabulary. Nothing here changes a posting.
+ */
+export async function postedAtFace(ctx: ActorContext): Promise<PostedAtFace[]> {
+  requirePermission(ctx, 'accounting:view')
+
+  const home = await functionalCurrency(ctx.companyId)
+
+  const rows = await db
+    .select({
+      transactionId: bankTransactions.id,
+      financialAccountId: financialAccounts.id,
+      accountName: financialAccounts.name,
+      currency: financialAccounts.currency,
+      postedDate: bankTransactions.postedDate,
+      description: bankTransactions.description,
+      amountCents: bankTransactions.amountCents,
+      functionalAmountCents: bankTransactions.functionalAmountCents,
+    })
+    .from(bankTransactions)
+    .innerJoin(financialAccounts, eq(financialAccounts.id, bankTransactions.financialAccountId))
+    .where(
+      scoped(
+        ctx,
+        bankTransactions,
+        and(
+          ne(financialAccounts.currency, home),
+          eq(bankTransactions.functionalAmountCents, bankTransactions.amountCents),
+        ),
+      ),
+    )
+    .orderBy(bankTransactions.postedDate)
+
+  // The decision itself stays in the pure core, so the rule this reports on is
+  // the same one the tests state in isolation.
+  return rows
+    .filter((row) =>
+      bookedAtFace({
+        isForeign: isForeign(row.currency, home),
+        amountCents: row.amountCents,
+        functionalAmountCents: row.functionalAmountCents,
+      }),
+    )
+    .map(({ functionalAmountCents: _ignored, ...row }) => row)
 }
 
 /**

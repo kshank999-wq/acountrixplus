@@ -276,13 +276,14 @@ function proposeRule(input: Record<string, unknown>): unknown {
 
 function summarize(input: Record<string, unknown>): unknown {
   const count = Number(input.uncategorizedCount ?? 0)
-  const totalCents = Number(input.uncategorizedTotalCents ?? 0)
+  const totals = (input.uncategorizedTotals as Array<{ currency: string; cents: number }>) ?? []
   const topMerchants = (input.topMerchants as Array<{ name: string; count: number }>) ?? []
 
   const lead =
     count === 0
       ? 'The inbox is clear — everything imported has been categorized.'
-      : `${count} transaction${count === 1 ? '' : 's'} are waiting, worth ${formatCentsPlain(Math.abs(totalCents))} in total.`
+      : `${count} transaction${count === 1 ? '' : 's'} are waiting, worth ` +
+        `${totals.map((row) => formatCentsPlain(Math.abs(row.cents), row.currency)).join(' and ')} in total.`
 
   const detail = topMerchants
     .slice(0, 3)
@@ -452,7 +453,18 @@ function businessInsights(input: Record<string, unknown>): unknown {
   return { insights }
 }
 
-/** Plain money formatting. The lib helper is not importable from a pure module. */
-function formatCentsPlain(cents: number): string {
-  return `$${(cents / 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+/**
+ * Plain money formatting. The lib helper is not importable from a pure module.
+ *
+ * The currency was hardcoded to a dollar sign until Phase 129 — a small
+ * instance of the defect that phase found in the caller, and the reason the
+ * assistant could state a euro figure as dollars without anything noticing.
+ */
+function formatCentsPlain(cents: number, currency = 'USD'): string {
+  return (cents / 100).toLocaleString('en-US', {
+    style: 'currency',
+    currency,
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })
 }

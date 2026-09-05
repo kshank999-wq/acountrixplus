@@ -327,7 +327,13 @@ export async function summarizeInbox(ctx: ActorContext) {
     promptKey: 'bookkeeping.summary',
     values: {
       uncategorizedCount: String(shape.uncategorizedCount),
-      uncategorizedTotal: formatCents(Math.abs(shape.uncategorizedTotalCents)),
+      // One figure per currency, each saying what it is in (Phase 129). A
+      // single total added euros to dollars and the assistant then stated the
+      // result with a dollar sign.
+      uncategorizedTotal:
+        shape.uncategorizedTotals
+          .map((row) => formatCents(Math.abs(row.cents), row.currency))
+          .join(' and ') || formatCents(0),
       topMerchants:
         shape.topMerchants.map((row) => `${row.name} (${row.count})`).join(', ') || '(none)',
     },

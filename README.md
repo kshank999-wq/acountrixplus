@@ -6016,7 +6016,21 @@ its face value was indistinguishable from a correct one. `banking.posted_at_face
 reports them now, which is the honest half of a repair two ADRs had to leave
 open — a person cannot correct what nothing can show them. It is a `position`
 rather than a `fault`, because a currency really can sit at parity and then a
-correct row looks exactly like a damaged one.
+correct row looks exactly like a damaged one, and it reports a **count** rather
+than a total, because the amounts are each in a different currency and rendering
+them as money read "$0.00 apart" on a check that was disagreeing.
+
+Giving `bank_transactions` a functional twin put it into `FACE_COLUMNS`, which
+pointed Phase 122's scanner at five sums nobody had looked at. Three are safe by
+construction and now say so — one reconciliation or one transaction means one
+account, and an account holds one currency. **Two were live defects, both in the
+assistant.** `inboxShape` summed the inbox across every account and the AI stated
+the result with a dollar sign; it reports one figure per currency now, which is
+the only honest repair because a transaction still in the inbox has been
+converted by nobody and so has no twin to sum instead. And `businessInsights`
+handed the assistant a "cash" figure that added euros to dollars — in the very
+function Phase 122 repaired for invoices and bills, whose cash line survived
+because `bank_transactions` had no twin to switch to until now.
 
 
 ## Deploying

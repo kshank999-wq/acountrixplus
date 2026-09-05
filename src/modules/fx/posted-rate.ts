@@ -86,13 +86,28 @@ export function rateForPosting(input: {
   storedRateMillionths: number | null
   currentRateMillionths: number
 }): PostedRate {
-  const stored = input.storedRateMillionths
+  const kept = keptRate(input.storedRateMillionths)
 
-  if (stored !== null && Number.isFinite(stored) && stored > 0) {
-    return { rateMillionths: stored, because: 'kept' }
-  }
+  if (kept !== null) return { rateMillionths: kept, because: 'kept' }
 
   return { rateMillionths: input.currentRateMillionths, because: 'first' }
+}
+
+/**
+ * The recorded rate if there is a usable one, or `null` to go and ask.
+ *
+ * The half of the decision a caller can make *before* fetching today's answer,
+ * which matters because `rateFor` throws when no rate is on file. A transaction
+ * that already posted must not start refusing to re-post just because the rate
+ * it used has since been superseded — or, worse, because the day it moved has
+ * fallen out of reach of the table.
+ */
+export function keptRate(storedRateMillionths: number | null): number | null {
+  const stored = storedRateMillionths
+
+  if (stored === null || !Number.isFinite(stored) || stored <= 0) return null
+
+  return stored
 }
 
 /**

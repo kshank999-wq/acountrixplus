@@ -98,6 +98,17 @@ export const FALSIFIERS: readonly Falsifier[] = [
       'the check agreed to the cent while the ledger held euros.',
   },
   {
+    key: 'banking.posted_at_face',
+    account: null,
+    how: "Set a foreign transaction's functional amount equal to its face amount, which is what every one of them looked like before Phase 128.",
+    because:
+      'The check has no ledger side to journal against — it reads what each transaction records ' +
+      'as its own posted rate. That is the point: before Phase 129 wrote the rate down, a euro ' +
+      'charge put into a dollar ledger at its face value and one converted correctly were the ' +
+      'same row, which is why ADR 0127 and ADR 0128 could only say the damage was unrepairable ' +
+      'rather than show it to anybody.',
+  },
+  {
     key: 'payments.in_transit',
     account: '1250',
     how: 'Post a manual journal entry against 1250 with no captured checkout behind it.',

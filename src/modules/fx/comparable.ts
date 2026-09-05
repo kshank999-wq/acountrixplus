@@ -157,6 +157,15 @@ export const FACE_COLUMNS: readonly FaceColumn[] = [
       'The receipts’ own sum, before other lines and fees. Crediting Undeposited Funds this ' +
       'figure rather than its twin left $50 of a €500 receipt in a clearing account (Phase 127).',
   },
+  {
+    table: 'bank_transactions',
+    column: 'amount_cents',
+    functionalColumn: 'functional_amount_cents',
+    because:
+      'What the statement says, in whatever currency the account is held in — a bank transaction ' +
+      'has no currency of its own and inherits the account’s. The twin is what the books took for ' +
+      'it, written down at the moment of posting since Phase 129 rather than derived twice.',
+  },
 ]
 
 /** The face column a table/column pair names, or null if it is not one. */
@@ -196,6 +205,43 @@ export const SAFE_FACE_SUMS: readonly SafeFaceSum[] = [
       'The same drawer and the same construction: what is in the till now, against what the ' +
       'ledger says is in it. Both sides are counter cash, and counter cash is company currency ' +
       'because nothing on that path ever sets another.',
+  },
+  {
+    file: 'src/modules/banking/accounts.ts',
+    symbol: 'cashTieOut',
+    because:
+      'Verified in the code rather than argued: the sum of `amount_cents` runs inside a loop over ' +
+      '`listFinancialAccounts` and is filtered to one `financial_account_id`, and an account holds ' +
+      'exactly one currency. So `feedCents` is provably a single currency — the account’s — and is ' +
+      'reported beside `currency` for that reason. The figure that is compared against the ledger ' +
+      'is `feedFunctionalCents`, which sums the functional twin, and the register adds *that* one ' +
+      'across accounts precisely because this one may not be.',
+  },
+  {
+    file: 'src/modules/reconciliation/service.ts',
+    symbol: 'summarize',
+    because:
+      'Filtered to one `reconciliation_id`, and `reconciliations.financial_account_id` is not ' +
+      'null — so every row summed belongs to one account, and an account holds one currency. The ' +
+      'figure is then compared against a statement balance for that same account, which is the ' +
+      'only comparison that would make sense in any currency at all.',
+  },
+  {
+    file: 'src/modules/ai/assistants.ts',
+    symbol: 'explainReconciliation',
+    because:
+      'The same query as `summarize` and the same filter — one `reconciliation_id`, therefore one ' +
+      'account, therefore one currency. It exists separately because the assistant explains the ' +
+      'difference in words rather than rendering it in a table.',
+  },
+  {
+    file: 'src/modules/bookkeeping/transactions.ts',
+    symbol: 'splitTransaction',
+    because:
+      'Not a roll-up at all: it sums the split lines of **one** transaction and refuses unless ' +
+      'they equal that transaction’s own `amountCents`. One transaction has one account and so ' +
+      'one currency, and the comparison is against the very face amount the parts came from — ' +
+      'converting either side would be the thing that made them disagree.',
   },
 ]
 
