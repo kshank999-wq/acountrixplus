@@ -136,7 +136,7 @@ describe('a correction that only moves our own records', () => {
   })
 })
 
-describe('the rule the six now share', () => {
+describe('the rule they now share', () => {
   /** The defect: one phrase meaning four things across the screens. */
   it('gives every correction its own verb', () => {
     const verbs = everyCorrection().map((row) => row.verb)
@@ -147,7 +147,17 @@ describe('the rule the six now share', () => {
     const must = everyCorrection().filter((row) => mustSayWhy(row.kind)).map((r) => r.kind).sort()
     const neednt = everyCorrection().filter((row) => !mustSayWhy(row.kind)).map((r) => r.kind).sort()
 
-    expect(must).toEqual(['document.void', 'party.merge', 'payment.void', 'refund.void'])
+    // `posting.restate` joined the first list in Phase 130 without a line
+    // being changed here, which is the point of writing `mustSayWhy` as
+    // `reach !== 'internal'`: a fifth reach has to be argued into silence
+    // rather than falling into it. `restates_the_past` was not, so it asks.
+    expect(must).toEqual([
+      'document.void',
+      'party.merge',
+      'payment.void',
+      'posting.restate',
+      'refund.void',
+    ])
     expect(neednt).toEqual(['approval.withdraw', 'deposit.void'])
   })
 
