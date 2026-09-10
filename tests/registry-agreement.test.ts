@@ -1,5 +1,14 @@
 import { describe, expect, it } from 'vitest'
-import { DENIALS, agreementFor, deniesConversion, withoutQuotations } from '@/modules/fx/agreement'
+import {
+  DENIALS,
+  agreementFor,
+  deniesConversion,
+  tableAgreementFor,
+  withoutQuotations,
+} from '@/modules/fx/agreement'
+import { PAIRED_COLUMNS } from '@/modules/fx/paired'
+import { CURRENCY_CARRIERS } from '@/modules/fx/carriers'
+import { INHERITED_CURRENCY } from '@/modules/fx/inherited'
 import { LEDGER_POSTINGS } from '@/modules/fx/ledger'
 import { BANK_POSTINGS } from '@/modules/fx/bank-side'
 
@@ -173,5 +182,50 @@ describe('what agreementFor refuses', () => {
     // `LEDGER_POSTINGS` has thirty-seven functions and `BANK_POSTINGS` fourteen.
     // A symbol in one alone is not a disagreement; it is a smaller question.
     expect(agreementFor({ symbol: 'createCreditNote', basis: 'converted' }).ok).toBe(true)
+  })
+})
+
+describe('the tables declared in more than one currency registry', () => {
+  const carriers = new Set(CURRENCY_CARRIERS.map((row) => row.table))
+  const inheritors = new Set(INHERITED_CURRENCY.map((row) => row.table))
+  const paired = [...new Set(PAIRED_COLUMNS.map((row) => row.table))]
+
+  it('finds the overlap ADR 0135 first said did not exist', () => {
+    // The claim was "nothing else declares the same key twice", and it was
+    // false — the same class of error this phase exists to catch, committed in
+    // the phase's own document. Measured: fifteen table names in more than one
+    // registry, `invoices` in four.
+    expect(paired.length).toBe(10)
+    expect(carriers.size).toBeGreaterThan(10)
+  })
+
+  it('gives every paired table a currency to convert from', () => {
+    const convertedFromNothing = paired
+      .map((table) => tableAgreementFor({ table, paired: true, carriers, inheritors }))
+      .filter((verdict) => !verdict.ok)
+      .map((verdict) => (verdict.ok ? '' : verdict.why))
+
+    expect(convertedFromNothing).toEqual([])
+  })
+
+  it('refuses a pair on a table with no currency anywhere', () => {
+    const verdict = tableAgreementFor({
+      table: 'audit_events',
+      paired: true,
+      carriers,
+      inheritors,
+    })
+
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.why).toContain('audit_events')
+    expect(verdict.why).toContain('converted from nothing')
+  })
+
+  it('says nothing about a table with no functional twin', () => {
+    // Most tables have no pair, and that is not a disagreement.
+    expect(
+      tableAgreementFor({ table: 'audit_events', paired: false, carriers, inheritors }).ok,
+    ).toBe(true)
   })
 })

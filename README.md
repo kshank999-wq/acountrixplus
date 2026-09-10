@@ -6213,6 +6213,14 @@ implies `converted`**, since a path that converts for the account is producing
 the company's own money by definition. The converse is explicitly *not* claimed,
 and the test says so, or somebody tidying up would "fix" the six.
 
+The overlap turned out wider than this phase's own ADR first claimed. It said
+nothing else declared the same key twice; checking that measured **fifteen table
+names in more than one registry**, `invoices` in four — the same class of error
+the phase exists to stop, committed in the phase's own document. So the rule
+extends: a table with a functional twin must get its currency from somewhere,
+its own column or a mandatory foreign key, because a pair on a table with
+neither is converted from nothing. All ten paired tables satisfy it.
+
 `DENIALS` is three phrases with prose arguing why each is safe to read as a
 denial — a registry rather than a regex in a test, because it decides that a
 sentence a person wrote means the opposite of a declaration beside it. Small on

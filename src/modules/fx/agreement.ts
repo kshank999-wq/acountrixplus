@@ -49,6 +49,28 @@
  * buried in a test.
  */
 
+/**
+ * ## The overlap is wider than the symbols
+ *
+ * ADR 0135 first claimed that nothing else in the repository declares the same
+ * key twice. **That was false**, and it is the same class of error this phase
+ * exists to catch, committed in the phase's own document. Measured: fifteen
+ * table names appear in more than one registry, and `invoices` is in four —
+ * `CURRENCY_CARRIERS`, `FACE_COLUMNS`, `INHERITED_CURRENCY`, `PAIRED_COLUMNS`.
+ *
+ * They are not redundant. Each answers its own question about the table, so
+ * again there is no equality to enforce — but one implication is real:
+ *
+ * > **A table with a functional twin must get its currency from somewhere.**
+ * > `PAIRED_COLUMNS` says a face amount has a counterpart in the company's
+ * > money. That conversion needs a currency to convert *from*, which is either
+ * > the table's own column (`CURRENCY_CARRIERS`) or one it reaches through a
+ * > mandatory foreign key (`INHERITED_CURRENCY`).
+ *
+ * All ten paired tables satisfy it. A future pair on a table with no currency
+ * anywhere would be a functional figure converted from nothing.
+ */
+
 /** What one registry says, put beside what the other says about the same symbol. */
 export type CrossDeclaration = {
   symbol: string
@@ -180,6 +202,35 @@ export function agreementFor(input: CrossDeclaration): Agreement {
             'to one question, and the prose is the one nothing was checking.',
         }
       }
+    }
+  }
+
+  return { ok: true }
+}
+
+/**
+ * Whether a table's declarations across the currency registries can all hold.
+ *
+ * `carriers` and `inheritors` are the table names each registry declares,
+ * passed in rather than imported, so this file stays a core with no dependency
+ * on the three registries it reasons about.
+ */
+export function tableAgreementFor(input: {
+  table: string
+  paired: boolean
+  carriers: ReadonlySet<string>
+  inheritors: ReadonlySet<string>
+}): Agreement {
+  const { table, paired, carriers, inheritors } = input
+
+  if (paired && !carriers.has(table) && !inheritors.has(table)) {
+    return {
+      ok: false,
+      why:
+        `PAIRED_COLUMNS gives ${table} a functional twin, and neither CURRENCY_CARRIERS nor ` +
+        'INHERITED_CURRENCY says where its currency comes from. A functional figure is a face ' +
+        'figure converted from some currency, so a pair on a table that has none is converted ' +
+        'from nothing.',
     }
   }
 

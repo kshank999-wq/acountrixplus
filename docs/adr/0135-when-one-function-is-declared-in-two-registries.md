@@ -107,10 +107,29 @@ declaration is the whole of it. The broader question — whether a `because` is
 *true* — stays unanswerable, and pretending otherwise would produce a check
 nobody trusts.
 
-**It does not reach the other twenty-two registries.** The overlap that exists
-today is `BANK_POSTINGS` × `LEDGER_POSTINGS`. Nothing else in the repository
-declares the same key twice, so there is nothing else to compare; if a third
-registry ever describes these functions, this is where it gets compared.
+**It does not reach every registry.** ~~Nothing else in the repository declares
+the same key twice, so there is nothing else to compare.~~
+
+**That claim was false, and checking it is how it was caught — in this phase's
+own document, which is the same class of error the phase exists to stop.**
+Measured on every key field, not just `symbol`: **fifteen table names appear in
+more than one registry**, and `invoices` is in four — `CURRENCY_CARRIERS`,
+`FACE_COLUMNS`, `INHERITED_CURRENCY`, `PAIRED_COLUMNS`.
+
+So the phase covers that overlap too, with the same shape of rule. The four
+registries answer their own questions about a table and are not made to match,
+but one implication is real:
+
+> **A table with a functional twin must get its currency from somewhere.** A
+> functional figure is a face figure converted *from* something — either the
+> table's own `currency` column, or one it reaches through a mandatory foreign
+> key. A pair on a table with neither is converted from nothing.
+
+All ten paired tables satisfy it, so this one is declared rather than repaired.
+
+What remains genuinely uncovered is the rest: `key`, `kind`, `name` and `column`
+have **no** values in more than one registry, measured, so there is nothing
+there to compare today.
 
 **It does not settle a foreign payout into a foreign account.** Still Phase 133's
 refusal, and now the honest reason `importPayouts` remains `refuses` while its
