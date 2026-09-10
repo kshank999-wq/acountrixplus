@@ -6189,6 +6189,42 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### When one function is declared in two registries (Phase 135)
+
+Not a nomination from an ADR — a defect **Phase 134 introduced**. It made
+`importPayouts` convert and updated that site in `LEDGER_POSTINGS`, and left the
+same function's `BANK_POSTINGS` entry arguing "it still does not". One
+declaration said the figure was converted; the other said it was not. They had
+contradicted each other for a phase.
+
+Nothing noticed because the only assertion on that prose was
+`because.length > 140`, and **a false sentence is exactly as long as a true
+one**. The first framing of this phase was "prose length is not a check", and
+measuring killed it: there are 32 non-length assertions on `because`, mostly on
+*computed* prose which is naturally checkable.
+
+What is checkable is the overlap. **Fourteen symbols are declared in two
+registries** — every `BANK_POSTINGS` entry is also in `LEDGER_POSTINGS` — and
+nothing had ever put the two descriptions side by side. They answer different
+questions and must not be required to match: `basis` is about the figure,
+`handling` about the account, and six rows are correctly `refuses` +
+`converted`. But one implication is real and is now declared: **`converts`
+implies `converted`**, since a path that converts for the account is producing
+the company's own money by definition. The converse is explicitly *not* claimed,
+and the test says so, or somebody tidying up would "fix" the six.
+
+`DENIALS` is three phrases with prose arguing why each is safe to read as a
+denial — a registry rather than a regex in a test, because it decides that a
+sentence a person wrote means the opposite of a declaration beside it. Small on
+purpose: `did not convert` is history, `would not convert` a hypothetical, and
+only the present tense denies.
+
+The check caught the live defect on its first run, then **caught its own
+correction** — the new prose quotes the sentence it corrects, and the denial
+fired on the quotation. Registries here recount their history constantly, so a
+check that cannot tell a quotation from a claim makes the honest entry the
+failing one, which is how a check gets deleted rather than fixed.
+
 ### The account where three currencies met (Phase 134)
 
 ADR 0133 nominated `importPayouts` as the shortest road out of its ten
@@ -6436,6 +6472,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-addition.test.ts` | **Both forms money is added in** (Phase 123): `ADDITION_FORMS` declares the SQL aggregate *and* the JavaScript reduce, each with its pattern and an argument for why it counts, and the scan requires both to be found in the wild so a broken regex cannot pass silently. A reduce over a face column's own property, in a file that reads that column from its own currency-bearing table, must group by currency or sum the functional twin. The file declaring the patterns is excluded from the scan by rule, because a registry of patterns always matches itself. Also covers `oneCurrencyOf` — agree, fall back on empty, refuse and name the currencies in a stable order |
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
+| `tests/registry-agreement.test.ts` | **When one function is declared in two registries** (Phase 135): `BANK_POSTINGS` and `LEDGER_POSTINGS` describe fourteen of the same functions, and nothing had compared the two descriptions. The assertion that caught Phase 134's own defect — `importPayouts` declared `converted` while its sibling entry argued "it still does not" — reported as the sentence a person needs, naming both registries and what they disagree about. `converts` implies `converted` for all four that convert, with the converse **stated as not claimed** so the six correct `refuses` + `converted` rows are not "fixed" by somebody tidying up. And the denial registry: the present tense denies, history does not, a hypothetical does not, and an entry may **quote** the sentence it is correcting — found by this check firing on the correction written to satisfy it |
 | `tests/in-transit-postings.test.ts` | **The same rule against the database** (Phase 134): a euro invoice through the card path end to end. The capture writes down what it actually put through the clearing account — €100.00 at 1.10 debiting $110.00 with a €3.20 fee relieving $3.52 — and **`1250 Payments in Transit` reaches zero** when the payout lands, which is the fact the whole phase turns on. The $10.00 the old way left behind is asserted as a number rather than described, so this is not a check that only ever agrees. The payout records the rate it posted at and what the bank took, Phase 129's shape; the nightly check agrees before and after, where it used to compare a face sum against a converted ledger balance and report the difference in a currency it could not state. And a domestic payment untouched to the cent, because at parity every conversion in the path is the identity |
 | `tests/in-transit-currency.test.ts` | **The account where three currencies met** (Phase 134): the arithmetic that says why `1250 Payments in Transit` could not reach zero on a foreign checkout. The defect stated as a number — charged $110.00 converted and relieved of $5.00 + $95.00 face, keeping $10.00 that is not a balance, a fee or a gain — and zero once all three speak the same money. The bank takes the arrival rate and the clearing account the capture rate, with the gap a realised gain: captured at 1.10 and settled at 1.12, €95 lands as 10640 against 10450 relieved, a gain of 190. **The parts summed rather than the sum converted** — three €3.33 charges give 1098 where their total converts to 1099, and recomputing would leave a correct batch a cent adrift, which reads exactly like a real discrepancy. A domestic payout at exactly the figures it always had, which is why a hundred and thirty phases of card payments are untouched. Refuses a batch holding two currencies as a **matching** error rather than a missing rate, because a processor settles one currency per batch and sending somebody to the rate table would fix the wrong thing; refuses a rate of nothing, inherited from `convert` rather than re-checked. Plus the four cases ported from `payoutReconciliation` when it was retired as Phase 49's class |
 | `tests/bank-side.test.ts` | **The currency of the account money lands in** (Phase 133): `mayPostToBank` lets a domestic account through untouched — the reason this went unnoticed — and refuses a foreign one in a sentence naming the account, both currencies, the act and what to do instead. Then it reads the source for every place money reaches a bank account's ledger account, in both spellings, because the ledger resolves it through a helper and matching only the direct form missed four functions including the bank feed. Nineteen postings in fourteen functions, measured rather than bounded — after eleven and thirteen were written from a grep and from the registry — each with a declared handling, no declaration pointing at code that has moved, and exactly four that convert |
