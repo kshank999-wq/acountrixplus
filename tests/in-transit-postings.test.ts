@@ -42,10 +42,20 @@ beforeEach(async () => {
   })
 })
 
-async function enable() {
+/**
+ * Somewhere for the payout to land.
+ *
+ * Takes a currency since Phase 136. A euro payout has to land in a euro
+ * account: into a dollar account the *bank* does the conversion, at its own
+ * rate, and `mayPostToBank` refuses rather than posting a guess at somebody
+ * else's arithmetic. These tests were written against a dollar account in
+ * Phase 134 and passed, which is what Phase 136 caught.
+ */
+async function enable(currency = 'USD') {
   const bank = await createFinancialAccount(fixture.ctx, {
-    name: 'Business Checking',
+    name: currency === 'USD' ? 'Business Checking' : 'Frankfurt Current',
     kind: 'checking',
+    currency,
     mask: '4471',
   })
 
@@ -86,7 +96,7 @@ const balanceOf = async (number: string) => {
 
 describe('a euro card payment, from charge to bank', () => {
   it('writes down what the capture actually put through the clearing account', async () => {
-    await enable()
+    await enable('EUR')
     const { checkout } = await payEuroInvoiceByCard(10_000)
 
     // €100 at 1.10. The fee is the mock's own, converted at the same rate as
@@ -101,7 +111,7 @@ describe('a euro card payment, from charge to bank', () => {
   })
 
   it('empties the clearing account, which is the whole phase', async () => {
-    const bank = await enable()
+    const bank = await enable('EUR')
     await payEuroInvoiceByCard(10_000)
 
     // Measured, on the mock's own fee schedule: a EUR100.00 charge with a
@@ -129,7 +139,7 @@ describe('a euro card payment, from charge to bank', () => {
   })
 
   it('records the rate the payout posted at, rather than deriving it twice', async () => {
-    await enable()
+    await enable('EUR')
     await payEuroInvoiceByCard(10_000)
     await importPayouts(fixture.ctx)
 
@@ -142,7 +152,7 @@ describe('a euro card payment, from charge to bank', () => {
   })
 
   it('agrees with the nightly check, which used to compare two currencies', async () => {
-    await enable()
+    await enable('EUR')
     await payEuroInvoiceByCard(10_000)
 
     // `heldByProcessor` summed face figures and `balanceForAccount` returns the
@@ -158,6 +168,22 @@ describe('a euro card payment, from charge to bank', () => {
     expect(after.owedCents).toBe(0)
     expect(after.ledgerCents).toBe(0)
     expect(after.agrees).toBe(true)
+  })
+})
+
+describe('a euro payout into a dollar account', () => {
+  it('is refused, because the bank did the conversion and we do not have its rate', async () => {
+    // What Phase 134 shipped and Phase 136 caught. The three tests above were
+    // written against a dollar account and passed: the arithmetic was
+    // self-consistent, and it described something a bank would not do.
+    //
+    // The statement would show whatever the bank's rate produced. Ours is an
+    // estimate of that, so Phase 40's tie-out — which compares each account in
+    // its own currency — would differ by the spread with nothing to name it.
+    await enable('USD')
+    await payEuroInvoiceByCard(10_000)
+
+    await expect(importPayouts(fixture.ctx)).rejects.toThrow(/bank converts that at its own rate/)
   })
 })
 

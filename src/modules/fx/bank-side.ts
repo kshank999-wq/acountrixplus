@@ -72,8 +72,48 @@ export function mayPostToBank(input: {
   accountCurrency: string
   homeCurrency: string
   what: string
+  /**
+   * The currency the money itself is in, when the path knows it (Phase 136).
+   *
+   * Omitted by the paths that do not. Nine of the ten Phase 133 refused have no
+   * field for it — a person typed an amount and chose an account, and nothing
+   * asked what currency the amount was in — so for them the old rule stands and
+   * a foreign account is refused.
+   */
+  moneyCurrency?: string
 }): BankSide {
-  const { accountName, accountCurrency, homeCurrency, what } = input
+  const { accountName, accountCurrency, homeCurrency, what, moneyCurrency } = input
+
+  // The money and the account agree, whatever the books are kept in.
+  //
+  // This is the bank feed's shape, and the feed has been doing it correctly
+  // since Phase 128: `bank_transactions` inherits its currency from
+  // `financial_accounts`, so the money *is* the account's currency, and the
+  // ledger takes the converted figure at a recorded rate. Nothing is unknown.
+  // The statement will show what the feed shows, and Phase 40's tie-out — which
+  // compares each account in its own currency — agrees.
+  if (moneyCurrency !== undefined && !isForeign(moneyCurrency, accountCurrency)) {
+    return { ok: true }
+  }
+
+  // The money and the account disagree, and somebody else did the conversion.
+  //
+  // A €96.80 payout into a dollar account was converted by the *bank*, at the
+  // bank's rate on the bank's terms, and we do not have that rate. Converting
+  // at ours produces an estimate of somebody else's arithmetic: the statement
+  // will show what the bank decided, the ledger will hold what we guessed, and
+  // the tie-out will differ by the spread with nothing to name it.
+  if (moneyCurrency !== undefined && isForeign(moneyCurrency, accountCurrency)) {
+    return {
+      ok: false,
+      why:
+        `${what} would put ${moneyCurrency} into ${accountName}, which is held in ` +
+        `${accountCurrency}. The bank converts that at its own rate on the day, and these books ` +
+        'do not have that rate — so any figure posted here is a guess at somebody else’s ' +
+        `arithmetic, and the statement will not agree with it. Use a ${moneyCurrency} account, or ` +
+        'enter what the bank actually credited as a journal entry that says the rate.',
+    }
+  }
 
   if (!isForeign(accountCurrency, homeCurrency)) return { ok: true }
 
@@ -104,8 +144,21 @@ export function mayPostToBank(input: {
  *
  * There is deliberately no `domestic-only, unchecked` answer. That is what ten of
  * the fourteen were before this phase, and it is the thing being fixed.
+ *
+ * `matched` is Phase 136's, added rather than folded into either neighbour
+ * (Phase 130's rule: argue a new value, do not bend the nearest). A path is
+ * `matched` when it knows the currency the money is in and can therefore tell
+ * two situations apart that `converts` and `refuses` each flatten:
+ *
+ * - the money and the account agree — the bank feed's shape, converted at a
+ *   recorded rate, nothing unknown;
+ * - they disagree — the **bank** converted, at its own rate, and posting ours
+ *   would be a guess at somebody else's arithmetic.
+ *
+ * Calling that `converts` would claim it always posts; calling it `refuses`
+ * would claim it never does. Both are false half the time.
  */
-export type BankPostingHandling = 'converts' | 'refuses'
+export type BankPostingHandling = 'converts' | 'refuses' | 'matched'
 
 export type BankPosting = {
   /** The module, as a repo-relative path. */
@@ -198,16 +251,15 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
   {
     file: 'src/modules/payments/service.ts',
     symbol: 'importPayouts',
-    handling: 'refuses',
+    handling: 'matched',
     because:
-      'What the card processor actually paid into a bank account, and the one entry here that has ' +
-      'moved. Phase 134 made it convert: the bank line takes the payout at the arrival rate and ' +
-      'the clearing account gives up what the capture charged it. So the *figure* is settled — ' +
-      '`LEDGER_POSTINGS` calls it `converted` — and this registry still says `refuses`, because ' +
-      'the remaining question is the **account**. A euro payout into a euro account should not be ' +
-      'converted at all, and nothing yet knows that, so it is refused rather than guessed at. ' +
-      'This entry said "it still does not convert" for a phase after it did, which is what Phase ' +
-      '135 exists to catch.',
+      'What the card processor actually paid into a bank account, and the only entry here that ' +
+      'has moved twice. Phase 134 made the figure convert; Phase 136 made it ask the question ' +
+      'Phase 133 could not, because `payouts.currency` says what the processor sent and no other ' +
+      'path has a field for it. A euro payout into a euro account is the feed’s shape and posts. ' +
+      'A euro payout into a dollar account is refused: the bank converted it at the bank’s rate, ' +
+      'these books do not have that rate, and Phase 40’s tie-out would differ by the spread with ' +
+      'nothing to name it. Phase 134 had those two exactly the wrong way round.'
   },
   {
     file: 'src/modules/receivables/credits.ts',

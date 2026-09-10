@@ -74,11 +74,17 @@ describe('the two registries that describe the same functions', () => {
     expect(converts.length).toBe(4)
     expect(converts.every((pair) => pair.basis === 'converted')).toBe(true)
 
-    // And six are `refuses` + `converted`, which is correct and stated here so
+    // And five are `refuses` + `converted`, which is correct and stated here so
     // that nobody tidying this up turns an implication into an equivalence.
     // The two registries answer different questions: `basis` is about the
     // figure, `handling` is about the account.
-    expect(refusesButConverted.length).toBe(6)
+    //
+    // Six until Phase 136 moved `importPayouts` to `matched` — a third handling
+    // for the one path that knows what currency the money is in, and can tell
+    // "the money and the account agree" from "the bank converted it". This
+    // count moving is Phase 135's device catching Phase 136's change, which is
+    // what it is for.
+    expect(refusesButConverted.length).toBe(5)
   })
 })
 

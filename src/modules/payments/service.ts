@@ -780,6 +780,10 @@ export async function importPayouts(
       settings.payoutFinancialAccountId,
       'banking this payout',
       db,
+      // Phase 136: what the processor said it sent. The only one of Phase 133's
+      // ten that knows, and the difference between a figure we can post and a
+      // guess at the bank's own arithmetic.
+      batch.currency,
     )
 
     const entry = await createJournalEntry(

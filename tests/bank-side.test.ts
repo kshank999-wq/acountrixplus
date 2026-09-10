@@ -157,9 +157,10 @@ describe('every place money reaches a bank account', () => {
     }
   })
 
-  it('counts the four that convert and the ten that do not', () => {
+  it('counts the four that convert, the nine that do not, and the one that asks', () => {
     const converts = BANK_POSTINGS.filter((row) => row.handling === 'converts')
     const refuses = BANK_POSTINGS.filter((row) => row.handling === 'refuses')
+    const matched = BANK_POSTINGS.filter((row) => row.handling === 'matched')
 
     // The four are the bank feed, its transfer pair, its restatement and
     // banking deposits — the whole of what knew, before this phase, which
@@ -170,7 +171,16 @@ describe('every place money reaches a bank account', () => {
       'restatePosting',
       'syncLedgerForTransferPair',
     ])
-    expect(refuses.length).toBe(10)
+    // Nine since Phase 136 moved `importPayouts` to `matched`. It is the only
+    // one of the ten with a field saying what currency the money is in
+    // (`payouts.currency`), so it is the only one that can tell "the money and
+    // the account agree" from "the bank converted it at a rate we do not have".
+    //
+    // The other nine have no such field — a person typed an amount and chose an
+    // account — so a foreign account is still the only question askable, and
+    // the answer is still no.
+    expect(refuses.length).toBe(9)
+    expect(matched.map((row) => row.symbol)).toEqual(['importPayouts'])
   })
 
   it('refuses a posting site nobody declared', () => {

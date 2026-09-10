@@ -32,6 +32,15 @@ export async function bankGlAccountFor(
   financialAccountId: string,
   what: string,
   exec: Executor = db,
+  /**
+   * The currency the money is in, when the caller knows it (Phase 136).
+   *
+   * Only `importPayouts` does: `payouts.currency` is what the processor said it
+   * sent. The other nine have no field for it, so they leave it out and get the
+   * Phase 133 rule — a foreign account refused — which is the honest answer when
+   * nothing knows what currency the amount was in.
+   */
+  moneyCurrency?: string,
 ): Promise<string> {
   const [account] = await exec
     .select({
@@ -50,6 +59,7 @@ export async function bankGlAccountFor(
     accountCurrency: account.currency,
     homeCurrency: await functionalCurrency(ctx.companyId, exec),
     what,
+    moneyCurrency,
   })
 
   // A `Refusal` rather than a bare Error: the sentence names the account, both
