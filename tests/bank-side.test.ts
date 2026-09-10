@@ -157,7 +157,7 @@ describe('every place money reaches a bank account', () => {
     }
   })
 
-  it('counts the four that convert, the nine that do not, and the one that asks', () => {
+  it('counts the four that convert, the five that ask, and the five that do not', () => {
     const converts = BANK_POSTINGS.filter((row) => row.handling === 'converts')
     const refuses = BANK_POSTINGS.filter((row) => row.handling === 'refuses')
     const matched = BANK_POSTINGS.filter((row) => row.handling === 'matched')
@@ -171,16 +171,21 @@ describe('every place money reaches a bank account', () => {
       'restatePosting',
       'syncLedgerForTransferPair',
     ])
-    // Nine since Phase 136 moved `importPayouts` to `matched`. It is the only
-    // one of the ten with a field saying what currency the money is in
-    // (`payouts.currency`), so it is the only one that can tell "the money and
-    // the account agree" from "the bank converted it at a rate we do not have".
+    // Five, and this count has moved twice in one phase. Phase 136 part 1 moved
+    // `importPayouts` to `matched` on the claim that it was the only one of the
+    // ten with a field saying what currency the money is in. Measuring in part 3
+    // found five more reading a currency already — for their own rate lookups —
+    // and four of them safe to wire, because the figure they post to the bank is
+    // struck at the rate on the day the money moved.
     //
-    // The other nine have no such field — a person typed an amount and chose an
-    // account — so a foreign account is still the only question askable, and
-    // the answer is still no.
-    expect(refuses.length).toBe(9)
-    expect(matched.map((row) => row.symbol)).toEqual(['importPayouts'])
+    // The five that remain are the four with no currency anywhere and
+    // `recoverWriteOff`, which has one and posts at the write-off's carried
+    // rate. `withheld` says which is which, and `who-may-ask.test.ts` checks
+    // that against the source rather than believing it.
+    expect(refuses.length).toBe(5)
+    expect(refuses.every((row) => row.withheld !== undefined)).toBe(true)
+    expect(matched.length).toBe(5)
+    expect(matched.some((row) => row.symbol === 'importPayouts')).toBe(true)
   })
 
   it('refuses a posting site nobody declared', () => {

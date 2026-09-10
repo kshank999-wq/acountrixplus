@@ -74,17 +74,21 @@ describe('the two registries that describe the same functions', () => {
     expect(converts.length).toBe(4)
     expect(converts.every((pair) => pair.basis === 'converted')).toBe(true)
 
-    // And five are `refuses` + `converted`, which is correct and stated here so
+    // And one is `refuses` + `converted`, which is correct and stated here so
     // that nobody tidying this up turns an implication into an equivalence.
     // The two registries answer different questions: `basis` is about the
     // figure, `handling` is about the account.
     //
-    // Six until Phase 136 moved `importPayouts` to `matched` — a third handling
-    // for the one path that knows what currency the money is in, and can tell
-    // "the money and the account agree" from "the bank converted it". This
-    // count moving is Phase 135's device catching Phase 136's change, which is
-    // what it is for.
-    expect(refusesButConverted.length).toBe(5)
+    // This count has now moved three times, and each move is Phase 135's device
+    // catching a later change, which is what it is for. Six before Phase 136;
+    // five when part 1 moved `importPayouts` to `matched`; one when part 3
+    // measured four more paths that already held the money's currency and were
+    // never handing it over.
+    //
+    // The survivor is `recoverWriteOff` — it has `writeOff.currency` and still
+    // may not be told it, because the figure it puts on the bank is struck at
+    // the write-off's carried rate rather than the rate on the day.
+    expect(refusesButConverted.map((pair) => pair.symbol)).toEqual(['recoverWriteOff'])
   })
 })
 
@@ -164,10 +168,25 @@ describe('what agreementFor refuses', () => {
     expect(verdict.why).toContain('domestic')
   })
 
-  it('lets a refusing path post a converted figure, which six really do', () => {
+  it('lets a refusing path post a converted figure, which one really does', () => {
     expect(
-      agreementFor({ symbol: 'refundRetainer', handling: 'refuses', basis: 'converted' }).ok,
+      agreementFor({ symbol: 'recoverWriteOff', handling: 'refuses', basis: 'converted' }).ok,
     ).toBe(true)
+  })
+
+  it('holds `matched` to the same implication as `converts`', () => {
+    // Phase 136 part 3 took `matched` from one site to five, so the rule that a
+    // path posting for the account produces the company's own money has to
+    // cover it too — otherwise the new value is a hole in the old check.
+    const verdict = agreementFor({
+      symbol: 'receiveRetainer',
+      handling: 'matched',
+      basis: 'domestic',
+    })
+
+    expect(verdict.ok).toBe(false)
+    if (verdict.ok) return
+    expect(verdict.why).toContain('the money and the account agree')
   })
 
   it('catches the prose denial even when the handlings are consistent', () => {

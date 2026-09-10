@@ -538,6 +538,10 @@ export async function receiveRetainer(
       input.financialAccountId,
       'receiving this retainer',
       tx,
+      // Phase 136 part 3: what the client actually sent. Already read above to
+      // fix the rate the liability is carried at — the guard was simply never
+      // handed it, which is why a euro retainer into a euro account was refused.
+      currency,
     )
 
     const entry = await createJournalEntry(
@@ -1084,6 +1088,10 @@ export async function refundRetainer(
       input.financialAccountId,
       'refunding this retainer',
       tx,
+      // Phase 136 part 3: what the client is owed, and so what leaves the bank.
+      // The comment on `paidCents` above already names why this is safe to ask
+      // — the bank figure is struck at the rate on the day the money moves.
+      retainer.currency,
     )
 
     const entry = await createJournalEntry(

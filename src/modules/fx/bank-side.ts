@@ -1,5 +1,6 @@
 import { RegistryError } from '@/modules/errors/registry'
 import { isForeign } from './rates'
+import type { Withheld } from './asking'
 
 /**
  * The currency of the account money lands in (Phase 133).
@@ -157,6 +158,14 @@ export function mayPostToBank(input: {
  *
  * Calling that `converts` would claim it always posts; calling it `refuses`
  * would claim it never does. Both are false half the time.
+ *
+ * Knowing the currency is necessary and not sufficient. A `matched` path must
+ * also strike its bank line at the rate on the day the money moved, because
+ * that is the figure the statement will show — and `askingFor` measures that
+ * from the source rather than taking the declaration's word for it. Phase 136
+ * shipped with one `matched` path and part 3 measured four more, plus one —
+ * `recoverWriteOff` — that has the currency and fails the rate test, and is
+ * left refusing with the reason recorded.
  */
 export type BankPostingHandling = 'converts' | 'refuses' | 'matched'
 
@@ -168,6 +177,16 @@ export type BankPosting = {
   handling: BankPostingHandling
   /** Why it is that, argued from what the path can and cannot know. */
   because: string
+  /**
+   * Why a refusing path does not ask what currency the money is in (Phase 136,
+   * part 3). Absent on `converts` and `matched`, which do not refuse.
+   *
+   * ADR 0136 answered this for all ten refusing paths in one sentence — "the
+   * other nine have no such field" — and it was false for five of them. So each
+   * one answers for itself now, and `askingFor` measures the answer against the
+   * source rather than believing it.
+   */
+  withheld?: Withheld
 }
 
 export const BANK_POSTINGS: readonly BankPosting[] = [
@@ -220,6 +239,7 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
       'than what `liabilityPositions` says the ledger account owes, so it is measured against a ' +
       'ledger balance and is the books’ money — right by `LEDGER_POSTINGS` and still wrong ' +
       'against a euro account, because nothing asks what left it and there is no field to say.',
+    withheld: 'no-field',
   },
   {
     file: 'src/modules/funds/contributions.ts',
@@ -229,6 +249,7 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
       'A donation arriving. The amount is what the donor gave and the account is where it landed, ' +
       'and nothing joins the two: a euro gift into a euro account would post the euro figure to a ' +
       'dollar ledger, which is Phase 127’s defect exactly, one module over.',
+    withheld: 'no-field',
   },
   {
     file: 'src/modules/properties/deposits.ts',
@@ -238,6 +259,7 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
       'A tenant’s security deposit into a bank account — somebody else’s money, which Phase 23 ' +
       'was careful to keep as a liability rather than income. The care stops at the currency: the ' +
       'figure is typed by a person and the account is chosen from a list that includes foreign ones.',
+    withheld: 'no-field',
   },
   {
     file: 'src/modules/properties/deposits.ts',
@@ -247,6 +269,7 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
       'The other end of the same act, and refused for the same reason. Returning it is the half ' +
       'where getting the currency wrong is worst: the liability was raised at one figure and ' +
       'relieving it at another leaves a balance no tenant can be shown.',
+    withheld: 'no-field',
   },
   {
     file: 'src/modules/payments/service.ts',
@@ -269,44 +292,65 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
       'Money arriving against a debt already written off. Phase 127 fixed the *other* side of ' +
       'this entry — it posts `recovery.functionalCents` to bad debt now rather than the face ' +
       'amount — and left the bank side taking the same functional figure into whatever account ' +
-      'was named. Right for the expense, unasked for the account.',
+      'was named. Right for the expense, unasked for the account. Phase 136 measured it as the ' +
+      'one path that has the money’s currency and still may not be told it: `writeOff.currency` ' +
+      'is right there, and the figure reaching the bank is struck at the write-off’s *carried* ' +
+      'rate rather than the rate on the day the money arrived. That is correct for bad debt — a ' +
+      'later rate would fold a currency movement into an expense — and wrong for the bank, so ' +
+      'one figure is answering two questions. Wiring it up would buy a posting nobody can tie to ' +
+      'a statement; it needs a day rate and a realised line first.',
+    withheld: 'no-day-rate',
   },
   {
     file: 'src/modules/receivables/vendor-credits.ts',
     symbol: 'refundVendorCredit',
-    handling: 'refuses',
+    handling: 'matched',
     because:
       'A supplier giving money back. `recovery.receivedCents` is what they sent, and the currency ' +
-      'it is in comes from the credit note rather than the account it was banked into — two ' +
-      'currencies in one entry with nothing checking they are the same.',
+      'it is in comes from the credit note rather than the account it was banked into — which ' +
+      'ADR 0136 called "two currencies in one entry with nothing checking they are the same" and ' +
+      'Phase 136 part 3 turned into the check. `note.currency` was already being read to look up ' +
+      'the day’s rate; it is now also handed to the guard, so a euro refund into a euro account ' +
+      'posts and one into a dollar account is refused. The bank line was already struck at the ' +
+      'rate on the day — its own comment says "the figure the statement will show" — which is ' +
+      'exactly what makes it safe to ask.',
   },
   {
     file: 'src/modules/receivables/customer-credit.ts',
     symbol: 'refundCredit',
-    handling: 'refuses',
+    handling: 'matched',
     because:
       'Giving a customer their overpayment back. Phase 67 was careful that held money goes back ' +
-      'at the rate it came in at and named the realised gap where a gap belongs — all of which is ' +
-      'about the *credit’s* currency, and none of which asks what the account paying it is held in.',
+      'at the rate it came in at and named the realised gap where a gap belongs — all of which ' +
+      'was about the *credit’s* currency, and none of which asked what the account paying it is ' +
+      'held in. Phase 136 part 3 joined the two: `payment.currency` already drove the day’s rate ' +
+      'for `paidCents`, and now also tells the guard what is leaving, so a euro refund out of a ' +
+      'euro account posts and out of a dollar account is refused.',
   },
   {
     file: 'src/modules/timebilling/billing.ts',
     symbol: 'receiveRetainer',
-    handling: 'refuses',
+    handling: 'matched',
     because:
-      'Client money arriving on account. The comment above the posting already says the right ' +
+      'Client money arriving on account. The comment above the posting already said the right ' +
       'thing — "the ledger is never in the client’s currency; posting the face amount would put ' +
-      '€10,000 on a dollar balance sheet" — and it is about the retainer. The account it lands ' +
-      'in was never part of that sentence.',
+      '€10,000 on a dollar balance sheet" — and it was about the retainer; the account it lands ' +
+      'in was never part of that sentence. Phase 136 part 3 made it part of it. The one `matched` ' +
+      'path with no realised gain line, and it is right not to have one: arrival is the moment ' +
+      'the rate is set, so `functionalCents` is struck at the day’s rate by construction and ' +
+      'there is no carried figure for it to differ from.',
   },
   {
     file: 'src/modules/timebilling/billing.ts',
     symbol: 'refundRetainer',
-    handling: 'refuses',
+    handling: 'matched',
     because:
       'Giving held client money back. Phase 67 built this to release at the rate the money was ' +
-      'carried at and post the difference, which settles the retainer’s side completely. The bank ' +
-      'side takes `paidCents` into an account whose currency is not consulted.',
+      'carried at and post the difference, which settles the retainer’s side completely, while ' +
+      'the bank side took `paidCents` into an account whose currency was not consulted. It is ' +
+      'now: `retainer.currency` is what the client is owed and what leaves the bank, and its own ' +
+      'comment already named the rule this phase turns on — "what leaves the bank, at the rate on ' +
+      'the day the money moves, because that is what the statement will say".',
   },
 ]
 

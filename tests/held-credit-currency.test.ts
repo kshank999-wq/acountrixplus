@@ -7,6 +7,7 @@ import { createCustomer, createInvoice, recordPayment } from '@/modules/receivab
 import { applyCredit, refundCredit } from '@/modules/receivables/customer-credit'
 import { listCustomerSummaries } from '@/modules/parties/service'
 import { putRate } from '@/modules/fx/service'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import { convert } from '@/modules/fx/rates'
 
 /**
@@ -47,6 +48,26 @@ async function euroInvoice(customerId: string, cents: number) {
     currency: 'EUR',
     lines: [{ chartAccountId: revenueId, description: 'Work', unitPriceCents: cents }],
   })
+}
+
+/**
+ * A euro bank account, because euro money lands in one (Phase 136).
+ *
+ * These assertions were written against the fixture's dollar `Business
+ * Checking` and passed — self-consistent arithmetic describing a bank taking
+ * euro into a dollar account without saying at what rate. Part 3 made these
+ * paths ask, so they are repaired onto an account that can hold the money
+ * rather than deleted: the same assertions, on a case that can happen.
+ */
+async function euroAccount() {
+  const account = await createFinancialAccount(fixture.ctx, {
+    name: 'Frankfurt Current',
+    kind: 'checking',
+    currency: 'EUR',
+    mask: '8802',
+  })
+
+  return account.id
 }
 
 describe('what a receipt keeps', () => {
@@ -182,7 +203,10 @@ describe('spending and refunding what is held', () => {
       paymentId: payment.id,
       amountCents: 50_000,
       refundedOn: '2026-06-20',
-      financialAccountId: bankId,
+      // Phase 136 part 3: a euro credit goes back out of a euro account. It
+      // was written against the dollar one, which the bank would have had to
+      // convert at a rate these books do not hold.
+      financialAccountId: await euroAccount(),
     })
 
     const [row] = await db.select().from(payments).where(eq(payments.id, payment.id))

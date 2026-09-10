@@ -173,13 +173,22 @@ export function deniesConversion(prose: string): Denial | null {
 export function agreementFor(input: CrossDeclaration): Agreement {
   const { symbol, basis, handling } = input
 
-  // `converts` ⟹ `converted`. See the note above on why the converse is not
-  // checked: six correct rows are `refuses` + `converted`.
-  if (handling === 'converts' && basis !== undefined && basis !== 'converted') {
+  // `converts` ⟹ `converted`, and so does `matched` — a path that posts when
+  // the money and the account agree posts a converted figure, or it would be
+  // putting euros on a dollar balance sheet. Phase 136 part 3 took `matched`
+  // from one site to five, so the implication is worth stating for it too.
+  //
+  // See the note above on why the converse is not checked.
+  if (
+    (handling === 'converts' || handling === 'matched') &&
+    basis !== undefined &&
+    basis !== 'converted'
+  ) {
     return {
       ok: false,
       why:
-        `BANK_POSTINGS says ${symbol} converts for a foreign account, and LEDGER_POSTINGS says ` +
+        `BANK_POSTINGS says ${symbol} ${handling === 'converts' ? 'converts for a foreign ' +
+          'account' : 'posts when the money and the account agree'}, and LEDGER_POSTINGS says ` +
         `its figure is \`${basis}\`. A path that converts for the account is producing a figure ` +
         'in the company’s own money by definition, so one of the two is wrong.',
     }

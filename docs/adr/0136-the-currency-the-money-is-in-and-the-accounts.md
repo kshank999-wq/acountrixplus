@@ -51,14 +51,83 @@ test with its own refusal.
 
 ## Why only one path gets the sharper question
 
-`importPayouts` is the only one of Phase 133's ten with a field saying what
+~~`importPayouts` is the only one of Phase 133's ten with a field saying what
 currency the money is in: `payouts.currency` is what the processor said it sent.
+The other nine have no such field.~~
 
-The other nine have no such field. A person typed an amount and chose an account,
-and nothing asked what currency the amount was in — so the account being foreign
-is the only question that can be asked of them, and the honest answer is still
-no. `moneyCurrency` is optional for exactly that reason, and its absence means
-"this path does not know", not "assume it matches".
+**That was false, and it is the same error one ADR after the phase built to
+catch it.** ADR 0135 said the checkable thing about a `because` is a claim tied
+to a fact a scan can verify; this claim was written from memory instead.
+Measured, by reading each of the nine function bodies for a currency in scope:
+
+| path | what it already reads |
+| --- | --- |
+| `receiveRetainer` | `input.currency ?? functionalCurrency(…)` |
+| `refundRetainer` | `retainer.currency` |
+| `refundCredit` | `payment.currency` |
+| `refundVendorCredit` | `note.currency` |
+| `recoverWriteOff` | `writeOff.currency` |
+
+**Five of the nine had it**, every one of them already reading it *for a rate
+lookup*, and simply never handing it to the guard. `importPayouts` was one of
+six that could ask, not the only one. Only four genuinely have nothing —
+`receivePledge`, `receiveDeposit`, `refundDeposit`, `recordRemittance` — and for
+those the paragraph above is true as written.
+
+## Having the currency is not enough to be told it
+
+Part 3 wired four of the five, not five, and the fifth is the interesting one.
+
+A path may only be told what currency the money is in if, when the money and the
+account agree, the figure it puts on the bank is struck at **the rate on the day
+the money moved** — because that is the figure the statement will show. Letting a
+path post is worthless if what it posts cannot be tied to a statement, which is
+Phase 117's rule the other way round.
+
+- `refundRetainer`, `refundCredit`, `refundVendorCredit` convert at the day's
+  rate and name the difference from the carried rate as a realised gain or loss.
+  `refundRetainer`'s own comment had already written the rule this phase turns
+  on: *"what leaves the bank, at the rate on the day the money moves, because
+  that is what the statement will say."*
+- `receiveRetainer` converts at the day's rate and has **no** realised line
+  because it cannot have one: arrival is the moment the rate is set, so there is
+  no carried figure to differ from.
+- `recoverWriteOff` posts `recovery.functionalCents` to **both** lines, at the
+  write-off's carried rate. That is right for bad debt — its own comment argues
+  it, and a later rate would fold a currency movement into an expense — and
+  wrong for the bank. **One figure answering two questions.**
+
+So `recoverWriteOff` keeps refusing, and `BANK_POSTINGS` records *why* rather
+than leaving it looking like the other four: `withheld: 'no-day-rate'` against
+their `'no-field'`. Giving it a day rate and a realised line is a real change to
+a real posting and is the obvious next phase.
+
+## The correction is a rule, not a sentence
+
+Rewriting the paragraph would have left the next such claim unchecked, so
+`askingFor` measures every declaration against the source:
+
+- a `matched` entry whose call site passes no money currency fails — Phase 49's
+  rule mirrored, a declaration nothing wires up is a claim that is false;
+- a path that passes one without declaring `matched` fails;
+- `withheld: 'no-field'` on a body that reads a currency fails — **the exact
+  mistake above**;
+- `withheld: 'no-day-rate'` on a body that reads none fails, as overstating what
+  the path knows;
+- a `matched` entry that never looks up a day rate fails.
+
+`passesMoneyCurrency`, `readsMoneyCurrency` and `strikesAtDayRate` are read off
+the source every run. None of them is declared.
+
+**The scan found its own bug first.** Its paren-walker treated the apostrophe in
+a comment — "at the day's rate" — as opening a string literal, ran off the end
+of the function and reported *no* arguments, so two correctly wired sites read as
+unwired. A scan that goes quiet on prose it did not expect is the Phase 128 /
+131 / 133 failure one layer down, and it is fixed in the walker rather than by
+rewording the comments.
+
+`moneyCurrency` stays optional, and its absence still means "this path does not
+know", not "assume it matches".
 
 ## A third handling, argued
 
@@ -73,10 +142,12 @@ value is false half the time is worse than one with a value missing.
 
 Neither by inspection:
 
-- `bank-side.test.ts` asserted ten `refuses`; nine now, with `matched` naming
-  `importPayouts` explicitly so the move is recorded rather than absorbed.
-- **Phase 135's own count** asserted six `refuses` + `converted`; five now. Its
-  device catching this phase's change is what it was built for.
+- `bank-side.test.ts` asserted ten `refuses`; nine after part 1, **five after
+  part 3**, with `matched` naming its members so the move is recorded rather
+  than absorbed.
+- **Phase 135's own count** asserted six `refuses` + `converted`; five after
+  part 1, **one after part 3** — `recoverWriteOff` alone. Its device catching
+  this phase's changes twice is what it was built for.
 
 ## What Phase 135 did not catch, and why that is right
 
@@ -96,10 +167,15 @@ anything.
 
 ## What this does not do
 
-**It does not tell the nine what currency their money is in.** Giving
+**It does not tell the four what currency their money is in.** Giving
 `recordRemittance` a currency field is a real change to a real screen, and this
-phase does not make it. They refuse a foreign account exactly as Phase 133 left
-them.
+phase does not make it. `receivePledge`, `receiveDeposit`, `refundDeposit` and
+`recordRemittance` refuse a foreign account exactly as Phase 133 left them.
+
+**It does not give `recoverWriteOff` a day rate.** It has the currency and is
+still refused, because the bank line it would post is struck at the write-off's
+carried rate. The reason is recorded on the entry and checked against the source
+rather than left as a gap that looks like the other four.
 
 **It does not read the bank's rate.** The refusal for a mismatched pair is
 permanent until a statement line can be matched to the payout and the rate

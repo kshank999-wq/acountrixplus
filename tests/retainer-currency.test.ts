@@ -10,6 +10,7 @@ import { putRate } from '@/modules/fx/service'
 import { convert } from '@/modules/fx/rates'
 import { trialBalance } from '@/modules/ledger/balances'
 import { setModuleEnabled } from '@/modules/industry/modules'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 
 /**
  * The retainer you could not draw (Phase 66).
@@ -60,6 +61,27 @@ async function euroClient() {
   return { customer, project }
 }
 
+/**
+ * A euro bank account, because a euro retainer lands in one (Phase 136).
+ *
+ * These tests were written against the fixture's dollar `Business Checking`,
+ * and passed: the arithmetic was self-consistent and described a bank taking
+ * €10,000 into a dollar account without saying at what rate. Part 3 made
+ * `receiveRetainer` ask, so they are repaired onto an account that can hold the
+ * money — the same assertions, on a case that can happen — and the mismatch
+ * gets a test of its own below.
+ */
+async function euroAccount() {
+  const account = await createFinancialAccount(fixture.ctx, {
+    name: 'Frankfurt Current',
+    kind: 'checking',
+    currency: 'EUR',
+    mask: '8802',
+  })
+
+  return account.id
+}
+
 describe('taking a retainer in the client’s currency', () => {
   it('records what arrived and what it was worth', async () => {
     const { customer } = await euroClient()
@@ -69,7 +91,7 @@ describe('taking a retainer in the client’s currency', () => {
       receivedOn: '2026-04-01',
       amountCents: 1_000_000,
       currency: 'EUR',
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroAccount(),
     })
 
     const [row] = await db.select().from(retainers).where(eq(retainers.id, retainer.id))
@@ -88,7 +110,7 @@ describe('taking a retainer in the client’s currency', () => {
       receivedOn: '2026-04-01',
       amountCents: 1_000_000,
       currency: 'EUR',
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroAccount(),
     })
 
     const lines = await db
@@ -115,6 +137,27 @@ describe('taking a retainer in the client’s currency', () => {
     expect(row.exchangeRateMillionths).toBe(1_000_000)
     expect(row.functionalRemainingCents).toBe(500_000)
   })
+
+  it('refuses a euro retainer into a dollar account', async () => {
+    // The case the three tests above used to be written as, now that the guard
+    // can tell it from the one where the money and the account agree.
+    //
+    // The bank converted this at the bank's rate on the bank's terms and these
+    // books do not have that rate, so any figure posted is a guess at somebody
+    // else's arithmetic — and Phase 40's tie-out, which compares each account
+    // in its own currency, would differ by the spread with nothing to name it.
+    const { customer } = await euroClient()
+
+    await expect(
+      receiveRetainer(fixture.ctx, {
+        customerId: customer.id,
+        receivedOn: '2026-04-01',
+        amountCents: 1_000_000,
+        currency: 'EUR',
+        financialAccountId: fixture.financialAccountId,
+      }),
+    ).rejects.toThrow(/bank converts that at its own rate/)
+  })
 })
 
 describe('drawing a euro retainer', () => {
@@ -126,7 +169,7 @@ describe('drawing a euro retainer', () => {
       receivedOn: '2026-04-01',
       amountCents: 1_000_000,
       currency: 'EUR',
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroAccount(),
     })
 
     // Two hours at €150 — €300 of work, billed in June at the later rate.

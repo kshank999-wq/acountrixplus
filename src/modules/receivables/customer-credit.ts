@@ -438,6 +438,9 @@ export async function refundCredit(
       input.financialAccountId,
       'refunding this credit',
       tx,
+      // Phase 136 part 3: the currency the customer is being paid back in,
+      // already read above to fix `paidCents` at the day's rate.
+      payment.currency,
     )
 
     const entry = await createJournalEntry(

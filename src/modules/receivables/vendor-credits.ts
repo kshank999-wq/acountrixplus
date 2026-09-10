@@ -553,6 +553,9 @@ export async function refundVendorCredit(
       input.financialAccountId,
       'banking this supplier refund',
       tx,
+      // Phase 136 part 3: the currency the supplier sent it in, already read
+      // above for the day's rate — "the figure the statement will show".
+      note.currency,
     )
 
     const entry = await createJournalEntry(

@@ -33,12 +33,22 @@ export async function bankGlAccountFor(
   what: string,
   exec: Executor = db,
   /**
-   * The currency the money is in, when the caller knows it (Phase 136).
+   * The currency the money is in, when the caller may say (Phase 136).
    *
-   * Only `importPayouts` does: `payouts.currency` is what the processor said it
-   * sent. The other nine have no field for it, so they leave it out and get the
-   * Phase 133 rule — a foreign account refused — which is the honest answer when
-   * nothing knows what currency the amount was in.
+   * Five callers do. ADR 0136 claimed `importPayouts` was the only one that
+   * *could* — "the other nine have no such field" — and measuring in part 3
+   * found five of the nine already reading a currency for their own rate
+   * lookups, and simply never handing it over.
+   *
+   * Having it is not enough to pass it: the figure this path posts to the bank
+   * has to be struck at the rate on the day the money moved, or letting it
+   * through buys a posting the statement disagrees with. `recoverWriteOff` has
+   * `writeOff.currency` and fails that test, so it still leaves this out —
+   * `BANK_POSTINGS` records it as `withheld: 'no-day-rate'` and `askingFor`
+   * checks the record against the source.
+   *
+   * Omitted, the Phase 133 rule stands: a foreign account is refused, which is
+   * the honest answer when nothing knows what currency the amount was in.
    */
   moneyCurrency?: string,
 ): Promise<string> {

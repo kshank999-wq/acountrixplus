@@ -9,6 +9,7 @@ import { receiveRetainer, refundRetainer } from '@/modules/timebilling/billing'
 import { listRefunds, voidRefund } from '@/modules/receivables/refund-voiding'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { putRate } from '@/modules/fx/service'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import { convert } from '@/modules/fx/rates'
 import { trialBalance } from '@/modules/ledger/balances'
 import { DomainError } from '@/modules/errors'
@@ -47,6 +48,26 @@ beforeEach(async () => {
   })
 })
 
+/**
+ * A euro bank account, because euro money lands in one (Phase 136).
+ *
+ * These assertions were written against the fixture's dollar `Business
+ * Checking` and passed — self-consistent arithmetic describing a bank taking
+ * euro into a dollar account without saying at what rate. Part 3 made these
+ * paths ask, so they are repaired onto an account that can hold the money
+ * rather than deleted: the same assertions, on a case that can happen.
+ */
+async function euroAccount() {
+  const account = await createFinancialAccount(fixture.ctx, {
+    name: 'Frankfurt Current',
+    kind: 'checking',
+    currency: 'EUR',
+    mask: '8802',
+  })
+
+  return account.id
+}
+
 /** A euro vendor credit, recovered in cash — money in, a realised gain. */
 async function recoveredCredit(amountCents = 50_000) {
   const vendor = await createVendor(fixture.ctx, { name: 'Hafen Logistik GmbH' })
@@ -67,7 +88,7 @@ async function recoveredCredit(amountCents = 50_000) {
   await refundVendorCredit(fixture.ctx, {
     creditNoteId: credit.id,
     amountCents,
-    financialAccountId: fixture.financialAccountId,
+    financialAccountId: await euroAccount(),
     refundedOn: '2026-06-15',
   })
 
@@ -83,13 +104,13 @@ async function refundedRetainer(amountCents = 50_000) {
     receivedOn: '2026-04-01',
     amountCents: 200_000,
     currency: 'EUR',
-    financialAccountId: fixture.financialAccountId,
+    financialAccountId: await euroAccount(),
   })
 
   await refundRetainer(fixture.ctx, {
     retainerId: retainer.id,
     amountCents,
-    financialAccountId: fixture.financialAccountId,
+    financialAccountId: await euroAccount(),
     refundedOn: '2026-06-15',
   })
 
