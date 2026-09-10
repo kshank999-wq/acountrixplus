@@ -8,6 +8,7 @@ import { refundCredit } from '@/modules/receivables/customer-credit'
 import { receiveRetainer, refundRetainer } from '@/modules/timebilling/billing'
 import { setModuleEnabled } from '@/modules/industry/modules'
 import { putRate } from '@/modules/fx/service'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import { convert } from '@/modules/fx/rates'
 import { trialBalance } from '@/modules/ledger/balances'
 import { mayUse } from '@/modules/receivables/overpayment'
@@ -50,6 +51,27 @@ beforeEach(async () => {
   })
 })
 
+/**
+ * A euro bank account, because euro money lands in one (Phase 136).
+ *
+ * These assertions were written against the fixture's dollar `Business
+ * Checking` and passed — self-consistent arithmetic describing a bank moving
+ * euro through a dollar account without saying at what rate. Part 3 made these
+ * paths ask, so the euro cases are repaired onto an account that can hold the
+ * money: the same assertions, on a case that can happen. The domestic tests
+ * beside them keep the dollar account, untouched.
+ */
+async function euroBank() {
+  const account = await createFinancialAccount(fixture.ctx, {
+    name: 'Frankfurt Current',
+    kind: 'checking',
+    currency: 'EUR',
+    mask: '8802',
+  })
+
+  return account.id
+}
+
 describe('what a refusal says it is refusing', () => {
   /** Phase 65 made a euro holding visible; this made its refusal legible. */
   it('names the currency when it is given one', () => {
@@ -84,7 +106,7 @@ describe('giving a retainer back', () => {
       receivedOn: '2026-04-01',
       amountCents: 1_000_000,
       currency: 'EUR',
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
     })
 
     return { customer, retainer }
@@ -97,7 +119,7 @@ describe('giving a retainer back', () => {
     const result = await refundRetainer(fixture.ctx, {
       retainerId: retainer.id,
       amountCents: 1_000_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
@@ -118,7 +140,7 @@ describe('giving a retainer back', () => {
     const result = await refundRetainer(fixture.ctx, {
       retainerId: retainer.id,
       amountCents: 1_000_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
@@ -150,7 +172,7 @@ describe('giving a retainer back', () => {
     await refundRetainer(fixture.ctx, {
       retainerId: retainer.id,
       amountCents: 400_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
       reference: 'Wire 8841',
     })
@@ -177,7 +199,7 @@ describe('giving a retainer back', () => {
     await refundRetainer(fixture.ctx, {
       retainerId: retainer.id,
       amountCents: 1_000_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
@@ -193,7 +215,7 @@ describe('giving a retainer back', () => {
       refundRetainer(fixture.ctx, {
         retainerId: retainer.id,
         amountCents: 1_500_000,
-        financialAccountId: fixture.financialAccountId,
+        financialAccountId: await euroBank(),
         refundedOn: '2026-06-15',
       }),
     ).rejects.toThrow(/€10,000\.00 is held/)
@@ -245,7 +267,7 @@ describe('giving an overpayment back', () => {
       customerId: customer.id,
       paymentDate: '2026-04-05',
       amountCents: 450_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       applications: [{ invoiceId: invoice.id, amountCents: 400_000 }],
     })
 
@@ -263,7 +285,7 @@ describe('giving an overpayment back', () => {
     await refundCredit(fixture.ctx, {
       paymentId: payment.id,
       amountCents: 50_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
@@ -283,7 +305,7 @@ describe('giving an overpayment back', () => {
     await refundCredit(fixture.ctx, {
       paymentId: payment.id,
       amountCents: 50_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 

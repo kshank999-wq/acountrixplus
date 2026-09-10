@@ -7,6 +7,7 @@ import { setModuleEnabled } from '@/modules/industry/modules'
 import { checkByKey } from '@/modules/integrity/register'
 import { createCustomer, createInvoice } from '@/modules/receivables/service'
 import { putRate } from '@/modules/fx/service'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import {
   applyRetainer,
   receiveRetainer,
@@ -154,6 +155,27 @@ describe('client money against the ledger, at a date', () => {
       lines: [{ chartAccountId: revenueId, description: 'Stage 1', unitPriceCents: cents }],
     })
 
+  /**
+   * A euro bank account, because euro money lands in one (Phase 136).
+   *
+   * These assertions were written against the fixture's dollar `Business
+   * Checking` and passed — self-consistent arithmetic describing a bank moving
+   * euro through a dollar account without saying at what rate. Part 3 made these
+   * paths ask, so the euro cases are repaired onto an account that can hold the
+   * money: the same assertions, on a case that can happen. The domestic tests
+   * beside them keep the dollar account, untouched.
+   */
+  async function euroBank() {
+    const account = await createFinancialAccount(fixture.ctx, {
+      name: 'Frankfurt Current',
+      kind: 'checking',
+      currency: 'EUR',
+      mask: '8802',
+    })
+
+    return account.id
+  }
+
   it('walks both sides back together', async () => {
     const retainer = await receiveRetainer(fixture.ctx, {
       customerId,
@@ -285,7 +307,7 @@ describe('client money against the ledger, at a date', () => {
       receivedOn: '2026-05-01',
       amountCents: 100_000,
       currency: 'EUR',
-      financialAccountId: bankId,
+      financialAccountId: await euroBank(),
     })
 
     // €1,000 at 1.10 is $1,100 on the books from the day it arrived.

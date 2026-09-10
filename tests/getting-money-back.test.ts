@@ -12,6 +12,7 @@ import {
 import { createCreditNote } from '@/modules/receivables/credits'
 import { createVendorCredit, refundVendorCredit } from '@/modules/receivables/vendor-credits'
 import { putRate } from '@/modules/fx/service'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import { convert } from '@/modules/fx/rates'
 import { trialBalance } from '@/modules/ledger/balances'
 import { splitReceipt } from '@/modules/receivables/overpayment'
@@ -79,6 +80,27 @@ async function euroCredit(amountCents = 50_000) {
   return { vendor, bill, credit }
 }
 
+/**
+ * A euro bank account, because euro money lands in one (Phase 136).
+ *
+ * These assertions were written against the fixture's dollar `Business
+ * Checking` and passed — self-consistent arithmetic describing a bank moving
+ * euro through a dollar account without saying at what rate. Part 3 made these
+ * paths ask, so the euro cases are repaired onto an account that can hold the
+ * money: the same assertions, on a case that can happen. The domestic tests
+ * beside them keep the dollar account, untouched.
+ */
+async function euroBank() {
+  const account = await createFinancialAccount(fixture.ctx, {
+    name: 'Frankfurt Current',
+    kind: 'checking',
+    currency: 'EUR',
+    mask: '8802',
+  })
+
+  return account.id
+}
+
 describe('the refusal that pointed at a dead end', () => {
   /**
    * `splitReceipt` still refuses an over-payment to a supplier, and should —
@@ -117,7 +139,7 @@ describe('getting a vendor credit back', () => {
     const result = await refundVendorCredit(fixture.ctx, {
       creditNoteId: credit.id,
       amountCents: 50_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
@@ -141,7 +163,7 @@ describe('getting a vendor credit back', () => {
     const result = await refundVendorCredit(fixture.ctx, {
       creditNoteId: credit.id,
       amountCents: 50_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
@@ -166,7 +188,7 @@ describe('getting a vendor credit back', () => {
     await refundVendorCredit(fixture.ctx, {
       creditNoteId: credit.id,
       amountCents: 20_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
       reference: 'Wire 5512',
     })
@@ -191,7 +213,7 @@ describe('getting a vendor credit back', () => {
       await refundVendorCredit(fixture.ctx, {
         creditNoteId: credit.id,
         amountCents: piece,
-        financialAccountId: fixture.financialAccountId,
+        financialAccountId: await euroBank(),
         refundedOn: '2026-06-15',
       })
     }
@@ -213,7 +235,7 @@ describe('getting a vendor credit back', () => {
     await refundVendorCredit(fixture.ctx, {
       creditNoteId: credit.id,
       amountCents: 50_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await euroBank(),
       refundedOn: '2026-06-15',
     })
 
