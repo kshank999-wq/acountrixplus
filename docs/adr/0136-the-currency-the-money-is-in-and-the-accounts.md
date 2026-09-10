@@ -97,6 +97,26 @@ Phase 117's rule the other way round.
   it, and a later rate would fold a currency movement into an expense — and
   wrong for the bank. **One figure answering two questions.**
 
+`recoveryFunctional` takes no rate parameter at all, deliberately, for a reason
+Phase 116 established: the pair the write-off stores *is* the rate it was carried
+at, and a rate passed in beside them is a second answer to the same question.
+Correct — and it means the day's rate has nowhere to enter.
+
+Measured rather than argued. €2,500 written off when the euro was at 1.0835 and
+recovered in full when it was at 1.10:
+
+```
+bank line recoverWriteOff would post: 270875
+what €2,500 was actually worth that day: 275000
+unnamed gap: 4125
+```
+
+**$41.25 on the cash account that the statement disagrees with**, and no realised
+line to put it on — `recoverWriteOff` never reaches `ensureFxAccount`, unlike
+every other path that relieves a carried balance. That is precisely the gap
+Phase 67 named for the three refunds, and wiring this path up would have bought
+it silently.
+
 So `recoverWriteOff` keeps refusing, and `BANK_POSTINGS` records *why* rather
 than leaving it looking like the other four: `withheld: 'no-day-rate'` against
 their `'no-field'`. Giving it a day rate and a realised line is a real change to

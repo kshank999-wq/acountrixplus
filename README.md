@@ -6241,6 +6241,14 @@ bank, one figure answering two questions — so it keeps refusing and
 `BANK_POSTINGS` records `withheld: 'no-day-rate'` rather than leaving it looking
 like the four with no field at all.
 
+Measured, not argued: €2,500 written off at 1.0835 and recovered in full at 1.10
+would put **$2,708.75** on a euro cash account whose statement says $2,750 —
+**$41.25 unnamed**, with no realised line to put it on, because `recoverWriteOff`
+is the only path relieving a carried balance that never reaches
+`ensureFxAccount`. Exactly the gap Phase 67 named for the three refunds. Wiring
+it up would have bought that silently, which is why "it already has the currency"
+was not a good enough reason.
+
 The correction is a rule, not a rewritten sentence: `askingFor` reads every call
 site and function body and fails a `matched` entry nothing wires up (Phase 49
 mirrored), a path that asks without declaring it, and either `withheld` reason
