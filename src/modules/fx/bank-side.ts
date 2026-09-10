@@ -200,10 +200,14 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
     symbol: 'importPayouts',
     handling: 'refuses',
     because:
-      'What the card processor actually paid into a bank account. `payouts` carries a currency of ' +
-      'its own (Phase 128 declared it), so this is the path closest to being able to convert — ' +
-      'and it still does not, because nothing compares the payout’s currency to the account’s. ' +
-      'It refuses rather than trusting that a processor settles into a matching account.',
+      'What the card processor actually paid into a bank account, and the one entry here that has ' +
+      'moved. Phase 134 made it convert: the bank line takes the payout at the arrival rate and ' +
+      'the clearing account gives up what the capture charged it. So the *figure* is settled — ' +
+      '`LEDGER_POSTINGS` calls it `converted` — and this registry still says `refuses`, because ' +
+      'the remaining question is the **account**. A euro payout into a euro account should not be ' +
+      'converted at all, and nothing yet knows that, so it is refused rather than guessed at. ' +
+      'This entry said "it still does not convert" for a phase after it did, which is what Phase ' +
+      '135 exists to catch.',
   },
   {
     file: 'src/modules/receivables/credits.ts',
