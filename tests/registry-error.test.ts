@@ -136,7 +136,13 @@ describe('every registry refuses the same way', () => {
     // written a phase later by somebody who never read this file, and this
     // assertion is what noticed — the first time the device has caught a
     // registry rather than described one.
-    expect(thrown.length).toBe(12)
+    //
+    // Thirteen since Phase 141, and it happened again: `DOMESTIC_GROUNDS` was
+    // written against `bank-side.ts` beside it, inherited the shape without
+    // being told to, and was found by this line rather than by anybody
+    // remembering. Twice now the count has done the work the allowlist used to
+    // do badly, which is the whole argument of ADR 0132 in one integer.
+    expect(thrown.length).toBe(13)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
