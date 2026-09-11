@@ -121,7 +121,10 @@ export type LedgerPosting = {
 export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
   {
     file: 'src/modules/receivables/service.ts',
-    symbol: 'that',
+    // Named `that` until Phase 140, after the word in the comment on line 567
+    // — "A function that accepts an executor…" — which the scanner that wrote
+    // this registry read as a declaration.
+    symbol: 'createInvoice',
     basis: 'converted',
     because:
       'Raising an invoice. `functionalTotalCents`, `functionalLineCents`, `functionalRetainageCents` ' +
@@ -200,7 +203,9 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
   },
   {
     file: 'src/modules/receivables/customer-credit.ts',
-    symbol: 'converted',
+    // Named `converted` until Phase 140, after the word in the comment on line
+    // 180 — "while this function converted both sides…" — for the same reason.
+    symbol: 'applyCredit',
     basis: 'converted',
     because:
       'Applying held customer credit. `settlement.releasedCents`, `relievedCents` and `realisedCents` ' +

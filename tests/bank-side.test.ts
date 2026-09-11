@@ -6,6 +6,7 @@ import {
   bankPostingFor,
   mayPostToBank,
 } from '@/modules/fx/bank-side'
+import { enclosingSymbol } from '@/modules/source/enclosing'
 
 /**
  * The currency of the account money lands in (Phase 133).
@@ -24,11 +25,15 @@ function sourceFiles(dir: string): string[] {
   })
 }
 
-/** The enclosing function a character offset sits inside. */
-function symbolAt(src: string, index: number): string {
-  const matches = [...src.slice(0, index).matchAll(/(?:export )?(?:async )?function (\w+)/g)]
-  return matches.length > 0 ? matches[matches.length - 1][1] : '(top level)'
-}
+/**
+ * The enclosing function a character offset sits inside.
+ *
+ * Shared since Phase 140, where the copy that lived here was found to match the
+ * word `function` in prose. None of this scan's nineteen sites was misattributed
+ * by it — but `ledger-postings.test.ts` had the identical copy and seven of its
+ * sites were, so this is one module now rather than four that can drift.
+ */
+const symbolAt = enclosingSymbol
 
 /**
  * Every journal line whose account comes from a bank account's row.

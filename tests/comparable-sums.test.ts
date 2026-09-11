@@ -8,6 +8,7 @@ import {
   safeFaceSumFor,
 } from '@/modules/fx/comparable'
 import { PAIRED_COLUMNS } from '@/modules/fx/paired'
+import { enclosingSpan, enclosingSymbol } from '@/modules/source/enclosing'
 
 /**
  * No sum adds two currencies together (Phase 122). It reads the source.
@@ -43,12 +44,15 @@ function snake(camel: string): string {
   return camel.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`)
 }
 
-/** The exported function a character offset sits inside. */
-function symbolAt(src: string, index: number): string {
-  const before = src.slice(0, index)
-  const matches = [...before.matchAll(/(?:export )?(?:async )?function (\w+)/g)]
-  return matches.length > 0 ? matches[matches.length - 1][1] : '(top level)'
-}
+/**
+ * The exported function a character offset sits inside.
+ *
+ * Shared since Phase 140. This is the copy that stings: ADR 0134 replaced a
+ * fixed-line window with an enclosing-function boundary *because* the window
+ * leaked and excused a real defect — and the boundary it replaced it with read
+ * the word `function` out of a sentence.
+ */
+const symbolAt = enclosingSymbol
 
 type Site = { file: string; line: number; symbol: string; table: string; column: string }
 
@@ -94,10 +98,10 @@ function currencyAware(file: string, line: number): boolean {
   const lines = src.split('\n')
 
   // The offset the sum sits at, then the span of the function containing it.
+  // Shared since Phase 140: this had its own copy of the boundary reader, and
+  // a boundary is only as good as what it counts as one.
   const offset = lines.slice(0, line).join('\n').length
-  const starts = [...src.matchAll(/^(?:export )?(?:async )?function \w+/gm)].map((m) => m.index!)
-  const from = starts.filter((start) => start <= offset).pop() ?? 0
-  const to = starts.find((start) => start > offset) ?? src.length
+  const { from, to } = enclosingSpan(src, offset)
 
   const body = src.slice(from, to)
   return /\.currency|currency:|groupBy\([^)]*currency|eq\(\w+\.currency/.test(body)

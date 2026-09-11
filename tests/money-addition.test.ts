@@ -8,6 +8,7 @@ import {
   refuseMixedCurrency,
 } from '@/modules/fx/addition'
 import { FACE_COLUMNS, SAFE_FACE_SUMS, safeFaceSumFor } from '@/modules/fx/comparable'
+import { enclosingSymbol } from '@/modules/source/enclosing'
 
 /**
  * Money is added two ways, and both get looked at (Phase 123).
@@ -38,11 +39,13 @@ function sourceFiles(dir: string): string[] {
   })
 }
 
-/** The enclosing function a character offset sits inside. */
-function symbolAt(src: string, index: number): string {
-  const matches = [...src.slice(0, index).matchAll(/(?:export )?(?:async )?function (\w+)/g)]
-  return matches.length > 0 ? matches[matches.length - 1][1] : '(top level)'
-}
+/**
+ * The enclosing function a character offset sits inside.
+ *
+ * Shared since Phase 140, where the copy that lived here — one of four
+ * identical ones — was found matching the word `function` in prose.
+ */
+const symbolAt = enclosingSymbol
 
 /** camelCase drizzle property back to the snake_case column it names. */
 function snake(camel: string): string {

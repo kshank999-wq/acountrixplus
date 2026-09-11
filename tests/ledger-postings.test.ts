@@ -7,6 +7,7 @@ import {
   recoveryFunctional,
 } from '@/modules/fx/ledger'
 import { carrierProperties } from '@/modules/fx/carriers'
+import { declaresFunction, enclosingSymbol } from '@/modules/source/enclosing'
 
 /**
  * Only the company's own money reaches the ledger (Phase 127).
@@ -53,11 +54,15 @@ function sourceFiles(dir: string): string[] {
   })
 }
 
-/** The enclosing function a character offset sits inside. */
-function symbolAt(src: string, index: number): string {
-  const matches = [...src.slice(0, index).matchAll(/(?:export )?(?:async )?function (\w+)/g)]
-  return matches.length > 0 ? matches[matches.length - 1][1] : '(top level)'
-}
+/**
+ * The enclosing function a character offset sits inside.
+ *
+ * Shared since Phase 140. The copy that lived here matched the word `function`
+ * in a comment, so seven posting sites in `createInvoice` and `applyCredit` were
+ * attributed to functions named `that` and `converted` — and this file declared
+ * them, because the declarations were written from this scan's output.
+ */
+const symbolAt = enclosingSymbol
 
 type Site = { file: string; symbol: string; line: number; expression: string }
 
@@ -147,6 +152,16 @@ describe('what the ledger will accept', () => {
     // Both directions, on Phase 122's rule: an excuse pointing at code that has
     // moved is a claim nobody is checking any more.
     expect(stale).toEqual([])
+
+    // And against the source rather than against the scan (Phase 140). Both
+    // sides above come from `postingSites()`, so for thirteen phases this
+    // agreed with itself while two entries named functions that do not exist —
+    // a check that cannot disagree, which is Phase 121's rule at its sharpest.
+    const fictional = LEDGER_POSTINGS.filter(
+      (row) => !declaresFunction(readFileSync(row.file, 'utf8'), row.symbol),
+    ).map((row) => `${row.file}:${row.symbol}`)
+
+    expect(fictional).toEqual([])
   })
 
   it('argues each basis from where the number comes from', () => {
