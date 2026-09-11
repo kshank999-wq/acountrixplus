@@ -46,8 +46,10 @@ describe('the register of what is staged', () => {
     // refuse a foreign bank account because nothing records their currency, and
     // — added by Phase 141 — the donation that reads around the gate those four
     // go through.
-    expect(PENDING_WIRING.length).toBe(4)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(7)
+    // Five since Phase 142 added the gift-card redemption, which ADR 0141 had
+    // to leave off precisely because this register requires a core that exists.
+    expect(PENDING_WIRING.length).toBe(5)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(8)
   })
 
   it('still describes the code, entry by entry', () => {
