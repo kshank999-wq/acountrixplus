@@ -6189,6 +6189,57 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### What a home-money holding can buy of a foreign document (Phase 142)
+
+ADR 0141 nominated `redeemGiftCard` as the one finding `PENDING_WIRING` could not
+hold, because that register requires a core that exists and none answered this
+question. Verified before taking it: `convert` goes face → functional,
+`rateFrom` derives a *rate* from a pair, and `relieveFunctional` and `spends`
+both start from a face amount. Nothing goes the other way, so this is the **first
+inverse of `convert`** in the codebase.
+
+The defect is one line:
+
+```ts
+const plan = redeemFor(card.balanceCents, bill.balanceCents)
+```
+
+`gift_cards` has no currency column, so the card is the company's own money — ADR
+0029 was right about that. It was not right about the invoice. The `min`
+therefore compares a dollar with a euro in the decision that says how much of a
+debt is forgiven, and `plan.appliedCents` posts to both journal lines while
+`relieveFunctional` converts for the subledger.
+
+Measured — a €1,000 invoice carried at 1.10 is $1,100 on the books, and a $600
+card redeemed against it today moves:
+
+| | |
+| --- | --- |
+| Accounts Receivable, in the ledger | **$600** |
+| the invoice's functional balance | **$660** |
+| the customer's debt | **€600**, which is $660 of it |
+
+So `ledger.receivables` reports a $60 difference every night and the customer has
+$660 of debt forgiven for a $600 card. It should buy **€545.45**, which costs
+exactly $600.
+
+`affords` returns a **face** amount and nothing else, so `relieveFunctional`
+still decides the functional figure — the only way a card that clears an invoice
+takes both columns to zero together, since that function returns the *carried*
+figure rather than a fresh conversion when the balance lands on zero.
+
+It **floors** rather than rounding. That is what guarantees the holding is never
+spent past what it holds; rounding to nearest buys one cent more of the document
+than the card has, which is a liability going the wrong way for a penny in a
+place nobody would look. Asserted as a property across eight rates and eight
+holdings, both directions — never over, and never obviously under.
+
+Why not a mode on Phase 138's `spends`: measured, `gift_cards` and
+`deposit_movements` are the only tables holding the company's own money that
+settle a document with it, and they ask different questions. `spends` asks *this
+much: can it?* and refuses; a card that cannot cover the bill is the ordinary
+case and must not refuse (Phase 130).
+
 ### The ground a domestic claim stands on (Phase 141)
 
 `LEDGER_POSTINGS` sorts every posting site into three baskets, and fourteen sit in
@@ -6755,6 +6806,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/affordable.test.ts` | **What a home-money holding can buy of a foreign document** (Phase 142): `redeemGiftCard` takes `min(card.balanceCents, bill.balanceCents)` — a dollar against a euro — in the decision that says how much of a debt is forgiven, then posts that to both journal lines while `relieveFunctional` converts for the subledger. A $600 card against a €1,000 invoice at 1.10 credits receivables $600 and takes $660 off the invoice, so the control account and the subledger part company by $60 nightly. `affords` returns a **face** amount and nothing else, leaving `relieveFunctional` to decide the functional figure — the only way a card that clears an invoice takes both columns to zero together, since that one returns the carried figure rather than a fresh conversion. It floors rather than rounds, because rounding buys one cent more of the document than the card holds; the property is asserted across eight rates and eight holdings in both directions, never over and never obviously under. The first inverse of `convert` in the codebase, and separate from Phase 138's `spends` because a card that cannot cover the bill is the ordinary case rather than a refusal |
 | `tests/domestic-ground.test.ts` | **The ground a domestic claim stands on** (Phase 141): fourteen posting sites are declared `domestic` and none said what *kind* of argument it was making — nothing in reach, a refusal, a conversion upstream, a rate of one, or a sum already argued to be one currency. The ground is declared because choosing it is a judgement; the reach is measured because remembering it is not, and it is the half that goes stale. Three are contradicted by the source and each keeps the argument it always made, so the scan names them: `applyDeposit` and `redeemGiftCard` claim no currency is near while reaching or reading `invoices`, and `recordContribution` claims the same while debiting a bank account its sibling forty lines below is refused a foreign one. `covered` is built only from what a named callee reaches, so a carrier the body reads itself is never excused by one — the hole a self-declared field would leave, with a test that tries to walk through it. The scan's three guards are each a false positive its first cut produced: a comment read as a table, a local array read as a table, and a hand-typed file list where the calling file's own imports belong |
 | `tests/enclosing-function.test.ts` | **The enclosing function that was not one** (Phase 140): the four scanners driving every currency registry each held their own copy of a reader that matched `/function (\w+)/` unanchored, so the word in a sentence counted — and two comments sitting between the top of a function and a posting site put entries named `that` and `converted` into `LEDGER_POSTINGS`, for `createInvoice` and `applyCredit`. The test that should have caught it compares the declarations against the same scan, so it agrees with itself and always will: Phase 121's rule at its sharpest, a check that *cannot* disagree rather than one that never has. Both comments are kept here as fixtures, the old reader is run beside the new one so the difference is asserted rather than described — 126 misattributed sites across seventeen invented names, none of them a function anywhere — and `declaresFunction` holds all 59 declarations in three registries to the source. A test asserts no copy of the old reader is left in `tests/`, because four fixed copies is four things that can drift again |
 | `tests/pending-wiring.test.ts` | **The register of what is built and not wired** (Phase 139): staging cores before hooking them up makes a staged core indistinguishable from a forgotten one, because Phase 49's rule says a function with no caller does not exist. The register is held to the source in both directions — an entry whose target already calls the core is **stale and must be removed**, since a backlog listing finished work makes its remaining entries untrustworthy too; and an entry with nothing blocking it must name the test that says it is done, because "wire it up" with no acceptance is a task nobody can finish. A blocked entry may name none, and that exception is argued rather than assumed: a test written against a column that does not exist would be fiction. Every entry carries a live defect in the present tense, and both named acceptance tests are checked to be skipped and labelled rather than red |
