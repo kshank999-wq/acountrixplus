@@ -51,7 +51,7 @@
  * ## The reach it spoils
  *
  * Broadened to every `…Cents:` assignment in `src/modules` — 2,402 of them — the
- * two scanners disagree on 126, across **twenty** invented names: `has`,
+ * two scanners disagree on 126, across **seventeen** invented names: `has`,
  * `exists`, `the`, `as`, `that`, `to`, `holds`, `with`, `whose`, `of`, `is`,
  * `never`, `converted`, `nobody`, `rather`, `a`, `in`. The two that reached a
  * registry are the ones the current narrowings happen to touch, not the extent
