@@ -41,11 +41,13 @@ function measured(entry: Pending) {
 
 describe('the register of what is staged', () => {
   it('finds entries, so an empty register cannot pass as a finished one', () => {
-    // Measured, not bounded (Phase 126). Three entries covering six targets: the
-    // deposit application, the write-off recovery, and the four paths that
-    // refuse a foreign bank account because nothing records their currency.
-    expect(PENDING_WIRING.length).toBe(3)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(6)
+    // Measured, not bounded (Phase 126). Four entries covering seven targets:
+    // the deposit application, the write-off recovery, the four paths that
+    // refuse a foreign bank account because nothing records their currency, and
+    // — added by Phase 141 — the donation that reads around the gate those four
+    // go through.
+    expect(PENDING_WIRING.length).toBe(4)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(7)
   })
 
   it('still describes the code, entry by entry', () => {

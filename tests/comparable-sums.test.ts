@@ -8,7 +8,7 @@ import {
   safeFaceSumFor,
 } from '@/modules/fx/comparable'
 import { PAIRED_COLUMNS } from '@/modules/fx/paired'
-import { enclosingSpan, enclosingSymbol } from '@/modules/source/enclosing'
+import { enclosingSpan, enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
 
 /**
  * No sum adds two currencies together (Phase 122). It reads the source.
@@ -60,7 +60,10 @@ type Site = { file: string; line: number; symbol: string; table: string; column:
 function faceSums(): Site[] {
   const sites: Site[] = []
   for (const file of sourceFiles('src/modules')) {
-    const src = readFileSync(file, 'utf8')
+    // Comments blanked, offsets preserved (Phase 141), so line numbers below are
+    // still the file's own. `currencyAware` deliberately reads the raw source:
+    // blanking there would make it stricter, which is a different decision.
+    const src = withoutComments(readFileSync(file, 'utf8'))
     for (const m of src.matchAll(/sum\(\s*\$\{(\w+)\.(\w+)\}/g)) {
       const table = snake(m[1])
       const column = snake(m[2])

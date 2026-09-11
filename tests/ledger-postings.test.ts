@@ -7,7 +7,7 @@ import {
   recoveryFunctional,
 } from '@/modules/fx/ledger'
 import { carrierProperties } from '@/modules/fx/carriers'
-import { declaresFunction, enclosingSymbol } from '@/modules/source/enclosing'
+import { declaresFunction, enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
 
 /**
  * Only the company's own money reaches the ledger (Phase 127).
@@ -81,7 +81,10 @@ type Site = { file: string; symbol: string; line: number; expression: string }
 function postingSites(): Site[] {
   const sites: Site[] = []
   for (const file of sourceFiles('src/modules')) {
-    const src = readFileSync(file, 'utf8')
+    // Comments blanked, offsets preserved (Phase 141) — the same rule its three
+    // sibling scanners now follow. Measured: it changes nothing here today, and
+    // it is the guard that stopped `bank-side` reporting a sentence.
+    const src = withoutComments(readFileSync(file, 'utf8'))
     const touchesCurrency = CURRENCY_TABLES.some((table) =>
       new RegExp(`\\b${table}\\.[a-zA-Z]`).test(src),
     )

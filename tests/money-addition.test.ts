@@ -8,7 +8,7 @@ import {
   refuseMixedCurrency,
 } from '@/modules/fx/addition'
 import { FACE_COLUMNS, SAFE_FACE_SUMS, safeFaceSumFor } from '@/modules/fx/comparable'
-import { enclosingSymbol } from '@/modules/source/enclosing'
+import { enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
 
 /**
  * Money is added two ways, and both get looked at (Phase 123).
@@ -67,7 +67,10 @@ function faceAdditions(): Site[] {
   const sites: Site[] = []
   for (const dir of ['src/modules', 'src/app']) {
     for (const file of sourceFiles(dir)) {
-      const src = readFileSync(file, 'utf8')
+      // Comments blanked, offsets preserved (Phase 141). Measured: the site
+      // count is unchanged, which is the point — the guard costs nothing here
+      // and is what stops the next scanner reading its own documentation.
+      const src = withoutComments(readFileSync(file, 'utf8'))
 
       // Which face columns does this file read out of their own table?
       const reads = FACE_COLUMNS.filter((row) => {

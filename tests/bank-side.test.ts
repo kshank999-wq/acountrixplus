@@ -6,7 +6,7 @@ import {
   bankPostingFor,
   mayPostToBank,
 } from '@/modules/fx/bank-side'
-import { enclosingSymbol } from '@/modules/source/enclosing'
+import { enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
 
 /**
  * The currency of the account money lands in (Phase 133).
@@ -51,7 +51,13 @@ const symbolAt = enclosingSymbol
 function bankSides(): { file: string; symbol: string; line: number }[] {
   const found: { file: string; symbol: string; line: number }[] = []
   for (const file of sourceFiles('src/modules')) {
-    const src = readFileSync(file, 'utf8')
+    // Comments blanked, offsets preserved (Phase 141). A posting site is code; a
+    // sentence about one is not. `fx/ground.ts` quotes this very pattern while
+    // explaining what Phase 133's scan matches, and the scan duly reported its
+    // own documentation as a twentieth posting — the self-match `money-addition`
+    // and `comparable-sums` each solved by excluding a file, solved here by
+    // reading code rather than prose.
+    const src = withoutComments(readFileSync(file, 'utf8'))
     for (const m of src.matchAll(
       /chartAccountId: ((?:bank|account|financialAccount)\.chartAccountId|\w*[gG]l(?:AccountId)?)\b/g,
     )) {

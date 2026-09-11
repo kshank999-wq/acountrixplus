@@ -139,6 +139,27 @@ export const PENDING_WIRING: readonly Pending[] = [
       'The acceptance test is `null` on purpose — one written against a column that does not ' +
       'exist would be fiction rather than a definition of done.',
   },
+  {
+    core: 'bankGlAccountFor',
+    coreFile: 'src/modules/banking/bank-guard.ts',
+    targets: [{ symbol: 'recordContribution', file: 'src/modules/funds/contributions.ts' }],
+    phase: 141,
+    blockedBy: 'nothing',
+    acceptance: 'tests/contribution-into-a-foreign-account.test.ts',
+    liveDefect:
+      'recordContribution reads `financialAccounts.chartAccountId` directly and debits that ' +
+      'account, so a donation banked into a euro account posts a dollar figure against it with ' +
+      'nothing recording what actually arrived. `receivePledge`, forty lines below in the same ' +
+      'file, goes through the gate and refuses — so the same business is told no when a pledge ' +
+      'lands in that account and nothing at all when a gift does.',
+    because:
+      'Not a new capability and not a missing field: the gate exists, is wired into nine other ' +
+      'paths, and this one reads around it. It is on the register rather than repaired in place ' +
+      'only because the staging pass is holding every bank path until they are hooked up ' +
+      'together. Found by Phase 141 measuring what each `domestic` entry reaches — and invisible ' +
+      'to Phase 133 because that scan matches `bank.chartAccountId` or a name containing `gl`, ' +
+      'and this assigns to `debitAccountId` first.',
+  },
 ]
 
 export type WiringVerdict = { ok: true } | { ok: false; why: string }
