@@ -6189,6 +6189,50 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The register of what is built and not wired (Phase 139)
+
+Two findings, and the second is the phase.
+
+**The nomination did not need building.** ADRs 0136, 0137 and 0138 each named
+`recoverWriteOff` as still open — three consecutive, which by Phase 31 and 33's
+rule usually means it *is* the phase. Verifying it first found that **no new core
+is needed**: `recoverHeld` already answers exactly its question — what arrives at
+the day's rate against what leaves at the carried one — and `refundVendorCredit`
+is the working precedent. Three ADRs nominated it as though something had to be
+built, and the piece was already there, uncalled.
+
+**And staging has a cost nobody was carrying.** Cores are now built first and
+hooked up in a later pass, which collides with this project's own Phase 49 rule:
+a function with no caller is a feature that does not exist. A staged core and a
+forgotten one look identical, and the only record that `spends` was waiting for
+`applyDeposit` was prose in three files that nothing checked — which is exactly
+what Phase 135 found rotting in `BANK_POSTINGS`, where a false sentence is
+exactly as long as a true one.
+
+So the backlog is a registry, held to the source in **both** directions: an entry
+whose target already calls the core is stale and must be removed, and an entry
+with nothing blocking it must name the test that says it is done. Three entries,
+six targets, each carrying a `liveDefect` — what is wrong in the code *today* —
+so reading the register is reading a list of faults rather than a list of plans.
+
+It is deliberately **not** a list of every unwired export. Measured: 1,349
+exported functions in `src/modules`, **293 with no caller elsewhere in `src/`** —
+and almost all are registry lookups (`bankPostingFor`, `carrierFor`,
+`falsifierFor`) and devices a test drives on purpose, which is Phase 101's design
+working. A scan calling those dead would be wrong about nearly three hundred
+things. The naive version of this phase produces a number, and the number is
+noise.
+
+The argued exception: four paths refuse a foreign bank account because nothing
+records what currency their money is in, so they are blocked by **a field**, not
+by wiring — and their acceptance test is `null`, because one written against a
+column that does not exist would be fiction rather than a definition of done.
+
+Both named acceptance tests are skipped rather than red. A red suite nobody can
+fix teaches people to ignore the suite, which is what ADR 0137 said about
+`ledger.receivables` reporting a fault with no document behind it — a staged plan
+must not do to the tests what that defect did to the nightly check.
+
 ### The credit note applied at two rates (Phase 137)
 
 ADR 0136 nominated `recoverWriteOff`. Verifying that before adopting it found
@@ -6608,6 +6652,8 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/pending-wiring.test.ts` | **The register of what is built and not wired** (Phase 139): staging cores before hooking them up makes a staged core indistinguishable from a forgotten one, because Phase 49's rule says a function with no caller does not exist. The register is held to the source in both directions — an entry whose target already calls the core is **stale and must be removed**, since a backlog listing finished work makes its remaining entries untrustworthy too; and an entry with nothing blocking it must name the test that says it is done, because "wire it up" with no acceptance is a task nobody can finish. A blocked entry may name none, and that exception is argued rather than assumed: a test written against a column that does not exist would be fiction. Every entry carries a live defect in the present tense, and both named acceptance tests are checked to be skipped and labelled rather than red |
+| `tests/spent-against.test.ts` | **Money held in one currency, spent against a document in another** (Phase 138): `applyDeposit` used one number as both a euro face amount and a dollar holding, so the check deciding whether somebody else's money may be spent compared two currencies. The decision turns only on what the face amount is *worth* — proved as a property across face amounts that can be anything, since they are in a currency the holding is not — and what it costs is exactly `functionalCents`, never a recomputation at a third rate (Phase 116). It converts rather than refusing, which is Phase 136's lesson: the invoice carries the rate it was raised at, so nothing is guessed. A domestic tenancy keeps the sentence it had, with no talk of rates, because that would be noise |
 | `tests/applied-at-two-rates.test.ts` | **When two carried balances meet** (Phase 137): applying a credit note reduces two balances carried at two rates for one face amount, and `meets` names what is left over. Both directions, because they are not symmetric — the rate movement that loses money on an invoice makes money on a bill, since a debt that got cheaper before settlement is a gain. The difference is always reported positive with the side saying the direction, the two sides are always opposite (or the entry would not balance), and it is exactly the gap between what each document gave up rather than a fresh conversion at a third rate (Phase 116). When both are carried at the same rate it posts nothing, which is every domestic application and why a hundred and thirty phases never saw this |
 | `tests/credit-applied-at-two-rates.test.ts` | **The credit note applied at two rates, in the database** (Phase 137): a €1,000 invoice at 1.10 credited in full by a €1,000 note at 1.0835 used to leave **$16.50** in Accounts Receivable with the customer owing nothing — `ledger.receivables`, severity `fault`, failing every night on a difference nobody could clear because both documents were gone. Now the control account and the subledger both reach zero and agree, the $16.50 is named as a realised loss, and the payables mirror calls the same movement a **gain**. One entry of exactly the difference and never the face amount — two lines, dated the day it was applied (Phase 113) — because posting the amount again would halve the receivable twice, which is what the comment that argued for posting nothing was right about. A part application agrees midway and after the rest, and a domestic credit note still posts no entry at all |
 | `tests/who-may-ask.test.ts` | **Which paths may be told what currency the money is in** (Phase 136, part 3): ADR 0136 claimed `importPayouts` was the only one that could ask and that "the other nine have no such field", which was false — five already read a currency, for their own rate lookups, and never handed it over. The correction is a rule that measures rather than a fixed sentence: every declaration is checked against the source, so a `matched` entry whose call site passes nothing fails (Phase 49 mirrored — a declaration nothing wires up is a claim that is false), a path that asks without declaring it fails, and a `withheld` reason the body contradicts fails, which is the original mistake exactly. Four of the five are wired; `recoverWriteOff` is not, because **having the currency is not enough** — it posts one figure to both the bank and bad debt at the write-off's carried rate, and a path allowed to post has to post what the statement will show. The call-site scan walks parens past comments, having first read the apostrophe in "the day's rate" as a string literal and reported two wired sites as unwired |
