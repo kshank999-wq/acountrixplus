@@ -176,6 +176,29 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
       'relieves the write-off’s own carried figure, and takes the whole remainder on the last of it.',
   },
   {
+    file: 'src/modules/receivables/credits.ts',
+    symbol: 'applyCreditWithin',
+    basis: 'converted',
+    because:
+      'Phase 137, and the entry this function spent a hundred and thirty phases arguing it did not ' +
+      'need: "no journal entry — the credit note already moved the receivable". True of the face ' +
+      'amounts and false of the functional ones, because the invoice and the note are carried at ' +
+      'their own rates and one face amount takes different figures off each. It posts only the ' +
+      'difference between two figures that are already the company’s own money — never a fresh ' +
+      'conversion of the face amount, which would be a third rate and a second answer.',
+  },
+  {
+    file: 'src/modules/receivables/vendor-credits.ts',
+    symbol: 'applyVendorCreditWithin',
+    basis: 'converted',
+    because:
+      'The payables mirror of `applyCreditWithin`, posted for the same reason and in the opposite ' +
+      'direction: the rate movement that loses money on an invoice makes money on a bill, because ' +
+      'a debt that got cheaper before it was settled is a gain. Both figures come from the two ' +
+      'documents’ own `relieveFunctional` results, so the entry is a difference between converted ' +
+      'amounts rather than a conversion of its own.',
+  },
+  {
     file: 'src/modules/receivables/customer-credit.ts',
     symbol: 'converted',
     basis: 'converted',

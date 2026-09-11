@@ -108,8 +108,15 @@ describe('what the ledger will accept', () => {
     // arrival rate, the clearing account is relieved at the capture rate, and
     // the gap between them is a realised exchange gain — so where there were two
     // named figures there are now three.
-    expect(postingSites().length).toBe(112)
-    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(37)
+    //
+    // 120 in 39 since Phase 137 gave the two credit-note applications an entry
+    // each. Applying a credit reduces two balances carried at two rates, and
+    // both posted nothing: a €1,000 invoice at 1.10 credited by a €1,000 note at
+    // 1.0835 left $16.50 in Accounts Receivable with the customer owing nothing.
+    // Four sites apiece, because each line is written on both a debit and a
+    // credit branch.
+    expect(postingSites().length).toBe(120)
+    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(39)
   })
 
   it('has a declared basis for every one of them', () => {

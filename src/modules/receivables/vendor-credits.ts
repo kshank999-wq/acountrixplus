@@ -20,6 +20,7 @@ import { formatCents } from '@/lib/money'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
 import { recoverHeld } from '@/modules/fx/settlement'
+import { meets } from '@/modules/fx/applied'
 import { convert } from '@/modules/fx/rates'
 import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
 import { mayUse } from './overpayment'
@@ -405,15 +406,71 @@ async function applyVendorCreditWithin(
     .where(eq(creditNotes.id, note.id))
 
   const billBalance = bill.balanceCents - input.amountCents
+  // Once, used twice — for the bill's own column and for the difference below.
+  // Computing it again there would be two answers to what this bill gives up
+  // (Phase 116).
+  const billFunctional = relieveFunctional(bill, input.amountCents)
+
   await tx
     .update(bills)
     .set({
       balanceCents: billBalance,
-      functionalBalanceCents: relieveFunctional(bill, input.amountCents).functionalBalanceCents,
+      functionalBalanceCents: billFunctional.functionalBalanceCents,
       status: billBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })
     .where(eq(bills.id, bill.id))
+
+  /**
+   * What the two rates leave behind (Phase 137), and the mirror of the customer
+   * side — with the direction reversed.
+   *
+   * The bill gives up its functional share at the rate it was entered at, the
+   * note at the rate it was issued at, and Accounts Payable keeps the difference
+   * unless something takes it out. The same rate movement that loses money on an
+   * invoice **makes** money here: a debt that got cheaper before we settled it
+   * is a gain, which is why `meets` is told which control account it is in
+   * rather than assuming.
+   */
+  const difference = meets({
+    relievedCents: billFunctional.functionalCents,
+    releasedCents: noteFunctional.functionalCents,
+    control: 'payable',
+  })
+
+  if (difference.posts) {
+    const control = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable, tx)
+    if (!control) throw new Refusal('Accounts Payable is missing from the chart.')
+    const fxAccount = await ensureFxAccount(ctx, tx)
+
+    await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.appliedOn,
+        memo: `Exchange ${difference.outcome} applying vendor credit ${note.number}`,
+        source: 'adjusting',
+        sourceType: 'credit_application',
+        sourceId: note.id,
+        lines: [
+          difference.control === 'debit'
+            ? { chartAccountId: control.id, debitCents: difference.differenceCents }
+            : { chartAccountId: control.id, creditCents: difference.differenceCents },
+          difference.exchange === 'debit'
+            ? {
+                chartAccountId: fxAccount,
+                debitCents: difference.differenceCents,
+                memo: `Exchange ${difference.outcome}`,
+              }
+            : {
+                chartAccountId: fxAccount,
+                creditCents: difference.differenceCents,
+                memo: `Exchange ${difference.outcome}`,
+              },
+        ],
+      },
+      tx,
+    )
+  }
 
   await recordAudit(
     ctx,

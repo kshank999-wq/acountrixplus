@@ -6189,6 +6189,60 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The credit note applied at two rates (Phase 137)
+
+ADR 0136 nominated `recoverWriteOff`. Verifying that before adopting it found
+something worse in the way — and found ADR 0136's **fourth consecutive** wrong
+"only one" claim. Measured across every caller of `relieveFunctional`,
+`recoveryFunctional`, `settleHeld` and `recoverHeld`: eleven functions relieve a
+carried balance and **six** have no realised line, not one.
+
+Most of the six are right to have none. Two were not.
+
+Applying a credit note reduces **two** balances carried at **two** rates for one
+face amount, and posted nothing, on the argument written above the function:
+*"no journal entry — the credit note already moved the receivable."* True of the
+face amounts and false of the functional ones. Probed:
+
+```
+INVOICE  face 100000 functional 110000 rate 1.10
+NOTE     face 100000 functional 108350 rate 1.0835
+BEFORE  subledger 1650  ledger 1650  agrees true
+AFTER   subledger    0  ledger 1650  agrees false
+```
+
+€1,000 invoiced, €1,000 credited, the customer owes nothing — and **$16.50 sits
+in Accounts Receivable permanently.** Worse than a wrong number: `ledger.receivables`
+is a `fault` and it *caught* this, so a business is told nightly that its books
+are broken and **cannot clear it** — the invoice is settled, the note is spent,
+and there is no document left to point at. A check that fires on something
+nothing can fix teaches people to ignore the checks.
+
+**This is ADR 0114's defect where its fix did not reach.** Phase 114 found and
+repaired exactly this for the path that spends a *held payment*; its comment
+still says `settleHeld` "is the rule Phase 68 wrote for exactly this". The two
+paths that spend a *credit note* were never looked at — and part of why is that
+**there are two functions called `applyCredit`**, in two modules, doing different
+things. Phase 114 repaired one. A search for the name finds it first, and it
+looks done.
+
+`meets` does not recompute the gap — `relieveFunctional` already produced what
+each document gives up, and it takes the difference, never a fresh conversion at
+a third rate (Phase 116). What it decides is **where the difference goes**, which
+is a new question: both documents sit in the *same* control account, and the
+direction is not symmetric. The rate movement that loses money on an invoice
+**makes** money on a bill, because the debt got cheaper before it was settled.
+
+The old comment was right about one thing, and it stays: posting the *amount*
+again would halve the receivable twice. Only the difference is posted, two lines,
+dated the day the credit was applied (Phase 113), `source: 'adjusting'` because
+no money moved.
+
+`LEDGER_POSTINGS` failed the moment the entries were written and named all seven
+new expressions — Phase 127's device working on a phase that had nothing to do
+with it. Two measured counts moved with it: **112 posting sites in 37 functions →
+120 in 39.**
+
 ### The currency the money is in, and the account's (Phase 136)
 
 Found by the project's own rule rather than by judgement: "foreign account" is
@@ -6554,6 +6608,8 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/applied-at-two-rates.test.ts` | **When two carried balances meet** (Phase 137): applying a credit note reduces two balances carried at two rates for one face amount, and `meets` names what is left over. Both directions, because they are not symmetric — the rate movement that loses money on an invoice makes money on a bill, since a debt that got cheaper before settlement is a gain. The difference is always reported positive with the side saying the direction, the two sides are always opposite (or the entry would not balance), and it is exactly the gap between what each document gave up rather than a fresh conversion at a third rate (Phase 116). When both are carried at the same rate it posts nothing, which is every domestic application and why a hundred and thirty phases never saw this |
+| `tests/credit-applied-at-two-rates.test.ts` | **The credit note applied at two rates, in the database** (Phase 137): a €1,000 invoice at 1.10 credited in full by a €1,000 note at 1.0835 used to leave **$16.50** in Accounts Receivable with the customer owing nothing — `ledger.receivables`, severity `fault`, failing every night on a difference nobody could clear because both documents were gone. Now the control account and the subledger both reach zero and agree, the $16.50 is named as a realised loss, and the payables mirror calls the same movement a **gain**. One entry of exactly the difference and never the face amount — two lines, dated the day it was applied (Phase 113) — because posting the amount again would halve the receivable twice, which is what the comment that argued for posting nothing was right about. A part application agrees midway and after the rest, and a domestic credit note still posts no entry at all |
 | `tests/who-may-ask.test.ts` | **Which paths may be told what currency the money is in** (Phase 136, part 3): ADR 0136 claimed `importPayouts` was the only one that could ask and that "the other nine have no such field", which was false — five already read a currency, for their own rate lookups, and never handed it over. The correction is a rule that measures rather than a fixed sentence: every declaration is checked against the source, so a `matched` entry whose call site passes nothing fails (Phase 49 mirrored — a declaration nothing wires up is a claim that is false), a path that asks without declaring it fails, and a `withheld` reason the body contradicts fails, which is the original mistake exactly. Four of the five are wired; `recoverWriteOff` is not, because **having the currency is not enough** — it posts one figure to both the bank and bad debt at the write-off's carried rate, and a path allowed to post has to post what the statement will show. The call-site scan walks parens past comments, having first read the apostrophe in "the day's rate" as a string literal and reported two wired sites as unwired |
 | `tests/registry-agreement.test.ts` | **When one function is declared in two registries** (Phase 135): `BANK_POSTINGS` and `LEDGER_POSTINGS` describe fourteen of the same functions, and nothing had compared the two descriptions. The assertion that caught Phase 134's own defect — `importPayouts` declared `converted` while its sibling entry argued "it still does not" — reported as the sentence a person needs, naming both registries and what they disagree about. `converts` implies `converted` for all four that convert, with the converse **stated as not claimed** so the six correct `refuses` + `converted` rows are not "fixed" by somebody tidying up. And the denial registry: the present tense denies, history does not, a hypothetical does not, and an entry may **quote** the sentence it is correcting — found by this check firing on the correction written to satisfy it |
 | `tests/in-transit-postings.test.ts` | **The same rule against the database** (Phase 134): a euro invoice through the card path end to end. The capture writes down what it actually put through the clearing account — €100.00 at 1.10 debiting $110.00 with a €3.20 fee relieving $3.52 — and **`1250 Payments in Transit` reaches zero** when the payout lands, which is the fact the whole phase turns on. The $10.00 the old way left behind is asserted as a number rather than described, so this is not a check that only ever agrees. The payout records the rate it posted at and what the bank took, Phase 129's shape; the nightly check agrees before and after, where it used to compare a face sum against a converted ledger balance and report the difference in a currency it could not state. And a domestic payment untouched to the cent, because at parity every conversion in the path is the identity |

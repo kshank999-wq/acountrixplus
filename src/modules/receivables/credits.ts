@@ -18,8 +18,9 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { formatCents } from '@/lib/money'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
-import { functionalCurrency, rateFor } from '@/modules/fx/service'
+import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
 import { recoveryFunctional } from '@/modules/fx/ledger'
+import { meets } from '@/modules/fx/applied'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 import { bankGlAccountFor } from '@/modules/banking/bank-guard'
@@ -324,10 +325,16 @@ async function defaultLinesFromInvoice(
 /**
  * Applies an open credit to an invoice.
  *
- * No journal entry: the credit note already moved the receivable when it was
- * issued. Applying it is bookkeeping *within* Accounts Receivable — which
- * invoice the reduction belongs to — and posting a second entry would halve
- * the receivable twice.
+ * ~~No journal entry: the credit note already moved the receivable when it was
+ * issued.~~ **True of the face amounts and false of the functional ones**
+ * (Phase 137). The invoice and the note are each carried at their own rate, and
+ * one face amount takes different figures off each — so an application at two
+ * rates leaves the difference in Accounts Receivable with no document behind
+ * it, and `ledger.receivables` fails on it every night afterwards.
+ *
+ * An entry is posted only for that difference. Applying is still bookkeeping
+ * within Accounts Receivable, and posting the *amount* again would halve the
+ * receivable twice — which is what the sentence above was right to refuse.
  */
 export async function applyCredit(
   ctx: ActorContext,
@@ -435,16 +442,81 @@ async function applyCreditWithin(
     .where(eq(creditNotes.id, note.id))
 
   const invoiceBalance = invoice.balanceCents - input.amountCents
+  // Worked out once and used twice — for the invoice's own column and for the
+  // difference below. Computing it again there would be two answers to what
+  // this invoice gives up, which is the defect Phase 116 took out of
+  // `fx.conversions`.
+  const invoiceFunctional = relieveFunctional(invoice, input.amountCents)
+
   await tx
     .update(invoices)
     .set({
       balanceCents: invoiceBalance,
-      functionalBalanceCents: relieveFunctional(invoice, input.amountCents)
-        .functionalBalanceCents,
+      functionalBalanceCents: invoiceFunctional.functionalBalanceCents,
       status: invoiceBalance === 0 ? 'paid' : 'partial',
       updatedAt: new Date(),
     })
     .where(eq(invoices.id, invoice.id))
+
+  /**
+   * What the two rates leave behind (Phase 137).
+   *
+   * The invoice gives up `invoiceFunctional.functionalCents` at the rate it was
+   * raised at; the note gives up `noteFunctional.functionalCents` at the rate it
+   * was issued at. Both are the company's own money and they are not the same
+   * number unless the rates are.
+   *
+   * Measured before this existed: a €1,000 invoice at 1.10 credited by a €1,000
+   * note at 1.0835 left **$16.50** in Accounts Receivable with the customer
+   * owing nothing — a `fault` on `ledger.receivables` that nobody could clear,
+   * because the invoice was settled, the note was spent, and there was no
+   * document left to point at.
+   *
+   * ADR 0114 found and fixed this for a held payment settling an invoice. Its
+   * own comment says `settleHeld` "is the rule Phase 68 wrote for exactly this";
+   * it did not reach the two paths that spend a *credit note*, and this is one.
+   */
+  const difference = meets({
+    relievedCents: invoiceFunctional.functionalCents,
+    releasedCents: noteFunctional.functionalCents,
+    control: 'receivable',
+  })
+
+  if (difference.posts) {
+    const control = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable, tx)
+    if (!control) throw new Refusal('Accounts Receivable is missing from the chart.')
+    const fxAccount = await ensureFxAccount(ctx, tx)
+
+    await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.appliedOn,
+        memo: `Exchange ${difference.outcome} applying credit note ${note.number}`,
+        // `adjusting`, not `payment`: no money moved. This is the books
+        // agreeing with themselves about what two documents were worth.
+        source: 'adjusting',
+        sourceType: 'credit_application',
+        sourceId: note.id,
+        lines: [
+          difference.control === 'debit'
+            ? { chartAccountId: control.id, debitCents: difference.differenceCents }
+            : { chartAccountId: control.id, creditCents: difference.differenceCents },
+          difference.exchange === 'debit'
+            ? {
+                chartAccountId: fxAccount,
+                debitCents: difference.differenceCents,
+                memo: `Exchange ${difference.outcome}`,
+              }
+            : {
+                chartAccountId: fxAccount,
+                creditCents: difference.differenceCents,
+                memo: `Exchange ${difference.outcome}`,
+              },
+        ],
+      },
+      tx,
+    )
+  }
 
   await recordAudit(
     ctx,
