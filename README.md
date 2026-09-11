@@ -6189,6 +6189,62 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The ground a domestic claim stands on (Phase 141)
+
+`LEDGER_POSTINGS` sorts every posting site into three baskets, and fourteen sit in
+`domestic` — "the money cannot be foreign here, argued from the schema". Each of
+the fourteen argues. None of them said **what kind of argument** it was making,
+and the kinds are not interchangeable: nothing with a currency is in reach; the
+path refuses when one differs; a callee converted it first; this function writes
+it at a rate of one; the figure is a sum already argued to be one currency.
+
+So the ground is now declared and the reach is measured. Choosing the argument is
+a judgement a person makes; remembering what a function reaches is not, and it is
+the half that goes stale — which is ADR 0134's rule applied to the half that could
+excuse a site.
+
+Three of the fourteen argue a ground the source contradicts, and each keeps the
+argument it has always made so the scan disagrees with it by name:
+
+| entry | argues | and the source says |
+| --- | --- | --- |
+| `applyDeposit` | "the lease carries no currency either" | reaches `invoices` through `settleInvoiceWithoutCash` |
+| `redeemGiftCard` | "a gift-card balance has no currency column" | reads `invoices` itself |
+| `recordContribution` | "`contributions` and `funds` carry no currency column" | debits a bank account read straight out of the table |
+
+`redeemGiftCard` bounds a home-currency card by the invoice's **face** balance,
+posts that to both lines, then relieves the invoice through `relieveFunctional`,
+which converts — so on a euro invoice the control account and the subledger move
+by different amounts. Phase 137's defect, in a path Phase 137 did not reach.
+
+`recordContribution` is the **sixth** instance of this codebase's recurring reach
+failure. Phase 133's scan matches `chartAccountId: bank.chartAccountId` or a name
+containing `gl`; this assigns to `debitAccountId` first, so it is absent from
+`BANK_POSTINGS` entirely — a scan that looked for a spelling rather than for the
+fact. Its sibling `receivePledge`, forty lines below in the same file, goes
+through the gate. Same business, same account: told no for a pledge, nothing at
+all for a gift. Measured across all ten reads of
+`financial_accounts.chart_account_id`: four go through the gate, five post
+nothing, and one is this.
+
+One structural property closes the hole a self-declared field would leave:
+`covered` is built only from what a named callee reaches, so a carrier a function
+reads itself can never be excused by one. Relabelling a failing entry
+`converted-downstream` and pointing at something plausible is refused, and there
+is a unit test that tries it.
+
+Two entries are more interesting than they look. `closeShift` reaches `payments`
+and is right anyway — it points at `SAFE_FACE_SUMS` rather than restating that
+argument. `commitOpenDocumentImport` reaches four carriers because it *creates*
+them, and its ground checks that the face column and its functional twin take the
+**same expression**, which is what "the rate is one" looks like written down.
+
+The scanners needed a guard of their own: `fx/ground.ts` quotes the pattern
+`bank-side` looks for while explaining it, and the scan reported its own
+documentation as a twentieth posting. All four now blank comments before
+matching — a posting site is code, a sentence about one is not — using Phase 140's
+offset-preserving reader so line numbers still belong to the file.
+
 ### The enclosing function that was not one (Phase 140)
 
 Four test files — `ledger-postings`, `bank-side`, `comparable-sums`,
@@ -6699,6 +6755,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/domestic-ground.test.ts` | **The ground a domestic claim stands on** (Phase 141): fourteen posting sites are declared `domestic` and none said what *kind* of argument it was making — nothing in reach, a refusal, a conversion upstream, a rate of one, or a sum already argued to be one currency. The ground is declared because choosing it is a judgement; the reach is measured because remembering it is not, and it is the half that goes stale. Three are contradicted by the source and each keeps the argument it always made, so the scan names them: `applyDeposit` and `redeemGiftCard` claim no currency is near while reaching or reading `invoices`, and `recordContribution` claims the same while debiting a bank account its sibling forty lines below is refused a foreign one. `covered` is built only from what a named callee reaches, so a carrier the body reads itself is never excused by one — the hole a self-declared field would leave, with a test that tries to walk through it. The scan's three guards are each a false positive its first cut produced: a comment read as a table, a local array read as a table, and a hand-typed file list where the calling file's own imports belong |
 | `tests/enclosing-function.test.ts` | **The enclosing function that was not one** (Phase 140): the four scanners driving every currency registry each held their own copy of a reader that matched `/function (\w+)/` unanchored, so the word in a sentence counted — and two comments sitting between the top of a function and a posting site put entries named `that` and `converted` into `LEDGER_POSTINGS`, for `createInvoice` and `applyCredit`. The test that should have caught it compares the declarations against the same scan, so it agrees with itself and always will: Phase 121's rule at its sharpest, a check that *cannot* disagree rather than one that never has. Both comments are kept here as fixtures, the old reader is run beside the new one so the difference is asserted rather than described — 126 misattributed sites across seventeen invented names, none of them a function anywhere — and `declaresFunction` holds all 59 declarations in three registries to the source. A test asserts no copy of the old reader is left in `tests/`, because four fixed copies is four things that can drift again |
 | `tests/pending-wiring.test.ts` | **The register of what is built and not wired** (Phase 139): staging cores before hooking them up makes a staged core indistinguishable from a forgotten one, because Phase 49's rule says a function with no caller does not exist. The register is held to the source in both directions — an entry whose target already calls the core is **stale and must be removed**, since a backlog listing finished work makes its remaining entries untrustworthy too; and an entry with nothing blocking it must name the test that says it is done, because "wire it up" with no acceptance is a task nobody can finish. A blocked entry may name none, and that exception is argued rather than assumed: a test written against a column that does not exist would be fiction. Every entry carries a live defect in the present tense, and both named acceptance tests are checked to be skipped and labelled rather than red |
 | `tests/spent-against.test.ts` | **Money held in one currency, spent against a document in another** (Phase 138): `applyDeposit` used one number as both a euro face amount and a dollar holding, so the check deciding whether somebody else's money may be spent compared two currencies. The decision turns only on what the face amount is *worth* — proved as a property across face amounts that can be anything, since they are in a currency the holding is not — and what it costs is exactly `functionalCents`, never a recomputation at a third rate (Phase 116). It converts rather than refusing, which is Phase 136's lesson: the invoice carries the rate it was raised at, so nothing is guessed. A domestic tenancy keeps the sentence it had, with no talk of rates, because that would be noise |

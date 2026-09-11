@@ -153,8 +153,8 @@ export const PENDING_WIRING: readonly Pending[] = [
       'file, goes through the gate and refuses — so the same business is told no when a pledge ' +
       'lands in that account and nothing at all when a gift does.',
     because:
-      'Not a new capability and not a missing field: the gate exists, is wired into nine other ' +
-      'paths, and this one reads around it. It is on the register rather than repaired in place ' +
+      'Not a new capability and not a missing field: the gate exists, ten other functions ' +
+      'already call it, and this one reads around it. It is on the register rather than repaired ' +
       'only because the staging pass is holding every bank path until they are hooked up ' +
       'together. Found by Phase 141 measuring what each `domestic` entry reaches — and invisible ' +
       'to Phase 133 because that scan matches `bank.chartAccountId` or a name containing `gl`, ' +
