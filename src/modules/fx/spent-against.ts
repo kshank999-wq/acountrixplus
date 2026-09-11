@@ -3,6 +3,13 @@ import { formatCents } from '@/lib/money'
 /**
  * Money held in one currency, spent against a document in another (Phase 138).
  *
+ * ## NOT WIRED YET
+ *
+ * `applyDeposit` does not call this. The cores are being put in place first and
+ * hooked up in a later pass, so **the defect described below is still live**.
+ * `tests/deposit-against-foreign-invoice.test.ts` is the skipped acceptance test
+ * for that pass.
+ *
  * ## The defect
  *
  * `applyDeposit` settles an invoice with a tenant's security deposit. The
