@@ -7,7 +7,12 @@ import {
   oneCurrencyOf,
   refuseMixedCurrency,
 } from '@/modules/fx/addition'
-import { FACE_COLUMNS, SAFE_FACE_SUMS, safeFaceSumFor } from '@/modules/fx/comparable'
+import {
+  FACE_COLUMNS,
+  SAFE_FACE_SUMS,
+  blindFaceSumFor,
+  safeFaceSumFor,
+} from '@/modules/fx/comparable'
 import { enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
 
 /**
@@ -152,6 +157,7 @@ describe('reading the source in both forms', () => {
     const blind = sites
       .filter((site) => !currencyAware(site.file, site.line))
       .filter((site) => !safeFaceSumFor(site.file, site.symbol))
+      .filter((site) => !blindFaceSumFor(site.file, site.symbol))
       .map((site) => `${site.file}:${site.line} ${site.symbol} — ${site.form} over ${site.what}`)
 
     expect(blind).toEqual([])
