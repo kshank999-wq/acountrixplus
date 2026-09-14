@@ -6212,11 +6212,18 @@ the source:
 
 | reason | count | |
 | --- | --- | --- |
+| `inherited` | 9 | one row was created carrying the other's currency |
 | `home-money` | 7 | neither side carries a currency — a till, a gift card, a fund |
-| `same-row` | 6 | both operands off one row, and one row has one currency |
-| `inherited` | 5 | one row was created carrying the other's currency |
-| `refused-upstream` | 2 | a guard refused a mismatch before the comparison ran |
 | `blind` | 3 | not known comparable, and wrong today |
+| `same-row` | 2 | both operands off one row, and one row has one currency |
+| `refused-upstream` | 2 | a guard refused a mismatch before the comparison ran |
+
+Those counts started as `same-row` 6 and `inherited` 5, and **the scan corrected
+four of them on its first run** — `recoverWriteOff`, `createInvoice`, `createBill`
+and `priceApplication` were all declared `same-row` and none of them is, because
+the operands have different roots or no root at all. The declarations were
+corrected rather than the measurement loosened, which is the point of declaring
+the ground and measuring the fact separately.
 
 **It found three, and every one was already known** — `applyDeposit`,
 `redeemGiftCard`, `contractorPayments`, each already on a register. That is the

@@ -57,17 +57,39 @@ the half that has to be checkable.
 
 | reason | count | what it means |
 | --- | --- | --- |
+| `inherited` | 9 | one row was created carrying the other's currency: a checkout takes the invoice's, a credit note takes the document's it reverses |
 | `home-money` | 7 | neither side carries a currency — a till, a gift-card balance, a fund, an inventory valuation |
-| `same-row` | 6 | both operands come off one row, and one row has one currency |
-| `inherited` | 5 | one row was created carrying the other's currency: a checkout takes the invoice's, a credit note takes the document's it reverses |
-| `refused-upstream` | 2 | a guard refused a mismatch before the comparison ran — `applyCreditWithin` calls `creditableAgainst` and throws first |
 | `blind` | 3 | not known comparable, and wrong today |
+| `same-row` | 2 | both operands come off one row, and one row has one currency |
+| `refused-upstream` | 2 | a guard refused a mismatch before the comparison ran — `applyCreditWithin` calls `creditableAgainst` and throws first |
 
 `inherited` is the one I did not expect to need. `postCapturedCheckout` caps a
 capture at `Math.min(checkout.grossCents, invoice.balanceCents)` — two rows, so
 not `same-row`; no refusal, so not `refused-upstream`. It is sound because
 `createCheckout` writes `currency: row.invoice.currency`. Two rows, one currency,
 guaranteed when the second was written.
+
+### It corrected four of my own declarations
+
+Those counts began as `same-row` 6 and `inherited` 5. The scan disagreed with
+four of them on the first run:
+
+```
+recoverWriteOff   input.amountCents > writeOff.amountCents
+createInvoice     retainageCents >= totalCents
+createBill        retainageCents >= totalCents
+priceApplication  completedToDateCents > item.scheduledValueCents
+```
+
+Every one was declared `same-row` and none of them is. `recoverWriteOff` has two
+different roots — `input` and `writeOff` — and the other three compare bare
+locals with no root at all. They are `inherited`: the amount recovered is an
+amount *of* that write-off, and the retainage and the total are both derived from
+the document being built.
+
+The declarations were corrected, not the measurement. That is the whole reason
+the ground is declared and the fact is measured separately (ADR 0141) — and the
+first thing this registry did was catch the person writing it.
 
 ## What it found: three, and every one already known
 
