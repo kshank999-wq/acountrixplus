@@ -140,9 +140,14 @@ describe('every registry refuses the same way', () => {
     // Thirteen since Phase 141, and it happened again: `DOMESTIC_GROUNDS` was
     // written against `bank-side.ts` beside it, inherited the shape without
     // being told to, and was found by this line rather than by anybody
-    // remembering. Twice now the count has done the work the allowlist used to
-    // do badly, which is the whole argument of ADR 0132 in one integer.
-    expect(thrown.length).toBe(13)
+    // remembering.
+    //
+    // Fifteen since Phase 144, which added two at once — `COMPARISON_FORMS` and
+    // `COMPARED_PAIRS`, both in `fx/comparison.ts`, both written against the
+    // registries beside them and neither against this file. Three times now the
+    // count has caught a registry rather than described one, which is the whole
+    // argument of ADR 0132 in one integer.
+    expect(thrown.length).toBe(15)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

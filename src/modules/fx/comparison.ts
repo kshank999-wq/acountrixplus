@@ -313,8 +313,10 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
     symbol: 'createVendorCredit',
     comparability: 'inherited',
     because:
-      'The payables mirror of the credit note, denominated by the bill it reverses through the ' +
-      'same rule.',
+      'The payables mirror of the credit note: a vendor credit reverses a bill and takes its ' +
+      'currency through the same shared rule in `fx/denomination.ts` that Phase 63 settled for ' +
+      'the receivables side. So `totalCents > bill.totalCents` and the `Math.min` beside it ' +
+      'compare the credit with the document that denominates it.',
   },
   {
     file: 'src/modules/receivables/credits.ts',
@@ -338,10 +340,13 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
   {
     file: 'src/modules/receivables/credits.ts',
     symbol: 'recoverWriteOff',
-    comparability: 'same-row',
+    comparability: 'inherited',
     because:
       '`input.amountCents > writeOff.amountCents` bounds a recovery by the write-off it recovers. ' +
-      'One row, one currency — and the row carries it explicitly since Phase 127.',
+      'Declared `same-row` first and the scan disagreed, correctly: the operands have different ' +
+      'roots, so this is two things and not one row. What makes it sound is that the amount ' +
+      'recovered is an amount *of that write-off*, denominated by it — which is why ' +
+      '`invoice_write_offs` had to be given a currency column at all (Phase 127).',
   },
   {
     file: 'src/modules/receivables/service.ts',
@@ -349,23 +354,28 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
     comparability: 'same-row',
     because:
       '`document.balanceCents !== document.totalCents` asks whether anything has been applied to ' +
-      'a document, comparing it with itself.',
+      'a document before it may be voided, comparing that document with itself. Both operands ' +
+      'read off one identifier, which is the thing the scan can actually check — and after four ' +
+      'entries were declared `same-row` and found not to be, it is one of only two that are.',
   },
   {
     file: 'src/modules/receivables/service.ts',
     symbol: 'createInvoice',
-    comparability: 'same-row',
+    comparability: 'inherited',
     because:
       '`retainageCents >= totalCents` refuses a contract withholding more than the invoice is ' +
-      'worth. Both figures are computed from the same input lines in the same currency, before ' +
-      'anything is written.',
+      'worth. Both are bare locals rather than one row — the scan said so when this was declared ' +
+      '`same-row` — and both are computed from the same input lines, so each inherits the ' +
+      'currency of the document being built before anything is written.',
   },
   {
     file: 'src/modules/receivables/service.ts',
     symbol: 'createBill',
-    comparability: 'same-row',
+    comparability: 'inherited',
     because:
-      'The payables twin, and the same arithmetic on the same input.',
+      'The payables twin of the invoice check, and the same arithmetic on the same input: both ' +
+      'figures are derived from the bill’s own lines and carry the currency it is being raised ' +
+      'in. Declared `same-row` first, for the same wrong reason, and corrected by the same scan.',
   },
   {
     file: 'src/modules/payables/approvals-service.ts',
@@ -378,11 +388,12 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
   {
     file: 'src/modules/jobs/billing.ts',
     symbol: 'priceApplication',
-    comparability: 'same-row',
+    comparability: 'inherited',
     because:
       '`completedToDateCents > item.scheduledValueCents` refuses billing more of a line than the ' +
-      'schedule of values holds. Both are the same line of the same schedule, which belongs to ' +
-      'one job and is quoted in one currency.',
+      'schedule of values holds. The completed figure is a figure *for that item*, so it carries ' +
+      'the schedule’s currency — one job, one quotation. Not one row, which is what the scan ' +
+      'pointed out when this was declared `same-row`.',
   },
   {
     file: 'src/modules/properties/deposits.ts',

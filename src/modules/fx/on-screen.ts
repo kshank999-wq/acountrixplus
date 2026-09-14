@@ -356,8 +356,25 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
  * these are counted.
  *
  * It may shrink. It must never grow without somebody saying why.
+ *
+ * ## It grew to twenty-seven in Phase 143, and here is why
+ *
+ * Not because six screens appeared. Because `FACE_COLUMNS` did: it was
+ * seventeen column names typed by hand and the schema has fifty-four, so
+ * completing it gave this scan thirty-seven more property names to recognise
+ * money by.
+ *
+ * The six are `budgets:Grid`, `dimensions:UnassignedLine`, `drawers:HistoryRow`,
+ * `inventory:Unbilled`, `settings/import:Plan` and `settings/chart:Account` —
+ * every one the same character as the twenty-one before them: a budget, a
+ * dimension roll-up, a till's history, a stock figure, an opening balance, a
+ * chart of accounts. The company's own money on a screen that shows it.
+ *
+ * Worth recording rather than absorbing, because it is the third scan Phase 143
+ * widened. The column list feeds the SQL sum scan, the reduce scan **and** this
+ * one, and only two of those were expected.
  */
-export const UNCLASSIFIED_CARRIERS = 21
+export const UNCLASSIFIED_CARRIERS = 27
 
 /**
  * Call sites where a face-column *name* appears on something that is not one.

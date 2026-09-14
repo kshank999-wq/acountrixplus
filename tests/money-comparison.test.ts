@@ -293,7 +293,7 @@ describe('what comparabilityStands refuses', () => {
 
     expect(verdict.ok).toBe(false)
     if (verdict.ok) return
-    expect(verdict.why).toContain('one row has')
+    expect(verdict.why).toContain('One row has')
   })
 
   it('catches a refusal that is not there', () => {

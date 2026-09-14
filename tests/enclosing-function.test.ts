@@ -121,9 +121,14 @@ describe('what the broken scanner did to the registries', () => {
 
   it('checks enough registries for that to mean something', () => {
     // Measured, not bounded (Phase 126). Fifty-nine declarations across three
-    // registries; two of them were fiction before this phase.
+    // registries; two of them were fiction before Phase 140.
+    //
+    // Sixty-one since Phase 143, which argued two more sums into
+    // `SAFE_FACE_SUMS` — `openCreditsAsAt`, grouped by credit note, and
+    // `previewBilling`, which the scan mistook for a retainer sum. Both are
+    // real functions, which is what this assertion is here to keep true.
     expect(SITE_REGISTRIES.length).toBe(3)
-    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(59)
+    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(61)
   })
 
   it('disagrees with the old scanner, on sites the registries do not yet reach', () => {
