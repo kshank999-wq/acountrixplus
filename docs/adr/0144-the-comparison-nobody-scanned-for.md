@@ -1,6 +1,6 @@
 # 0144 — The comparison nobody scanned for
 
-**Status:** proposed
+**Status:** accepted
 **Date:** 2026-09-14
 **Phase:** 144
 
