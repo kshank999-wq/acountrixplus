@@ -182,6 +182,26 @@ export const PENDING_WIRING: readonly Pending[] = [
       'so `relieveFunctional` still decides the functional figure — which is the only way a card ' +
       'that clears an invoice takes both columns to zero together.',
   },
+  {
+    core: 'taxPerCode',
+    coreFile: 'src/modules/payroll/tax-rounding.ts',
+    targets: [{ symbol: 'priceDocumentTax', file: 'src/modules/payroll/sales-tax.ts' }],
+    phase: 145,
+    blockedBy: 'nothing',
+    acceptance: 'tests/tax-that-foots-on-the-document.test.ts',
+    liveDefect:
+      'priceDocumentTax rounds every tax line on its own base and adds the results up, which is ' +
+      'the one thing taxOn’s own comment says not to do. Measured: three lines of $10.00, $20.00 ' +
+      'and $33.33 under one 8.25% code charge $5.23 where the code’s base of $63.33 gives $5.22, ' +
+      'so the invoice the customer receives shows a tax that is not its own printed base times ' +
+      'its own printed rate — and the return inherits it from the stored breakdown.',
+    because:
+      'The core exists and is tested exhaustively, and the change at the call site is one ' +
+      'expression: price through `taxPerCode` rather than mapping the per-line rounding over the ' +
+      'lines. It is staged rather than made because it changes what an invoice charges, which is ' +
+      'a repair to want deliberately and in one pass with the rest rather than as a side effect ' +
+      'of the phase that found it.',
+  },
 ]
 
 export type WiringVerdict = { ok: true } | { ok: false; why: string }

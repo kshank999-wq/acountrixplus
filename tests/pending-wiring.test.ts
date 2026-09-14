@@ -48,8 +48,11 @@ describe('the register of what is staged', () => {
     // go through.
     // Five since Phase 142 added the gift-card redemption, which ADR 0141 had
     // to leave off precisely because this register requires a core that exists.
-    expect(PENDING_WIRING.length).toBe(5)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(8)
+    // Six since Phase 145 added the tax rounding, which is the first entry here
+    // that is not about currency — the figure is in the right currency and is
+    // the wrong number.
+    expect(PENDING_WIRING.length).toBe(6)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(9)
   })
 
   it('still describes the code, entry by entry', () => {
@@ -75,8 +78,18 @@ describe('the register of what is staged', () => {
   it('names a live defect for every entry, not a plan', () => {
     // What separates this from a wish list. Each entry says what is wrong in the
     // code today, so reading the register is reading a list of faults.
+    //
+    // `rounds` since Phase 145, argued rather than worked around: the entry it
+    // was added for says "priceDocumentTax rounds every tax line on its own
+    // base", which is present tense about live code and is the thing this
+    // assertion is testing for. Writing it as "posts" to satisfy the list would
+    // have been a worse sentence passing a check that had stopped meaning
+    // anything — and the list is a spelling, which is the shape this codebase
+    // has now found wanting seven times.
     for (const entry of PENDING_WIRING) {
-      expect(entry.liveDefect, entry.core).toMatch(/\b(?:compares|posts|refuse|reports|puts)\b/)
+      expect(entry.liveDefect, entry.core).toMatch(
+        /\b(?:compares|posts|refuse|reports|puts|rounds)\b/,
+      )
     }
   })
 })

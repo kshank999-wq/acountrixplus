@@ -147,7 +147,12 @@ describe('every registry refuses the same way', () => {
     // registries beside them and neither against this file. Three times now the
     // count has caught a registry rather than described one, which is the whole
     // argument of ADR 0132 in one integer.
-    expect(thrown.length).toBe(15)
+    //
+    // Sixteen since Phase 145 and `SPLIT_SITES`, which is the first one written
+    // in a module that did not exist — `money/` — and still inherited the shape,
+    // because the shape now comes from reading any registry in the codebase
+    // rather than from being next door to a particular one.
+    expect(thrown.length).toBe(16)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

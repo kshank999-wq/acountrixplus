@@ -5,6 +5,7 @@ import { declaresFunction, enclosingSymbol, withoutComments } from '@/modules/so
 import { LEDGER_POSTINGS } from '@/modules/fx/ledger'
 import { BANK_POSTINGS } from '@/modules/fx/bank-side'
 import { SAFE_FACE_SUMS } from '@/modules/fx/comparable'
+import { SPLIT_SITES } from '@/modules/money/splitting'
 
 /**
  * The enclosing function that was not one (Phase 140).
@@ -37,6 +38,7 @@ const SITE_REGISTRIES: readonly { name: string; rows: readonly { file: string; s
     { name: 'LEDGER_POSTINGS', rows: LEDGER_POSTINGS },
     { name: 'BANK_POSTINGS', rows: BANK_POSTINGS },
     { name: 'SAFE_FACE_SUMS', rows: SAFE_FACE_SUMS },
+    { name: 'SPLIT_SITES', rows: SPLIT_SITES },
   ]
 
 describe('which function a line of source is inside', () => {
@@ -127,8 +129,14 @@ describe('what the broken scanner did to the registries', () => {
     // `SAFE_FACE_SUMS` — `openCreditsAsAt`, grouped by credit note, and
     // `previewBilling`, which the scan mistook for a retainer sum. Both are
     // real functions, which is what this assertion is here to keep true.
-    expect(SITE_REGISTRIES.length).toBe(3)
-    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(61)
+    //
+    // Sixty-six across four registries since Phase 145. `SPLIT_SITES` names the
+    // five places a money whole is divided into parts, and it is keyed the same
+    // way for the same reason: four of those five entries were read off the
+    // source by hand, which is exactly how `LEDGER_POSTINGS` came to hold two
+    // functions that did not exist.
+    expect(SITE_REGISTRIES.length).toBe(4)
+    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(66)
   })
 
   it('disagrees with the old scanner, on sites the registries do not yet reach', () => {

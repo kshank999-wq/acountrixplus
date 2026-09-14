@@ -6189,6 +6189,51 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The rounding that happens once per line (Phase 145)
+
+ADR 0144 nominated the wiring pass, which the staging instruction rules out for
+now, so the phase was derived by measuring instead. Six registries cover money
+being posted, banked, added, shown, grounded and compared; the gap is the
+arithmetic that is none of those — money **divided**. Measured: **140 roundings
+and 35 sites where a cents amount is multiplied or divided, across 26 files**,
+and four separate implementations of the one rule that matters — a whole split
+into parts that must add back to the whole.
+
+The fifth place is where `taxOn` carries this, and has since it was written:
+
+> Pure, and rounded **once on the total** rather than per line. Rounding each
+> line and adding them up drifts by up to half a cent per line, and a return that
+> does not foot against the invoices behind it is a return somebody has to
+> reconcile by hand.
+
+Its only pricing caller rounds each line and adds them up. ADR 0110's shape
+exactly: a declaration argued from a fact that is not a fact. Three lines of
+$10.00, $20.00 and $33.33 under one 8.25% code charge **523** where the code's
+own base of $63.33 gives **522** — so the invoice a customer receives shows,
+under a named jurisdiction, a tax that is not its own printed base times its own
+printed rate, and the stored breakdown carries it into the return.
+
+Rounding once on the *document* total, which is what that sentence literally
+asks for, cannot be done: lines carry different codes and a return reports per
+jurisdiction. The rule that holds is **once per code, on that code's own base,
+split back across the lines it came from**.
+
+What it does not fix is stated rather than glossed: a return aggregates many
+documents and `round(a × r) + round(b × r)` is not `round((a + b) × r)`, so a
+quarter will still be a few cents out. That is inherent. The document is the
+level where the identity is required and the level this repairs.
+
+`splitExactly` is a fifth implementation and argues for being one — largest
+remainder, so no part is ever more than a cent from its exact share, where
+`prorate` puts the whole residue on the last weight. It multiplies in `BigInt`
+because every existing version does it in floating point, none is wrong at the
+sizes seen today and all are wrong at some size. `SPLIT_SITES` records all five
+so a sixth has somewhere to be declared.
+
+Nothing is wired. The entry is on `PENDING_WIRING` — now six over nine targets —
+with the acceptance test that says when it is done.
+
+
 ### The comparison nobody scanned for (Phase 144)
 
 ADR 0143 nominated this with a measurement rather than a hunch: **63
@@ -6911,6 +6956,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/tax-rounding.test.ts` | **The rounding that happens once per line** (Phase 145): `taxOn` says in its own comment that tax is rounded once on the total and never per line, because "a return that does not foot against the invoices behind it is a return somebody has to reconcile by hand" — and its only pricing caller rounds each line and adds them up. Three lines of $10.00, $20.00 and $33.33 under one 8.25% code charge 523 cents where the code's own base of $63.33 gives 522, so the invoice shows a tax that is not its printed base times its printed rate under a named jurisdiction. Measured over three hundred sets of lines at each size, the total fails to foot in 249 of 300 sets at fifty lines and 300 of 300 at ten thousand. Rounding once on the document cannot be the repair, since lines carry different codes and a return reports per jurisdiction; `taxPerCode` rounds once per code and splits the figure back across its lines with `splitExactly`, which is largest-remainder in `BigInt` — no part more than a cent from its exact share, where the four existing splitters put the whole residue on the last one and multiply in floating point. What it cannot fix is asserted as a limit rather than glossed: a quarter aggregates documents already rounded, and no later period can re-round them |
 | `tests/money-comparison.test.ts` | **The comparison nobody scanned for** (Phase 144): Phase 122 built a tripwire for money being added and nobody built one for money being compared, though two of the five defects before this phase were comparisons found by hand four phases apart. Four forms, and the fourth is the one that mattered — `redeemGiftCard`'s comparison lives inside `redeemFor`, a pure helper over two bare parameters in a file reading no currency-bearing table, so the three obvious forms all miss it and a scan built without the fourth would have missed the defect it was for. Each of the 23 sites declares one of five reasons two amounts are comparable, and the scan measures the two that can be checked: `same-row` against the operands, `refused-upstream` against the guards in the function. It found three blind sites and **every one was already on a register** — which is how a new tripwire earns trust, by disagreeing first about things somebody can go and verify |\n| `tests/money-columns.test.ts` | **The money columns nobody declared** (Phase 143): `FACE_COLUMNS` — the list both sum scans key on — was seventeen column names typed by hand, and `information_schema` says the carrier tables have **fifty-four** money columns. The thirty-seven nobody classified were not excused by the tripwire; they were invisible to it, which is worse, because an excused site carries an argument somebody can disagree with and an unseen one carries nothing. Phase 128's shape exactly, in the module next door, seven phases of reach failures later. The registry is now held to the schema in both directions and cross-checked against `PAIRED_COLUMNS`, so a new `*_cents` column on a carrier table has to say which money it is. Three sides keep it from making the scans noisier: `face` is the document's currency, `functional` is already the company's money, `account` is one account's arithmetic end to end. Completing it surfaced five sites, of which measuring found three real — two feeding statutory filings — and two the scan's own narrowing got wrong |
 | `tests/affordable.test.ts` | **What a home-money holding can buy of a foreign document** (Phase 142): `redeemGiftCard` takes `min(card.balanceCents, bill.balanceCents)` — a dollar against a euro — in the decision that says how much of a debt is forgiven, then posts that to both journal lines while `relieveFunctional` converts for the subledger. A $600 card against a €1,000 invoice at 1.10 credits receivables $600 and takes $660 off the invoice, so the control account and the subledger part company by $60 nightly. `affords` returns a **face** amount and nothing else, leaving `relieveFunctional` to decide the functional figure — the only way a card that clears an invoice takes both columns to zero together, since that one returns the carried figure rather than a fresh conversion. It floors rather than rounds, because rounding buys one cent more of the document than the card holds; the property is asserted across eight rates and eight holdings in both directions, never over and never obviously under. The first inverse of `convert` in the codebase, and separate from Phase 138's `spends` because a card that cannot cover the bill is the ordinary case rather than a refusal |
 | `tests/domestic-ground.test.ts` | **The ground a domestic claim stands on** (Phase 141): fourteen posting sites are declared `domestic` and none said what *kind* of argument it was making — nothing in reach, a refusal, a conversion upstream, a rate of one, or a sum already argued to be one currency. The ground is declared because choosing it is a judgement; the reach is measured because remembering it is not, and it is the half that goes stale. Three are contradicted by the source and each keeps the argument it always made, so the scan names them: `applyDeposit` and `redeemGiftCard` claim no currency is near while reaching or reading `invoices`, and `recordContribution` claims the same while debiting a bank account its sibling forty lines below is refused a foreign one. `covered` is built only from what a named callee reaches, so a carrier the body reads itself is never excused by one — the hole a self-declared field would leave, with a test that tries to walk through it. The scan's three guards are each a false positive its first cut produced: a comment read as a table, a local array read as a table, and a hand-typed file list where the calling file's own imports belong |
