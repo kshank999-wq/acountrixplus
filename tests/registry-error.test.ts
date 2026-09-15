@@ -161,7 +161,10 @@ describe('every registry refuses the same way', () => {
     // Eighteen since Phase 148 and `RECOVERY_TARGETS`, the first registry in
     // this codebase that is not about money at all — which is the point. The
     // shape travelled to a new domain without anybody carrying it there.
-    expect(thrown.length).toBe(18)
+    //
+    // Nineteen since Phase 149 and `ISOLATION_GUARDS`, which is the second
+    // outside the money domain and the first about security.
+    expect(thrown.length).toBe(19)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

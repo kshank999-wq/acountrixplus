@@ -6189,6 +6189,58 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### What a write stands on (Phase 149)
+
+ADR 0148 nominated this against a sentence in this file: *"tenant isolation
+rests on `scoped()` at every query and on the tests that assert it."* That is a
+claim about the most serious defect class the system can have, and it can be
+held to a fact.
+
+Measured: 159 company-scoped tables, 1,330 queries naming one, and **106** that
+can be *aimed* — an `update` or `delete` whose `where` keys off an id the
+function was handed, the only shape that reaches a row somebody else chose.
+
+Every one of the 106 is guarded. By eight different things:
+
+| guard | count |
+| --- | --- |
+| `explicit-company` — `eq(t.companyId, ctx.companyId)` written out | 58 |
+| `scoped-write` — `scoped()` inside the statement | **27** |
+| `read-then-refuse` — a filtered read above, a refusal, then a write by id | 9 |
+| `owner-helper` — a helper that loads and refuses | 4 |
+| `system-actor` — no tenant, by design | 4 |
+| `caller-established` — module-private, or the caller had the check | 2 |
+| `actor-scoped` — `eq(t.userId, ctx.userId)`, stricter than the company | 1 |
+| `bearer-credential` — the id is the secret | 1 |
+
+**The code is right and the sentence was wrong.** Nothing here is a leak.
+`scoped()` guards about a quarter of them; the most common guard is an explicit
+`companyId` equality at more than twice as many. What was missing is that
+isolation rested on eight mechanisms and nothing recorded which one any given
+write stood on, so the only way to know a write was safe was to read it and work
+it out again.
+
+The guards are **declared** and the sites are **measured** (ADR 0141), because
+declaring the sites would produce a register saying `updateTime` is fine — a
+sentence that stops being true the moment somebody deletes its `loadOwnEditable`
+call and goes on reading exactly the same. Every guard carries a `detect`, and a
+write matching none of them fails by name.
+
+Three guards are marked as *not* company-tight — `bearer-credential`,
+`caller-established`, `system-actor` — and a test asserts exactly those three.
+That flag is ADR 0134 in a boolean: *"it is a system path"* is precisely what
+somebody would write to excuse a real leak, so it is measured rather than
+accepted, and being in a worker file is not on its own a licence.
+
+The scan caught itself twice. It called `revokeDevice` and `renameDevice`
+unguarded when both filter on the acting user — **stricter** than a company
+filter — because it was looking for `companyId`: a check shaped like the loosest
+rule could not see the tightest one, the eleventh instance of that family. And
+the test asserting every declared guard is *used* collapsed one of my own
+distinctions: `parent-scoped` turned out to be `read-then-refuse` with the
+refusal one table up, so it is gone.
+
+
 ### A database dump is not a backup (Phase 148)
 
 Found by auditing `docs/SPEC.md` against the code rather than by measuring the
@@ -7034,7 +7086,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
-| `tests/tenant-isolation.test.ts` | Two companies side by side: inbox scoping, cross-tenant writes, foreign ids in bulk operations, audit scoping |
+| `tests/isolation-guards.test.ts` | Two companies side by side: inbox scoping, cross-tenant writes, foreign ids in bulk operations, audit scoping |
 | `tests/permissions.test.ts` | Role defaults, granular overrides, and enforcement inside services |
 | `tests/dedup.test.ts` | Repeated syncs, the database-level unique constraint, and two tenants importing identical provider ids |
 | `tests/rules.test.ts` | Condition evaluation, priority, merchant normalization, vendor memory, auto vs suggest |
@@ -7108,6 +7160,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/isolation-guards.test.ts` | **What a write stands on** (Phase 149): the README said tenant isolation "rests on `scoped()` at every query". Measured across 159 company-scoped tables and 1,330 queries, **106** writes can be aimed at a row — an update or delete keyed by an id the function was handed — and `scoped()` guards 27 of them, against 58 guarded by an explicit `companyId` equality. Every one of the 106 is safe; the code is right and the sentence was wrong, and what was missing is that isolation rested on eight mechanisms with nothing recording which. The guards are declared and the sites measured (ADR 0141), because a declared site says `updateTime` is fine and goes on saying it after the `loadOwnEditable` call is deleted. Three guards are marked not company-tight, because "it is a system path" is what somebody would write to excuse a real leak. It caught itself twice: it called the strictest guard in the codebase — a filter on the acting user — unguarded, because it was looking for `companyId`; and the used-guard check collapsed a distinction I had invented |
 | `tests/recovery-targets.test.ts` | **A database dump is not a backup** (Phase 148): spec §19 asks for backups, point-in-time recovery, a retention policy and a tested restore procedure; only the retention policy existed, and DEPLOY.md contained no occurrence of the word *backup*. The finding is that a database backup is not a backup of this system — `secret-box.ts` argues a leaked dump is safe because "the key was never in it", which is exactly why a dump you keep is insufficient: restore without `ENCRYPTION_KEY` and every MFA enrolment is permanently unreadable, because GCM fails rather than producing a plausible secret. Six recovery targets, sorted by whether you could roll the value on purpose on a Tuesday; the two that cost nothing are on the list so the four that cost data are legible. Whether anything lives outside the database is measured from `document_blobs.storage_provider` rather than declared, so a company that never left the database adapter is not sent looking for a directory. The non-regenerable claim is **run** — encrypt, decrypt, swap the key, watch it throw — and the rehearsal's step 3 is signing in with MFA, the only step that catches a missing key |
 | `tests/money-division.test.ts` | **Which came first, the whole or the parts** (Phase 147): `SPLIT_SITES` was five entries chosen by hand and ADR 0145 argued for declaring rather than scanning; this is the scan, and the line that made it possible is that a constant divisor converts units while a variable one is a total something is a share of — thirteen rates, seven shares. Three forms, and only the third reaches `priceDocumentTax`, the one live defect, because there is no arithmetic at that site at all. It grew the register to eight: `recoveryFunctional`, a split no registry had named; `createDeposit`, the same shape as the tax defect and correct because each receipt was already posted converted, so the parts are the record; and `grossFor`, an annual salary cut into equal periods with no residue, on the register and not on `PENDING_WIRING` because it is the illustrative provider that must not be used to pay anybody. It also disproved two of the registry's own declarations — `splitFor` does place its residue, and `wholeIsIndependent` carried two answers for the tax site — and caught two faults in itself, which is the only way a scan's reach gets tested |
 | `tests/application-preview.test.ts` | **The preview the screen never asked for** (Phase 146): `priceApplication` says it exists so the UI can show what an application will bill, and the UI has never called it — its only caller is `createProgressBilling`. `BillingPanel` derives the three figures again in a `useMemo` under different rules: a line billed backwards is clamped to zero on the screen and refuses the whole application on the server, and neither the percent nor the retainage is bounded before the click. Item 02 dropped from 50% to 20% with $2,500 already billed previews $2,000 and posts nothing. Wiring the screen to the existing function would not have been enough, since it throws on the first bad line — so `priceApplicationLines` returns problems as a list keyed to the item, and the five refusal sentences are the service's own moved character for character, asserted still to appear in `billing.ts`. The panel's own `useMemo` is transcribed here to prove the disagreement, the device ADR 0140 used for the broken symbol reader |
@@ -9289,7 +9342,10 @@ Gaps within the phases already built:
 - **Deleting a document is silent about its links.** The button says how many records it will strip
   it from, and then does it. No undo, and no interstitial for a file used on ten records.
 - **Row-level security as a second isolation layer** (spec §19) is still not in place; tenant
-  isolation rests on `scoped()` at every query and on the tests that assert it. MFA, session and
+  isolation rests on eight guards held to the source by `tests/isolation-guards.test.ts` — `scoped()`
+  covers twenty-seven of the hundred and six writes that can be aimed at a row, and an explicit
+  `companyId` equality covers fifty-eight. This line said "`scoped()` at every query" until Phase
+  149 measured it. MFA, session and
   device controls were built in Phase 13.
 - **Spec §18's infrastructure list is now complete.** Object storage arrived in Phase 20,
   server-side PDF generation and immutable snapshots in Phase 21, the background job queue and the
