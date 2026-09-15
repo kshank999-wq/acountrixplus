@@ -157,7 +157,11 @@ describe('every registry refuses the same way', () => {
     // registry in `money/` and the fourth written by somebody who had not read
     // this file. The count has now caught a registry four times, and has never
     // once had to be argued down.
-    expect(thrown.length).toBe(17)
+    //
+    // Eighteen since Phase 148 and `RECOVERY_TARGETS`, the first registry in
+    // this codebase that is not about money at all — which is the point. The
+    // shape travelled to a new domain without anybody carrying it there.
+    expect(thrown.length).toBe(18)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

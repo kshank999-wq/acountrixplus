@@ -6189,6 +6189,60 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### A database dump is not a backup (Phase 148)
+
+Found by auditing `docs/SPEC.md` against the code rather than by measuring the
+code. §19 asks for four things — *"Backups, point-in-time recovery strategy,
+retention policy, and tested restore procedure"* — and only the retention policy
+existed. `docs/DEPLOY.md` ran to 323 lines and contained no occurrence of
+*backup*, *restore* or *recovery*.
+
+The finding is not the missing section. It is that a database backup is not a
+backup of this system, and the argument was already here, written from the other
+side. `secret-box.ts` says a leaked dump is safe because *"the key was never in
+it"* — which is true, and is exactly why a dump you **keep** is insufficient.
+Restore without `ENCRYPTION_KEY` and every MFA-enrolled user is locked out of
+their own books permanently: AES-GCM authenticates, so a wrong key fails rather
+than producing a plausible secret. The row does not become wrong, it stops being
+data. One file held both halves of that and neither mentioned a restore.
+
+Six things have to come back, and the distinction that matters is whether you
+could change the value **on purpose on a Tuesday**:
+
+| target | regenerable |
+| --- | --- |
+| the database | no |
+| document bytes under `OBJECT_STORE_PATH` | no |
+| `ENCRYPTION_KEY` | **no** — the ciphertext dies with it |
+| `VAPID_PRIVATE_KEY` | **no** — every push subscription dies with it |
+| `SESSION_SECRET` | yes — everybody signs in again |
+| `CRON_SECRET` | yes — set it at both ends |
+
+The last two are on the list *because* they do not matter: a register whose
+entries are all emergencies is read as one undifferentiated emergency, and
+`restoreStands` does not hold a restore open for either.
+
+Whether anything lives outside the database is a fact **in** the database.
+`document_blobs.storage_provider` records the adapter per row and its own comment
+already insisted on it — "Read from here, never from the setting" — so
+`storesInUse` is measured rather than declared (ADR 0141), and a company that
+never left the database adapter is not sent looking for a directory.
+
+The claim that `ENCRYPTION_KEY` cannot be regenerated is the whole argument, so
+the test performs it rather than asserting it: encrypt, decrypt, swap the key,
+watch it throw. The rehearsal in DEPLOY.md has the same shape — step 3 is *sign
+in as a user with MFA enrolled*, called out as the step that catches a missing
+key because it is the only one that does. Step 4 sends the operator to
+**Settings → Integrity**, because twenty-odd checks that prove the subledgers
+still agree with the control accounts already exist, and writing a second set
+would have been the defect this project keeps naming.
+
+It caught two faults in itself, both the same fault: the query said `store` and
+the column is `storage_provider`, and the environment check looked in a list of
+four files I typed and failed on `SESSION_SECRET`. Both were found because the
+test runs against the live schema and scans the tree.
+
+
 ### Which came first, the whole or the parts (Phase 147)
 
 ADR 0146 nominated this against Phase 145's own work: `SPLIT_SITES` was five
@@ -7054,6 +7108,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/recovery-targets.test.ts` | **A database dump is not a backup** (Phase 148): spec §19 asks for backups, point-in-time recovery, a retention policy and a tested restore procedure; only the retention policy existed, and DEPLOY.md contained no occurrence of the word *backup*. The finding is that a database backup is not a backup of this system — `secret-box.ts` argues a leaked dump is safe because "the key was never in it", which is exactly why a dump you keep is insufficient: restore without `ENCRYPTION_KEY` and every MFA enrolment is permanently unreadable, because GCM fails rather than producing a plausible secret. Six recovery targets, sorted by whether you could roll the value on purpose on a Tuesday; the two that cost nothing are on the list so the four that cost data are legible. Whether anything lives outside the database is measured from `document_blobs.storage_provider` rather than declared, so a company that never left the database adapter is not sent looking for a directory. The non-regenerable claim is **run** — encrypt, decrypt, swap the key, watch it throw — and the rehearsal's step 3 is signing in with MFA, the only step that catches a missing key |
 | `tests/money-division.test.ts` | **Which came first, the whole or the parts** (Phase 147): `SPLIT_SITES` was five entries chosen by hand and ADR 0145 argued for declaring rather than scanning; this is the scan, and the line that made it possible is that a constant divisor converts units while a variable one is a total something is a share of — thirteen rates, seven shares. Three forms, and only the third reaches `priceDocumentTax`, the one live defect, because there is no arithmetic at that site at all. It grew the register to eight: `recoveryFunctional`, a split no registry had named; `createDeposit`, the same shape as the tax defect and correct because each receipt was already posted converted, so the parts are the record; and `grossFor`, an annual salary cut into equal periods with no residue, on the register and not on `PENDING_WIRING` because it is the illustrative provider that must not be used to pay anybody. It also disproved two of the registry's own declarations — `splitFor` does place its residue, and `wholeIsIndependent` carried two answers for the tax site — and caught two faults in itself, which is the only way a scan's reach gets tested |
 | `tests/application-preview.test.ts` | **The preview the screen never asked for** (Phase 146): `priceApplication` says it exists so the UI can show what an application will bill, and the UI has never called it — its only caller is `createProgressBilling`. `BillingPanel` derives the three figures again in a `useMemo` under different rules: a line billed backwards is clamped to zero on the screen and refuses the whole application on the server, and neither the percent nor the retainage is bounded before the click. Item 02 dropped from 50% to 20% with $2,500 already billed previews $2,000 and posts nothing. Wiring the screen to the existing function would not have been enough, since it throws on the first bad line — so `priceApplicationLines` returns problems as a list keyed to the item, and the five refusal sentences are the service's own moved character for character, asserted still to appear in `billing.ts`. The panel's own `useMemo` is transcribed here to prove the disagreement, the device ADR 0140 used for the broken symbol reader |
 | `tests/tax-rounding.test.ts` | **The rounding that happens once per line** (Phase 145): `taxOn` says in its own comment that tax is rounded once on the total and never per line, because "a return that does not foot against the invoices behind it is a return somebody has to reconcile by hand" — and its only pricing caller rounds each line and adds them up. Three lines of $10.00, $20.00 and $33.33 under one 8.25% code charge 523 cents where the code's own base of $63.33 gives 522, so the invoice shows a tax that is not its printed base times its printed rate under a named jurisdiction. Measured over three hundred sets of lines at each size, the total fails to foot in 249 of 300 sets at fifty lines and 300 of 300 at ten thousand. Rounding once on the document cannot be the repair, since lines carry different codes and a return reports per jurisdiction; `taxPerCode` rounds once per code and splits the figure back across its lines with `splitExactly`, which is largest-remainder in `BigInt` — no part more than a cent from its exact share, where the four existing splitters put the whole residue on the last one and multiply in floating point. What it cannot fix is asserted as a limit rather than glossed: a quarter aggregates documents already rounded, and no later period can re-round them |

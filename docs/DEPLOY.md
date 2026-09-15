@@ -316,6 +316,119 @@ A misconfigured provider fails loudly rather than quietly: an unknown name or a
 missing key throws instead of falling back to the mock, so the failure is at
 deploy time rather than the first time somebody is locked out.
 
+## Backups and getting back
+
+Spec §19 asks for backups, a point-in-time recovery strategy, a retention
+policy and a **tested** restore procedure. The retention policy is in the code
+(`RETENTION_POLICIES`). The rest is this section, and the thing worth reading
+first is why a database backup on its own is not a backup of this system.
+
+### A database dump is not enough, and `secret-box.ts` says why
+
+`src/modules/auth/secret-box.ts` explains that a leaked dump is safe because
+the encryption key was never in it:
+
+> A database dump — a leaked backup, a SQL injection, a misconfigured replica —
+> yields ciphertext, and the key was never in it.
+
+That is true, and it is the same sentence read from the other end: **a dump you
+kept is ciphertext too.** Restore the database without `ENCRYPTION_KEY` and
+every MFA-enrolled user is locked out of their own books permanently — AES-GCM
+authenticates, so a different key fails rather than producing a wrong secret.
+Nothing recovers those rows afterwards.
+
+`src/modules/recovery/targets.ts` is the register of everything in this class,
+with what each loss costs. It is checked by `tests/recovery-targets.test.ts`,
+including an actual round trip proving a different key cannot read the
+ciphertext.
+
+### What to back up
+
+| | Where | If you lose it |
+| --- | --- | --- |
+| The database | Supabase | Everything |
+| Document bytes | `OBJECT_STORE_PATH`, **if in use** | Receipts and PDFs — the rows survive pointing at nothing |
+| `ENCRYPTION_KEY` | Vercel env | Every MFA enrolment, permanently |
+| `VAPID_PRIVATE_KEY` | Vercel env | Every push subscription, silently |
+| `SESSION_SECRET` | Vercel env | Nothing — people sign in again |
+| `CRON_SECRET` | Vercel env | Nothing — set the new value at both ends |
+
+The last two are **regenerable**: roll them any Tuesday. The first four are not.
+Keep the environment variables somewhere that is not the same Vercel project
+whose loss you are planning for — a password manager entry named for this
+deployment is enough.
+
+### Whether the object store applies to you
+
+Do not answer this from memory. `document_blobs.storage_provider` records the adapter
+per row, so the database knows:
+
+```sql
+select storage_provider, count(*) from document_blobs group by storage_provider;
+```
+
+- only `database` — the bytes are in `document_bytes` and the dump has them;
+- any `filesystem` — those bytes are under `OBJECT_STORE_PATH` and the dump
+  does **not** have them, and they need their own copy.
+
+A company that switched adapters has both, and both halves of its history
+matter.
+
+### Turning point-in-time recovery on
+
+This is a setting somebody has to have enabled *before* the day it is needed,
+which is why it is first.
+
+1. Supabase dashboard → your project → **Database** → **Backups**.
+2. Free and Starter plans keep **daily** snapshots only. Point-in-time recovery
+   is a paid add-on; if the books matter, this is the line item to buy.
+3. With PITR on, choose a retention window — seven days is the usual starting
+   point, and longer is worth it if nobody looks at the books weekly.
+4. Note the window somewhere the people who would need it can read: a mistake
+   discovered outside the window is not recoverable by this route.
+
+Daily snapshots alone mean the recovery point is "yesterday". For a ledger that
+is a real decision rather than a detail — a day of categorisation, invoices and
+payments re-entered by hand — so make it deliberately.
+
+### Restoring
+
+1. **Stop writing.** In Vercel, pause the project or set the deployment to a
+   maintenance page. A restore while the application is live gives you a
+   database that is behind and a worker still appending to it.
+2. Restore the database — Supabase → **Backups** → the snapshot or the
+   timestamp. Restoring into a **new** project rather than over the live one is
+   safer and lets you compare before you commit.
+3. If the query above showed any `filesystem` rows, restore that directory to
+   `OBJECT_STORE_PATH` as well.
+4. Set the environment variables back, `ENCRYPTION_KEY` first. If you are
+   restoring into a new Supabase project, `DATABASE_URL` is the new one and
+   everything else is unchanged.
+5. Run the checks below before letting anybody back in.
+
+### Rehearsing it — the part that makes it a procedure
+
+An untested restore is a plan, not a backup. Do this once now and once after any
+change to storage or secrets:
+
+1. Restore yesterday's snapshot into a **scratch** Supabase project.
+2. Point a local checkout at it: `DATABASE_URL=<scratch> npm run dev`, with the
+   same `ENCRYPTION_KEY` as production.
+3. Sign in as a user who has MFA enrolled. **This is the step that catches a
+   missing key** — and the only one that does, because everything else looks
+   healthy without it.
+4. Open **Settings → Integrity** and run the checks. `ledger.receivables` and
+   `ledger.payables` prove the subledgers still agree with the control accounts;
+   `banking.cash_tie_out` proves the bank side does. Twenty-odd checks exist and
+   they are the evidence that a restore is *sound*, not merely present.
+5. Open a document with a receipt attached. If the bytes were on the filesystem
+   and did not come with you, this is where you find out.
+6. Delete the scratch project.
+
+If step 3 or step 5 fails, the backup you have is not sufficient, and you have
+learned it on a day when nothing is at stake.
+
+
 ## Upgrading later
 
 Run migrations against the session pooler before deploying code that needs them,
