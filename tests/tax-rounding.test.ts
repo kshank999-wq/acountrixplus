@@ -330,12 +330,18 @@ describe('the register of places a whole is split', () => {
     }
   })
 
-  it('holds the one site whose whole does not exist first', () => {
-    // The defect, and the only entry that is wrong today. If a later phase
-    // repairs `priceDocumentTax`, this is what has to be updated with it.
+  it('holds the sites that place no residue at all', () => {
+    // One at Phase 145 and two since Phase 147, which is the distinction the
+    // register turned out to need: both leave the cents where they fall, and
+    // only one of them is a defect. `grossFor` is inside
+    // `IllustrativePayrollProvider` — invented rates, every run stamped
+    // illustrative, a refusal in the same file saying it must not be used to
+    // pay anybody — so it is on this register and deliberately not on
+    // `PENDING_WIRING`. If a real calculating provider is ever written with
+    // this shape, this is the line that should stop being comfortable.
     const unplaced = SPLIT_SITES.filter((site) => site.policy === 'unplaced')
 
-    expect(unplaced.map((site) => site.symbol)).toEqual(['priceDocumentTax'])
+    expect(unplaced.map((site) => site.symbol)).toEqual(['priceDocumentTax', 'grossFor'])
     // Phase 147 replaced `wholeIsIndependent` with `provenance`, because the
     // old field carried two answers for this very site: the whole does not
     // exist first as the code stands, and it is supposed to. `whole-first` is
@@ -364,6 +370,11 @@ describe('the register of places a whole is split', () => {
 
   it('finds the ones that are declared', () => {
     expect(splitSiteFor('src/modules/ledger/cash-basis.ts', 'prorate').policy).toBe('last-takes-it')
-    expect(splitSiteFor('src/modules/appointments/split.ts', 'splitFor').policy).toBe('reported')
+    // `reported` until Phase 147, and wrong: `businessCents` is
+    // `totalCents - practitionerCents`, so the business takes the residue like
+    // any other last part and `roundingCents` says how much rather than asking.
+    expect(splitSiteFor('src/modules/appointments/split.ts', 'splitFor').policy).toBe(
+      'last-takes-it',
+    )
   })
 })

@@ -136,14 +136,21 @@ export function splitExactly(wholeCents: number, weights: readonly number[]): nu
   return shares.map((share) => share * sign)
 }
 
-/** How a site places the cents that flooring or rounding leaves over. */
+/**
+ * How a site places the cents that flooring or rounding leaves over.
+ *
+ * `reported` — the parts computed independently and the residue handed back
+ * rather than placed — was a member here until Phase 147 and no site was ever
+ * it. It was declared for `splitFor` on a reading of that function which turned
+ * out to be wrong, and once the entry was corrected nothing was left that the
+ * value described. A union member with no instance reads like a case somebody
+ * handled, so it is gone rather than kept in case.
+ */
 export type ResiduePolicy =
   /** The last part takes whatever is left, however much that is. */
   | 'last-takes-it'
   /** One cent each to the parts that dropped the most. */
   | 'largest-remainder'
-  /** The parts are computed independently and the residue is reported, not placed. */
-  | 'reported'
   /** The parts are computed independently and the residue is left where it falls. */
   | 'unplaced'
   /**
