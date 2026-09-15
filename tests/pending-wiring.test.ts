@@ -51,8 +51,11 @@ describe('the register of what is staged', () => {
     // Six since Phase 145 added the tax rounding, which is the first entry here
     // that is not about currency — the figure is in the right currency and is
     // the wrong number.
-    expect(PENDING_WIRING.length).toBe(6)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(9)
+    // Seven over eleven since Phase 146, whose entry is the first to name a
+    // target in `src/app` — a screen and a service that have to be wired to one
+    // answer together, because the defect is that they each have their own.
+    expect(PENDING_WIRING.length).toBe(7)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(11)
   })
 
   it('still describes the code, entry by entry', () => {

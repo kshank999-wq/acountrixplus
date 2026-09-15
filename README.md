@@ -6189,6 +6189,52 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The preview the screen never asked for (Phase 146)
+
+`priceApplication` says it was separated out from the commit **so the UI can
+show the person what they are about to bill**. Measured: it has exactly one
+caller in `src/`, and it is `createProgressBilling`. There is no action wrapping
+it. The screen it was separated out for works the three figures out again in a
+`useMemo`, and the two do not agree:
+
+| | screen | service |
+| --- | --- | --- |
+| line billed backwards | `Math.max(0, …)` — contributes 0 | refuses the application |
+| beyond the scheduled value | no check — previews the excess | refuses the application |
+| percent above 100% | no bound | refuses the application |
+| retainage above 100% | no bound | refuses the application |
+
+So the preview shows a total, somebody clicks, and the server refuses. The clamp
+is the worst of the four: a line billed backwards contributes nothing to the
+preview, so the figure looks ordinary and is not the figure anybody will be
+invoiced. Item 02 dropped from 50% to 20% with $2,500 already billed previews
+$2,000 and posts nothing at all.
+
+ADR 0110's shape a phase after Phase 145 found it in `taxOn` — a declaration
+argued from a fact that is not a fact — with Phase 49's rule underneath it, in
+its sharpest form yet: not a function nobody happened to call, but one written
+for a caller that went and did it again itself.
+
+Wiring the screen to the existing function would not have been enough, because
+it **throws on the first bad line** — useless for somebody filling in twelve
+items. So `priceApplicationLines` returns problems as a **list** keyed to the
+item, beside the figures: a preview renders the list, a commit refuses when it is
+not empty. The five refusal sentences are the service's own, moved character for
+character, and a test asserts each still appears in `billing.ts`.
+
+What the measurement said about the other screens is worth recording, because it
+was not a sprawl: **23 client files do money arithmetic at 46 sites**, and all
+but this one are display sums over server figures or a single operation matching
+the service. Two are better than that — `invoices/board.tsx` asks the server for
+the conversion because "the arithmetic has to be the posting's own", and
+`payables/board.tsx` defaults its amount to what fits so nobody meets the
+refusals. `BillingPanel` is the outlier because it does the opposite: it hides a
+refusal by clamping past it.
+
+Nothing is wired, and a test asserts that both sides still disagree so the
+register entry cannot go stale unnoticed.
+
+
 ### The rounding that happens once per line (Phase 145)
 
 ADR 0144 nominated the wiring pass, which the staging instruction rules out for
@@ -6956,6 +7002,7 @@ Coverage matches what spec §21 asks for:
 | `tests/money-on-screen.test.ts` | **Money reaching a screen says what it is in** (Phase 124): reads the client component and the server file that renders it, following the page's imports one hop into the modules, and finds prop types carrying face-named money on screens whose modules touch one of the tables that have a currency. A type classified `document` must carry a currency and must pass it to `formatCents` rather than letting the `'USD'` default decide; a type classified `books` argues from its query why the default is right. Holds the declarations honest in both directions, argues every name collision, and — since Phase 126 — **computes** the unclassified remainder and compares it exactly, rather than asserting a constant against itself. Since Phase 131 both of its lists come from registries the schema checks rather than being typed here: the tables from `denominatedProperties()`, the face-column property names from `FACE_COLUMNS` and `INHERITED_CURRENCY`. It reads through one `Math.abs` too, and needs both closing brackets to do it — the branch that catches the deck's hidden call matched the repair for that call until it did |
 | `tests/inherited-currency.test.ts` | **Money on a row that has no currency of its own** (Phase 131): asks `information_schema` which money-bearing tables have a **mandatory** foreign key to a currency carrier and compares the set against `INHERITED_CURRENCY` in both directions — a nullable parent declared here would be a link somebody mistook for a denomination and would put a screen in reach on a relationship that does not hold. Every declared table's `%_cents` columns must be split exactly between the parent's money and the books', against the columns the table actually has, so one added later cannot sit unclassified. Every face column must name a real carrier that is really one of its parents; a table with two parents must say what keeps them from disagreeing; and the count a screen scan may reach is measured rather than bounded |
 | `tests/money-and-account.test.ts` | **The currency the money is in, and the account's** (Phase 136): `mayPostToBank` never saw the money, so it asked one question where there are two. A euro payout into a **euro** account passes — the feed's shape, where the money *is* the account's currency and nothing is unknown — and a euro payout into a **dollar** account is refused, because the bank converted it at a rate these books do not have and the tie-out would differ by the spread with nothing to name it. The refusal says *the bank converted it*, not *a rate is missing*, because that decides where somebody goes to fix it. Two foreign currencies against each other are refused too, since nothing here turns on either being home. And when a path does not know its money's currency the old rule stands, because that is the honest answer rather than an assumption |
+| `tests/application-preview.test.ts` | **The preview the screen never asked for** (Phase 146): `priceApplication` says it exists so the UI can show what an application will bill, and the UI has never called it — its only caller is `createProgressBilling`. `BillingPanel` derives the three figures again in a `useMemo` under different rules: a line billed backwards is clamped to zero on the screen and refuses the whole application on the server, and neither the percent nor the retainage is bounded before the click. Item 02 dropped from 50% to 20% with $2,500 already billed previews $2,000 and posts nothing. Wiring the screen to the existing function would not have been enough, since it throws on the first bad line — so `priceApplicationLines` returns problems as a list keyed to the item, and the five refusal sentences are the service's own moved character for character, asserted still to appear in `billing.ts`. The panel's own `useMemo` is transcribed here to prove the disagreement, the device ADR 0140 used for the broken symbol reader |
 | `tests/tax-rounding.test.ts` | **The rounding that happens once per line** (Phase 145): `taxOn` says in its own comment that tax is rounded once on the total and never per line, because "a return that does not foot against the invoices behind it is a return somebody has to reconcile by hand" — and its only pricing caller rounds each line and adds them up. Three lines of $10.00, $20.00 and $33.33 under one 8.25% code charge 523 cents where the code's own base of $63.33 gives 522, so the invoice shows a tax that is not its printed base times its printed rate under a named jurisdiction. Measured over three hundred sets of lines at each size, the total fails to foot in 249 of 300 sets at fifty lines and 300 of 300 at ten thousand. Rounding once on the document cannot be the repair, since lines carry different codes and a return reports per jurisdiction; `taxPerCode` rounds once per code and splits the figure back across its lines with `splitExactly`, which is largest-remainder in `BigInt` — no part more than a cent from its exact share, where the four existing splitters put the whole residue on the last one and multiply in floating point. What it cannot fix is asserted as a limit rather than glossed: a quarter aggregates documents already rounded, and no later period can re-round them |
 | `tests/money-comparison.test.ts` | **The comparison nobody scanned for** (Phase 144): Phase 122 built a tripwire for money being added and nobody built one for money being compared, though two of the five defects before this phase were comparisons found by hand four phases apart. Four forms, and the fourth is the one that mattered — `redeemGiftCard`'s comparison lives inside `redeemFor`, a pure helper over two bare parameters in a file reading no currency-bearing table, so the three obvious forms all miss it and a scan built without the fourth would have missed the defect it was for. Each of the 23 sites declares one of five reasons two amounts are comparable, and the scan measures the two that can be checked: `same-row` against the operands, `refused-upstream` against the guards in the function. It found three blind sites and **every one was already on a register** — which is how a new tripwire earns trust, by disagreeing first about things somebody can go and verify |\n| `tests/money-columns.test.ts` | **The money columns nobody declared** (Phase 143): `FACE_COLUMNS` — the list both sum scans key on — was seventeen column names typed by hand, and `information_schema` says the carrier tables have **fifty-four** money columns. The thirty-seven nobody classified were not excused by the tripwire; they were invisible to it, which is worse, because an excused site carries an argument somebody can disagree with and an unseen one carries nothing. Phase 128's shape exactly, in the module next door, seven phases of reach failures later. The registry is now held to the schema in both directions and cross-checked against `PAIRED_COLUMNS`, so a new `*_cents` column on a carrier table has to say which money it is. Three sides keep it from making the scans noisier: `face` is the document's currency, `functional` is already the company's money, `account` is one account's arithmetic end to end. Completing it surfaced five sites, of which measuring found three real — two feeding statutory filings — and two the scan's own narrowing got wrong |
 | `tests/affordable.test.ts` | **What a home-money holding can buy of a foreign document** (Phase 142): `redeemGiftCard` takes `min(card.balanceCents, bill.balanceCents)` — a dollar against a euro — in the decision that says how much of a debt is forgiven, then posts that to both journal lines while `relieveFunctional` converts for the subledger. A $600 card against a €1,000 invoice at 1.10 credits receivables $600 and takes $660 off the invoice, so the control account and the subledger part company by $60 nightly. `affords` returns a **face** amount and nothing else, leaving `relieveFunctional` to decide the functional figure — the only way a card that clears an invoice takes both columns to zero together, since that one returns the carried figure rather than a fresh conversion. It floors rather than rounds, because rounding buys one cent more of the document than the card holds; the property is asserted across eight rates and eight holdings in both directions, never over and never obviously under. The first inverse of `convert` in the codebase, and separate from Phase 138's `spends` because a card that cannot cover the bill is the ordinary case rather than a refusal |
