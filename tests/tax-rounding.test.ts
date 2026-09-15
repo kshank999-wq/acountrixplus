@@ -336,8 +336,14 @@ describe('the register of places a whole is split', () => {
     const unplaced = SPLIT_SITES.filter((site) => site.policy === 'unplaced')
 
     expect(unplaced.map((site) => site.symbol)).toEqual(['priceDocumentTax'])
-    expect(unplaced[0].wholeIsIndependent).toBe(false)
-    expect(SPLIT_SITES.filter((site) => site.wholeIsIndependent)).toHaveLength(4)
+    // Phase 147 replaced `wholeIsIndependent` with `provenance`, because the
+    // old field carried two answers for this very site: the whole does not
+    // exist first as the code stands, and it is supposed to. `whole-first` is
+    // a statement about the money, so it can be true while the site is wrong —
+    // which is what makes the site a defect rather than a design.
+    expect(unplaced[0].provenance).toBe('whole-first')
+    expect(SPLIT_SITES.filter((site) => site.provenance === 'whole-first')).toHaveLength(7)
+    expect(SPLIT_SITES.filter((site) => site.provenance === 'parts-first')).toHaveLength(1)
   })
 
   it('refuses a site nobody declared', () => {

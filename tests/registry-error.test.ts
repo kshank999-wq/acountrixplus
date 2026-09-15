@@ -152,7 +152,12 @@ describe('every registry refuses the same way', () => {
     // in a module that did not exist — `money/` — and still inherited the shape,
     // because the shape now comes from reading any registry in the codebase
     // rather than from being next door to a particular one.
-    expect(thrown.length).toBe(16)
+    //
+    // Seventeen since Phase 147 and `DIVISION_FORMS`, which is the second
+    // registry in `money/` and the fourth written by somebody who had not read
+    // this file. The count has now caught a registry four times, and has never
+    // once had to be argued down.
+    expect(thrown.length).toBe(17)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

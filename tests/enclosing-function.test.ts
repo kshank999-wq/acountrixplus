@@ -135,8 +135,13 @@ describe('what the broken scanner did to the registries', () => {
     // way for the same reason: four of those five entries were read off the
     // source by hand, which is exactly how `LEDGER_POSTINGS` came to hold two
     // functions that did not exist.
+    // Sixty-nine since Phase 147, which built the scan ADR 0146 nominated and
+    // grew `SPLIT_SITES` from five to eight with it: `recoveryFunctional`,
+    // which no registry had ever named, `createDeposit`, and `grossFor`. All
+    // three were found by a form rather than by somebody reading, which is the
+    // difference this assertion exists to keep track of.
     expect(SITE_REGISTRIES.length).toBe(4)
-    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(66)
+    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(69)
   })
 
   it('disagrees with the old scanner, on sites the registries do not yet reach', () => {

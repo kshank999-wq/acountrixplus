@@ -46,16 +46,24 @@
  * prorate          ledger/cash-basis.ts    last weight takes what is left
  * scaleSigned      ledger/cash-basis.ts    same, in signed cents
  * consume          inventory/costing.ts    two clamps, last lot touched and emptied lots
- * splitFor         appointments/split.ts   reports the residue rather than placing it
+ * splitFor         appointments/split.ts   the business takes what is left, and is told how much
  * ```
  *
  * Four copies of one rule is what ADR 0140 found in the scanners and ADR 0116
  * named before that: four things that can drift apart. `SPLIT_SITES` below is
  * the register of them, so the fifth has somewhere to be declared instead of
  * being written from scratch a fifth time.
+ *
+ * The `splitFor` line above read "reports the residue rather than placing it"
+ * until Phase 147, which is what this file said about it and was not true:
+ * `businessCents` is `totalCents - practitionerCents`, so the business absorbs
+ * the residue like any other last part and `roundingCents` says how much. The
+ * registry built to catch a declaration argued from a fact that is not a fact
+ * held one, for two phases, about the code next to it.
  */
 
 import { RegistryError } from '@/modules/errors/registry'
+import type { Provenance } from '@/modules/money/division'
 
 /**
  * Splits a whole across weights so the parts sum to the whole **exactly**.
@@ -138,13 +146,40 @@ export type ResiduePolicy =
   | 'reported'
   /** The parts are computed independently and the residue is left where it falls. */
   | 'unplaced'
+  /**
+   * There is no residue to place, because the parts are the record: each was
+   * already rounded and posted on its own, and the whole is their sum by
+   * definition rather than a figure anybody rounds (Phase 147).
+   */
+  | 'parts-are-the-record'
 
 export type SplitSite = {
   file: string
   symbol: string
   policy: ResiduePolicy
-  /** Does the whole exist before the parts do? */
-  wholeIsIndependent: boolean
+  /**
+   * Which came first, the whole or the parts (Phase 147).
+   *
+   * A statement about the **money**, not about the code: `whole-first` means
+   * the figure exists and the parts have to reproduce it, whatever this site
+   * currently does. That is the point — `priceDocumentTax` is `whole-first`
+   * *and* wrong, which is what makes it a defect rather than a design.
+   *
+   * It replaces Phase 145's `wholeIsIndependent`, which asked the same question
+   * and could not be answered: for the tax site it meant `false` as built and
+   * `true` as it should be, so the one field carried both answers and the
+   * verdict function could not use it.
+   */
+  provenance: Provenance
+  /**
+   * Which declared form of division reaches this site (Phase 147), or `null`
+   * when none does.
+   *
+   * `null` is the entry that has to argue hardest: a site no form can see is
+   * one the scan is taking on trust, and saying which are those is the
+   * difference between a registry held to the source and a list.
+   */
+  foundBy: 'proportional' | 'equal' | 'handed_over' | null
   /** Why this site splits the way it does, argued. */
   because: string
 }
@@ -152,24 +187,32 @@ export type SplitSite = {
 /**
  * Every place this codebase divides a money whole into parts.
  *
- * Declared rather than scanned, for the reason ADR 0123 gave: a wider regex
- * over `Cents * x / y` matches thirty-five sites and nearly all of them are a
+ * Held to the source by `DIVISION_FORMS` since Phase 147. Before that it was
+ * declared and unscanned, for the reason ADR 0123 gave: a wider regex over
+ * `Cents * x / y` matches thirty-five sites and nearly all of them are a
  * **rate applied to a base** — tax on a taxable amount, a markup on a cost, a
  * commission on a service — where there is no whole that the answers have to
  * add back to. Those are not splits and a register that called them splits
  * would be wrong about most of its entries.
  *
- * The distinguishing question is `wholeIsIndependent`: was there a total before
- * the parts were computed, which the parts must now reproduce? For a FIFO
- * consumption there was — the lots hold a value already. For a markup there was
- * not; the marked-up figure is created by the multiplication.
+ * What made a scan possible was finding the line that separates the two: a
+ * **constant** divisor converts units and a **variable** one is a total that
+ * something is a share of. Measured, that is thirteen rates and seven shares,
+ * and the noise ADR 0145 was afraid of does not appear.
+ *
+ * The distinguishing question is `provenance`: is there a total that the parts
+ * must reproduce? For a FIFO consumption there is — the lots hold a value
+ * already. For a markup there is not; the marked-up figure is created by the
+ * multiplication. And for a deposit the parts came first, each receipt having
+ * been posted at its own rate before the slip was made up.
  */
 export const SPLIT_SITES: readonly SplitSite[] = [
   {
     file: 'src/modules/ledger/cash-basis.ts',
     symbol: 'prorate',
     policy: 'last-takes-it',
-    wholeIsIndependent: true,
+    provenance: 'whole-first',
+    foundBy: 'proportional',
     because:
       'The original statement of the rule in this codebase, and the one the others were written ' +
       'beside. Correct on the total and weaker per part: the final weight absorbs everything the ' +
@@ -180,7 +223,8 @@ export const SPLIT_SITES: readonly SplitSite[] = [
     file: 'src/modules/ledger/cash-basis.ts',
     symbol: 'scaleSigned',
     policy: 'last-takes-it',
-    wholeIsIndependent: true,
+    provenance: 'whole-first',
+    foundBy: 'proportional',
     because:
       'The same rule in signed cents, and the reason it exists is recorded in its own comment: ' +
       'pro-rating unsigned amounts gave shares of the right size and the wrong direction for a ' +
@@ -191,7 +235,8 @@ export const SPLIT_SITES: readonly SplitSite[] = [
     file: 'src/modules/inventory/costing.ts',
     symbol: 'consume',
     policy: 'last-takes-it',
-    wholeIsIndependent: true,
+    provenance: 'whole-first',
+    foundBy: 'proportional',
     because:
       'Two clamps rather than one, and the second is a constraint the other sites do not have: a ' +
       'lot emptied along the way must give up exactly its remaining value, or it is left holding ' +
@@ -201,25 +246,70 @@ export const SPLIT_SITES: readonly SplitSite[] = [
   {
     file: 'src/modules/appointments/split.ts',
     symbol: 'splitFor',
-    policy: 'reported',
-    wholeIsIndependent: true,
+    policy: 'last-takes-it',
+    provenance: 'whole-first',
+    foundBy: null,
     because:
-      'The one site that places no residue and is right not to. A commission split is a figure ' +
-      'somebody is paid and a figure the business keeps, and moving a cent between them to make ' +
-      'the arithmetic close is a decision about wages. It returns `roundingCents` and lets the ' +
-      'caller decide, which is the honest answer where the parts belong to different people.',
+      'Phase 145 declared this `reported` and said it "places no residue and is right not to", ' +
+      'letting the caller decide. That was wrong, and Phase 147 found it by reading the code the ' +
+      'scan pointed at: `businessCents` is `totalCents - practitionerCents`, so the business ' +
+      'absorbs the residue like any other last part, and `roundingCents` tells somebody how much ' +
+      'rather than asking them. No form reaches it because the split is a subtraction rather than ' +
+      'a division — the practitioner share is rounded and the rest is what is left.',
   },
   {
     file: 'src/modules/payroll/sales-tax.ts',
     symbol: 'priceDocumentTax',
     policy: 'unplaced',
-    wholeIsIndependent: false,
+    provenance: 'whole-first',
+    foundBy: 'handed_over',
     because:
       'The defect Phase 145 was built for, and the only entry here whose whole does not exist ' +
       'first — which is the fault rather than an exemption. Each line is rounded on its own base ' +
       'and the results are added, so the document total is whatever the per-line roundings happen ' +
       'to sum to, and no level of the return satisfies round(base times rate). It is registered ' +
       'rather than repaired because the staging pass holds the wiring.',
+  },
+  {
+    file: 'src/modules/fx/ledger.ts',
+    symbol: 'recoveryFunctional',
+    policy: 'last-takes-it',
+    provenance: 'whole-first',
+    foundBy: 'proportional',
+    because:
+      'Found by the Phase 147 scan and declared by nobody before it, which is the reach failure ' +
+      'this register was supposed to stop: a write-off carried at one pair of figures, recovered ' +
+      'in instalments, is a whole divided into parts like any other. It is sound — the branch that ' +
+      'returns the whole outstanding functional amount when the last of the face is recovered is ' +
+      'the residue placement, and its comment says so — but nothing was holding it to that.',
+  },
+  {
+    file: 'src/modules/banking/deposits.ts',
+    symbol: 'createDeposit',
+    policy: 'parts-are-the-record',
+    provenance: 'parts-first',
+    foundBy: 'handed_over',
+    because:
+      'The counter-example the register needed, and the reason `provenance` is the field that ' +
+      'decides rather than `policy`. It converts each receipt at its own recorded rate and ' +
+      'adds the results, which is the same shape as the tax defect and is correct here for the ' +
+      'opposite reason: `recordPayment` already debited Undeposited Funds each converted figure, ' +
+      'so summing them relieves exactly what the receipts put there and converting the total ' +
+      'would strand the difference in a clearing account.',
+  },
+  {
+    file: 'src/modules/payroll/provider.ts',
+    symbol: 'grossFor',
+    policy: 'unplaced',
+    provenance: 'whole-first',
+    foundBy: 'equal',
+    because:
+      'An annual salary cut into equal periods with no residue placed, so a year of payslips comes ' +
+      'to periods times round(salary / periods) rather than to the salary. It is on the register ' +
+      'and is **not** on `PENDING_WIRING`, because it is inside `IllustrativePayrollProvider` — ' +
+      'invented rates, every run stamped illustrative, and a refusal in the same file saying it ' +
+      'must not be used to pay anybody. A real provider with this shape would be a defect; this ' +
+      'one is a demo, and calling it live would be the false sentence ADR 0135 is about.',
   },
 ]
 
