@@ -110,14 +110,18 @@ export async function recordContribution(
         throw new FundError('Say which account the money went into.')
       }
 
-      const [bank] = await tx
-        .select({ chartAccountId: financialAccounts.chartAccountId })
-        .from(financialAccounts)
-        .where(scoped(ctx, financialAccounts, eq(financialAccounts.id, input.financialAccountId)))
-        .limit(1)
-
-      if (!bank) throw new FundError('That account does not exist.')
-      debitAccountId = bank.chartAccountId
+      // Through the gate, like every other bank posting (Phase 151). This read
+      // the account's `chartAccountId` straight out of the table until then, so
+      // a gift banked into a euro account posted a dollar figure against it with
+      // nothing recording what arrived — while `receivePledge`, forty lines
+      // below, went through the gate and refused. Same business, same account,
+      // two different answers depending on which form was used.
+      debitAccountId = await bankGlAccountFor(
+        ctx,
+        input.financialAccountId,
+        'recording this contribution',
+        tx,
+      )
     }
 
     const entry = await createJournalEntry(

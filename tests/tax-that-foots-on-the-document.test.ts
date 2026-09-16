@@ -7,21 +7,19 @@ import { taxAtRate } from '@/modules/payroll/tax-rounding'
 /**
  * An invoice whose tax cannot be got back from its own base (Phase 145).
  *
- * ## Skipped on purpose — this is the acceptance test for the wiring pass
+ * ## Unskipped by Phase 151, which wired it
  *
- * `priceDocumentTax` is deliberately **not** routed through `taxPerCode`. It is
- * declared in `PENDING_WIRING`, and this file is the definition of done that
- * entry is required to name: unskip it, price through the new core, and it says
- * whether it worked.
+ * `priceDocumentTax` now prices through `taxPerCode`, the entry is off
+ * `PENDING_WIRING`, and this is what says it worked.
  *
- * ## The defect it describes, which is live today
+ * ## The defect it described, which is now repaired
  *
- * `priceDocumentTax` calls `taxOn` once per line and adds the results up. Three
- * lines of $10.00, $20.00 and $33.33 under one 8.25% code are rounded to 83, 165
- * and 275 cents — $5.23 — where the code's own base of $63.33 gives $5.22. The
- * invoice charges the customer a figure that is not its printed base times the
- * printed rate, under a named jurisdiction, and `taxOn`'s own comment says this
- * is the thing not to do.
+ * `priceDocumentTax` called `taxOn` once per line and added the results up.
+ * Three lines of $10.00, $20.00 and $33.33 under one 8.25% code round to 83, 165
+ * and 275 cents — $5.23 — where the code's own base of $63.33 gives $5.22, so
+ * the invoice charged the customer a figure that was not its printed base times
+ * its printed rate under a named jurisdiction. It prices through `taxPerCode`
+ * now and charges 522.
  *
  * ## What it does not assert
  *
@@ -32,7 +30,7 @@ import { taxAtRate } from '@/modules/payroll/tax-rounding'
  * what is asserted here.
  */
 
-describe.skip('an invoice with several lines under one tax code', () => {
+describe('an invoice with several lines under one tax code', () => {
   it('charges what its own base and rate come to', async () => {
     const fixture = await createCompanyFixture({ name: 'Cascade Supply' })
     const revenue = await fixture.account('4100')
@@ -98,11 +96,10 @@ describe.skip('an invoice with several lines under one tax code', () => {
   })
 })
 
-describe.skip('two tax codes on one document', () => {
+describe('two tax codes on one document', () => {
   it('rounds each on its own base rather than on the document', async () => {
-    // Why "round once on the total", which is what `taxOn`'s comment asks for,
-    // is not the repair: a return reports per jurisdiction, so each code needs
-    // a figure of its own that its own base produces.
+    // Why "round once on the total" was never the repair: a return reports per
+    // jurisdiction, so each code needs a figure its own base produces.
     const fixture = await createCompanyFixture({ name: 'Cascade Supply' })
     const revenue = await fixture.account('4100')
     const customer = await createCustomer(fixture.ctx, { name: 'Bracken & Co' })

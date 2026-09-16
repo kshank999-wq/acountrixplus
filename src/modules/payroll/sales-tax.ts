@@ -5,6 +5,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { PAYROLL_ACCOUNTS } from './accounts'
 import { accountByNumber } from '@/modules/coa/service'
+import { taxPerCode } from '@/modules/payroll/tax-rounding'
 import { Refusal } from '@/modules/errors'
 
 /**
@@ -100,12 +101,19 @@ export async function listTaxCodes(ctx: ActorContext, opts: { activeOnly?: boole
 }
 
 /**
- * Computes tax for a set of taxable amounts under one code.
+ * The rate applied to one base, rounded half-up.
  *
- * Pure, and rounded **once on the total** rather than per line. Rounding each
- * line and adding them up drifts by up to half a cent per line, and a return
- * that does not foot against the invoices behind it is a return somebody has
- * to reconcile by hand.
+ * This is the arithmetic and nothing else. It used to carry a sentence about
+ * being rounded "once on the total rather than per line" — which is the right
+ * rule and was not true of the only caller that mattered: `priceDocumentTax`
+ * mapped this over the lines and added the results up for a hundred and forty
+ * phases. Phase 145 found it, Phase 151 wired the repair, and the sentence
+ * moved with it.
+ *
+ * The rule now lives where it is enforced. `taxPerCode` rounds a code's
+ * combined base once and splits the figure back across its lines, because a
+ * document's lines may carry different codes and a return reports per
+ * jurisdiction — so "once on the total" cannot mean the document.
  */
 export function taxOn(taxableCents: number, rateBp: number): number {
   return Math.round((taxableCents * rateBp) / 10_000)
@@ -170,21 +178,40 @@ export async function priceDocumentTax(
 
   const codes = await codesFor(ctx, lines, exec)
 
-  const priced = lines.map((line) => {
-    const code = codes.get(line.taxCodeId)
-    if (!code) throw new Refusal('That tax code is not on this company’s list.')
+  for (const line of lines) {
+    if (!codes.get(line.taxCodeId)) {
+      throw new Refusal('That tax code is not on this company’s list.')
+    }
+  }
 
-    return {
+  // Rounded once per code, not once per line (Phase 151, wiring ADR 0145).
+  //
+  // This mapped `taxOn` over the lines and added the results up, which is the
+  // one thing `taxOn`'s own comment says not to do — so an invoice with several
+  // lines under one code charged a figure that was not its own printed base
+  // times its own printed rate. `taxPerCode` rounds the code's combined base
+  // once and splits the result back across the lines it came from, so the lines
+  // still sum to the code and the code is what an auditor recomputes.
+  const priced = taxPerCode(
+    lines.map((line) => ({
       taxCodeId: line.taxCodeId,
       taxableCents: line.taxableCents,
-      exemptCents: line.exemptCents ?? 0,
-      taxCents: line.taxCents ?? taxOn(line.taxableCents, code.rateBp),
-    }
-  })
+      taxCents: line.taxCents,
+    })),
+    (taxCodeId) => codes.get(taxCodeId)!.rateBp,
+  )
 
   return {
-    totalCents: priced.reduce((sum, line) => sum + line.taxCents, 0),
-    lines: priced,
+    totalCents: priced.totalCents,
+    // In the order they were given, which `taxPerCode` guarantees — so the
+    // exempt figure, which is the caller's and not the rate's, stays on its own
+    // line rather than being carried along by the grouping.
+    lines: priced.lines.map((row, index) => ({
+      taxCodeId: row.taxCodeId,
+      taxableCents: row.taxableCents,
+      exemptCents: lines[index].exemptCents ?? 0,
+      taxCents: row.taxCents,
+    })),
   }
 }
 

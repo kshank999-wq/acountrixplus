@@ -54,8 +54,14 @@ describe('the register of what is staged', () => {
     // Seven over eleven since Phase 146, whose entry is the first to name a
     // target in `src/app` — a screen and a service that have to be wired to one
     // answer together, because the defect is that they each have their own.
-    expect(PENDING_WIRING.length).toBe(7)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(11)
+    // Five over nine since Phase 151 started the wiring pass and took two off:
+    // `bankGlAccountFor` → `recordContribution`, and `taxPerCode` →
+    // `priceDocumentTax`. The register shrinks as the work is done, which is
+    // the direction it was built to move in — `wiringStateFor` fails an entry
+    // whose target already calls its core, so a finished entry cannot be left
+    // sitting here reading as outstanding.
+    expect(PENDING_WIRING.length).toBe(5)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(9)
   })
 
   it('still describes the code, entry by entry', () => {

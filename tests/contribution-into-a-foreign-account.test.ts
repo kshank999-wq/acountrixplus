@@ -7,14 +7,13 @@ import { createFund } from '@/modules/funds/service'
 /**
  * A donation banked into an account the books do not keep (Phase 133 → 141).
  *
- * ## Skipped on purpose — this is the acceptance test for the wiring pass
+ * ## Unskipped by Phase 151, which wired it
  *
- * `recordContribution` is deliberately **not** routed through
- * `bankGlAccountFor`. It is declared in `PENDING_WIRING`, and this file is the
- * definition of done that entry is required to name: unskip it, route the gift
- * branch through the gate, and it says whether it worked.
+ * `recordContribution` was deliberately **not** routed through
+ * `bankGlAccountFor` while the cores were being staged. It is now, the entry is
+ * off `PENDING_WIRING`, and this is what says it worked.
  *
- * ## The defect it describes, which is live today
+ * ## The defect it described, which is now repaired
  *
  * The gift branch reads `financialAccounts.chartAccountId` straight out of the
  * table and debits that account. Nothing asks what currency the account is held
@@ -41,7 +40,7 @@ let euroAccountId: string
 let fundId: string
 
 beforeEach(async () => {
-  fixture = await createCompanyFixture({ name: 'Harbour Trust' })
+  fixture = await createCompanyFixture({ name: 'Harbour Trust', industry: 'nonprofit' })
 
   const account = await createFinancialAccount(fixture.ctx, {
     name: 'Frankfurt Current',
@@ -59,7 +58,7 @@ beforeEach(async () => {
   fundId = fund.id
 })
 
-describe.skip('recording a gift into an account the books are not kept in', () => {
+describe('recording a gift into an account the books are not kept in', () => {
   it('refuses, naming the account and both currencies', async () => {
     // Phase 119's standard for a refusal somebody has to act on, and the same
     // sentence `receivePledge` already produces.
@@ -120,7 +119,7 @@ describe.skip('recording a gift into an account the books are not kept in', () =
   })
 })
 
-describe.skip('a domestic gift, which is every one so far', () => {
+describe('a domestic gift, which is every one so far', () => {
   it('still posts, untouched', async () => {
     // Why this went a hundred and forty phases unnoticed, and the assertion that
     // keeps the repair from becoming a refusal nobody wanted: with one currency

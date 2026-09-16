@@ -140,27 +140,6 @@ export const PENDING_WIRING: readonly Pending[] = [
       'exist would be fiction rather than a definition of done.',
   },
   {
-    core: 'bankGlAccountFor',
-    coreFile: 'src/modules/banking/bank-guard.ts',
-    targets: [{ symbol: 'recordContribution', file: 'src/modules/funds/contributions.ts' }],
-    phase: 141,
-    blockedBy: 'nothing',
-    acceptance: 'tests/contribution-into-a-foreign-account.test.ts',
-    liveDefect:
-      'recordContribution reads `financialAccounts.chartAccountId` directly and debits that ' +
-      'account, so a donation banked into a euro account posts a dollar figure against it with ' +
-      'nothing recording what actually arrived. `receivePledge`, forty lines below in the same ' +
-      'file, goes through the gate and refuses — so the same business is told no when a pledge ' +
-      'lands in that account and nothing at all when a gift does.',
-    because:
-      'Not a new capability and not a missing field: the gate exists, ten other functions ' +
-      'already call it, and this one reads around it. It is on the register rather than repaired ' +
-      'only because the staging pass is holding every bank path until they are hooked up ' +
-      'together. Found by Phase 141 measuring what each `domestic` entry reaches — and invisible ' +
-      'to Phase 133 because that scan matches `bank.chartAccountId` or a name containing `gl`, ' +
-      'and this assigns to `debitAccountId` first.',
-  },
-  {
     core: 'affords',
     coreFile: 'src/modules/fx/affordable.ts',
     targets: [{ symbol: 'redeemGiftCard', file: 'src/modules/appointments/service.ts' }],
@@ -181,26 +160,6 @@ export const PENDING_WIRING: readonly Pending[] = [
       'than a face amount from a functional one. It returns a **face** amount and nothing else, ' +
       'so `relieveFunctional` still decides the functional figure — which is the only way a card ' +
       'that clears an invoice takes both columns to zero together.',
-  },
-  {
-    core: 'taxPerCode',
-    coreFile: 'src/modules/payroll/tax-rounding.ts',
-    targets: [{ symbol: 'priceDocumentTax', file: 'src/modules/payroll/sales-tax.ts' }],
-    phase: 145,
-    blockedBy: 'nothing',
-    acceptance: 'tests/tax-that-foots-on-the-document.test.ts',
-    liveDefect:
-      'priceDocumentTax rounds every tax line on its own base and adds the results up, which is ' +
-      'the one thing taxOn’s own comment says not to do. Measured: three lines of $10.00, $20.00 ' +
-      'and $33.33 under one 8.25% code charge $5.23 where the code’s base of $63.33 gives $5.22, ' +
-      'so the invoice the customer receives shows a tax that is not its own printed base times ' +
-      'its own printed rate — and the return inherits it from the stored breakdown.',
-    because:
-      'The core exists and is tested exhaustively, and the change at the call site is one ' +
-      'expression: price through `taxPerCode` rather than mapping the per-line rounding over the ' +
-      'lines. It is staged rather than made because it changes what an invoice charges, which is ' +
-      'a repair to want deliberately and in one pass with the rest rather than as a side effect ' +
-      'of the phase that found it.',
   },
   {
     core: 'priceApplicationLines',
