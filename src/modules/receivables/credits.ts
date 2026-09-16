@@ -20,6 +20,8 @@ import { relieveFunctional } from '@/modules/fx/documents'
 import { creditableAgainst, functionalAmounts } from '@/modules/fx/denomination'
 import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
 import { recoveryFunctional } from '@/modules/fx/ledger'
+import { recoverHeld } from '@/modules/fx/settlement'
+import { convert, RATE_ONE } from '@/modules/fx/rates'
 import { meets } from '@/modules/fx/applied'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
@@ -729,7 +731,7 @@ export async function recoverWriteOff(
    * would fold a currency movement into bad debt, and rounding three
    * part-recoveries need not sum back to what was written off.
    */
-  const recovery = recoveryFunctional(
+  const carried = recoveryFunctional(
     {
       amountCents: writeOff.amountCents,
       functionalAmountCents: writeOff.functionalAmountCents,
@@ -739,14 +741,49 @@ export async function recoverWriteOff(
     input.amountCents,
   )
 
+  /**
+   * What arrives against what leaves (Phase 151, wiring ADR 0136).
+   *
+   * Both lines posted `carried.functionalCents` until this: the bank was
+   * credited what the debt had been *carried* at rather than what turned up.
+   * Measured, and the figure ADRs 0136, 0137 and 0138 each nominated: €2,500
+   * written off at 1.0835 and recovered in full at 1.10 put $2,708.75 on a euro
+   * cash account whose statement said $2,750, and the $41.25 between them had
+   * nowhere to go — this was the only path relieving a carried balance that
+   * never reached `ensureFxAccount`.
+   *
+   * `recoverHeld` is the answer and has been since Phase 136. The bank takes
+   * the day's rate, bad debt keeps the carried one — relieving the expense at a
+   * later rate would fold a currency movement into it, which is why
+   * `recoveryFunctional` takes no rate parameter — and the difference is
+   * realised.
+   */
+  const homeCurrency = await functionalCurrency(ctx.companyId)
+  const dayRateMillionths =
+    writeOff.currency === homeCurrency
+      ? RATE_ONE
+      : (await rateFor(ctx, writeOff.currency, input.recoveredOn)).rateMillionths
+
+  const recovery = recoverHeld({
+    receivedCents: convert(input.amountCents, dayRateMillionths),
+    relievedCents: carried.functionalCents,
+  })
+
   return db.transaction(async (tx) => {
     // Phase 133: the ledger account, and whether this account may take it.
+    // The currency may be handed over now. Phase 136 recorded this path as
+    // `withheld: 'no-day-rate'` — it had `writeOff.currency` and no rate for the
+    // day the money moved, and passing a currency without one buys a posting the
+    // statement disagrees with. It has one above, so the gate can be told.
     const bankGl = await bankGlAccountFor(
       ctx,
       input.financialAccountId,
       'banking this recovery',
       tx,
+      writeOff.currency,
     )
+
+    const fxAccount = recovery.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
     const entry = await createJournalEntry(
       ctx,
@@ -757,10 +794,26 @@ export async function recoverWriteOff(
         sourceType: 'write_off_recovery',
         sourceId: writeOff.id,
         lines: [
-          { chartAccountId: bankGl, debitCents: recovery.functionalCents },
-          // Back out the expense. Not revenue — that was recognized when the
-          // invoice was raised and never reversed.
-          { chartAccountId: badDebtAccount.id, creditCents: recovery.functionalCents },
+          // What the statement will show.
+          { chartAccountId: bankGl, debitCents: recovery.receivedCents },
+          // Back out the expense, at the rate it was carried at. Not revenue —
+          // that was recognized when the invoice was raised and never reversed.
+          { chartAccountId: badDebtAccount.id, creditCents: recovery.relievedCents },
+          ...(fxAccount
+            ? [
+                recovery.realisedCents > 0
+                  ? {
+                      chartAccountId: fxAccount,
+                      creditCents: recovery.realisedCents,
+                      memo: 'Exchange gain',
+                    }
+                  : {
+                      chartAccountId: fxAccount,
+                      debitCents: -recovery.realisedCents,
+                      memo: 'Exchange loss',
+                    },
+              ]
+            : []),
         ],
       },
       tx,
@@ -772,7 +825,7 @@ export async function recoverWriteOff(
         recoveredOn: input.recoveredOn,
         recoveredCents: input.amountCents,
         // Moves with the face figure and is never re-derived from it (Phase 116).
-        functionalRecoveredCents: writeOff.functionalRecoveredCents + recovery.functionalCents,
+        functionalRecoveredCents: writeOff.functionalRecoveredCents + carried.functionalCents,
         recoveryJournalEntryId: entry.id,
       })
       .where(eq(invoiceWriteOffs.id, writeOff.id))
@@ -786,7 +839,9 @@ export async function recoverWriteOff(
         after: {
           recoveredOn: input.recoveredOn,
           amountCents: input.amountCents,
-          functionalCents: recovery.functionalCents,
+          functionalCents: carried.functionalCents,
+          receivedCents: recovery.receivedCents,
+          realisedCents: recovery.realisedCents,
         },
       },
       tx,

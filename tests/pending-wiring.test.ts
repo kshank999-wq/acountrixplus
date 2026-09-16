@@ -60,8 +60,12 @@ describe('the register of what is staged', () => {
     // the direction it was built to move in — `wiringStateFor` fails an entry
     // whose target already calls its core, so a finished entry cannot be left
     // sitting here reading as outstanding.
-    expect(PENDING_WIRING.length).toBe(5)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(9)
+    // Four over eight: `recoverHeld` → `recoverWriteOff` went too, and wiring
+    // it moved the only entry in `BANK_POSTINGS` whose handling has ever
+    // changed — `refuses` to `matched`, because giving it a day rate removed
+    // the reason it was withholding the money's currency.
+    expect(PENDING_WIRING.length).toBe(4)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(8)
   })
 
   it('still describes the code, entry by entry', () => {

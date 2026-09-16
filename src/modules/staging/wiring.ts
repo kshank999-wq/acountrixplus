@@ -96,26 +96,6 @@ export const PENDING_WIRING: readonly Pending[] = [
       'than this one alone.',
   },
   {
-    core: 'recoverHeld',
-    coreFile: 'src/modules/fx/settlement.ts',
-    targets: [{ symbol: 'recoverWriteOff', file: 'src/modules/receivables/credits.ts' }],
-    phase: 136,
-    blockedBy: 'nothing',
-    acceptance: 'tests/recovery-at-two-rates.test.ts',
-    liveDefect:
-      'recoverWriteOff posts recovery.functionalCents to both the bank and bad debt at the ' +
-      'write-off’s carried rate. Measured: €2,500 written off at 1.0835 and recovered in full at ' +
-      '1.10 puts $2,708.75 on a euro cash account whose statement says $2,750 — $41.25 unnamed, ' +
-      'with no realised line to put it on.',
-    because:
-      'Nominated by ADR 0136 and restated by 0137 and 0138, and **no new core is needed for it**. ' +
-      '`recoverHeld` already answers exactly this question — what arrives at the day’s rate ' +
-      'against what leaves at the carried one — and `refundVendorCredit` is the working ' +
-      'precedent. Three ADRs nominated it as though something had to be built; measuring found ' +
-      'the piece already there and uncalled, which is why it belongs on this list rather than in ' +
-      'a phase of its own.',
-  },
-  {
     core: 'mayPostToBank',
     coreFile: 'src/modules/fx/bank-side.ts',
     targets: [

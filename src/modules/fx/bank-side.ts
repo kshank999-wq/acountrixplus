@@ -164,8 +164,10 @@ export function mayPostToBank(input: {
  * that is the figure the statement will show — and `askingFor` measures that
  * from the source rather than taking the declaration's word for it. Phase 136
  * shipped with one `matched` path and part 3 measured four more, plus one —
- * `recoverWriteOff` — that has the currency and fails the rate test, and is
- * left refusing with the reason recorded.
+ * `recoverWriteOff` — that had the currency and failed the rate test, and was
+ * left refusing with the reason recorded. Phase 151 wired `recoverHeld` into
+ * it, which gave it a day rate and a realised line, so it is the sixth
+ * `matched` path and the only entry here whose handling has ever changed.
  */
 export type BankPostingHandling = 'converts' | 'refuses' | 'matched'
 
@@ -287,19 +289,16 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
   {
     file: 'src/modules/receivables/credits.ts',
     symbol: 'recoverWriteOff',
-    handling: 'refuses',
+    handling: 'matched',
     because:
-      'Money arriving against a debt already written off. Phase 127 fixed the *other* side of ' +
-      'this entry — it posts `recovery.functionalCents` to bad debt now rather than the face ' +
-      'amount — and left the bank side taking the same functional figure into whatever account ' +
-      'was named. Right for the expense, unasked for the account. Phase 136 measured it as the ' +
-      'one path that has the money’s currency and still may not be told it: `writeOff.currency` ' +
-      'is right there, and the figure reaching the bank is struck at the write-off’s *carried* ' +
-      'rate rather than the rate on the day the money arrived. That is correct for bad debt — a ' +
-      'later rate would fold a currency movement into an expense — and wrong for the bank, so ' +
-      'one figure is answering two questions. Wiring it up would buy a posting nobody can tie to ' +
-      'a statement; it needs a day rate and a realised line first.',
-    withheld: 'no-day-rate',
+      'Money arriving against a debt already written off, and the sixth path that may be told ' +
+      'what currency it is in. It was `refuses` with `withheld: \'no-day-rate\'` from Phase 136 ' +
+      'until Phase 151 wired it: `writeOff.currency` was right there, and the figure reaching the ' +
+      'bank was struck at the write-off’s *carried* rate rather than the rate on the day the ' +
+      'money arrived, so one figure was answering two questions and passing a currency would have ' +
+      'bought a posting nobody could tie to a statement. `recoverHeld` separates them — the bank ' +
+      'takes the day’s rate, bad debt keeps the carried one, and the difference is realised — so ' +
+      'the reason for withholding is gone and the currency goes through.',
   },
   {
     file: 'src/modules/receivables/vendor-credits.ts',

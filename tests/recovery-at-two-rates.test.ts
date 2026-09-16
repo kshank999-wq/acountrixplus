@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { and, eq } from 'drizzle-orm'
 import { db } from '@/db'
-import { chartAccounts, journalEntries, journalLines } from '@/db/schema'
+import { chartAccounts, financialAccounts, journalEntries, journalLines } from '@/db/schema'
 import { createCompanyFixture, type Fixture } from './helpers'
 import { createCustomer, createInvoice } from '@/modules/receivables/service'
 import { recoverWriteOff, writeOffInvoice } from '@/modules/receivables/credits'
@@ -12,14 +12,12 @@ import { trialBalance } from '@/modules/ledger/balances'
 /**
  * A write-off recovered at a rate it was never carried at (Phase 136 → 139).
  *
- * ## Skipped on purpose — this is the acceptance test for the wiring pass
+ * ## Unskipped by Phase 151, which wired it
  *
- * `recoverWriteOff` is deliberately **not wired** to `recoverHeld`. It is
- * declared in `PENDING_WIRING`, and this file is the definition of done that
- * entry is required to name: unskip it, wire `recoverWriteOff`, and it says
- * whether it worked.
+ * `recoverWriteOff` goes through `recoverHeld` now, the entry is off
+ * `PENDING_WIRING`, and this is what says it worked.
  *
- * ## The defect it describes, which is live today
+ * ## The defect it described, which is now repaired
  *
  * `recoverWriteOff` posts `recovery.functionalCents` to **both** lines, at the
  * write-off's own carried rate. That is right for bad debt — a later rate would
@@ -44,6 +42,15 @@ import { trialBalance } from '@/modules/ledger/balances'
 let fixture: Fixture
 let revenueId: string
 let euroAccountId: string
+/**
+ * The euro account's own ledger account.
+ *
+ * This test asked for `1000` until Phase 151 ran it. A foreign bank account
+ * gets a chart account of its own — `1001 Frankfurt Current ••8802` — so
+ * looking for the debit on the default cash account found nothing while the
+ * posting was correct. An assumption written before the account existed.
+ */
+let euroChartAccountId: string
 
 /** 1.0835 when it was written off; 1.10 when the money turned up. */
 const CARRIED = 1_083_500
@@ -83,6 +90,12 @@ beforeEach(async () => {
     mask: '8802',
   })
   euroAccountId = account.id
+
+  const [row] = await db
+    .select({ chartAccountId: financialAccounts.chartAccountId })
+    .from(financialAccounts)
+    .where(eq(financialAccounts.id, account.id))
+  euroChartAccountId = row.chartAccountId
 })
 
 async function writtenOffEuroInvoice() {
@@ -108,6 +121,10 @@ async function linesOn(number: string) {
     .from(chartAccounts)
     .where(and(eq(chartAccounts.companyId, fixture.companyId), eq(chartAccounts.number, number)))
 
+  return linesOnAccount(account.id)
+}
+
+async function linesOnAccount(chartAccountId: string) {
   return db
     .select({ debitCents: journalLines.debitCents, creditCents: journalLines.creditCents })
     .from(journalLines)
@@ -116,12 +133,12 @@ async function linesOn(number: string) {
       and(
         eq(journalEntries.companyId, fixture.companyId),
         eq(journalEntries.sourceType, 'write_off_recovery'),
-        eq(journalLines.chartAccountId, account.id),
+        eq(journalLines.chartAccountId, chartAccountId),
       ),
     )
 }
 
-describe.skip('recovering a euro write-off when the rate has moved', () => {
+describe('recovering a euro write-off when the rate has moved', () => {
   it('banks what actually arrived, at the rate on the day', async () => {
     const writeOff = await writtenOffEuroInvoice()
 
@@ -132,7 +149,7 @@ describe.skip('recovering a euro write-off when the rate has moved', () => {
     })
 
     // $2,750, not $2,708.75. What the statement will show.
-    const bank = await linesOn('1000')
+    const bank = await linesOnAccount(euroChartAccountId)
     expect(bank.length).toBe(1)
     expect(bank[0].debitCents).toBe(AT_DAY)
   })
@@ -189,7 +206,7 @@ describe.skip('recovering a euro write-off when the rate has moved', () => {
   })
 })
 
-describe.skip('a domestic recovery, which is every one so far', () => {
+describe('a domestic recovery, which is every one so far', () => {
   it('posts two lines and realises nothing', async () => {
     // Why this went unnoticed: with one currency the carried rate and the day's
     // rate are both 1.0, so the two figures are the same number and there is no
@@ -214,7 +231,14 @@ describe.skip('a domestic recovery, which is every one so far', () => {
       financialAccountId: fixture.financialAccountId,
     })
 
-    const bank = await linesOn('1000')
+    // The fixture's own account, not the euro one — same lookup, different
+    // bank, because a domestic recovery lands where the company's money lives.
+    const [home] = await db
+      .select({ chartAccountId: financialAccounts.chartAccountId })
+      .from(financialAccounts)
+      .where(eq(financialAccounts.id, fixture.financialAccountId))
+
+    const bank = await linesOnAccount(home.chartAccountId)
     expect(bank[0].debitCents).toBe(FACE)
 
     const balances = await trialBalance(fixture.ctx, { endDate: '2026-12-31' })

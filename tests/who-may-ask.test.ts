@@ -134,7 +134,11 @@ describe('what every posting site actually does with the money’s currency', ()
     // Measured, not bounded (Phase 126). Four `converts` reach the account
     // through the feed rather than the guard, so ten call the guard.
     expect(sites.length).toBe(14)
-    expect(sites.filter((site) => site.passesMoneyCurrency).length).toBe(5)
+    // Six since Phase 151 wired `recoverWriteOff`, which is the only entry in
+    // `BANK_POSTINGS` whose handling has ever changed — and this line is what
+    // noticed, exactly as intended: the code started passing a currency while
+    // the registry still said it could not.
+    expect(sites.filter((site) => site.passesMoneyCurrency).length).toBe(6)
   })
 
   it('agrees with what each entry declares', () => {
@@ -148,18 +152,24 @@ describe('what every posting site actually does with the money’s currency', ()
     expect(disagreements).toEqual([])
   })
 
-  it('counts the three handlings, and the five that ask', () => {
+  it('counts the three handlings, and the six that ask', () => {
     const by = (handling: string) => BANK_POSTINGS.filter((row) => row.handling === handling)
 
     expect(by('converts').length).toBe(4)
+    // `recoverWriteOff` joined them in Phase 151 and is the only entry whose
+    // handling has ever moved. It had the currency all along and was refused
+    // the right to pass it because the figure it banked was struck at the
+    // write-off's carried rate; wiring `recoverHeld` gave it a day rate, and
+    // the reason for withholding went with it.
     expect(by('matched').map((row) => row.symbol).sort()).toEqual([
       'importPayouts',
       'receiveRetainer',
+      'recoverWriteOff',
       'refundCredit',
       'refundRetainer',
       'refundVendorCredit',
     ])
-    expect(by('refuses').length).toBe(5)
+    expect(by('refuses').length).toBe(4)
   })
 
   it('makes every refusing path say why it cannot ask, and only one blame the rate', () => {
@@ -172,13 +182,12 @@ describe('what every posting site actually does with the money’s currency', ()
       'refundDeposit',
     ])
 
-    // The one that has the currency and still may not be told it: it posts
-    // `recovery.functionalCents` to the bank at the write-off's *carried* rate,
-    // which is right for bad debt and wrong for a statement. One figure
-    // answering two questions.
-    expect(refuses.filter((row) => row.withheld === 'no-day-rate').map((row) => row.symbol)).toEqual(
-      ['recoverWriteOff'],
-    )
+    // `no-day-rate` was `recoverWriteOff`'s alone and is nobody's since Phase
+    // 151 wired it. The value stays declared rather than deleted: it is the
+    // reason a path with the currency in hand may still not pass it, and the
+    // next path in that position should find the vocabulary already there
+    // rather than argue it again.
+    expect(refuses.filter((row) => row.withheld === 'no-day-rate')).toEqual([])
   })
 })
 
