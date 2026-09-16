@@ -52,6 +52,12 @@ import { RegistryError } from '@/modules/errors/registry'
 /** How a write that is not `scoped()` establishes whose row it is touching. */
 export type GuardKind =
   | 'scoped-write'
+  | 'scoped-read'
+  | 'join-inherited'
+  | 'established-above'
+  | 'validated-above'
+  | 'id-from-fetched-row'
+  | 'derives-tenant-from-row'
   | 'conditions-array'
   | 'explicit-company'
   | 'owner-helper'
@@ -63,6 +69,15 @@ export type GuardKind =
 
 export type IsolationGuard = {
   kind: GuardKind
+  /**
+   * Whether this guard is available to a read, a write, or both (Phase 150).
+   *
+   * They are not the same set, and the split is the point. A write can be
+   * refused by a preceding load; a read that leaks has already leaked by the
+   * time anything could refuse it, so a read's guard has to be in the
+   * statement or in the id it was handed.
+   */
+  appliesTo: 'read' | 'write' | 'both'
   /** What the scan looks for, in words, beside the predicate that does it. */
   detect: string
   /**
@@ -78,6 +93,7 @@ export type IsolationGuard = {
 export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   {
     kind: 'scoped-write',
+    appliesTo: 'write',
     detect: '`scoped(ctx, table, …)` inside the statement’s own `where`.',
     atLeastCompanyTight: true,
     because:
@@ -88,6 +104,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'conditions-array',
+    appliesTo: 'both',
     detect: 'A `conditions` array built above, holding a companyId equality, spread into `where`.',
     atLeastCompanyTight: true,
     because:
@@ -98,6 +115,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'explicit-company',
+    appliesTo: 'both',
     detect: '`eq(table.companyId, ctx.companyId)` written out in the statement or just above it.',
     atLeastCompanyTight: true,
     because:
@@ -108,6 +126,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'owner-helper',
+    appliesTo: 'write',
     detect: 'A named helper awaited above that loads the row and refuses when it is not yours.',
     atLeastCompanyTight: true,
     because:
@@ -118,6 +137,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'actor-scoped',
+    appliesTo: 'both',
     detect: '`eq(table.userId, ctx.userId)` in the statement — the acting user, not the company.',
     atLeastCompanyTight: true,
     because:
@@ -128,6 +148,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'read-then-refuse',
+    appliesTo: 'write',
     detect:
       'A read above filtered by company or acting user, a refusal when it finds nothing, then a ' +
       'write by the same id.',
@@ -147,6 +168,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'bearer-credential',
+    appliesTo: 'both',
     detect: 'The id is the secret: an unguessable token, with its precondition in the write.',
     atLeastCompanyTight: false,
     because:
@@ -158,6 +180,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'caller-established',
+    appliesTo: 'both',
     detect: 'A module-private helper, or one whose id argument the caller obtained under a check.',
     atLeastCompanyTight: false,
     because:
@@ -168,6 +191,7 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'system-actor',
+    appliesTo: 'both',
     detect: 'No `ActorContext` at all, in the worker or scheduler, operating across tenants by design.',
     atLeastCompanyTight: false,
     because:
@@ -178,9 +202,153 @@ export const ISOLATION_GUARDS: readonly IsolationGuard[] = [
   },
 ]
 
+const READ_GUARDS: readonly IsolationGuard[] = [
+  {
+    kind: 'scoped-read',
+    appliesTo: 'read',
+    detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
+    atLeastCompanyTight: true,
+    because:
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 531 of ' +
+      'the 867 reads, against 27 of the 109 writes. The two halves of this system are guarded ' +
+      'quite differently and nobody had noticed, because nothing had counted either of them.',
+  },
+  {
+    kind: 'join-inherited',
+    appliesTo: 'read',
+    detect: 'An inner join to a table whose own filter carries the tenant.',
+    atLeastCompanyTight: true,
+    because:
+      'A journal line is reachable only through its entry, so filtering the entry filters the ' +
+      'lines. Sound, and the guard that depends most on the join staying an inner one: a left ' +
+      'join with the filter in the ON clause rather than the WHERE would return the other ' +
+      'company’s rows padded with nulls, which reads like an empty result and is not one.',
+  },
+  {
+    kind: 'established-above',
+    appliesTo: 'read',
+    detect: 'A companyId or `scoped()` filter earlier in the same function, on the same subject.',
+    atLeastCompanyTight: true,
+    because:
+      'A second query in a function whose first query established the tenant — a report that ' +
+      'reads accounts under a filter and then reads their balances. The scope is real and it is ' +
+      'one statement away, so a reader has to hold two statements in their head to see it.',
+  },
+  {
+    kind: 'validated-above',
+    appliesTo: 'read',
+    detect: 'The id was handed to a ctx-taking helper earlier in the function, which refuses.',
+    atLeastCompanyTight: true,
+    because:
+      '`getCampaign` calls `loadCampaign(ctx, campaignId)`, which refuses when the campaign is ' +
+      'not this company’s, and then reads the steps by that id. The guard is the refusal. It is ' +
+      'the read form of `owner-helper` and the write scan could not have found it, because that ' +
+      'one looks for a helper with "Own" in its name and this one is called `loadCampaign`.',
+  },
+  {
+    kind: 'id-from-fetched-row',
+    appliesTo: 'read',
+    detect: 'The key is a property of a row already fetched, not a bare argument.',
+    atLeastCompanyTight: true,
+    because:
+      'The proposal design page reads a brand kit by `document.brandKitId`, and the document came ' +
+      'from a scoped load. An id that is a field of a checked row cannot be aimed by whoever ' +
+      'called the function — it is the row that was checked, and this is the difference between ' +
+      'a parameter and a property that makes the whole narrowing of both scans possible.',
+  },
+  {
+    kind: 'derives-tenant-from-row',
+    appliesTo: 'read',
+    detect: 'No ActorContext, keyed by an external id, and the company comes out of the row.',
+    atLeastCompanyTight: false,
+    because:
+      '`settleCheckout` takes the payment processor’s own checkout id from a webhook and says so ' +
+      'in its comment: it "derives the company from the row". There is no actor to filter ' +
+      'against — the caller is a processor, not a person — so the read establishes the tenant ' +
+      'instead of confirming it. Marked not company-tight because it rests on the external id ' +
+      'being unguessable, which is a property of the processor rather than of this codebase.',
+  },
+]
+
+export const ALL_ISOLATION_GUARDS: readonly IsolationGuard[] = [
+  ...ISOLATION_GUARDS,
+  ...READ_GUARDS,
+]
+
+/**
+ * Every table in the schema that carries a companyId.
+ *
+ * Pure over the concatenated schema source, and **one** implementation, because
+ * this is where Phase 149 went wrong. That phase matched
+ * `pgTable\(([\s\S]*?)\n\)` — non-greedy to the first `\n)` — and a table
+ * whose body ends `\n})` ran past its own closing brace into the next
+ * declaration. It falsely called `documentBlobs` and `assetBlobs` tenant-scoped
+ * when both are content-addressed and say so, and it **missed seven that are**:
+ * `aiRequests`, `documents`, `checkouts`, `statementSettings`,
+ * `payablesSettings`, `refunds` and `serviceItems`.
+ *
+ * Splitting on declaration boundaries cannot make that mistake: a body ends
+ * where the next `export const … = pgTable(` begins.
+ */
+export function companyScopedTablesIn(schemaSource: string): string[] {
+  const declarations = [...schemaSource.matchAll(/export const (\w+)\s*=\s*pgTable\(/g)]
+  const scoped: string[] = []
+
+  for (let index = 0; index < declarations.length; index++) {
+    const start = declarations[index].index
+    const end = index + 1 < declarations.length ? declarations[index + 1].index : schemaSource.length
+    if (/companyId:/.test(schemaSource.slice(start, end))) scoped.push(declarations[index][1])
+  }
+
+  return scoped
+}
+
+export type ReadVerdict = { guarded: true; kind: GuardKind } | { guarded: false; why: string }
+
+/**
+ * Which guard a read stands on.
+ *
+ * Measured by the scan that calls this, never declared. The order is the same
+ * principle as `guardFor`: the evidence closest to the statement first.
+ */
+export function readGuardFor(site: {
+  scopedInStatement: boolean
+  companyInStatement: boolean
+  conditionsArray: boolean
+  actorFiltered: boolean
+  joined: boolean
+  establishedAbove: boolean
+  validatedAbove: boolean
+  keyIsRowProperty: boolean
+  takesActorContext: boolean
+  exported: boolean
+  systemPath: boolean
+}): ReadVerdict {
+  if (site.scopedInStatement) return { guarded: true, kind: 'scoped-read' }
+  if (site.companyInStatement) return { guarded: true, kind: 'explicit-company' }
+  if (site.conditionsArray) return { guarded: true, kind: 'conditions-array' }
+  if (site.actorFiltered) return { guarded: true, kind: 'actor-scoped' }
+  if (site.joined) return { guarded: true, kind: 'join-inherited' }
+  if (site.establishedAbove) return { guarded: true, kind: 'established-above' }
+  if (site.validatedAbove) return { guarded: true, kind: 'validated-above' }
+  if (site.keyIsRowProperty) return { guarded: true, kind: 'id-from-fetched-row' }
+  if (!site.takesActorContext && site.systemPath) return { guarded: true, kind: 'system-actor' }
+  if (!site.takesActorContext && !site.exported) return { guarded: true, kind: 'caller-established' }
+  if (!site.takesActorContext) return { guarded: true, kind: 'derives-tenant-from-row' }
+
+  return {
+    guarded: false,
+    why:
+      'This read returns rows from a company-scoped table and nothing establishes whose they are: ' +
+      'no scope in the statement, no join carrying one, no filter set above it, and it takes an ' +
+      'ActorContext so it is not a processor callback or a worker. A select that returns another ' +
+      'company’s rows is a breach whether or not anything was written.',
+  }
+}
+
 /** The guard a kind names. Throws on one nobody declared. */
 export function isolationGuardFor(kind: string): IsolationGuard {
-  const guard = ISOLATION_GUARDS.find((row) => row.kind === kind)
+  const guard = ALL_ISOLATION_GUARDS.find((row) => row.kind === kind)
   if (!guard) {
     throw new RegistryError({
       registry: 'ISOLATION_GUARDS',

@@ -6189,6 +6189,55 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### What a read stands on (Phase 150)
+
+ADR 0149 nominated this in one sentence: *a `select` that returns another
+company's rows is a breach whether or not anything was written.* That phase
+measured only the writes, because they are the shape that can be aimed.
+
+**867 reads** from company-scoped tables. Every one guarded, by eleven
+mechanisms — `scoped-read` 531, `explicit-company` 247, `established-above` 28,
+`id-from-fetched-row` 17, `join-inherited` 13, `derives-tenant-from-row` 12,
+`caller-established` 7, `conditions-array` 4, `actor-scoped` 3,
+`validated-above` 3, `system-actor` 2.
+
+**The reads and the writes are guarded differently and nothing had counted
+either half.** `scoped()` covers 61% of reads and 25% of writes. Both sound. The
+README described one system and there are two — the same shape as the sentence
+Phase 149 corrected, one level down.
+
+The asymmetry is not an accident. A write can be guarded by something that
+happened earlier, because the write has not happened yet when a refusal fires. A
+read that leaks has already leaked by the time anything could object, so its
+guard has to be in the statement or in the id it was handed. `appliesTo` records
+which guards belong to which side.
+
+Two guards exist only on the read side. **`derives-tenant-from-row`** —
+`settleCheckout` takes a payment processor's own id from a webhook and *"derives
+the company from the row"*, because there is no actor to filter against; marked
+not company-tight, since it rests on an external id being unguessable. And
+**`id-from-fetched-row`** — the design page reads a brand kit by
+`document.brandKitId`, and an id that is a field of a checked row cannot be
+aimed by the caller. That distinction is what makes the narrowing of both scans
+possible, and it took until here to name.
+
+**It corrected the phase before it.** ADR 0149's table detector matched
+`pgTable\(([\s\S]*?)\n\)`, which runs past a body ending `\n})` into the next
+declaration: it falsely called two content-addressed tables tenant-scoped and
+**missed seven that are**. Re-run with the corrected set — 164 tables, 109
+id-keyed writes, `explicit-company` 61 — and still zero unguarded. The
+conclusion survived, three numbers did not, and ADR 0149 now says so.
+`companyScopedTablesIn` lives in the module and both scans call it.
+
+The scan was wrong twice more before it was trustworthy, and both are kept as
+cases. It read statements by line, so a `.where(` whose argument began on the
+next line ended the statement early — 113 false positives, including
+`recentActivity`, which `tenant-isolation.test.ts` has proved isolates by
+behaviour since Phase 122. And it could not see a refusing helper unless the
+name contained "Own", which is what the write scan looked for while
+`getCampaign` calls `loadCampaign`.
+
+
 ### What a write stands on (Phase 149)
 
 ADR 0148 nominated this against a sentence in this file: *"tenant isolation
@@ -7086,6 +7135,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/isolation-reads.test.ts` | **What a read stands on** (Phase 150): ADR 0149 measured only the writes and said so — a select that returns another company's rows is a breach whether or not anything was written. **867** reads from company-scoped tables, every one guarded, by eleven mechanisms; `scoped()` covers 61% of reads against 25% of writes, so the two halves are guarded quite differently and nothing had counted either. A write can be guarded by a refusal that fired earlier; a read that leaks has already leaked, so its guard must be in the statement or in the id it was handed — which is why `owner-helper` is write-only and `derives-tenant-from-row` and `id-from-fetched-row` are read-only. It corrected the phase before it: ADR 0149's table detector ran past a closing brace, falsely counting two content-addressed tables and missing seven real ones, so the write numbers become 164 tables and 109 writes — still zero unguarded. The scan itself was wrong twice more first, both kept as cases: a line-based statement reader that cut multi-line `where` clauses, and a helper detector that only recognised the word "Own" |
 | `tests/isolation-guards.test.ts` | Two companies side by side: inbox scoping, cross-tenant writes, foreign ids in bulk operations, audit scoping |
 | `tests/permissions.test.ts` | Role defaults, granular overrides, and enforcement inside services |
 | `tests/dedup.test.ts` | Repeated syncs, the database-level unique constraint, and two tenants importing identical provider ids |
@@ -9342,10 +9392,10 @@ Gaps within the phases already built:
 - **Deleting a document is silent about its links.** The button says how many records it will strip
   it from, and then does it. No undo, and no interstitial for a file used on ten records.
 - **Row-level security as a second isolation layer** (spec §19) is still not in place; tenant
-  isolation rests on eight guards held to the source by `tests/isolation-guards.test.ts` — `scoped()`
-  covers twenty-seven of the hundred and six writes that can be aimed at a row, and an explicit
-  `companyId` equality covers fifty-eight. This line said "`scoped()` at every query" until Phase
-  149 measured it. MFA, session and
+  isolation rests on guards held to the source by `tests/isolation-guards.test.ts` and
+  `tests/isolation-reads.test.ts` — eight on the write side, eleven on the read side, and
+  `scoped()` covers 27 of the 109 writes that can be aimed at a row against 531 of the 867 reads.
+  This line said "`scoped()` at every query" until Phase 149 measured it. MFA, session and
   device controls were built in Phase 13.
 - **Spec §18's infrastructure list is now complete.** Object storage arrived in Phase 20,
   server-side PDF generation and immutable snapshots in Phase 21, the background job queue and the

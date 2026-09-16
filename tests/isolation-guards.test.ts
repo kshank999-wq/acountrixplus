@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { withoutComments } from '@/modules/source/enclosing'
 import { RegistryError } from '@/modules/errors/registry'
 import {
+  companyScopedTablesIn,
   guardFor,
   ISOLATION_GUARDS,
   isolationGuardFor,
@@ -35,17 +36,20 @@ function readable(file: string): string {
     .replace(/`(?:[^`\\]|\\.)*`/g, (m) => m.replace(/[^\n]/g, ' '))
 }
 
-/** Every table in the schema that carries a companyId. */
+/**
+ * Every table in the schema that carries a companyId.
+ *
+ * One implementation, in the module, since Phase 150 — this file had its own
+ * and it was wrong. The regex ran past a table's closing brace into the next
+ * declaration, which falsely called two content-addressed tables tenant-scoped
+ * and missed seven that are. The counts below moved because of it.
+ */
 function companyScopedTables(): Set<string> {
   const schema = sourceFiles('src/db/schema')
     .map((file) => readFileSync(file, 'utf8'))
-    .join('\n')
+    .join('\n\n')
 
-  const tables = new Set<string>()
-  for (const m of schema.matchAll(/export const (\w+)\s*=\s*pgTable\(([\s\S]*?)\n\)/g)) {
-    if (/companyId:/.test(m[2])) tables.add(m[1])
-  }
-  return tables
+  return new Set(companyScopedTablesIn(schema))
 }
 
 type Write = {
@@ -160,14 +164,20 @@ describe('every write that can be aimed at a row', () => {
     // and so does one that finds six sites and calls them representative.
     //
     // The distribution is the phase's finding in one object: `scoped()` guards
-    // twenty-seven of the hundred and six, and `explicit-company` guards more
+    // twenty-seven of the hundred and nine, and `explicit-company` guards more
     // than twice as many.
+    //
+    // It was a hundred and six until Phase 150 found the table detector here
+    // reading past a closing brace — seven company-scoped tables were invisible
+    // to this scan, and the conclusion survived while three of the numbers did
+    // not. The tables come from the module now, so both scans count the same
+    // thing.
     const by: Record<string, number> = {}
     for (const write of WRITES) by[write.kind ?? 'none'] = (by[write.kind ?? 'none'] ?? 0) + 1
 
-    expect(WRITES.length).toBe(106)
+    expect(WRITES.length).toBe(109)
     expect(by).toEqual({
-      'explicit-company': 58,
+      'explicit-company': 61,
       'scoped-write': 27,
       'read-then-refuse': 9,
       'owner-helper': 4,

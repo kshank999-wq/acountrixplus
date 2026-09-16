@@ -19,16 +19,16 @@ company writing to another company's books — and it can be held to a fact.
 
 ## What the measurement says
 
-159 company-scoped tables. 1,330 queries naming one. **106** of those are the
+164 company-scoped tables. 1,330 queries naming one. **109** of those are the
 shape that can be *aimed*: an `update` or `delete` whose `where` keys off an id
 the function was handed, which is the only way a statement reaches a row chosen
 by somebody else.
 
-Every one of the 106 is guarded. Here is what by:
+Every one of the 109 is guarded. Here is what by:
 
 | guard | count |
 | --- | --- |
-| `explicit-company` — `eq(t.companyId, ctx.companyId)` written out | 58 |
+| `explicit-company` — `eq(t.companyId, ctx.companyId)` written out | 61 |
 | `scoped-write` — `scoped()` inside the statement | **27** |
 | `read-then-refuse` — a filtered read above, a refusal, then a write by id | 9 |
 | `owner-helper` — a helper that loads and refuses | 4 |
@@ -39,6 +39,14 @@ Every one of the 106 is guarded. Here is what by:
 
 `scoped()` guards about a quarter of them. The most common guard is an explicit
 `companyId` equality, at more than twice as many.
+
+> **Corrected by Phase 150.** This ADR first said 159 tables, 106 writes and 58
+> `explicit-company`. Its table detector matched `pgTable\(([\s\S]*?)\n\)`,
+> which runs past a body ending `\n})` into the next declaration: it falsely
+> counted two content-addressed tables as tenant-scoped and **missed seven that
+> are**. The conclusion below is unchanged — every id-keyed write is guarded,
+> and `scoped()` covers about a quarter — but three of the numbers were wrong
+> and are corrected here rather than left to read as measurements.
 
 **The code is right and the sentence was wrong.** Nothing here is a leak. What
 was missing is that isolation rested on eight different mechanisms and nothing
@@ -61,7 +69,7 @@ from the source. Declaring it per site would produce a register saying
 `updateTime` is fine — a sentence that stops being true the moment somebody
 deletes its `loadOwnEditable` call, and goes on reading exactly the same.
 
-So every guard carries a `detect`, the scan measures each of the 106, and a
+So every guard carries a `detect`, the scan measures each of the 109, and a
 write matching **no** guard fails the test by name. Adding one is not a matter
 of adding a row.
 
