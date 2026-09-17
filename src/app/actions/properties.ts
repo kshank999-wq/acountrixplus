@@ -205,8 +205,12 @@ export async function applyDepositAction(input: unknown): Promise<ActionResult> 
       invoiceId: parsed.invoiceId ?? null,
     })
 
+    // What came off the tenancy, which is the company's own money — so
+    // `formatCents` may use its default currency here and be right. It reported
+    // `parsed.amountCents`, the face amount somebody typed, until Phase 151:
+    // a €400 application read as "$400.00 applied to the invoice".
     return result.recognisedIncome
-      ? `${formatCents(parsed.amountCents)} kept, and recognised as income now.`
-      : `${formatCents(parsed.amountCents)} applied to the invoice. The rent was already recognised.`
+      ? `${formatCents(result.appliedCents)} kept, and recognised as income now.`
+      : `${formatCents(result.appliedCents)} applied to the invoice. The rent was already recognised.`
   })
 }

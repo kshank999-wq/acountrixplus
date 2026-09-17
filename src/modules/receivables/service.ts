@@ -1594,7 +1594,22 @@ export async function settleInvoiceWithoutCash(
   ctx: ActorContext,
   input: { invoiceId: string; amountCents: number },
   tx: Executor,
-): Promise<{ settled: boolean; balanceCents: number; number: string }> {
+): Promise<{
+  settled: boolean
+  balanceCents: number
+  number: string
+  /**
+   * What came off the books, in the company's own money.
+   *
+   * `reduceDocumentBalance` has returned this since Phase 127 and the declared
+   * type did not mention it, so every caller saw a face amount and no way to
+   * ask what it was carried at (Phase 151). A return value nobody can read is
+   * the inverse of Phase 49's rule and has the same effect.
+   */
+  functionalCents: number
+  /** The document's own currency, for a sentence that names both. */
+  currency: string
+}> {
   if (input.amountCents <= 0) {
     throw new DocumentError('A settlement amount must be greater than zero.')
   }
@@ -1608,7 +1623,7 @@ export async function settleInvoiceWithoutCash(
   if (!invoice) throw new DocumentError('Invoice not found')
 
   const reduced = await reduceDocumentBalance(ctx, invoices, invoice, input.amountCents, tx)
-  return { ...reduced, number: invoice.number }
+  return { ...reduced, number: invoice.number, currency: invoice.currency }
 }
 
 /**

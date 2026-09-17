@@ -64,8 +64,13 @@ describe('the register of what is staged', () => {
     // it moved the only entry in `BANK_POSTINGS` whose handling has ever
     // changed — `refuses` to `matched`, because giving it a day rate removed
     // the reason it was withholding the money's currency.
-    expect(PENDING_WIRING.length).toBe(4)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(8)
+    // Three over seven: `spends` → `applyDeposit` went too, and wiring it
+    // needed two return values widened on the way — `settleInvoiceWithoutCash`
+    // had returned the functional figure since Phase 127 with a declared type
+    // that did not mention it, and `applyDeposit` had no way to tell a caller
+    // what actually came off the tenancy.
+    expect(PENDING_WIRING.length).toBe(3)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(7)
   })
 
   it('still describes the code, entry by entry', () => {

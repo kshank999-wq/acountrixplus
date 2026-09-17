@@ -78,24 +78,6 @@ export type Pending = {
 
 export const PENDING_WIRING: readonly Pending[] = [
   {
-    core: 'spends',
-    coreFile: 'src/modules/fx/spent-against.ts',
-    targets: [{ symbol: 'applyDeposit', file: 'src/modules/properties/deposits.ts' }],
-    phase: 138,
-    blockedBy: 'nothing',
-    acceptance: 'tests/deposit-against-foreign-invoice.test.ts',
-    liveDefect:
-      'applyDeposit compares a euro face amount against a dollar holding, credits Accounts ' +
-      'Receivable with the face amount rather than what the invoice was carried at, and ' +
-      'applyDepositAction reports it with formatCents’ default currency — so €400 applied reads ' +
-      'as "$400.00 applied to the invoice".',
-    because:
-      'Every piece exists. `settleInvoiceWithoutCash` already returns the functional figure and ' +
-      '`spends` already decides what the holding gives up; the wiring pass has to read one and ' +
-      'call the other. Staged with the rest so the deposit paths are hooked up together rather ' +
-      'than this one alone.',
-  },
-  {
     core: 'mayPostToBank',
     coreFile: 'src/modules/fx/bank-side.ts',
     targets: [

@@ -20,6 +20,9 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { settleInvoiceWithoutCash } from '@/modules/receivables/service'
 import { PropertyError, propertyDimension } from './service'
 import { bankGlAccountFor } from '@/modules/banking/bank-guard'
+import { spends } from '@/modules/fx/spent-against'
+import { functionalCurrency } from '@/modules/fx/service'
+import { formatCents } from '@/lib/money'
 
 /**
  * Security deposits (spec §5 "tenants", §13, §19).
@@ -333,7 +336,19 @@ export async function applyDeposit(
     incomeAccountId?: string | null
     memo?: string | null
   },
-): Promise<{ id: string; recognisedIncome: boolean }> {
+): Promise<{
+  id: string
+  recognisedIncome: boolean
+  /**
+   * What actually came off the tenancy, in the company's own money.
+   *
+   * Returned so a caller reporting the result does not have to reach for the
+   * face amount somebody typed: `applyDepositAction` said
+   * `formatCents(parsed.amountCents)` and rendered a €400 application as
+   * "$400.00 applied to the invoice" (Phase 151).
+   */
+  appliedCents: number
+}> {
   requirePermission(ctx, 'accounting:journal')
   await requireModule(ctx, 'properties')
 
@@ -350,15 +365,20 @@ export async function applyDeposit(
     const lease = await leaseForMovement(ctx, input.leaseId, tx)
     const position = await depositPosition(ctx, input.leaseId, tx)
 
-    if (input.amountCents > position.heldCents) {
-      throw new PropertyError(
-        `Only ${position.heldCents} is held on this tenancy; ${input.amountCents} cannot be applied.`,
-      )
-    }
-
     let creditAccountId: string
     let memo: string
     let recognisedIncome: boolean
+    /**
+     * What comes off the tenancy, in the company's own money (Phase 151).
+     *
+     * This was `input.amountCents` throughout — the invoice's **face** amount.
+     * On a euro invoice against a dollar deposit that is not the same kind of
+     * number as the holding, so the check `input.amountCents > position.heldCents`
+     * compared two currencies and the credit to Accounts Receivable was a euro
+     * figure posted as dollars. $1,050 held and €1,000 applied asked
+     * `100000 > 105000`, went ahead, and spent $1,100 of a $1,050 deposit.
+     */
+    let appliedCents = input.amountCents
 
     if (input.invoiceId) {
       // Settles the receivable, and nothing else. Deliberately not a payment
@@ -370,10 +390,32 @@ export async function applyDeposit(
         tx,
       )
 
+      // Both figures in the company's own money before they are compared, and
+      // the refusal names each in its own currency. Inside the transaction, so
+      // a refusal unwinds the settlement it had to perform to learn the worth.
+      const home = await functionalCurrency(ctx.companyId, tx)
+      const verdict = spends({
+        heldCents: position.heldCents,
+        faceCents: input.amountCents,
+        functionalCents: settled.functionalCents,
+        documentCurrency: settled.currency,
+        homeCurrency: home,
+      })
+
+      if (!verdict.ok) throw new PropertyError(verdict.why)
+
+      appliedCents = verdict.costsCents
       creditAccountId = receivable.id
       memo = `Deposit applied to invoice ${settled.number}`
       recognisedIncome = false
     } else {
+      if (input.amountCents > position.heldCents) {
+        throw new PropertyError(
+          `Only ${formatCents(position.heldCents)} is held on this tenancy, so ` +
+            `${formatCents(input.amountCents)} cannot be applied.`,
+        )
+      }
+
       const income = input.incomeAccountId
         ? await ownedAccount(ctx, input.incomeAccountId, tx)
         : await accountByNumber(ctx.companyId, INDUSTRY_ACCOUNTS.rentalIncome, tx)
@@ -398,10 +440,10 @@ export async function applyDeposit(
         sourceType: 'lease_deposit',
         sourceId: input.leaseId,
         lines: [
-          { chartAccountId: liability.id, debitCents: input.amountCents },
+          { chartAccountId: liability.id, debitCents: appliedCents },
           {
             chartAccountId: creditAccountId,
-            creditCents: input.amountCents,
+            creditCents: appliedCents,
             memo: input.memo?.trim() || memo,
             // Tagged with the property, so a kept deposit shows up on that
             // property's profit and loss alongside its rent.
@@ -420,7 +462,9 @@ export async function applyDeposit(
         companyId: ctx.companyId,
         leaseId: input.leaseId,
         kind: 'applied',
-        amountCents: input.amountCents,
+        // The worth, not the face amount — this is what the tenancy gave up,
+        // and `depositPosition` sums these to say what is left.
+        amountCents: appliedCents,
         occurredOn: input.occurredOn,
         journalEntryId: entry.id,
         invoiceId: input.invoiceId ?? null,
@@ -444,7 +488,7 @@ export async function applyDeposit(
       tx,
     )
 
-    return { id: row.id, recognisedIncome }
+    return { id: row.id, recognisedIncome, appliedCents }
   })
 }
 
