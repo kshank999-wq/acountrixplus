@@ -69,8 +69,13 @@ describe('the register of what is staged', () => {
     // had returned the functional figure since Phase 127 with a declared type
     // that did not mention it, and `applyDeposit` had no way to tell a caller
     // what actually came off the tenancy.
-    expect(PENDING_WIRING.length).toBe(3)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(7)
+    // Two over five: `affords` → `redeemGiftCard` went too, and unskipping its
+    // acceptance test found that the test was a stub — it created an invoice,
+    // asserted two ids were truthy, and never called `redeemGiftCard`. A
+    // skipped test is where a fiction is easiest to keep, because nothing ever
+    // runs it to find out.
+    expect(PENDING_WIRING.length).toBe(2)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(5)
   })
 
   it('still describes the code, entry by entry', () => {
@@ -113,12 +118,21 @@ describe('the register of what is staged', () => {
 })
 
 describe('what the register refuses', () => {
-  const entry = PENDING_WIRING[0]
+  /**
+   * An entry with nothing blocking it.
+   *
+   * This was `PENDING_WIRING[0]` until Phase 151 wired four entries off the
+   * front of the register and left a blocked one at index zero — at which point
+   * two of these stopped testing what they say, because a blocked entry is
+   * allowed to name no acceptance test. A positional assumption about a list
+   * that shrinks.
+   */
+  const entry = PENDING_WIRING.find((row) => row.blockedBy === 'nothing') as Pending
 
   it('catches an entry that has already been wired', () => {
     const verdict = wiringStateFor({
       entry,
-      targetsCallingCore: ['applyDeposit'],
+      targetsCallingCore: [entry.targets[0].symbol],
       coreExists: true,
       acceptanceExists: true,
     })

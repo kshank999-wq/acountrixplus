@@ -15,6 +15,8 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { requireModule } from '@/modules/industry/modules'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { createInvoice } from '@/modules/receivables/service'
+import { affords } from '@/modules/fx/affordable'
+import { functionalCurrency } from '@/modules/fx/service'
 import { relieveFunctional } from '@/modules/fx/documents'
 import { redeemFor, splitFor } from './split'
 import { DomainError } from '@/modules/errors'
@@ -794,6 +796,7 @@ export async function redeemGiftCard(
       .select({
         id: invoices.id,
         balanceCents: invoices.balanceCents,
+        currency: invoices.currency,
         exchangeRateMillionths: invoices.exchangeRateMillionths,
         functionalBalanceCents: invoices.functionalBalanceCents,
       })
@@ -830,7 +833,37 @@ export async function redeemGiftCard(
     }
 
     const dueCents = bill.balanceCents
-    const plan = redeemFor(card.balanceCents, dueCents)
+
+    /**
+     * What a home-money card can buy of this document (Phase 151, ADR 0142).
+     *
+     * `redeemFor(card.balanceCents, bill.balanceCents)` put a dollar against a
+     * euro in the decision that says how much debt is forgiven, then posted
+     * that figure to both journal lines while `relieveFunctional` converted for
+     * the subledger. Measured: a $600 card against a €1,000 invoice carried at
+     * 1.10 credited Accounts Receivable $600 and took $660 off the invoice, so
+     * `ledger.receivables` reported a $60 difference nightly and the customer
+     * had $660 of debt forgiven for $600 of card.
+     *
+     * `affords` returns a **face** amount and nothing else, leaving
+     * `relieveFunctional` to decide the functional figure — which is the only
+     * way a card that clears an invoice takes both columns to zero together.
+     */
+    const home = await functionalCurrency(ctx.companyId, tx)
+    const buys = affords({
+      heldCents: card.balanceCents,
+      balanceCents: bill.balanceCents,
+      functionalBalanceCents: bill.functionalBalanceCents,
+      rateMillionths: bill.exchangeRateMillionths,
+      documentCurrency: bill.currency,
+      homeCurrency: home,
+    })
+
+    // `redeemFor` is not used for this any more, and cannot be: it answers in
+    // one currency, and the two sides of this are in two. It counted the card's
+    // remainder from whatever it was handed, so passing it a face amount made
+    // a $100 card meeting a $30 appointment report nothing left.
+    const plan = { appliedCents: buys.ok ? buys.faceCents : 0 }
 
     if (plan.appliedCents === 0) {
       throw new AppointmentError(
@@ -868,6 +901,16 @@ export async function redeemGiftCard(
       }
     }
 
+    // What the ledger posts is the document's own relief, in home money — the
+    // card is home money already, so on a domestic invoice these are the same
+    // number and this is why the fault went unnoticed.
+    const relief = relieveFunctional(bill, plan.appliedCents)
+
+    // The card gives up what the ledger says it gave up. The applied figure
+    // counts in the document's currency; the card is held in the company's own,
+    // and on a domestic invoice these are the same number.
+    const cardRemainingCents = card.balanceCents - relief.functionalCents
+
     const entry = await createJournalEntry(
       ctx,
       {
@@ -879,12 +922,12 @@ export async function redeemGiftCard(
         lines: [
           {
             chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.giftCardsOutstanding) as string,
-            debitCents: plan.appliedCents,
+            debitCents: relief.functionalCents,
             memo: 'Card spent — the promise is kept',
           },
           {
             chartAccountId: accounts.get(APPOINTMENT_ACCOUNTS.receivable) as string,
-            creditCents: plan.appliedCents,
+            creditCents: relief.functionalCents,
             memo: 'No longer owed by the client',
           },
         ],
@@ -905,15 +948,14 @@ export async function redeemGiftCard(
         // exactly the defect the receivables check reported the night Phase 35
         // landed: the invoice was settled, the amount the control account is
         // measured against was not.
-        functionalBalanceCents: relieveFunctional(bill, plan.appliedCents)
-          .functionalBalanceCents,
+        functionalBalanceCents: relief.functionalBalanceCents,
         status: remainingCents === 0 ? 'paid' : 'partial',
       })
       .where(scoped(ctx, invoices, eq(invoices.id, bill.id)))
 
     await tx
       .update(giftCards)
-      .set({ balanceCents: plan.remainingBalanceCents })
+      .set({ balanceCents: cardRemainingCents })
       .where(eq(giftCards.id, card.id))
 
     await tx
@@ -928,11 +970,18 @@ export async function redeemGiftCard(
         entityType: 'gift_card',
         entityId: card.id,
         before: { balanceCents: card.balanceCents },
-        after: { balanceCents: plan.remainingBalanceCents, appliedCents: plan.appliedCents },
+        after: { balanceCents: cardRemainingCents, appliedCents: plan.appliedCents },
       },
       tx,
     )
 
-    return { ...plan, applied: true }
+    return {
+      appliedCents: plan.appliedCents,
+      // What is left on the card is in the company's own money, so it comes off
+      // the ledger figure rather than the document one.
+      remainingBalanceCents: cardRemainingCents,
+      stillDueCents: remainingCents,
+      applied: true,
+    }
   })
 }

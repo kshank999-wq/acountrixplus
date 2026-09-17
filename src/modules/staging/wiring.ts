@@ -102,28 +102,6 @@ export const PENDING_WIRING: readonly Pending[] = [
       'exist would be fiction rather than a definition of done.',
   },
   {
-    core: 'affords',
-    coreFile: 'src/modules/fx/affordable.ts',
-    targets: [{ symbol: 'redeemGiftCard', file: 'src/modules/appointments/service.ts' }],
-    phase: 142,
-    blockedBy: 'nothing',
-    acceptance: 'tests/gift-card-against-foreign-invoice.test.ts',
-    liveDefect:
-      'redeemGiftCard puts `min(card.balanceCents, bill.balanceCents)` against a euro invoice — a ' +
-      'dollar compared with a euro — then posts that figure to both journal lines while relieving ' +
-      'the invoice’s functional twin through `relieveFunctional`, which converts. Measured: a ' +
-      '$600 card against a €1,000 invoice carried at 1.10 credits Accounts Receivable $600 and ' +
-      'takes $660 off the subledger, so `ledger.receivables` reports a $60 difference nightly and ' +
-      'the customer has $660 of debt forgiven for $600 of card.',
-    because:
-      'Nominated by ADR 0141 as the one finding this register could not hold, because the register ' +
-      'requires a core that exists and none answered it. `affords` is that core: the first ' +
-      'inverse of `convert` in the codebase, since `rateFrom` derives a rate from a pair rather ' +
-      'than a face amount from a functional one. It returns a **face** amount and nothing else, ' +
-      'so `relieveFunctional` still decides the functional figure — which is the only way a card ' +
-      'that clears an invoice takes both columns to zero together.',
-  },
-  {
     core: 'priceApplicationLines',
     coreFile: 'src/modules/jobs/application.ts',
     targets: [
