@@ -6,6 +6,7 @@ import { createCompanyFixture, type Fixture } from './helpers'
 import { createCustomer, createInvoice, recordPayment } from '@/modules/receivables/service'
 import { writeOffInvoice, recoverWriteOff, badDebtSummary } from '@/modules/receivables/credits'
 import { createDeposit, undepositedReceipts } from '@/modules/banking/deposits'
+import { createFinancialAccount } from '@/modules/banking/accounts'
 import { putRate } from '@/modules/fx/service'
 import { balanceForAccount } from '@/modules/ledger/balances'
 import { accountByNumber } from '@/modules/coa/service'
@@ -48,6 +49,28 @@ beforeEach(async () => {
 
 const YEAR = { startDate: '2026-01-01', endDate: '2026-12-31' }
 
+/**
+ * A euro account for euro money to arrive in (Phase 151).
+ *
+ * These recoveries banked a euro write-off into the company's dollar account
+ * until the wiring pass told `bankGlAccountFor` what currency the money was in.
+ * It refuses that now, and is right to: when a customer pays a euro debt into a
+ * dollar account the bank converts at its own rate, the books do not have that
+ * rate, and the figure this path would post is — in the guard's own words — "a
+ * guess at somebody else's arithmetic". Passing the day rate through would have
+ * been exactly that guess, so the gate is refusing the change that gave it the
+ * currency.
+ */
+async function aEuroAccount() {
+  const account = await createFinancialAccount(fixture.ctx, {
+    name: 'Frankfurt Current',
+    kind: 'checking',
+    currency: 'EUR',
+    mask: '9001',
+  })
+  return account.id
+}
+
 async function aEuroInvoice(unitPriceCents = 250_000) {
   return createInvoice(fixture.ctx, {
     customerId,
@@ -86,7 +109,7 @@ describe('recovering a written-off debt', () => {
     await recoverWriteOff(fixture.ctx, writeOff.id, {
       recoveredOn: '2026-11-15',
       amountCents: 250_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await aEuroAccount(),
     })
 
     // The defect in one assertion: this was 25000 before Phase 127 — $250 of
@@ -105,7 +128,7 @@ describe('recovering a written-off debt', () => {
     await recoverWriteOff(fixture.ctx, writeOff.id, {
       recoveredOn: '2026-11-15',
       amountCents: 100_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await aEuroAccount(),
     })
 
     // €1,000 of €2,500 recovered: $1,100 off a $2,750 loss, leaving $1,650.
@@ -128,7 +151,7 @@ describe('recovering a written-off debt', () => {
     await recoverWriteOff(fixture.ctx, writeOff.id, {
       recoveredOn: '2026-11-15',
       amountCents: 250_000,
-      financialAccountId: fixture.financialAccountId,
+      financialAccountId: await aEuroAccount(),
     })
 
     const summary = await badDebtSummary(fixture.ctx, YEAR)
@@ -154,7 +177,7 @@ describe('recovering a written-off debt', () => {
       recoverWriteOff(fixture.ctx, writeOff.id, {
         recoveredOn: '2026-11-15',
         amountCents: 300_000,
-        financialAccountId: fixture.financialAccountId,
+        financialAccountId: await aEuroAccount(),
       }),
     ).rejects.toThrow(/€2,500\.00 was written off/)
   })

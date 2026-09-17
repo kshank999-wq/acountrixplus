@@ -341,7 +341,12 @@ describe('the register of places a whole is split', () => {
     // this shape, this is the line that should stop being comfortable.
     const unplaced = SPLIT_SITES.filter((site) => site.policy === 'unplaced')
 
-    expect(unplaced.map((site) => site.symbol)).toEqual(['priceDocumentTax', 'grossFor'])
+    // One since Phase 151 wired the repair. `priceDocumentTax` no longer
+    // divides anything — it hands its lines to `taxPerCode`, which places its
+    // residue — so the register moved the entry to the function that does the
+    // dividing, and what is left unplaced is `grossFor`: the illustrative
+    // payroll provider that must not be used to pay anybody.
+    expect(unplaced.map((site) => site.symbol)).toEqual(['grossFor'])
     // Phase 147 replaced `wholeIsIndependent` with `provenance`, because the
     // old field carried two answers for this very site: the whole does not
     // exist first as the code stands, and it is supposed to. `whole-first` is

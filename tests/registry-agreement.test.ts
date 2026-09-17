@@ -88,7 +88,12 @@ describe('the two registries that describe the same functions', () => {
     // The survivor is `recoverWriteOff` — it has `writeOff.currency` and still
     // may not be told it, because the figure it puts on the bank is struck at
     // the write-off's carried rate rather than the rate on the day.
-    expect(refusesButConverted.map((pair) => pair.symbol)).toEqual(['recoverWriteOff'])
+    // Empty since Phase 151. `recoverWriteOff` was the one path declared
+    // `refuses` while its ledger side converted, because the figure it banked
+    // was struck at the write-off's carried rate rather than the day's. Wiring
+    // `recoverHeld` gave it a day rate and a realised line, so it is `matched`
+    // now and the disagreement it stood for is gone.
+    expect(refusesButConverted.map((pair) => pair.symbol)).toEqual([])
   })
 })
 

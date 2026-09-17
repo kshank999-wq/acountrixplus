@@ -311,20 +311,29 @@ describe('what the scan measures, and would miss without each guard', () => {
     ).toContain('invoices')
   })
 
-  it('tells the two siblings in one file apart', () => {
-    // The finding, as a measurement rather than a sentence. Both functions live
-    // in `contributions.ts`, both debit a bank account, and only one of them
-    // goes through the gate that refuses a foreign one.
+  it('tells the two siblings in one file apart, and they agree now', () => {
+    // The Phase 141 finding, as a measurement rather than a sentence: both
+    // functions live in `contributions.ts`, both debit a bank account, and only
+    // `receivePledge` went through the gate that refuses a foreign one. The
+    // same business was told no when a pledge landed in a euro account and
+    // nothing at all when a gift did.
+    //
+    // Phase 151 wired it, so this asserts the agreement rather than the gap.
+    // The measurement is unchanged — it is the answer that moved, which is the
+    // whole reason this was written as a reach scan and not as prose.
     const gate = (symbol: string) =>
       reachOf('src/modules/funds/contributions.ts', symbol).hops.some(
         (hop) => hop.callee === 'bankGlAccountFor',
       )
 
     expect(gate('receivePledge')).toBe(true)
-    expect(gate('recordContribution')).toBe(false)
+    expect(gate('recordContribution')).toBe(true)
 
-    // And the registry that is supposed to know about bank postings has never
-    // heard of it, because Phase 133's scan matches a spelling this one avoids.
+    // `BANK_POSTINGS` still has not heard of `recordContribution`, because
+    // Phase 133's scan matches a spelling this one avoids — it assigns to
+    // `debitAccountId` rather than to a name containing `gl`. Wiring the gate
+    // did not change what that scan can see, and pretending otherwise here
+    // would hide a reach failure behind a repair.
     expect(BANK_POSTINGS.some((row) => row.symbol === 'receivePledge')).toBe(true)
     expect(BANK_POSTINGS.some((row) => row.symbol === 'recordContribution')).toBe(false)
   })

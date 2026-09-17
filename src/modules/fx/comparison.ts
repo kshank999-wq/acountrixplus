@@ -238,27 +238,33 @@ export function comparabilityStands(input: {
   return { ok: true }
 }
 
+/**
+ * Twenty-one since Phase 151, down from twenty-three.
+ *
+ * `redeemGiftCard`'s `min(card.balanceCents, bill.balanceCents)` and
+ * `priceApplication`'s `completedToDateCents > item.scheduledValueCents` are
+ * both gone from here — not because anybody decided they were fine, but because
+ * the wiring pass moved them into `affords` and `priceApplicationLines`, which
+ * take their currencies as arguments and refuse a mismatch.
+ *
+ * Those two cores are out of this scan's reach on purpose: it narrows to files
+ * that read a currency-bearing table, and a pure core reads none. That is the
+ * limit ADR 0144 declared in its own "what this does not do" — a helper called
+ * only from unscanned files is invisible — and the right answer to it is the
+ * one taken here, which is to give the helper the currencies rather than to
+ * widen the scan until it drowns.
+ */
 export const COMPARED_PAIRS: readonly ComparedPair[] = [
-  {
-    file: 'src/modules/appointments/service.ts',
-    symbol: 'redeemGiftCard',
-    comparability: 'blind',
-    because:
-      'Hands `card.balanceCents` and the invoice’s **face** balance to `redeemFor`, which returns ' +
-      'the lesser. The card is the company’s own money and the invoice may be in any currency at ' +
-      'all, so the `min` chooses between a dollar and a euro. Found by hand in Phase 142; this ' +
-      'scan is the first thing that would have found it on its own.',
-    trackedIn: 'PENDING_WIRING — affords → redeemGiftCard',
-  },
   {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'applyDeposit',
-    comparability: 'blind',
+    comparability: 'home-money',
     because:
-      '`input.amountCents > position.heldCents` puts a euro face amount against a dollar holding, ' +
-      'in the check that decides whether somebody else’s money may be spent. Found by hand in ' +
-      'Phase 138.',
-    trackedIn: 'PENDING_WIRING — spends → applyDeposit',
+      'Was `blind` until Phase 151. It compared `input.amountCents` — an invoice’s face amount — ' +
+      'against a dollar holding, so $1,050 held and €1,000 applied asked `100000 > 105000`, went ' +
+      'ahead, and spent $1,100 of a $1,050 deposit. The invoice branch goes through `spends` now, ' +
+      'which takes both currencies and refuses a mismatch; what is left here is the ' +
+      'kept-for-damage branch, where the amount is the company’s own money on both sides.',
   },
   {
     file: 'src/modules/payroll/vendor-reporting.ts',
@@ -384,16 +390,6 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
     because:
       '`row.balanceCents !== row.totalCents` asks whether a bill has been paid against before an ' +
       'approval may be withdrawn. One bill, compared with itself.',
-  },
-  {
-    file: 'src/modules/jobs/billing.ts',
-    symbol: 'priceApplication',
-    comparability: 'inherited',
-    because:
-      '`completedToDateCents > item.scheduledValueCents` refuses billing more of a line than the ' +
-      'schedule of values holds. The completed figure is a figure *for that item*, so it carries ' +
-      'the schedule’s currency — one job, one quotation. Not one row, which is what the scan ' +
-      'pointed out when this was declared `same-row`.',
   },
   {
     file: 'src/modules/properties/deposits.ts',

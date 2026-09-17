@@ -123,7 +123,10 @@ describe('what the ledger will accept', () => {
     // 1.0835 left $16.50 in Accounts Receivable with the customer owing nothing.
     // Four sites apiece, because each line is written on both a debit and a
     // credit branch.
-    expect(postingSites().length).toBe(120)
+    // A hundred and twenty-one since Phase 151, whose wiring added a realised
+    // exchange line to the write-off recovery — the difference between what
+    // arrived and what was carried, which previously had nowhere to go.
+    expect(postingSites().length).toBe(121)
     expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(39)
   })
 

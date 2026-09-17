@@ -132,7 +132,7 @@ function reads(): Read[] {
 const READS = reads()
 
 describe('every read from a company-scoped table', () => {
-  it('has a guard, all eight hundred and sixty-seven of them', () => {
+  it('has a guard, all eight hundred and sixty-six of them', () => {
     // **The assertion the phase exists for.** A select with nothing
     // establishing whose rows it returns is a breach whether or not anything
     // was written, and ADR 0149 left this half unmeasured.
@@ -148,9 +148,12 @@ describe('every read from a company-scoped table', () => {
     const by: Record<string, number> = {}
     for (const read of READS) by[read.kind ?? 'none'] = (by[read.kind ?? 'none'] ?? 0) + 1
 
-    expect(READS.length).toBe(867)
+    // Eight hundred and sixty-six since Phase 151: `recordContribution` reads
+    // the bank account through `bankGlAccountFor` now instead of selecting it
+    // itself, so a read left this file for a gate that was already counted.
+    expect(READS.length).toBe(866)
     expect(by).toEqual({
-      'scoped-read': 531,
+      'scoped-read': 530,
       'explicit-company': 247,
       'established-above': 28,
       'id-from-fetched-row': 17,

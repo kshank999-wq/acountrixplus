@@ -231,18 +231,31 @@ describe('which came first, the whole or the parts', () => {
     ).toEqual({ sound: true })
   })
 
-  it('agrees with the register about the one live defect', () => {
-    // The validation Phase 144 used: the scan reaches the defect already known
-    // and on a register, rather than announcing something nobody can check.
-    const tax = splitSiteFor('src/modules/payroll/sales-tax.ts', 'priceDocumentTax')
+  it('no longer has a live defect to agree with, and says what took its place', () => {
+    // This asserted the opposite until Phase 151. `priceDocumentTax` was the
+    // one live defect on the register — `whole-first` provenance, parts rounded
+    // one at a time and added up — and the validation Phase 144 asked for was
+    // that the scan reached it rather than announcing something nobody could
+    // check. It did, and the wiring pass repaired it.
+    //
+    // The register followed the division rather than the caller: the entry is
+    // `taxPerCode` now, which is the function that actually splits. It is still
+    // `whole-first` — a code's tax is `round(base × rate)`, whatever code does
+    // the rounding — and it is sound because it rounds the whole once and
+    // splits the figure back, which is the case `roundedThenSummed: false`
+    // describes.
+    expect(() => splitSiteFor('src/modules/payroll/sales-tax.ts', 'priceDocumentTax')).toThrow(
+      RegistryError,
+    )
 
+    const tax = splitSiteFor('src/modules/payroll/tax-rounding.ts', 'taxPerCode')
     expect(tax.foundBy).toBe('handed_over')
+    expect(tax.provenance).toBe('whole-first')
+    expect(tax.policy).toBe('largest-remainder')
+
     expect(
-      perItemRoundingStands({
-        provenance: tax.provenance,
-        roundedThenSummed: true,
-      }).sound,
-    ).toBe(false)
+      perItemRoundingStands({ provenance: tax.provenance, roundedThenSummed: false }).sound,
+    ).toBe(true)
   })
 })
 
@@ -283,11 +296,6 @@ const EXCLUDED: readonly { file: string; symbol: string; why: string }[] = [
     file: 'src/modules/payments/in-transit.ts',
     symbol: 'payoutSettlement',
     why: 'One settlement converted once. The reduce beside it sums unrelated fees.',
-  },
-  {
-    file: 'src/modules/payroll/tax-rounding.ts',
-    symbol: 'taxPerCode',
-    why: 'Phase 145’s repair. It is the function that rounds once per code and splits it back.',
   },
   {
     file: 'src/app/crm/pipeline-board.tsx',

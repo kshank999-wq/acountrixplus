@@ -265,17 +265,18 @@ export const SPLIT_SITES: readonly SplitSite[] = [
       'a division — the practitioner share is rounded and the rest is what is left.',
   },
   {
-    file: 'src/modules/payroll/sales-tax.ts',
-    symbol: 'priceDocumentTax',
-    policy: 'unplaced',
+    file: 'src/modules/payroll/tax-rounding.ts',
+    symbol: 'taxPerCode',
+    policy: 'largest-remainder',
     provenance: 'whole-first',
     foundBy: 'handed_over',
     because:
-      'The defect Phase 145 was built for, and the only entry here whose whole does not exist ' +
-      'first — which is the fault rather than an exemption. Each line is rounded on its own base ' +
-      'and the results are added, so the document total is whatever the per-line roundings happen ' +
-      'to sum to, and no level of the return satisfies round(base times rate). It is registered ' +
-      'rather than repaired because the staging pass holds the wiring.',
+      'This entry was `priceDocumentTax` with `policy: unplaced` — the defect Phase 145 found, ' +
+      'where each line was rounded on its own base and the results added up. Phase 151 wired the ' +
+      'repair, so that function no longer divides anything: it hands the lines to `taxPerCode`, ' +
+      'which rounds a code’s combined base once and splits the figure back across the lines it ' +
+      'came from. The register follows the division rather than the caller, so the entry moved ' +
+      'with it — and this is the only site here whose policy has ever changed.',
   },
   {
     file: 'src/modules/fx/ledger.ts',

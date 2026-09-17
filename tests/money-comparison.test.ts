@@ -177,7 +177,9 @@ describe('reading the source for comparisons', () => {
     // Measured, not bounded (Phase 126). Twenty-three functions, and every form
     // present in the wild — a form nothing matches is a form nobody has had to
     // defend.
-    expect(new Set(sites.map((site) => `${site.file}:${site.symbol}`)).size).toBe(23)
+    // Twenty-one since Phase 151 moved two of them into pure cores that take
+    // their currencies as arguments — `affords` and `priceApplicationLines`.
+    expect(new Set(sites.map((site) => `${site.file}:${site.symbol}`)).size).toBe(21)
 
     const found = new Set(sites.map((site) => site.form))
     expect([...found].sort()).toEqual(['bounded', 'equality', 'handed_over', 'relational'])
@@ -239,18 +241,26 @@ describe('reading the source for comparisons', () => {
 })
 
 describe('what the scan found on the day it was written', () => {
-  it('names three, and every one of them was already known', () => {
-    // **The assertion the phase exists for**, and the only way to know a new
-    // scan works: it disagrees on its first run (Phase 121), and what it
-    // disagrees about is three defects found by hand over five phases — not
-    // three new ones nobody can check.
+  it('is down to one, and it is the one still on a register', () => {
+    // **The assertion the phase exists for.** It named three when it was
+    // written — `applyDeposit`, `redeemGiftCard` and `contractorPayments` —
+    // and that was how a new scan proved itself: it disagreed on its first run
+    // (Phase 121) about three defects already found by hand, rather than three
+    // nobody could check.
+    //
+    // The wiring pass repaired two. `applyDeposit` goes through `spends` and
+    // `redeemGiftCard` through `affords`, both of which take the two currencies
+    // and refuse a mismatch — so the comparison left in the first is home money
+    // on both sides and the second's has moved into a core this scan does not
+    // reach, on purpose.
+    //
+    // What remains is `contractorPayments`, which is on `BLIND_FACE_SUMS` and
+    // feeds a statutory filing. A register that empties one entry at a time is
+    // the shape this project has been aiming at; this is the count that says
+    // how far along it is.
     const blind = COMPARED_PAIRS.filter((pair) => pair.comparability === 'blind')
 
-    expect(blind.map((pair) => pair.symbol).sort()).toEqual([
-      'applyDeposit',
-      'contractorPayments',
-      'redeemGiftCard',
-    ])
+    expect(blind.map((pair) => pair.symbol).sort()).toEqual(['contractorPayments'])
 
     // Each says where the repair is tracked, so none is a defect somebody wrote
     // down and then lost.
@@ -259,14 +269,21 @@ describe('what the scan found on the day it was written', () => {
     }
   })
 
-  it('tells two siblings in one file apart', () => {
+  it('told two siblings in one file apart, and the wrong one was repaired', () => {
     // Why this is per-site rather than per-file. `applyDeposit` and
-    // `refundDeposit` contain the *same expression* —
-    // `input.amountCents > position.heldCents` — and one is wrong. Refunding
-    // hands the tenant back the company's own money; applying it puts that
-    // money against an invoice that may be in any currency at all.
+    // `refundDeposit` contained the *same expression* —
+    // `input.amountCents > position.heldCents` — and one was wrong. Refunding
+    // hands the tenant back the company's own money; applying it put that money
+    // against an invoice that may be in any currency at all.
+    //
+    // A per-file or per-expression rule would have had to call them the same,
+    // and would then have had to repair both or neither. Phase 151 repaired the
+    // one that was wrong: `applyDeposit`'s invoice branch goes through `spends`
+    // and what is left beside `refundDeposit` really is the same, home money on
+    // both sides. The registry was right about them being different and is now
+    // right about them being alike, which is a stronger thing than either.
     expect(comparedPairFor('src/modules/properties/deposits.ts', 'applyDeposit').comparability).toBe(
-      'blind',
+      'home-money',
     )
     expect(
       comparedPairFor('src/modules/properties/deposits.ts', 'refundDeposit').comparability,

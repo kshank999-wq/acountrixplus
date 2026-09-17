@@ -193,9 +193,12 @@ describe('every place money reaches a bank account', () => {
     // `recoverWriteOff`, which has one and posts at the write-off's carried
     // rate. `withheld` says which is which, and `who-may-ask.test.ts` checks
     // that against the source rather than believing it.
-    expect(refuses.length).toBe(5)
+    // Four and six since Phase 151 wired `recoverWriteOff`: it had the money's
+    // currency all along and was refused the right to pass it because the
+    // figure it banked was struck at the wrong rate. A day rate moved it.
+    expect(refuses.length).toBe(4)
     expect(refuses.every((row) => row.withheld !== undefined)).toBe(true)
-    expect(matched.length).toBe(5)
+    expect(matched.length).toBe(6)
     expect(matched.some((row) => row.symbol === 'importPayouts')).toBe(true)
   })
 
