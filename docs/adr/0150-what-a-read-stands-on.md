@@ -35,6 +35,12 @@ mechanisms:
 | `validated-above` | 3 |
 | `system-actor` | 2 |
 
+> **866 since Phase 151**, with `scoped-read` at 530. The wiring pass routed
+> `recordContribution` through `bankGlAccountFor` instead of selecting the
+> account itself, so one read left that file for a gate this scan had already
+> counted. The figures above are what Phase 150 measured; the test carries the
+> current ones.
+
 **The reads and the writes are guarded differently, and nothing had counted
 either half.** `scoped()` covers **61%** of reads and **25%** of writes. Both are
 sound. The README described one system and there are two — which is the same

@@ -6189,14 +6189,72 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The wiring pass (Phase 151)
+
+Thirteen phases of cores built and deliberately not connected, on one
+instruction: get everything in place, then hook it up. `PENDING_WIRING` existed
+to make that stageable — by Phase 49's rule a function with no caller is a
+feature that does not exist, so a staged core and a forgotten one look identical
+unless something writes down which it is.
+
+Five entries wired, each verified by the acceptance test it named:
+
+| core → target | what it repaired |
+| --- | --- |
+| `bankGlAccountFor` → `recordContribution` | a gift into a euro account posted a dollar figure while its sibling refused |
+| `taxPerCode` → `priceDocumentTax` | three lines under one 8.25% code charged 523 where the code's base gives 522 |
+| `recoverHeld` → `recoverWriteOff` | the bank took the carried rate; $41.25 had nowhere to go |
+| `spends` → `applyDeposit` | the check, the posting and the message all used the invoice's face amount |
+| `priceApplicationLines` → `priceApplication` + `BillingPanel` | the preview promised a total the commit refused |
+
+**The register worked.** `wiringStateFor` fails an entry whose target already
+calls its core, so each wiring forced its own entry off the list — the backlog
+could not be left describing finished work. Two other registries moved with it
+and both were caught by their own scans rather than by anybody remembering:
+`BANK_POSTINGS` failed with *"the registry and the code disagree about what this
+path does"* the moment `recoverWriteOff` started passing a currency, and the
+Phase 146 test that said *"when the wiring pass lands, both of these flip"* did.
+
+**One capability was removed, deliberately.** Telling the bank gate what
+currency a recovery is in means a euro write-off can no longer be banked into a
+dollar account. It posted before. The refusal is right and it is refusing the
+change that gave it the currency: when a customer pays a euro debt into a dollar
+account the bank converts at its own rate, the books do not have that rate, and
+converting at ours is what the refusal calls "a guess at somebody else's
+arithmetic".
+
+**Four faults turned up that no register held**, every one surfaced by doing the
+work rather than by planning it. An acceptance test that was a stub — it created
+an invoice, asserted two ids were truthy, and never called the function it was
+written for; a skipped test is where a fiction is easiest to keep, because
+nothing runs it to find out. A defect that cannot happen, since
+`completeAppointment` calls `createInvoice` with no currency and an appointment
+invoice is always home money — the wiring kept, the claim that it repaired
+something live dropped. `setScheduleOfValues` returning an empty list after
+successfully writing, because it read through `db` from inside its own
+transaction. And two tests asserting contradictory things about whether
+`priceApplication` throws, which wiring made load-bearing and which had to be
+settled: the preview reports, the commit refuses.
+
+Also two return values that were invisible — `settleInvoiceWithoutCash`'s
+functional figure and `applyDeposit`'s applied figure — both the inverse of
+Phase 49's rule: not a function with no caller, but a **value with no reader**.
+A value the type hides is unreachable as surely as one never returned.
+
+Thirty skipped tests became passing ones. `PENDING_WIRING` is one entry —
+`mayPostToBank`, blocked by a column since Phase 136 — and the blind comparisons
+are down from three to one.
+
+
 ### What a read stands on (Phase 150)
 
 ADR 0149 nominated this in one sentence: *a `select` that returns another
 company's rows is a breach whether or not anything was written.* That phase
 measured only the writes, because they are the shape that can be aimed.
 
-**867 reads** from company-scoped tables. Every one guarded, by eleven
-mechanisms — `scoped-read` 531, `explicit-company` 247, `established-above` 28,
+**866 reads** from company-scoped tables (867 when Phase 150 measured it; the
+wiring pass moved one into a gate already counted). Every one guarded, by eleven
+mechanisms — `scoped-read` 530, `explicit-company` 247, `established-above` 28,
 `id-from-fetched-row` 17, `join-inherited` 13, `derives-tenant-from-row` 12,
 `caller-established` 7, `conditions-array` 4, `actor-scoped` 3,
 `validated-above` 3, `system-actor` 2.
@@ -7135,7 +7193,8 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
-| `tests/isolation-reads.test.ts` | **What a read stands on** (Phase 150): ADR 0149 measured only the writes and said so — a select that returns another company's rows is a breach whether or not anything was written. **867** reads from company-scoped tables, every one guarded, by eleven mechanisms; `scoped()` covers 61% of reads against 25% of writes, so the two halves are guarded quite differently and nothing had counted either. A write can be guarded by a refusal that fired earlier; a read that leaks has already leaked, so its guard must be in the statement or in the id it was handed — which is why `owner-helper` is write-only and `derives-tenant-from-row` and `id-from-fetched-row` are read-only. It corrected the phase before it: ADR 0149's table detector ran past a closing brace, falsely counting two content-addressed tables and missing seven real ones, so the write numbers become 164 tables and 109 writes — still zero unguarded. The scan itself was wrong twice more first, both kept as cases: a line-based statement reader that cut multi-line `where` clauses, and a helper detector that only recognised the word "Own" |
+| `tests/deposit-against-foreign-invoice.test.ts`, `recovery-at-two-rates.test.ts`, `contribution-into-a-foreign-account.test.ts`, `tax-that-foots-on-the-document.test.ts`, `a-preview-that-matches-the-post.test.ts` | **The wiring pass** (Phase 151): the five acceptance tests `PENDING_WIRING` had been pointing at for thirteen phases, skipped until the thing each was waiting for existed. They run now, and thirty skipped tests became passing ones. Each names one repair: a donation into a euro account refused rather than posted as dollars; an invoice charging what its printed base times its printed rate comes to; a recovery banking what the statement will show with the difference named as a realised gain; a deposit taking the invoice's worth off the tenancy rather than its face amount; and a billing preview showing every problem at once instead of a total the server declines. Unskipping them found four faults no register held — one of these files was a **stub** that created an invoice, asserted two ids were truthy and never called the function it was written for, which is what a skipped test makes easy to keep |
+| `tests/isolation-reads.test.ts` | **What a read stands on** (Phase 150): ADR 0149 measured only the writes and said so — a select that returns another company's rows is a breach whether or not anything was written. **866** reads from company-scoped tables, every one guarded, by eleven mechanisms; `scoped()` covers 61% of reads against 25% of writes, so the two halves are guarded quite differently and nothing had counted either. A write can be guarded by a refusal that fired earlier; a read that leaks has already leaked, so its guard must be in the statement or in the id it was handed — which is why `owner-helper` is write-only and `derives-tenant-from-row` and `id-from-fetched-row` are read-only. It corrected the phase before it: ADR 0149's table detector ran past a closing brace, falsely counting two content-addressed tables and missing seven real ones, so the write numbers become 164 tables and 109 writes — still zero unguarded. The scan itself was wrong twice more first, both kept as cases: a line-based statement reader that cut multi-line `where` clauses, and a helper detector that only recognised the word "Own" |
 | `tests/isolation-guards.test.ts` | Two companies side by side: inbox scoping, cross-tenant writes, foreign ids in bulk operations, audit scoping |
 | `tests/permissions.test.ts` | Role defaults, granular overrides, and enforcement inside services |
 | `tests/dedup.test.ts` | Repeated syncs, the database-level unique constraint, and two tenants importing identical provider ids |
@@ -9394,7 +9453,7 @@ Gaps within the phases already built:
 - **Row-level security as a second isolation layer** (spec §19) is still not in place; tenant
   isolation rests on guards held to the source by `tests/isolation-guards.test.ts` and
   `tests/isolation-reads.test.ts` — eight on the write side, eleven on the read side, and
-  `scoped()` covers 27 of the 109 writes that can be aimed at a row against 531 of the 867 reads.
+  `scoped()` covers 27 of the 109 writes that can be aimed at a row against 530 of the 866 reads.
   This line said "`scoped()` at every query" until Phase 149 measured it. MFA, session and
   device controls were built in Phase 13.
 - **Spec §18's infrastructure list is now complete.** Object storage arrived in Phase 20,
