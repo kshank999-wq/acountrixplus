@@ -618,7 +618,15 @@ describe('progress billing and retainage', () => {
     })
 
     await expect(
-      priceApplication(fixture.ctx, {
+      // The refusal moved to the commit in Phase 151. `priceApplication` is the
+      // preview and reports its problems as a list now rather than throwing on
+      // the first, because a screen showing somebody what they are about to
+      // bill has to show all of them at once. `createProgressBilling` is what
+      // says no, in the sentence it always used.
+      createProgressBilling(fixture.ctx, {
+        customerId: fixture.customer.id,
+        periodEnd: '2026-04-30',
+        billingDate: '2026-04-30',
         projectId: fixture.job.id,
         retainagePercentBp: 0,
         lines: [{ scheduleOfValuesId: schedule[0].id, percentCompleteBp: 4000 }],

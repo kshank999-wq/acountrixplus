@@ -1,6 +1,7 @@
 'use client'
 
 import { useMemo, useState, useTransition } from 'react'
+import { priceApplicationLines } from '@/modules/jobs/application'
 import { useRouter } from 'next/navigation'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 import { formatBasisPoints } from '@/lib/ratio'
@@ -675,20 +676,37 @@ function BillingPanel({
   const scheduledTotal = sov.reduce((sum, item) => sum + item.scheduledValueCents, 0)
   const billedTotal = sov.reduce((sum, item) => sum + item.billedCents, 0)
 
-  /** What this application would bill, computed as the person types. */
+  /**
+   * What this application would bill, and everything wrong with it (Phase 151).
+   *
+   * Through `priceApplicationLines`, which is the service's own arithmetic and
+   * the service's own sentences. This worked the three figures out again under
+   * different rules until then — a line billed backwards was clamped to zero
+   * here and refused outright on the server, so the preview showed a total
+   * somebody clicked and could not have. The core is pure, so a screen may call
+   * it directly with the rows it already has.
+   */
   const preview = useMemo(() => {
-    const thisPeriod = sov.reduce((sum, item) => {
-      const raw = progress[item.id]
-      if (raw === undefined || raw.trim() === '') return sum
-      const bp = Math.round(Number(raw) * 100)
-      if (!Number.isFinite(bp)) return sum
-      const completed = Math.round((item.scheduledValueCents * bp) / 10_000)
-      return sum + Math.max(0, completed - item.billedCents)
-    }, 0)
+    const retainageBp = Math.round(Number(retainagePercent || '0') * 100)
 
-    const bp = Math.round(Number(retainagePercent || '0') * 100)
-    const retained = Math.round((thisPeriod * (Number.isFinite(bp) ? bp : 0)) / 10_000)
-    return { thisPeriod, retained, net: thisPeriod - retained }
+    const entries = sov
+      .filter((item) => (progress[item.id] ?? '').trim() !== '')
+      .map((item) => ({
+        scheduleOfValuesId: item.id,
+        percentCompleteBp: Math.round(Number(progress[item.id]) * 100),
+      }))
+      .filter((entry) => Number.isFinite(entry.percentCompleteBp))
+
+    return priceApplicationLines(
+      sov.map((item) => ({
+        id: item.id,
+        itemNumber: item.itemNumber,
+        scheduledValueCents: item.scheduledValueCents,
+        previouslyBilledCents: item.billedCents,
+      })),
+      entries,
+      Number.isFinite(retainageBp) ? retainageBp : 0,
+    )
   }, [progress, retainagePercent, sov])
 
   function saveSov() {
@@ -1059,15 +1077,15 @@ function BillingPanel({
               <div className="rounded-lg bg-raised p-3 text-sm">
                 <div className="flex justify-between">
                   <span className="text-muted">This period</span>
-                  <span className="tnum">{formatCents(preview.thisPeriod)}</span>
+                  <span className="tnum">{formatCents(preview.thisPeriodCents)}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-muted">Less retainage</span>
-                  <span className="tnum">({formatCents(preview.retained)})</span>
+                  <span className="tnum">({formatCents(preview.retainedCents)})</span>
                 </div>
                 <div className="mt-1 flex justify-between border-t border-line pt-1 font-medium">
                   <span>Net due this application</span>
-                  <span className="tnum">{formatCents(preview.net)}</span>
+                  <span className="tnum">{formatCents(preview.netDueCents)}</span>
                 </div>
               </div>
 

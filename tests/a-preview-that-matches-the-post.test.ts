@@ -19,16 +19,17 @@ import type { PricedApplication } from '@/modules/jobs/application'
  * `DraftApplication`. A bare `as any` would have compiled and said nothing.
  */
 type WiredDraft = DraftApplication & Pick<PricedApplication, 'problems'>
+// Phase 151 wired it, so `DraftApplication` carries `problems` itself and this
+// alias has collapsed to `DraftApplication` — which is exactly what it said
+// would happen. Kept as the record of what the gap was.
 
 /**
  * A preview that matches the post (Phase 146).
  *
- * ## Skipped on purpose — this is the acceptance test for the wiring pass
+ * ## Unskipped by Phase 151, which wired it
  *
- * `priceApplication` is deliberately **not** routed through
- * `priceApplicationLines`, and `BillingPanel` still works the figures out for
- * itself. Both are declared in `PENDING_WIRING`, and this file is the definition
- * of done that entry is required to name.
+ * `priceApplication` prices through `priceApplicationLines` now and returns its
+ * problems; `createProgressBilling` is where the refusal moved to.
  *
  * ## What it asserts, and what it cannot
  *
@@ -84,7 +85,7 @@ beforeEach(async () => {
   itemIds = items.map((item) => item.id)
 })
 
-describe.skip('pricing an application with more than one thing wrong', () => {
+describe('pricing an application with more than one thing wrong', () => {
   it('reports every problem instead of throwing on the first', async () => {
     // The change that makes the function usable as a preview. Today this
     // throws a Refusal naming item 01 and says nothing about item 02.
@@ -115,7 +116,7 @@ describe.skip('pricing an application with more than one thing wrong', () => {
   })
 })
 
-describe.skip('an application with nothing wrong', () => {
+describe('an application with nothing wrong', () => {
   it('prices exactly as it always has', async () => {
     // What must not move. Every application anybody has filed correctly gets
     // the same three figures as before, which is the assertion that keeps the

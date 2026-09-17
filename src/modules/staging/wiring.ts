@@ -101,29 +101,6 @@ export const PENDING_WIRING: readonly Pending[] = [
       'The acceptance test is `null` on purpose — one written against a column that does not ' +
       'exist would be fiction rather than a definition of done.',
   },
-  {
-    core: 'priceApplicationLines',
-    coreFile: 'src/modules/jobs/application.ts',
-    targets: [
-      { symbol: 'priceApplication', file: 'src/modules/jobs/billing.ts' },
-      { symbol: 'BillingPanel', file: 'src/app/jobs/[id]/panels.tsx' },
-    ],
-    phase: 146,
-    blockedBy: 'nothing',
-    acceptance: 'tests/a-preview-that-matches-the-post.test.ts',
-    liveDefect:
-      'priceApplication says it was separated out so the UI could show what an application will ' +
-      'bill, and the UI has never called it — its only caller is createProgressBilling. ' +
-      'BillingPanel works the three figures out again and reports a total the service will not ' +
-      'honour: a line billed backwards is clamped to zero on the screen and refused outright on ' +
-      'the server, and neither the percent nor the retainage is bounded before the click.',
-    because:
-      'The core is the service’s own arithmetic and its own sentences, moved rather than ' +
-      'restated, with one change that is the point of the phase: problems come back as a list ' +
-      'instead of throwing on the first, because a preview has to show all twelve at once where ' +
-      'a commit only has to refuse. Wiring it touches a screen and a service together, which is ' +
-      'the pass this is staged for.',
-  },
 ]
 
 export type WiringVerdict = { ok: true } | { ok: false; why: string }

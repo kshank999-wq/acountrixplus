@@ -14,6 +14,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { requireModule } from '@/modules/industry/modules'
 import { createInvoice } from '@/modules/receivables/service'
+import { priceApplicationLines, willPost } from '@/modules/jobs/application'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 
@@ -46,10 +47,23 @@ export type SovLineInput = {
   costCodeId?: string | null
 }
 
-export async function scheduleFor(ctx: ActorContext, projectId: string) {
+export async function scheduleFor(
+  ctx: ActorContext,
+  projectId: string,
+  /**
+   * The executor to read through (Phase 151).
+   *
+   * `setScheduleOfValues` ends by returning this, and did so on `db` from
+   * inside its own transaction — so it read the schedule as it stood *before*
+   * the write and returned an empty list after successfully saving one. Its
+   * callers in the suite never used the return value, which is how it went
+   * unnoticed; the Phase 146 acceptance test used it and got nothing.
+   */
+  exec: Executor = db,
+) {
   requirePermission(ctx, 'jobs:view')
 
-  return db
+  return exec
     .select()
     .from(scheduleOfValues)
     .where(scoped(ctx, scheduleOfValues, eq(scheduleOfValues.projectId, projectId)))
@@ -163,7 +177,7 @@ export async function setScheduleOfValues(
       tx,
     )
 
-    return scheduleFor(ctx, projectId)
+    return scheduleFor(ctx, projectId, tx)
   })
 }
 
@@ -186,6 +200,17 @@ export type DraftApplication = {
   thisPeriodCents: number
   retainedCents: number
   netDueCents: number
+  /**
+   * Everything wrong with this application, keyed to the item (Phase 151).
+   *
+   * Non-empty means **nothing** posts — not that the sound lines go through,
+   * because an application is one document. `priceApplication` returns them and
+   * `createProgressBilling` refuses on them, which is the split ADR 0146 asked
+   * for: a preview has to show all twelve at once where a commit only has to
+   * say no. Wiring a screen to a function that threw would have produced a
+   * preview that hides four faults out of five.
+   */
+  problems: readonly { scheduleOfValuesId: string; itemNumber: string; why: string }[]
   lines: Array<{
     scheduleOfValuesId: string
     itemNumber: string
@@ -215,76 +240,57 @@ export async function priceApplication(
 ): Promise<DraftApplication> {
   requirePermission(ctx, 'jobs:view')
 
-  if (input.retainagePercentBp < 0 || input.retainagePercentBp > 10_000) {
-    throw new Refusal('Retainage must be between 0% and 100%.')
-  }
-
   const items = await scheduleFor(ctx, input.projectId)
-  const itemById = new Map(items.map((item) => [item.id, item]))
   const billed = await billedByItem(ctx, input.projectId)
-
   const applicationNumber = (await lastApplicationNumber(ctx, input.projectId)) + 1
 
-  const lines = input.lines.map((line) => {
-    const item = itemById.get(line.scheduleOfValuesId)
-    if (!item) throw new Refusal('That contract item is not on this job.')
-
-    const previousCompletedCents = billed.get(item.id) ?? 0
-
-    let completedToDateCents: number
-    if (line.percentCompleteBp !== undefined) {
-      if (line.percentCompleteBp < 0 || line.percentCompleteBp > 10_000) {
-        throw new Refusal(`Item ${item.itemNumber}: percent complete must be between 0% and 100%.`)
-      }
-      completedToDateCents = Math.round(
-        (item.scheduledValueCents * line.percentCompleteBp) / 10_000,
-      )
-    } else {
-      completedToDateCents = previousCompletedCents + (line.thisPeriodCents ?? 0)
-    }
-
-    const thisPeriodCents = completedToDateCents - previousCompletedCents
-
-    if (thisPeriodCents < 0) {
-      throw new Refusal(
-        `Item ${item.itemNumber} would bill a negative amount. Completion cannot go backwards on an application; raise a credit instead.`,
-      )
-    }
-    if (completedToDateCents > item.scheduledValueCents) {
-      throw new Refusal(
-        `Item ${item.itemNumber} would be billed beyond its scheduled value. Approve a change order first.`,
-      )
-    }
-
-    return {
-      scheduleOfValuesId: item.id,
+  /**
+   * The arithmetic, and every rule, in one place (Phase 151, wiring ADR 0146).
+   *
+   * This function's own comment says it was separated out "so the UI can show
+   * the person what they are about to bill" — and the UI never called it. Its
+   * only caller was `createProgressBilling`, while `BillingPanel` worked the
+   * three figures out again in a `useMemo` under different rules: a line billed
+   * backwards was clamped to zero on the screen and refused outright here, and
+   * neither the percent nor the retainage was bounded before the click. The
+   * preview showed a total, somebody clicked, and the server refused.
+   *
+   * `priceApplicationLines` returns problems as a **list** rather than throwing
+   * on the first, because a preview has to show all twelve at once where a
+   * commit only has to refuse. This is the **preview** — its own comment says
+   * so — so it returns them, and `createProgressBilling` is where the refusal
+   * belongs. Putting the throw here would have kept the fault this phase is
+   * repairing: a screen calling it would still meet one refusal per click.
+   */
+  const priced = priceApplicationLines(
+    items.map((item) => ({
+      id: item.id,
       itemNumber: item.itemNumber,
-      description: item.description,
       scheduledValueCents: item.scheduledValueCents,
-      previousCompletedCents,
-      thisPeriodCents,
-      completedToDateCents,
-      percentCompleteBp:
-        item.scheduledValueCents > 0
-          ? Math.round((completedToDateCents / item.scheduledValueCents) * 10_000)
-          : 0,
-    }
-  })
-
-  const thisPeriodCents = lines.reduce((sum, line) => sum + line.thisPeriodCents, 0)
-  // Rounded once on the total, not per line: rounding each line and adding
-  // them up can miss the total by a cent per line, and the customer's copy has
-  // to foot.
-  const retainedCents = Math.round((thisPeriodCents * input.retainagePercentBp) / 10_000)
+      previouslyBilledCents: billed.get(item.id) ?? 0,
+    })),
+    input.lines,
+    input.retainagePercentBp,
+  )
 
   return {
     projectId: input.projectId,
     applicationNumber,
     retainagePercentBp: input.retainagePercentBp,
-    thisPeriodCents,
-    retainedCents,
-    netDueCents: thisPeriodCents - retainedCents,
-    lines,
+    thisPeriodCents: priced.thisPeriodCents,
+    retainedCents: priced.retainedCents,
+    netDueCents: priced.netDueCents,
+    problems: priced.problems,
+    lines: priced.lines.map((line) => ({
+      scheduleOfValuesId: line.scheduleOfValuesId,
+      itemNumber: line.itemNumber,
+      description: items.find((item) => item.id === line.scheduleOfValuesId)?.description ?? '',
+      scheduledValueCents: line.scheduledValueCents,
+      previousCompletedCents: line.previousCompletedCents,
+      thisPeriodCents: line.thisPeriodCents,
+      completedToDateCents: line.completedToDateCents,
+      percentCompleteBp: line.percentCompleteBp,
+    })),
   }
 }
 
@@ -316,6 +322,14 @@ export async function createProgressBilling(
     retainagePercentBp: input.retainagePercentBp,
     lines: input.lines,
   })
+
+  // The commit refuses; the preview reports (Phase 151). On the first problem
+  // and in the sentence it has always used, so nothing anybody has been shown
+  // changes wording — `priceApplicationLines` moved the service's own strings
+  // rather than restating them.
+  if (!willPost(draft)) {
+    throw new Refusal(draft.problems[0].why)
+  }
 
   if (draft.thisPeriodCents <= 0) {
     throw new Refusal('This application bills nothing. Enter progress on at least one item.')

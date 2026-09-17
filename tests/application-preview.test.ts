@@ -209,32 +209,40 @@ describe('what a preview has to be able to say', () => {
 })
 
 describe('the sentences this moved', () => {
-  it('uses the ones the service already shows people', () => {
-    // Moved rather than restated. If the service's wording changes and this
-    // does not, somebody meets two different sentences for one refusal — which
-    // is the fault this module exists to end, reappearing in the prose.
+  it('keeps them in one place, now that the service is wired to it', () => {
+    // Moved rather than restated, and since Phase 151 wired it the service no
+    // longer holds its own copies — so the check turns around: the sentences
+    // live in the core, and `billing.ts` must not restate any of them. Two
+    // copies of a refusal is the fault this module exists to end, reappearing
+    // in the prose.
+    const core = readFileSync('src/modules/jobs/application.ts', 'utf8')
     const service = readFileSync(SERVICE, 'utf8')
 
+    // Fragments rather than whole sentences, because two of them are written
+    // across a string concatenation in the core and `includes` does not see
+    // through a `' +` and a newline. Each is still distinctive enough that a
+    // reworded refusal would fail this.
     for (const sentence of [
       'percent complete must be between 0% and 100%.',
-      'Completion cannot go backwards on an application; raise a credit instead.',
-      'would be billed beyond its scheduled value. Approve a change order first.',
+      'Completion cannot go backwards',
+      'would be billed beyond its scheduled value',
       'Retainage must be between 0% and 100%.',
       'That contract item is not on this job.',
     ]) {
-      expect(service.includes(sentence), sentence).toBe(true)
+      expect(core.includes(sentence), sentence).toBe(true)
+      expect(service.includes(sentence), sentence).toBe(false)
     }
   })
 
-  it('is still not wired, and the screen still works it out for itself', () => {
-    // The register says this is outstanding; this is what keeps that true.
-    // When the wiring pass lands, both of these flip and the entry comes off
-    // `PENDING_WIRING` — a stale entry being exactly what that register
-    // refuses to hold.
+  it('is wired on both sides, which is what the register was waiting for', () => {
+    // This asserted the opposite until Phase 151, and said so: "when the wiring
+    // pass lands, both of these flip and the entry comes off `PENDING_WIRING`".
+    // They have. The screen's own `Math.max(0, …)` clamp — the one that hid a
+    // refusal rather than avoiding it — is gone with them.
     const panel = readFileSync(PANEL, 'utf8')
 
-    expect(panel.includes('priceApplicationLines')).toBe(false)
-    expect(panel.includes('Math.max(0, completed - item.billedCents)')).toBe(true)
-    expect(readFileSync(SERVICE, 'utf8').includes('priceApplicationLines')).toBe(false)
+    expect(panel.includes('priceApplicationLines')).toBe(true)
+    expect(panel.includes('Math.max(0, completed - item.billedCents)')).toBe(false)
+    expect(readFileSync(SERVICE, 'utf8').includes('priceApplicationLines')).toBe(true)
   })
 })

@@ -234,6 +234,6 @@ export function priceApplicationLines(
  * predicate somebody can read is easier than agreeing about an expression two
  * people wrote separately — which is the fault this whole module is about.
  */
-export function willPost(priced: PricedApplication): boolean {
+export function willPost(priced: { problems: readonly LineProblem[] }): boolean {
   return priced.problems.length === 0
 }

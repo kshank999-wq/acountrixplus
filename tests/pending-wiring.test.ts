@@ -74,8 +74,17 @@ describe('the register of what is staged', () => {
     // asserted two ids were truthy, and never called `redeemGiftCard`. A
     // skipped test is where a fiction is easiest to keep, because nothing ever
     // runs it to find out.
-    expect(PENDING_WIRING.length).toBe(2)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(5)
+    // One over four. `priceApplicationLines` → `priceApplication` and
+    // `BillingPanel` was the last entry blocked by nothing, and the only one
+    // naming a screen: the service prices through the core and reports its
+    // problems, the panel calls the same core directly, and the refusal moved
+    // to `createProgressBilling` where a commit's refusal belongs.
+    //
+    // What is left is `mayPostToBank`, which is blocked by a column and has
+    // been since Phase 136. It names no acceptance test on purpose, and the
+    // register allows that only for a blocked entry.
+    expect(PENDING_WIRING.length).toBe(1)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(4)
   })
 
   it('still describes the code, entry by entry', () => {
@@ -119,15 +128,33 @@ describe('the register of what is staged', () => {
 
 describe('what the register refuses', () => {
   /**
-   * An entry with nothing blocking it.
+   * An entry with nothing blocking it, written here rather than taken from the
+   * register.
    *
-   * This was `PENDING_WIRING[0]` until Phase 151 wired four entries off the
-   * front of the register and left a blocked one at index zero — at which point
-   * two of these stopped testing what they say, because a blocked entry is
-   * allowed to name no acceptance test. A positional assumption about a list
-   * that shrinks.
+   * It was `PENDING_WIRING[0]` until Phase 151 wired four entries off the front
+   * and left a blocked one at index zero, and then it was a `find` for an
+   * unblocked entry — until the wiring pass finished and there were none left.
+   * These four are about what `wiringStateFor` refuses, not about what is
+   * currently outstanding, so they should never have been reading the live
+   * register: the day the backlog empties is the day they had nothing to stand
+   * on, which is exactly when a rule about backlogs should still hold.
    */
-  const entry = PENDING_WIRING.find((row) => row.blockedBy === 'nothing') as Pending
+  const entry: Pending = {
+    core: 'someCore',
+    coreFile: 'src/modules/fx/settlement.ts',
+    targets: [{ symbol: 'someTarget', file: 'src/modules/receivables/credits.ts' }],
+    phase: 151,
+    blockedBy: 'nothing',
+    acceptance: 'tests/pending-wiring.test.ts',
+    liveDefect:
+      'A sentence long enough to satisfy the register’s own floor, describing a fault that posts ' +
+      'the wrong figure somewhere a person would eventually notice it, so that this fixture is ' +
+      'shaped like the entries it stands in for rather than like a stub.',
+    because:
+      'A fixture, so that the four assertions below test `wiringStateFor` rather than whatever ' +
+      'happens to be outstanding on the day they run. Taking a real entry made them pass for the ' +
+      'wrong reason twice: once on a positional assumption, and once when the register emptied.',
+  }
 
   it('catches an entry that has already been wired', () => {
     const verdict = wiringStateFor({
