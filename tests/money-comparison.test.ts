@@ -241,7 +241,7 @@ describe('reading the source for comparisons', () => {
 })
 
 describe('what the scan found on the day it was written', () => {
-  it('is down to one, and it is the one still on a register', () => {
+  it('is down to none, three phases after it found three', () => {
     // **The assertion the phase exists for.** It named three when it was
     // written — `applyDeposit`, `redeemGiftCard` and `contractorPayments` —
     // and that was how a new scan proved itself: it disagreed on its first run
@@ -254,16 +254,18 @@ describe('what the scan found on the day it was written', () => {
     // on both sides and the second's has moved into a core this scan does not
     // reach, on purpose.
     //
-    // What remains is `contractorPayments`, which is on `BLIND_FACE_SUMS` and
-    // feeds a statutory filing. A register that empties one entry at a time is
-    // the shape this project has been aiming at; this is the count that says
-    // how far along it is.
+    // Phase 152 repaired the third. `contractorPayments` sums through
+    // `functionalSumSql`, so the figure meeting a statutory dollar threshold is
+    // the company's own money and both sides of `>=` are comparable.
+    //
+    // Three found, three repaired, counted one at a time by a check that could
+    // say otherwise — which is the shape this project has been aiming at.
     const blind = COMPARED_PAIRS.filter((pair) => pair.comparability === 'blind')
 
-    expect(blind.map((pair) => pair.symbol).sort()).toEqual(['contractorPayments'])
+    expect(blind.map((pair) => pair.symbol)).toEqual([])
 
-    // Each says where the repair is tracked, so none is a defect somebody wrote
-    // down and then lost.
+    // Each would have to say where the repair is tracked, so none is a defect
+    // somebody wrote down and then lost. Kept for the next one.
     for (const pair of blind) {
       expect(pair.trackedIn, pair.symbol).toBeTruthy()
     }
@@ -290,15 +292,23 @@ describe('what the scan found on the day it was written', () => {
     ).toBe('home-money')
   })
 
-  it('uses every reason it declares, so none is decoration', () => {
+  it('uses every reason it declares, except the one that means a live defect', () => {
+    // Phase 147's rule — a declared value nothing uses is a value that does not
+    // exist — with the one exception this registry needs. Four of the five say
+    // *why a comparison is sound*, and a sound comparison must actually be
+    // there or the reason is decoration. `blind` says the opposite: it indicts.
+    //
+    // It is empty since Phase 152 and stays declared, because the alternative
+    // is that the next currency-blind comparison found has nowhere to be
+    // recorded and gets argued into one of the four that excuse. That is ADR
+    // 0134's failure exactly, and it is worth one unused enum value to keep it
+    // impossible. Emptiness is asserted rather than tolerated, above.
     const used = new Set(COMPARED_PAIRS.map((pair) => pair.comparability))
-    expect([...used].sort()).toEqual([
-      'blind',
-      'home-money',
-      'inherited',
-      'refused-upstream',
-      'same-row',
-    ])
+    expect([...used].sort()).toEqual(['home-money', 'inherited', 'refused-upstream', 'same-row'])
+
+    // And it is still a value the type admits, still refused when claimed
+    // without a tracker — see the `comparabilityStands` cases below.
+    expect(used.has('blind')).toBe(false)
   })
 })
 

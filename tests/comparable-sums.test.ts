@@ -11,7 +11,14 @@ import {
   safeFaceSumFor,
 } from '@/modules/fx/comparable'
 import { PAIRED_COLUMNS } from '@/modules/fx/paired'
-import { enclosingSpan, enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
+import { additionFormFor } from '@/modules/fx/addition'
+import { convertedSumStands } from '@/modules/fx/summing'
+import {
+  enclosingQuery,
+  enclosingSpan,
+  enclosingSymbol,
+  withoutComments,
+} from '@/modules/source/enclosing'
 
 /**
  * No sum adds two currencies together (Phase 122). It reads the source.
@@ -57,9 +64,26 @@ function snake(camel: string): string {
  */
 const symbolAt = enclosingSymbol
 
-type Site = { file: string; line: number; symbol: string; table: string; column: string }
+type Site = {
+  file: string
+  line: number
+  symbol: string
+  table: string
+  column: string
+  /** The rate argument when the sum is written as a `functionalSumSql` call. */
+  rate?: string
+}
 
-/** Every `sum(${table.column})` in the module layer over a face-amount column. */
+/**
+ * Every sum in the module layer over a face-amount column.
+ *
+ * Two written forms since Phase 152: the raw ``sum(${table.column})`` this was
+ * built for, and `functionalSumSql(amount, rate)`, which is what the three
+ * repaired sums became. Adding the second is not a nicety — the repair moved
+ * those sites out of this scan's sight, so without it the register could be
+ * emptied and the check that had been watching would report all clear on
+ * nothing.
+ */
 function faceSums(): Site[] {
   const sites: Site[] = []
   for (const file of sourceFiles('src/modules')) {
@@ -79,8 +103,46 @@ function faceSums(): Site[] {
         column,
       })
     }
+    for (const m of src.matchAll(new RegExp(additionFormFor('converted_sum').pattern, 'g'))) {
+      // No `faceColumnFor` filter, unlike the form above. A `functionalSumSql`
+      // call is money being converted by construction, and filtering it to
+      // currency-bearing tables would drop the three sums this was built for:
+      // `document_tax_lines` has no currency column, which is exactly why its
+      // rate has to be joined in and exactly why no face-column scan could ever
+      // have seen it.
+      sites.push({
+        file,
+        line: src.slice(0, m.index).split('\n').length,
+        symbol: symbolAt(src, m.index!),
+        table: snake(m[1]),
+        column: snake(m[2]),
+        rate: `${m[3]}.${m[4]}`,
+      })
+    }
   }
   return sites
+}
+
+/**
+ * The tables a query names in its `from` or its joins.
+ *
+ * Bounded by the **query**, not by the enclosing function (Phase 152). Both
+ * were tried. `salesTaxReturn` holds two queries, the second of which reads
+ * `.from(invoices)` — so with the function as the boundary, deleting the
+ * `leftJoin(invoices, …)` the first one's rate depends on changed nothing and
+ * the check passed. That is ADR 0134's leak again, one level in.
+ */
+function tablesInScope(file: string, line: number): Set<string> {
+  const src = readFileSync(file, 'utf8')
+  const lines = src.split('\n')
+  const { from, to } = enclosingQuery(src, lines.slice(0, line).join('\n').length)
+  const body = src.slice(from, to)
+
+  const tables = new Set<string>()
+  for (const m of body.matchAll(/\.(?:from|innerJoin|leftJoin|rightJoin|fullJoin)\(\s*(\w+)/g)) {
+    tables.add(m[1])
+  }
+  return tables
 }
 
 /**
@@ -156,7 +218,17 @@ describe('the module layer, read as source', () => {
 
   it('adds no two currencies together', () => {
     const blind = sites
-      .filter((site) => !currencyAware(site.file, site.line))
+      .filter((site) =>
+        // A `functionalSumSql` call is judged on its two arguments, not on
+        // whether a currency is named nearby — its own name names one, so
+        // `currencyAware` would wave every one of them through (Phase 121).
+        site.rate
+          ? !convertedSumStands(
+              { amount: `${site.table}.${site.column}`, rate: site.rate },
+              tablesInScope(site.file, site.line),
+            ).sound
+          : !currencyAware(site.file, site.line),
+      )
       .filter((site) => !safeFaceSumFor(site.file, site.symbol))
       // Registered as known-wrong in `BLIND_FACE_SUMS` (Phase 143), which
       // indicts rather than excuses: each names its defect and the skipped test

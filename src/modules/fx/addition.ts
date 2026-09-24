@@ -90,6 +90,19 @@ export const ADDITION_FORMS: readonly AdditionForm[] = [
       'effect from the aggregate and far more common in this codebase, because a function that ' +
       'already has the rows in hand does not go back to the database to add them up.',
   },
+  {
+    key: 'converted_sum',
+    pattern: String.raw`functionalSumSql\(\s*(\w+)\.(\w+)\s*,\s*(\w+)\.(\w+)\s*\)`,
+    looksLike: 'functionalSumSql(paymentApplications.amountCents, payments.exchangeRateMillionths)',
+    because:
+      'The repair for the three blind sums, and therefore a form this scan has to know about ' +
+      'or the repair is what blinded it (Phase 152). The arithmetic moved behind a helper, and ' +
+      '`sum(${table.column})` stopped matching the very sites the register was built to watch — ' +
+      'a scan whose reach is wrong, arriving for once as a consequence of a fix. Unlike the ' +
+      'other two forms this one is not presumed guilty: it converts by construction, so it is ' +
+      'judged by `convertedSumStands` on whether the rate it names is a rate and comes from a ' +
+      'table the query actually joins.',
+  },
 ]
 
 /** The form a key names. Throws on a form nobody declared. */

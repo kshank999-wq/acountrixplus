@@ -660,6 +660,9 @@ export function safeFaceSumFor(file: string, symbol: string): SafeFaceSum | null
 /**
  * Sums known to add two currencies, and not yet repaired (Phase 143).
  *
+ * **Empty since Phase 152.** It held three from the day it was written until
+ * then; the entries and what became of each are below.
+ *
  * ## Why this exists rather than a repair
  *
  * `SAFE_FACE_SUMS` says a sum is provably one currency. These are not, and
@@ -673,16 +676,38 @@ export function safeFaceSumFor(file: string, symbol: string): SafeFaceSum | null
  * applied to work that needs no core at all — every one of these is a query
  * change, grouping by currency or summing a functional twin.
  *
- * They are registered rather than repaired because the staging pass is holding
- * live service paths until the wiring pass. Repairing them is small and
- * available; leaving them undeclared was the only unacceptable option.
+ * They were registered rather than repaired because the staging pass was
+ * holding live service paths until the wiring pass. Repairing them was small
+ * and available; leaving them undeclared was the only unacceptable option.
  *
  * ## What they were hidden behind
  *
- * All three sum a column `FACE_COLUMNS` did not list. It was seventeen names
+ * All three summed a column `FACE_COLUMNS` did not list. It was seventeen names
  * typed by hand and the schema has fifty-four, so these were not excused by the
- * tripwire — they were **invisible** to it. Two of the three feed a filing made
+ * tripwire — they were **invisible** to it. Two of the three fed a filing made
  * to a tax authority.
+ *
+ * ## What the three turned into
+ *
+ * ```
+ * contractorPayments   converts each payment at its own rate, functionalSumSql
+ * salesTaxReturn       the same, plus the leftJoin that makes the rate reachable
+ * cashBasisCaveats     counts rows — its total was only ever read as `> 0`
+ * ```
+ *
+ * The third is the one worth remembering. Two of these needed a conversion and
+ * the third needed the question asked one step earlier: *who reads this?*
+ * Nothing printed it, so money was the wrong type for it, and `faceSumStands`
+ * is where that distinction now lives. Its sibling query three lines above it
+ * had already reached the same answer nine phases earlier and nobody had
+ * carried it across.
+ *
+ * ## The register is kept, emptied, rather than deleted
+ *
+ * `blindFaceSumFor` still throws nothing and returns null for everything, and
+ * the two scans still call it. An entry can be added the next time a sum is
+ * found that cannot be repaired in the same pass — which is the situation this
+ * was built for, and will happen again.
  */
 export type BlindFaceSum = {
   file: string
@@ -693,37 +718,7 @@ export type BlindFaceSum = {
   acceptance: string
 }
 
-export const BLIND_FACE_SUMS: readonly BlindFaceSum[] = [
-  {
-    file: 'src/modules/payroll/vendor-reporting.ts',
-    symbol: 'contractorPayments',
-    liveDefect:
-      'Sums `payment_applications.amount_cents` per vendor and compares the total against ' +
-      '`thresholdCents`, a statutory figure in the company’s own money. A contractor paid €600 ' +
-      'contributes 60,000 to a total measured against a $600 threshold, so a 1099 is filed — or ' +
-      'not filed — on a number that adds whatever currencies the vendor was paid in. The function ' +
-      'mentions no currency anywhere.',
-    acceptance: 'tests/sums-that-add-currencies.test.ts',
-  },
-  {
-    file: 'src/modules/payroll/sales-tax.ts',
-    symbol: 'salesTaxReturn',
-    liveDefect:
-      'Sums `invoices.subtotal_cents` to report taxable sales for a jurisdiction. A euro invoice ' +
-      'and a dollar invoice add to a figure in neither, and the result goes on a sales tax return ' +
-      'filed with a tax authority.',
-    acceptance: 'tests/sums-that-add-currencies.test.ts',
-  },
-  {
-    file: 'src/modules/ledger/cash-basis.ts',
-    symbol: 'cashBasisCaveats',
-    liveDefect:
-      'Sums `invoices.tax_cents` across every invoice to caveat the cash-basis report. It ' +
-      'describes rather than decides, which makes it the least severe of the three and still a ' +
-      'figure that means nothing when the invoices are in two currencies.',
-    acceptance: 'tests/sums-that-add-currencies.test.ts',
-  },
-]
+export const BLIND_FACE_SUMS: readonly BlindFaceSum[] = []
 
 /** Whether a sum at this site is a known, registered defect. */
 export function blindFaceSumFor(file: string, symbol: string): BlindFaceSum | null {

@@ -142,3 +142,64 @@ export function enclosingSpan(src: string, index: number): { from: number; to: n
 export function declaresFunction(src: string, symbol: string): boolean {
   return new RegExp(`^(?:export )?(?:async )?function ${symbol}\\(`, 'm').test(src)
 }
+
+/**
+ * The span of the single chained query expression containing `index`.
+ *
+ * ## Why a third boundary, when there is already a function one
+ *
+ * `enclosingSpan` replaced a fixed-line window because the window leaked past a
+ * function boundary and excused a real defect (ADR 0134). Phase 152 found the
+ * function boundary leaking in the same way, one level in, for a question it
+ * was never the right boundary for.
+ *
+ * `salesTaxReturn` runs two queries. The first sums `document_tax_lines` and
+ * converts each row at `invoices.exchange_rate_millionths`, which is only a
+ * rate at all because of a `leftJoin(invoices, …)` in that chain. The second
+ * reads `.from(invoices)`. Asked "is `invoices` in scope here?" over the
+ * enclosing *function*, the answer is yes even with the join deleted — and
+ * `functionalSumSql` coalesces a null rate to RATE_ONE, so deleting it turns
+ * the sum silently back into the face-amount addition it was repaired from.
+ *
+ * Measured: with the join removed, the check bounded by the function passed.
+ * Bounded by the query, it names the site.
+ *
+ * ## How it reads one
+ *
+ * Backwards to the executor the chain hangs off — `db`, a `tx`, an `exec` —
+ * then forwards by bracket depth to the newline that is not followed by another
+ * `.`, which is Phase 150's rule and is there for the same reason: a `.where(`
+ * whose argument opens on the next line is still the same statement, and
+ * anything that counts lines instead of brackets gets that wrong.
+ */
+export function enclosingQuery(src: string, index: number): { from: number; to: number } {
+  const blanked = withoutComments(src)
+
+  const executors = [...blanked.slice(0, index).matchAll(/\b(?:db|tx|exec|executor)\b/g)]
+  const from = executors.length > 0 ? executors[executors.length - 1].index : index
+
+  let depth = 0
+  for (let at = from; at < blanked.length; at++) {
+    const char = blanked[at]
+    if (char === '(' || char === '[' || char === '{') depth += 1
+    else if (char === ')' || char === ']' || char === '}') depth -= 1
+    else if (char === '\n' && depth === 0) {
+      // `\s*`, not `[ \t]*`, and the difference is a whole line of blanks.
+      // Comments are stripped to spaces with their offsets kept (Phase 141), so
+      // a comment sitting between two links of the chain leaves a line that is
+      // entirely whitespace — and a rule that stops at the first line not
+      // beginning with `.` reads that blank line as the end of the statement.
+      //
+      // Measured: `salesTaxReturn` has a nine-line comment above the
+      // `.leftJoin(invoices, …)` that its rate depends on, so the chain was cut
+      // one link short of the join it was being asked about, and the check
+      // reported the site unsound with the join right there. Skipping to the
+      // next non-whitespace character is the same rule stated correctly.
+      const gap = /^\s*/.exec(blanked.slice(at + 1))?.[0] ?? ''
+      if (blanked[at + 1 + gap.length] !== '.') return { from, to: at }
+      at += gap.length
+    }
+  }
+
+  return { from, to: blanked.length }
+}

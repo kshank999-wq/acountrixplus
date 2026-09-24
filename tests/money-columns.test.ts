@@ -132,51 +132,44 @@ describe('what money a column holds', () => {
   })
 })
 
-describe('the sums the completed list found', () => {
-  it('names them, and says what is wrong with each', () => {
-    // A check seen to disagree rather than only to agree (Phase 121). These
-    // three were not excused by the tripwire — they summed columns it had
-    // never been told about.
-    expect(BLIND_FACE_SUMS.map((row) => row.symbol).sort()).toEqual([
-      'cashBasisCaveats',
-      'contractorPayments',
-      'salesTaxReturn',
-    ])
+describe('the sums the completed list found, and what became of them', () => {
+  it('is empty, and the acceptance test it pointed at is the reason', () => {
+    // A check seen to disagree rather than only to agree (Phase 121). The
+    // three that were here — `cashBasisCaveats`, `contractorPayments`,
+    // `salesTaxReturn` — were not excused by the tripwire; they summed columns
+    // it had never been told about. All three are repaired in Phase 152 and
+    // `tests/sums-that-add-currencies.test.ts` runs rather than skips.
+    expect(BLIND_FACE_SUMS).toEqual([])
+
+    // Kept declared rather than deleted. The entry shape is what a sum found
+    // in one pass and repairable only in the next needs, and that situation
+    // produced this register once and will again. `blindFaceSumFor` still
+    // answers, and both scans still ask it.
+    expect(blindFaceSumFor('src/modules/payroll/sales-tax.ts', 'salesTaxReturn')).toBeNull()
+    expect(blindFaceSumFor('src/modules/nowhere/x.ts', 'y')).toBeNull()
+  })
+
+  it('holds every entry to an indictment, for whenever the next one is added', () => {
+    // These ran against three entries for nine phases and pass vacuously now.
+    // They stay because the rules they encode are what made the register worth
+    // having: each entry names a checkable defect, points at an acceptance test
+    // that exists and is skipped, and cannot also be excused in SAFE_FACE_SUMS.
+    // A site in both registers would be the ADR 0134 failure with a citation.
+    const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs')
 
     for (const row of BLIND_FACE_SUMS) {
       expect(row.liveDefect.length, row.symbol).toBeGreaterThan(140)
       expect(row.liveDefect, row.symbol).toMatch(/\b(?:sums|compares|adds|report)\b/i)
-    }
-  })
 
-  it('points each at an acceptance test that is skipped and labelled', () => {
-    // Phase 139's rule: a red suite nobody can fix teaches people to ignore the
-    // suite, so the definition of done is skipped rather than failing — and it
-    // has to exist and say so, or the entry is a plan wearing the clothes of a
-    // fact.
-    const { readFileSync, existsSync } = require('node:fs') as typeof import('node:fs')
-
-    for (const row of BLIND_FACE_SUMS) {
       expect(existsSync(row.acceptance), row.acceptance).toBe(true)
       const src = readFileSync(row.acceptance, 'utf8')
       expect(src, row.acceptance).toContain('describe.skip(')
-      expect(src, row.acceptance).toContain('acceptance test for the repair')
       expect(src, row.acceptance).toContain(row.symbol)
-    }
-  })
 
-  it('indicts rather than excuses, which is the whole difference', () => {
-    // ADR 0134's rule, and why these are not `SAFE_FACE_SUMS` entries. A site
-    // cannot be in both: one says "this is provably one currency" and the other
-    // says "this adds two and here is the proof".
-    for (const row of BLIND_FACE_SUMS) {
       expect(
         SAFE_FACE_SUMS.some((safe) => safe.file === row.file && safe.symbol === row.symbol),
         row.symbol,
       ).toBe(false)
     }
-
-    expect(blindFaceSumFor('src/modules/payroll/sales-tax.ts', 'salesTaxReturn')).not.toBeNull()
-    expect(blindFaceSumFor('src/modules/nowhere/x.ts', 'y')).toBeNull()
   })
 })

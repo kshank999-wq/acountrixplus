@@ -6189,6 +6189,65 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### A number with no reader (Phase 152)
+
+`BLIND_FACE_SUMS` held three sums known to add two currencies, from Phase 143
+until here. It described all three the same way, and they were not one problem.
+
+**Two needed a conversion.** `contractorPayments` measured a face sum of
+`payment_applications.amount_cents` against a statutory dollar threshold — a
+contractor paid €600 contributed 60,000 to a total compared against $600, and a
+1099 was filed or not filed on it. `salesTaxReturn` added `document_tax_lines`
+across invoices in any currency and filed the result with a tax authority. Both
+convert each document at the rate it carries now.
+
+**The third needed the question asked one step earlier.** `cashBasisCaveats`
+summed `invoices.tax_cents` and used the total **only** as `> 0`; the caveat it
+raises prints no figure. There was no rate to argue about because there was no
+reader. It counts rows. Its own sibling query, three lines above it in the same
+`Promise.all`, had already reached that answer nine phases earlier —
+
+> Deleted rather than converted: converting a number with no reader would only
+> make it a correct number nobody wants.
+
+— and nobody had carried it across. `faceSumStands` is where the distinction
+lives now, so the next blind sum is asked *who reads this* before *at what rate*.
+
+**The register named the wrong column**, and not carelessly. It said
+`salesTaxReturn` sums `invoices.subtotal_cents`; it does, in its *second* query.
+The figure on the return comes from `document_tax_lines`, which carries no
+currency — so it is on no face-column list, so the scan could only ever see the
+other query, and the entry was written from what the scan could reach. Both
+convert now.
+
+**The repair blinded the check that found it.** The sums moved behind
+`functionalSumSql` and the scans match ``sum(${table.column})``, so emptying the
+register would have left two scans reporting all clear over nothing — the
+scan-reach family again, arriving for the first time as a consequence of a fix.
+`converted_sum` is declared beside the other two forms, and it is not presumed
+innocent: `convertedSumStands` requires the second argument to be a rate, and the
+rate's table to be joined. `functionalSumSql` coalesces a null rate to the
+identity so a left-joined row with no payment adds zero instead of vanishing —
+and a rate column from an unjoined table is null on *every* row, which turns the
+sum back into face amounts with a helper's name on them. `salesTaxReturn` needed
+a `leftJoin` added for exactly that, and nothing would have said so.
+
+**A third boundary, wrong twice before it was right.** Asking which tables a
+query joins is not a question the enclosing function can answer:
+`salesTaxReturn` holds two queries and the second reads `.from(invoices)`, so
+with the function as the boundary, deleting the join changed nothing the check
+could see. That is ADR 0134's leak one level in. `enclosingQuery` bounds it by
+the chained statement — and then cut the chain one link short, because comments
+are blanked to whitespace with their offsets kept and a reader that stops at the
+first line not starting with `.` reads a blank line as the end of a statement.
+The join in question had a nine-line comment above it. Both cases are tests.
+
+Three registers of known-wrong money figures are down to one entry between them:
+`BLIND_FACE_SUMS` empty, `COMPARED_PAIRS` with no blind comparison left, and
+`PENDING_WIRING` holding only `mayPostToBank`, blocked by a column since Phase
+136.
+
+
 ### The wiring pass (Phase 151)
 
 Thirteen phases of cores built and deliberately not connected, on one
@@ -6243,7 +6302,7 @@ A value the type hides is unreachable as surely as one never returned.
 
 Thirty skipped tests became passing ones. `PENDING_WIRING` is one entry —
 `mayPostToBank`, blocked by a column since Phase 136 — and the blind comparisons
-are down from three to one.
+are down from three to one. (Phase 152 took the last one.)
 
 
 ### What a read stands on (Phase 150)
@@ -7193,6 +7252,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/fx-summing.test.ts`, `tests/sums-that-add-currencies.test.ts` | **A number with no reader** (Phase 152): the three sums `BLIND_FACE_SUMS` held since Phase 143, and they were not one problem. Two needed converting — a 1099 threshold met by adding whatever currencies a contractor was paid in, and a sales tax return adding euro and dollar invoices — and the third needed the question asked earlier: `cashBasisCaveats` summed `invoices.tax_cents` and read the total only as `> 0`, so there was no rate to argue about because there was no reader. It counts rows, which is the answer its own sibling query three lines above had reached nine phases earlier and nobody carried across. The register also named the wrong column, because `document_tax_lines` carries no currency and so is on no face-column list — the entry was written from what the scan could reach. Then the repair blinded that scan: the arithmetic moved behind `functionalSumSql` and ``sum(${table.column})`` stopped matching, so `converted_sum` is declared as a third addition form and judged, not waved through — the second argument must be a rate and its table must be joined, since a null rate coalesces to the identity and an unjoined one is null on every row. Verified by disagreement in both directions |
 | `tests/deposit-against-foreign-invoice.test.ts`, `recovery-at-two-rates.test.ts`, `contribution-into-a-foreign-account.test.ts`, `tax-that-foots-on-the-document.test.ts`, `a-preview-that-matches-the-post.test.ts` | **The wiring pass** (Phase 151): the five acceptance tests `PENDING_WIRING` had been pointing at for thirteen phases, skipped until the thing each was waiting for existed. They run now, and thirty skipped tests became passing ones. Each names one repair: a donation into a euro account refused rather than posted as dollars; an invoice charging what its printed base times its printed rate comes to; a recovery banking what the statement will show with the difference named as a realised gain; a deposit taking the invoice's worth off the tenancy rather than its face amount; and a billing preview showing every problem at once instead of a total the server declines. Unskipping them found four faults no register held — one of these files was a **stub** that created an invoice, asserted two ids were truthy and never called the function it was written for, which is what a skipped test makes easy to keep |
 | `tests/isolation-reads.test.ts` | **What a read stands on** (Phase 150): ADR 0149 measured only the writes and said so — a select that returns another company's rows is a breach whether or not anything was written. **866** reads from company-scoped tables, every one guarded, by eleven mechanisms; `scoped()` covers 61% of reads against 25% of writes, so the two halves are guarded quite differently and nothing had counted either. A write can be guarded by a refusal that fired earlier; a read that leaks has already leaked, so its guard must be in the statement or in the id it was handed — which is why `owner-helper` is write-only and `derives-tenant-from-row` and `id-from-fetched-row` are read-only. It corrected the phase before it: ADR 0149's table detector ran past a closing brace, falsely counting two content-addressed tables and missing seven real ones, so the write numbers become 164 tables and 109 writes — still zero unguarded. The scan itself was wrong twice more first, both kept as cases: a line-based statement reader that cut multi-line `where` clauses, and a helper detector that only recognised the word "Own" |
 | `tests/isolation-guards.test.ts` | Two companies side by side: inbox scoping, cross-tenant writes, foreign ids in bulk operations, audit scoping |

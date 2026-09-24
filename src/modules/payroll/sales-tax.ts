@@ -6,6 +6,7 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { PAYROLL_ACCOUNTS } from './accounts'
 import { accountByNumber } from '@/modules/coa/service'
 import { taxPerCode } from '@/modules/payroll/tax-rounding'
+import { functionalSumSql } from '@/modules/fx/summing'
 import { Refusal } from '@/modules/errors'
 
 /**
@@ -325,12 +326,28 @@ export async function salesTaxReturn(
       name: taxCodes.name,
       jurisdiction: taxCodes.jurisdiction,
       rateBp: documentTaxLines.rateBp,
-      taxableCents: sql<string>`coalesce(sum(${documentTaxLines.taxableCents}), 0)`,
-      exemptCents: sql<string>`coalesce(sum(${documentTaxLines.exemptCents}), 0)`,
-      taxCents: sql<string>`coalesce(sum(${documentTaxLines.taxCents}), 0)`,
+      // Each document converted at its own carried rate before it is added
+      // (Phase 152). `document_tax_lines` holds face amounts and carries no
+      // currency of its own, so a euro invoice and a dollar invoice added to a
+      // figure in neither — and this one is filed with a tax authority.
+      //
+      // Converting each document rather than the total is deliberate: the
+      // parts came first here, each already raised and already posted to the
+      // ledger at its own rate, which is the distinction ADR 0147 drew between
+      // this and the per-line tax rounding Phase 145 repaired.
+      taxableCents: functionalSumSql(documentTaxLines.taxableCents, invoices.exchangeRateMillionths),
+      exemptCents: functionalSumSql(documentTaxLines.exemptCents, invoices.exchangeRateMillionths),
+      taxCents: functionalSumSql(documentTaxLines.taxCents, invoices.exchangeRateMillionths),
     })
     .from(documentTaxLines)
     .innerJoin(taxCodes, eq(taxCodes.id, documentTaxLines.taxCodeId))
+    // Left, not inner: a tax line whose invoice has gone should still be
+    // reported rather than silently dropped from a return. The join exists for
+    // the rate above — without it `exchange_rate_millionths` is null on every
+    // row, `functionalSumSql` coalesces null to RATE_ONE, and the sum is face
+    // amounts wearing a conversion. `convertedSumStands` is the check that
+    // says so.
+    .leftJoin(invoices, eq(invoices.id, documentTaxLines.documentId))
     .where(
       scoped(
         ctx,
@@ -369,7 +386,9 @@ export async function salesTaxReturn(
   // company that has not set tax codes up yet; occasionally a real gap.
   const [uncoded] = await db
     .select({
-      total: sql<string>`coalesce(sum(${invoices.subtotalCents}), 0)`,
+      // Converted too, for the same reason: this figure is printed beside the
+      // taxable sales it is meant to be compared with.
+      total: functionalSumSql(invoices.subtotalCents, invoices.exchangeRateMillionths),
     })
     .from(invoices)
     .where(

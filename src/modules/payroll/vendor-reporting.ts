@@ -1,4 +1,5 @@
 import { asc, eq, gte, lte, sql } from 'drizzle-orm'
+import { functionalSumSql } from '@/modules/fx/summing'
 import { db } from '@/db'
 import { paymentApplications, payments, vendors } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -87,7 +88,12 @@ export async function contractorPayments(
       vendorName: vendors.name,
       isReportable: vendors.is1099Vendor,
       taxId: vendors.taxId,
-      paidCents: sql<string>`coalesce(sum(${paymentApplications.amountCents}), 0)`,
+      // Each payment converted at its own carried rate before it is added
+      // (Phase 152). This summed face amounts, so a contractor paid €600
+      // contributed 60,000 to a total measured against a $600 threshold and a
+      // 1099 was filed — or not filed — on a number that added whatever
+      // currencies the vendor happened to be paid in.
+      paidCents: functionalSumSql(paymentApplications.amountCents, payments.exchangeRateMillionths),
       paymentCount: sql<string>`count(distinct ${payments.id})`,
     })
     .from(vendors)

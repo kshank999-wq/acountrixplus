@@ -1,7 +1,12 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { declaresFunction, enclosingSymbol, withoutComments } from '@/modules/source/enclosing'
+import {
+  declaresFunction,
+  enclosingQuery,
+  enclosingSymbol,
+  withoutComments,
+} from '@/modules/source/enclosing'
 import { LEDGER_POSTINGS } from '@/modules/fx/ledger'
 import { BANK_POSTINGS } from '@/modules/fx/bank-side'
 import { SAFE_FACE_SUMS } from '@/modules/fx/comparable'
@@ -193,5 +198,89 @@ describe('what the broken scanner did to the registries', () => {
       )
 
     expect(copies).toEqual([])
+  })
+})
+
+describe('the query a site is inside, which is a third boundary (Phase 152)', () => {
+  /** Two queries in one function, the shape that made the function boundary wrong. */
+  const twoQueries = `export async function salesTaxReturn(ctx) {
+  const rows = await db
+    .select({
+      taxableCents: functionalSumSql(documentTaxLines.taxableCents, invoices.exchangeRateMillionths),
+    })
+    .from(documentTaxLines)
+    .innerJoin(taxCodes, eq(taxCodes.id, documentTaxLines.taxCodeId))
+    .leftJoin(invoices, eq(invoices.id, documentTaxLines.documentId))
+    .where(scoped(ctx, documentTaxLines))
+
+  const [uncoded] = await db
+    .select({ total: sql\`1\` })
+    .from(invoices)
+    .where(scoped(ctx, invoices))
+
+  return { rows, uncoded }
+}
+`
+
+  const tablesIn = (src: string, at: number) => {
+    const { from, to } = enclosingQuery(src, at)
+    return new Set(
+      [...src.slice(from, to).matchAll(/\.(?:from|innerJoin|leftJoin)\(\s*(\w+)/g)].map(
+        (m) => m[1],
+      ),
+    )
+  }
+
+  it('stops at the end of the chain, not the end of the function', () => {
+    // With the enclosing *function* as the boundary, the second query's
+    // `.from(invoices)` puts `invoices` in scope for the first — so deleting the
+    // `leftJoin` the first query's exchange rate depends on changes nothing the
+    // check can see. That is ADR 0134's leak one level in, and it passed on the
+    // real file before this boundary existed.
+    const site = twoQueries.indexOf('functionalSumSql')
+    const tables = tablesIn(twoQueries, site)
+
+    expect([...tables].sort()).toEqual(['documentTaxLines', 'invoices', 'taxCodes'])
+
+    const without = twoQueries.replace(
+      '    .leftJoin(invoices, eq(invoices.id, documentTaxLines.documentId))\n',
+      '',
+    )
+    expect([...tablesIn(without, without.indexOf('functionalSumSql'))].sort()).toEqual([
+      'documentTaxLines',
+      'taxCodes',
+    ])
+  })
+
+  it('reads through a comment sitting between two links of the chain', () => {
+    // The second defect, found the same afternoon. Comments are blanked with
+    // their offsets kept (Phase 141), so a comment inside a chain leaves a line
+    // of pure whitespace — and the first version of this stopped at the first
+    // line that did not begin with `.`, which a blank line does not. The chain
+    // was cut one link short of the join it was being asked about, and the
+    // check called a perfectly joined site unsound.
+    const commented = twoQueries.replace(
+      '    .leftJoin(invoices',
+      '    // Left, not inner: a tax line whose invoice has gone is still on the\n' +
+        "    // return. The join exists for the rate above — without it the sum is\n" +
+        '    // face amounts wearing a conversion.\n' +
+        '    .leftJoin(invoices',
+    )
+
+    expect([...tablesIn(commented, commented.indexOf('functionalSumSql'))].sort()).toEqual([
+      'documentTaxLines',
+      'invoices',
+      'taxCodes',
+    ])
+  })
+
+  it('does not run on into the statement after a blank line', () => {
+    // The other half of the same rule. Skipping whitespace must not skip a
+    // statement boundary: what decides is the next non-whitespace character,
+    // and `const` is not `.`.
+    const site = twoQueries.indexOf('functionalSumSql')
+    const { to } = enclosingQuery(twoQueries, site)
+
+    expect(twoQueries.slice(0, to)).not.toContain('uncoded')
   })
 })

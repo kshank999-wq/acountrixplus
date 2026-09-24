@@ -269,13 +269,15 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
   {
     file: 'src/modules/payroll/vendor-reporting.ts',
     symbol: 'contractorPayments',
-    comparability: 'blind',
+    comparability: 'home-money',
     because:
-      '`paidCents >= thresholdCents` measures a face sum of `payment_applications.amount_cents` ' +
-      'against a statutory figure in the company’s own money, and decides whether a 1099 is ' +
-      'filed. Found in Phase 143 by completing `FACE_COLUMNS`; the sum is registered there and ' +
-      'the comparison is registered here, which is the same defect from both ends.',
-    trackedIn: 'BLIND_FACE_SUMS — contractorPayments',
+      'Was `blind` from Phase 143 until Phase 152, and the last entry on ' +
+      '`BLIND_FACE_SUMS` to be repaired. `paidCents >= thresholdCents` measured a face sum of ' +
+      '`payment_applications.amount_cents` against a statutory figure in the company’s own ' +
+      'money, and decided whether a 1099 was filed — a contractor paid €600 contributed 60,000 ' +
+      'to a total compared against $600. The sum goes through `functionalSumSql` now, which ' +
+      'converts each payment at the rate it carries, so both sides of the comparison are the ' +
+      'company’s own money. Registered from both ends and repaired from both ends.',
   },
   {
     file: 'src/modules/receivables/credits.ts',

@@ -1,41 +1,47 @@
 import { beforeEach, describe, expect, it } from 'vitest'
 import { createCompanyFixture, type Fixture } from './helpers'
-import { createCustomer, createInvoice, recordPayment } from '@/modules/receivables/service'
-import { createVendor, createBill } from '@/modules/receivables/service'
+import {
+  createBill,
+  createCustomer,
+  createInvoice,
+  createVendor,
+  recordPayment,
+} from '@/modules/receivables/service'
 import { putRate } from '@/modules/fx/service'
 import { contractorPayments } from '@/modules/payroll/vendor-reporting'
-import { salesTaxReturn } from '@/modules/payroll/sales-tax'
+import { createTaxCode, recordDocumentTax, salesTaxReturn, taxOn } from '@/modules/payroll/sales-tax'
+import { cashBasisCaveats } from '@/modules/ledger/cash-basis'
+import { BLIND_FACE_SUMS } from '@/modules/fx/comparable'
 
 /**
- * Three sums that add two currencies (Phase 143).
+ * Three sums that added two currencies (Phase 143, repaired in Phase 152).
  *
- * ## Skipped on purpose — this is the acceptance test for the repair
+ * ## This file was skipped for nine phases, on purpose
  *
- * All three are registered in `BLIND_FACE_SUMS` with what is wrong in each.
- * They are **not** repaired: the staging pass is holding live service paths, and
- * every one of these is a query change rather than a core. Unskip this file,
- * group by currency or sum the functional twin, and it says whether it worked.
+ * All three were registered in `BLIND_FACE_SUMS` with what was wrong in each,
+ * and left unrepaired because the staging pass was holding live service paths.
+ * Phase 151 lifted that hold. This is the test the register pointed at, and it
+ * now runs.
  *
  * ## Why they were invisible rather than excused
  *
  * `FACE_COLUMNS` was seventeen column names typed by hand. The schema has
  * **fifty-four** money columns on currency-carrying tables, and all three of
- * these sum one of the thirty-seven nobody had classified — so the tripwire that
- * says "no sum adds two currencies together" never looked at them. An excused
- * site has an argument somebody can disagree with; an unseen one has nothing.
+ * these summed one of the thirty-seven nobody had classified — so the tripwire
+ * that says "no sum adds two currencies together" never looked at them. An
+ * excused site has an argument somebody can disagree with; an unseen one has
+ * nothing.
  *
- * ## Two of the three are filed with a tax authority
+ * ## The three repairs are not the same repair
  *
- * - **`contractorPayments`** sums `payment_applications.amount_cents` per vendor
- *   and compares the total against a statutory threshold in the company's own
- *   money. A contractor paid €600 contributes 60,000 to a figure measured
- *   against $600, so a 1099 is filed — or not filed — on arithmetic over
- *   incomparable things. The function mentions no currency anywhere.
- * - **`salesTaxReturn`** sums `invoices.subtotal_cents` to report taxable sales
- *   for a jurisdiction.
- * - **`cashBasisCaveats`** sums `invoices.tax_cents` to caveat a report. It
- *   describes rather than decides, which makes it the least severe and still
- *   wrong.
+ * - **`contractorPayments`** and **`salesTaxReturn`** convert each document at
+ *   the rate it was raised at and add the results, through `functionalSumSql`.
+ *   Both are filed with a tax authority.
+ * - **`cashBasisCaveats`** does not convert. Its sum was read only as `> 0` —
+ *   a presence test, whose message prints no figure — so it counts rows now.
+ *   `faceSumStands` is the pure statement of that distinction, and the sibling
+ *   query three lines above it in the same function had already reached the
+ *   same answer for the same reason.
  */
 
 let fixture: Fixture
@@ -58,11 +64,12 @@ beforeEach(async () => {
   })
 })
 
-describe.skip('contractorPayments, which decides whether a 1099 is filed', () => {
+describe('contractorPayments, which decides whether a 1099 is filed', () => {
   it('does not count a euro paid as though it were a dollar', async () => {
     // €600 paid to a contractor is $660 at the rate it was paid at, and the
-    // threshold is a US dollar figure. Today the report compares 60,000 against
-    // 60,000 and calls it exactly at the threshold; it is over it.
+    // threshold is a US dollar figure. Before Phase 152 the report compared
+    // 60,000 against 60,000 and called it exactly at the threshold; it is over
+    // it, and by enough that the rounding is not what decides.
     const vendor = await createVendor(fixture.ctx, { name: 'Rheinwerk GmbH', is1099Vendor: true })
 
     const bill = await createBill(fixture.ctx, {
@@ -94,8 +101,13 @@ describe.skip('contractorPayments, which decides whether a 1099 is filed', () =>
 
   it('still reports a domestic contractor exactly as it does today', async () => {
     // Why this went a hundred and forty-two phases unnoticed, and the assertion
-    // that keeps the repair from moving what already works.
-    const vendor = await createVendor(fixture.ctx, { name: 'Harborview Trades', is1099Vendor: true })
+    // that keeps the repair from moving what already works. A domestic payment
+    // carries no rate at all, so this is also the test that the `coalesce` to
+    // `RATE_ONE` inside `functionalSumSql` is the identity and not a zero.
+    const vendor = await createVendor(fixture.ctx, {
+      name: 'Harborview Trades',
+      is1099Vendor: true,
+    })
 
     const bill = await createBill(fixture.ctx, {
       vendorId: vendor.id,
@@ -119,12 +131,78 @@ describe.skip('contractorPayments, which decides whether a 1099 is filed', () =>
     expect(row?.paidCents).toBe(80_000)
     expect(row?.meetsThreshold).toBe(true)
   })
+
+  it('reports a vendor who was paid nothing at zero rather than dropping them', async () => {
+    // The left join leaves both the amount and the rate null. `coalesce` on
+    // the rate would not save a sum that then multiplied null; the outer
+    // `coalesce` on the total is what does.
+    await createVendor(fixture.ctx, { name: 'Quiet Partners', is1099Vendor: true })
+
+    const report = await contractorPayments(fixture.ctx, { year: 2026, thresholdCents: 60_000 })
+    const row = report.rows.find((entry) => entry.vendorName === 'Quiet Partners')
+
+    expect(row?.paidCents).toBe(0)
+    expect(row?.meetsThreshold).toBe(false)
+  })
 })
 
-describe.skip('salesTaxReturn, which is filed with a tax authority', () => {
+describe('salesTaxReturn, which is filed with a tax authority', () => {
   it('does not add a euro invoice to a dollar one', async () => {
-    const customer = await createCustomer(fixture.ctx, { name: 'Rheinwerk GmbH' })
+    const stateTax = await createTaxCode(fixture.ctx, {
+      code: 'STATE',
+      name: 'State sales tax',
+      jurisdiction: 'State',
+      rateBp: 400,
+    })
 
+    const customer = await createCustomer(fixture.ctx, { name: 'Rheinwerk GmbH' })
+    const foreign = await createInvoice(fixture.ctx, {
+      customerId: customer.id,
+      issueDate: '2026-03-01',
+      dueDate: '2026-04-01',
+      currency: 'EUR',
+      taxCents: taxOn(100_000, 400),
+      lines: [{ chartAccountId: revenueId, description: 'Goods', unitPriceCents: 100_000 }],
+    })
+    await recordDocumentTax(fixture.ctx, {
+      documentType: 'invoice',
+      documentId: foreign.id,
+      documentDate: '2026-03-01',
+      lines: [{ taxCodeId: stateTax.id, taxableCents: 100_000 }],
+    })
+
+    const domestic = await createCustomer(fixture.ctx, { name: 'Harborview Homes' })
+    const home = await createInvoice(fixture.ctx, {
+      customerId: domestic.id,
+      issueDate: '2026-03-01',
+      dueDate: '2026-04-01',
+      taxCents: taxOn(100_000, 400),
+      lines: [{ chartAccountId: revenueId, description: 'Goods', unitPriceCents: 100_000 }],
+    })
+    await recordDocumentTax(fixture.ctx, {
+      documentType: 'invoice',
+      documentId: home.id,
+      documentDate: '2026-03-01',
+      lines: [{ taxCodeId: stateTax.id, taxableCents: 100_000 }],
+    })
+
+    const report = await salesTaxReturn(fixture.ctx, {
+      periodStart: '2026-01-01',
+      periodEnd: '2026-12-31',
+    })
+
+    // €1,000 is $1,100, so taxable sales are $2,100 — not "200000".
+    expect(report.totalTaxableCents).toBe(210_000)
+    // And the tax collected on them: €40 is $44, plus $40.
+    expect(report.totalTaxCollectedCents).toBe(8_400)
+  })
+
+  it('converts the uncoded sales printed beside the taxable ones', async () => {
+    // The register named `invoices.subtotal_cents`, and this is the figure it
+    // actually feeds — the one for sales carrying no tax breakdown at all. It
+    // is printed next to taxable sales, so a euro invoice in one and not the
+    // other is two numbers that cannot be compared.
+    const customer = await createCustomer(fixture.ctx, { name: 'Rheinwerk GmbH' })
     await createInvoice(fixture.ctx, {
       customerId: customer.id,
       issueDate: '2026-03-01',
@@ -146,18 +224,44 @@ describe.skip('salesTaxReturn, which is filed with a tax authority', () => {
       periodEnd: '2026-12-31',
     })
 
-    // €1,000 is $1,100, so taxable sales are $2,100 — not "200000".
-    expect(report.totalTaxableCents).toBe(210_000)
+    expect(report.hasUncodedSales).toBe(true)
+    expect(report.uncodedSalesCents).toBe(210_000)
   })
 })
 
-describe.skip('cashBasisCaveats, which describes rather than decides', () => {
-  it('states a tax figure in one currency or none at all', async () => {
-    // The least severe of the three and the same defect. Whatever the repair
-    // is — convert, or group and say which currency — it must not be a bare
-    // addition of `invoices.tax_cents` across the ledger.
+describe('cashBasisCaveats, which describes rather than decides', () => {
+  it('raises the sales tax caveat from a euro invoice, having added nothing', async () => {
+    // The least severe of the three and the one that needed no conversion.
+    // Its sum of `invoices.tax_cents` was read only as `> 0` and the message
+    // prints no figure, so it counts the invoices that charged tax. A euro
+    // invoice is one of those whatever the rate is.
     const customer = await createCustomer(fixture.ctx, { name: 'Rheinwerk GmbH' })
+    await createInvoice(fixture.ctx, {
+      customerId: customer.id,
+      issueDate: '2026-03-01',
+      dueDate: '2026-04-01',
+      currency: 'EUR',
+      taxCents: taxOn(100_000, 400),
+      lines: [{ chartAccountId: revenueId, description: 'Goods', unitPriceCents: 100_000 }],
+    })
 
+    const caveats = await cashBasisCaveats(fixture.ctx, {
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+    })
+
+    expect(caveats.map((caveat) => caveat.area)).toContain('Sales tax')
+    // And it still says nothing that would have to be in a currency.
+    const salesTax = caveats.find((caveat) => caveat.area === 'Sales tax')!
+    expect(salesTax.message).not.toMatch(/\d/)
+  })
+
+  it('raises no sales tax caveat when no invoice charged any', async () => {
+    // A caveat computed from the data rather than printed as boilerplate is
+    // only worth the claim if it can come back absent. Before Phase 152 this
+    // was a sum of zeros; it is now a count of no rows, and the same sentence
+    // has to hold.
+    const customer = await createCustomer(fixture.ctx, { name: 'Rheinwerk GmbH' })
     await createInvoice(fixture.ctx, {
       customerId: customer.id,
       issueDate: '2026-03-01',
@@ -166,6 +270,21 @@ describe.skip('cashBasisCaveats, which describes rather than decides', () => {
       lines: [{ chartAccountId: revenueId, description: 'Goods', unitPriceCents: 100_000 }],
     })
 
-    expect(RATE).toBe(1_100_000)
+    const caveats = await cashBasisCaveats(fixture.ctx, {
+      startDate: '2026-01-01',
+      endDate: '2026-12-31',
+    })
+
+    expect(caveats.map((caveat) => caveat.area)).not.toContain('Sales tax')
+  })
+})
+
+describe('the register these three were held on', () => {
+  it('is empty, and this file is why', async () => {
+    // Phase 139's device: an indictment points at the test that says when it
+    // is spent. Emptying the register without this file running would be the
+    // half of the pair that cannot be checked — ADR 0141's split, where the
+    // half that could excuse a site is the half that must be measurable.
+    expect(BLIND_FACE_SUMS).toHaveLength(0)
   })
 })

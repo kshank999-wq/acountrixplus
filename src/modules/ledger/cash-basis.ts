@@ -1,4 +1,4 @@
-import { and, eq, gte, inArray, isNotNull, lte, sql, type SQL } from 'drizzle-orm'
+import { and, eq, gt, gte, inArray, isNotNull, lte, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   chartAccounts,
@@ -773,13 +773,23 @@ export async function cashBasisCaveats(
       ),
 
     db
-      .select({ total: sql<string>`coalesce(sum(${invoices.taxCents}), 0)` })
+      .select({
+        // How many invoices in the period charged tax, not how much (Phase
+        // 152). This summed `tax_cents` across invoices that may each be
+        // denominated in a different currency, and the total was then used
+        // only as `> 0` — the message below prints no figure. `faceSumStands`
+        // calls that purpose `presence`, and a presence test does not need
+        // money at all. Same answer as the sibling query above, for the same
+        // reason.
+        count: sql<string>`count(*)`,
+      })
       .from(invoices)
       .where(
         and(
           eq(invoices.companyId, ctx.companyId),
           gte(invoices.issueDate, range.startDate),
           lte(invoices.issueDate, range.endDate),
+          gt(invoices.taxCents, 0),
         ),
       ),
   ])
@@ -803,7 +813,7 @@ export async function cashBasisCaveats(
     })
   }
 
-  if (Number(taxRows[0]?.total ?? 0) > 0) {
+  if (Number(taxRows[0]?.count ?? 0) > 0) {
     caveats.push({
       area: 'Sales tax',
       message:
