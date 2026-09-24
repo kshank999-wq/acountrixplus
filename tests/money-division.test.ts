@@ -302,6 +302,16 @@ const EXCLUDED: readonly { file: string; symbol: string; why: string }[] = [
     symbol: 'PipelineBoard',
     why: 'A weighted forecast on a screen. No money is posted from it.',
   },
+  {
+    file: 'src/modules/payroll/sales-tax.ts',
+    symbol: 'salesTaxReturn',
+    why:
+      'A conversion in SQL, not a share. `functionalSumSql` divides by a rate and Postgres does ' +
+      'the adding, so nothing is handed anything one item at a time — and the `.map` and ' +
+      '`.reduce` the form keyed on are over the return’s own lines, a different array in the ' +
+      'same function. The same shape as `payoutSettlement` above, arriving from the Phase 152 ' +
+      'repair: this scan is the one that noticed the new call, which is the register working.',
+  },
 ]
 
 describe('what the scan reaches and is not a split', () => {

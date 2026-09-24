@@ -121,6 +121,22 @@ correctly, and both cases are in `tests/enclosing-function.test.ts`.
 Two boundary defects in one afternoon, in the fourth boundary reader this
 project has written. It is in the shared module with the other three.
 
+## The division scan found the new call, which is the register working
+
+The full suite came back with one failure, and it was `money-division.test.ts`
+saying *"declares every site a form reaches"* about
+`functionalSumSql(invoices.subtotalCents, …)`.
+
+It is not a split. `functionalSumSql` divides by a rate to convert, Postgres
+does the adding, and nothing is handed anything one item at a time — the `.map`
+and `.reduce` the `handed_over` form keyed on are over the return's own lines, a
+different array in the same function. Recorded in that test's `EXCLUDED` list
+with the reason, beside `payoutSettlement`, which is the same shape.
+
+Worth saying plainly: a scan built in Phase 147 noticed a call written in Phase
+152 and made somebody argue for it. That is what these registers are for, and it
+is the first time one has caught a line from the phase that was emptying it.
+
 ## What this does not do
 
 **It does not convert the ledger.** Journal lines are already the company's
