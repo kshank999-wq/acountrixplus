@@ -112,9 +112,22 @@ export function PipelineBoard({
     })
   }
 
+  /**
+   * Converting a won opportunity (spec §6, Phase 154).
+   *
+   * The second argument was hardcoded `false` from the day this screen was
+   * written, which meant nothing in the product could ever ask conversion to
+   * raise the invoice schedule spec §6 requires — so by Phase 49's rule the
+   * capability did not exist, and the whole-contract invoice behind the flag was
+   * reachable only from one test.
+   *
+   * `true` now, and safe to be: conversion raises the proposal's deposit if its
+   * schedule has one and nothing at all if it has no schedule. What it will never
+   * do again is bill the whole contract on signing day.
+   */
   function convert(id: string) {
     startTransition(async () => {
-      const result = await convertAction(id, false)
+      const result = await convertAction(id, true)
       notify(result)
       router.refresh()
     })

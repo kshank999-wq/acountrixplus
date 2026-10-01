@@ -227,6 +227,23 @@ the jurisdiction the company files in.
 the first thing in a long while that is neither a measurement nor a repair. After
 it, §9's geography analytics and §19's row-level security.
 
+> **Correction (Phase 154).** This nomination was wrong, and ADR 0154 records why
+> rather than quietly nominating something else. §7 is substantially built — 16
+> block types, a versioned clause library, optional items, expiry, view tracking,
+> acceptances, a template gallery, merge fields, brand kits, and PDF with running
+> headers and page numbering. What is absent is absent **by decision**: ADR 0004
+> chose an ordered block model over a free vector canvas and quotes the spec's own
+> sentence licensing it.
+>
+> Calling a deliberate architectural choice "the largest unbuilt piece" is Phase
+> 110/125's defect, and the cost was specific — a phase taking this as instruction
+> would have built a canvas and discarded ADR 0004's reasoning. Measuring found
+> the real gap in **§6** instead: a won proposal was supposed to create an invoice
+> *schedule* and raised one invoice for the whole contract on signing day.
+>
+> The vector canvas remains declined, and should be argued against ADR 0004 rather
+> than nominated as a gap.
+
 The money registers are as empty as they go without that pledge table:
 `BLIND_FACE_SUMS` at zero, `COMPARED_PAIRS` with no blind comparison,
 `PENDING_WIRING` at one entry and one target.

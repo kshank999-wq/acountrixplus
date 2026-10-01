@@ -377,6 +377,73 @@ export const proposalItems = pgTable(
 )
 
 /**
+ * When a won proposal asks to be paid (spec §6, §7, Phase 154).
+ *
+ * Spec §6 requires a won proposal to create an "invoice schedule" and
+ * `crm/conversion.ts` quoted that sentence while raising **one** invoice for the
+ * whole proposal, dated the day of conversion — the entire contract value billed
+ * on signing day, before any work was done.
+ *
+ * A row per stage rather than columns on the proposal, because a schedule is
+ * several stages each with its own label, share and kind.
+ */
+export const proposalScheduleStages = pgTable(
+  'proposal_schedule_stages',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    proposalId: uuid('proposal_id')
+      .notNull()
+      .references(() => proposals.id, { onDelete: 'cascade' }),
+
+    /** What the client sees on the proposal and on the invoice it raises. */
+    label: text('label').notNull(),
+    /**
+     * `deposit` | `milestone` | `on-completion`.
+     *
+     * Text rather than an enum: the three are declared in `StageKind` with an
+     * argument apiece, and a fourth should be argued there rather than added by
+     * a migration nobody reads.
+     *
+     * The distinction that matters is whether the money has been earned. A
+     * milestone bills work — revenue when billed, and a line on the job's
+     * schedule of values. A deposit is money taken before any work, held as a
+     * liability until it is earned.
+     */
+    kind: text('kind').notNull(),
+    /**
+     * Basis points of the contract. 5000 is half.
+     *
+     * The stages of one proposal must come to 10000, and `scheduleStands`
+     * refuses it rather than the database, because that refusal is a sentence
+     * somebody editing a proposal has to read and a CHECK across rows cannot be
+     * one.
+     */
+    percentBp: integer('percent_bp').notNull(),
+    sortOrder: integer('sort_order').notNull().default(0),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    proposalIdx: index('proposal_schedule_stages_proposal_idx').on(
+      t.companyId,
+      t.proposalId,
+      t.sortOrder,
+    ),
+    shareSane: check(
+      'proposal_schedule_stages_share_sane',
+      sql`${t.percentBp} >= 0 AND ${t.percentBp} <= 10000`,
+    ),
+    kindKnown: check(
+      'proposal_schedule_stages_kind_known',
+      sql`${t.kind} IN ('deposit', 'milestone', 'on-completion')`,
+    ),
+    labelled: check('proposal_schedule_stages_labelled', sql`btrim(${t.label}) <> ''`),
+  }),
+)
+
+/**
  * An immutable snapshot taken each time a proposal is sent (spec §7, §18).
  *
  * Once a proposal is in front of a client, what they were shown must not

@@ -561,6 +561,13 @@
       "when": 1789085608000,
       "tag": "0079_phase153_bank_money_currency",
       "breakpoints": true
+    },
+    {
+      "idx": 80,
+      "version": "7",
+      "when": 1789172008000,
+      "tag": "0080_phase154_proposal_billing_schedule",
+      "breakpoints": true
     }
   ]
 }

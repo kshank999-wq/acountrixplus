@@ -7,6 +7,7 @@ import {
   opportunities,
   organizations,
   proposalItems,
+  proposalScheduleStages,
   proposalVersions,
   proposalViews,
   proposals,
@@ -20,6 +21,7 @@ import { snapshotProposalPdf } from '@/modules/pdf/service'
 import { PIPELINE_STAGES, STAGE_PROBABILITY, stageIndex } from './pipeline'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
+import { scheduleStands, type ScheduleStage } from './billing-schedule'
 
 /**
  * Proposal lifecycle (spec §7 commercial structure, §9 statuses).
@@ -630,4 +632,124 @@ async function nextProposalNumber(ctx: ActorContext, tx: Executor): Promise<stri
     .where(eq(proposals.companyId, ctx.companyId))
 
   return `PROP-${1001 + Number(row?.count ?? 0)}`
+}
+
+/**
+ * The billing schedule on a proposal (spec §6, §7, Phase 154).
+ *
+ * Stored as rows and read in order. `scheduleStands` is the gate rather than the
+ * database: the refusals are sentences somebody editing a proposal has to read,
+ * and "the stages must come to 100%" is not something a CHECK across rows can
+ * say in those words.
+ */
+export async function setBillingSchedule(
+  ctx: ActorContext,
+  proposalId: string,
+  stages: readonly ScheduleStage[],
+) {
+  requirePermission(ctx, 'proposals:manage')
+
+  const proposal = await loadProposal(ctx, proposalId)
+
+  // An empty schedule is how a proposal says "bill it the old way", so it is
+  // cleared rather than refused. `scheduleStands` refuses an empty *schedule*,
+  // which is a different question: it is asked of stages somebody has written.
+  if (stages.length > 0) {
+    const verdict = scheduleStands(stages)
+    if (!verdict.ok) throw new Refusal(verdict.why)
+  }
+
+  return db.transaction(async (tx) => {
+    await tx
+      .delete(proposalScheduleStages)
+      .where(
+        scoped(ctx, proposalScheduleStages, eq(proposalScheduleStages.proposalId, proposal.id)),
+      )
+
+    if (stages.length > 0) {
+      await tx.insert(proposalScheduleStages).values(
+        stages.map((stage, index) => ({
+          companyId: ctx.companyId,
+          proposalId: proposal.id,
+          label: stage.label.trim(),
+          kind: stage.kind,
+          percentBp: stage.percentBp,
+          sortOrder: index,
+        })),
+      )
+    }
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'proposal.schedule',
+        entityType: 'proposal',
+        entityId: proposal.id,
+        after: { stages: stages.map((s) => ({ label: s.label, kind: s.kind, bp: s.percentBp })) },
+      },
+      tx,
+    )
+
+    return { stages: stages.length }
+  })
+}
+
+/** The schedule a proposal carries, in order. Empty when it has none. */
+export async function billingSchedule(
+  ctx: ActorContext,
+  proposalId: string,
+  exec: Executor = db,
+): Promise<ScheduleStage[]> {
+  const rows = await exec
+    .select({
+      label: proposalScheduleStages.label,
+      kind: proposalScheduleStages.kind,
+      percentBp: proposalScheduleStages.percentBp,
+    })
+    .from(proposalScheduleStages)
+    .where(scoped(ctx, proposalScheduleStages, eq(proposalScheduleStages.proposalId, proposalId)))
+    .orderBy(asc(proposalScheduleStages.sortOrder))
+
+  return rows.map((row) => ({
+    label: row.label,
+    kind: row.kind as ScheduleStage['kind'],
+    percentBp: row.percentBp,
+  }))
+}
+
+/**
+ * Every proposal's schedule in one query, for the list (Phase 154).
+ *
+ * The list shows all of them and a per-proposal read would be one query per row
+ * — the shape `sentVersions` exists to avoid for the same screen.
+ */
+export async function schedulesFor(
+  ctx: ActorContext,
+  exec: Executor = db,
+): Promise<Map<string, ScheduleStage[]>> {
+  requirePermission(ctx, 'proposals:view')
+
+  const rows = await exec
+    .select({
+      proposalId: proposalScheduleStages.proposalId,
+      label: proposalScheduleStages.label,
+      kind: proposalScheduleStages.kind,
+      percentBp: proposalScheduleStages.percentBp,
+    })
+    .from(proposalScheduleStages)
+    .where(scoped(ctx, proposalScheduleStages))
+    .orderBy(asc(proposalScheduleStages.proposalId), asc(proposalScheduleStages.sortOrder))
+
+  const byProposal = new Map<string, ScheduleStage[]>()
+  for (const row of rows) {
+    const stages = byProposal.get(row.proposalId) ?? []
+    stages.push({
+      label: row.label,
+      kind: row.kind as ScheduleStage['kind'],
+      percentBp: row.percentBp,
+    })
+    byProposal.set(row.proposalId, stages)
+  }
+
+  return byProposal
 }

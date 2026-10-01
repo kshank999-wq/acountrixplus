@@ -174,14 +174,22 @@ describe('the register held to the source', () => {
     expect(unreached).toEqual([])
   })
 
-  it('makes the two sites no form reaches argue for themselves', () => {
-    // `null` is allowed and has to be earned. Both of these split by
-    // subtracting a rounded part from a whole, which is not a division at all.
+  it('makes the sites no form reaches argue for themselves', () => {
+    // `null` is allowed and has to be earned, and the two that claim it earn it
+    // for **opposite** reasons — which is why the sentence each has to produce is
+    // no longer one pattern.
+    //
+    // `splitFor` is invisible because its split is a subtraction: the
+    // practitioner share is rounded and the business gets what is left.
+    // `scheduleAmounts` is invisible because it contains no arithmetic at all —
+    // it hands the whole question to `splitExactly`, which is the best shape a
+    // split site can have and the one a scan looking for a multiply over a
+    // divide cannot see.
     const unscanned = SPLIT_SITES.filter((row) => row.foundBy === null)
 
-    expect(unscanned.map((row) => row.symbol)).toEqual(['splitFor'])
+    expect(unscanned.map((row) => row.symbol).sort()).toEqual(['scheduleAmounts', 'splitFor'])
     for (const row of unscanned) {
-      expect(row.because, row.symbol).toMatch(/subtraction|what is left/)
+      expect(row.because, row.symbol).toMatch(/subtraction|what is left|no arithmetic/)
     }
   })
 
@@ -189,10 +197,14 @@ describe('the register held to the source', () => {
     // Five at Phase 145, eight since Phase 147 — `recoveryFunctional`, which
     // nothing had declared, `createDeposit`, which is the counter-example, and
     // `grossFor`, which places no residue and is a demo.
-    expect(SPLIT_SITES.length).toBe(8)
+    expect(SPLIT_SITES.length).toBe(9)
     expect(SPLIT_SITES.filter((row) => row.foundBy === 'proportional')).toHaveLength(4)
     expect(SPLIT_SITES.filter((row) => row.foundBy === 'handed_over')).toHaveLength(2)
     expect(SPLIT_SITES.filter((row) => row.foundBy === 'equal')).toHaveLength(1)
+    // Nine since Phase 154 and `scheduleAmounts`, which is the second site no
+    // form reaches. The count moved and the three `foundBy` counts did not, which
+    // is the shape of a site that delegates its arithmetic rather than doing any.
+    expect(SPLIT_SITES.filter((row) => row.foundBy === null)).toHaveLength(2)
   })
 
   it('argues every entry', () => {

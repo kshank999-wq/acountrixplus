@@ -14,9 +14,11 @@ import {
   proposalByToken,
   recordView,
   sendProposal,
+  setBillingSchedule,
   updateProposalItems,
 } from '@/modules/crm/proposals'
 import { proposalStats } from '@/modules/crm/analytics'
+import { setModuleEnabled } from '@/modules/industry/modules'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
 import { PermissionError } from '@/modules/permissions'
 
@@ -368,9 +370,31 @@ describe('proposal analytics', () => {
   })
 })
 
-/** Won proposal to invoice (spec §6). */
+/** Won proposal to invoice schedule (spec §6). */
 describe('proposal to invoice', () => {
-  it('raises an invoice from the winning proposal on conversion', async () => {
+  it('raises nothing when the proposal says nothing about when it is billed', async () => {
+    /**
+     * **This test asserted the opposite until Phase 154**, and what it asserted
+     * was the defect:
+     *
+     * ```ts
+     * // Only the selected item is billed, matching the proposal total.
+     * expect(invoice.totalCents).toBe(1_800_000)
+     * ```
+     *
+     * That is the whole contract, invoiced on the day of conversion. Spec §6 asks
+     * for an invoice *schedule* and `conversion.ts` quoted that sentence while
+     * billing a $18,000 proposal — or a $500,000 one — in full on signing day,
+     * before any work was done. The test agreed with the code because both were
+     * written from the same idea, which is Phase 121's rule: a check that cannot
+     * disagree is not a check.
+     *
+     * Settled rather than deleted. A proposal with no billing schedule has agreed
+     * no payment terms, so conversion raises nothing and the client gets no
+     * invoice until somebody decides what to bill. Inventing a schedule here
+     * would be inventing terms nobody agreed to; billing the lot is what this
+     * replaced.
+     */
     const { fixture, opportunity, proposal } = await proposalFixture()
     await sendProposal(fixture.ctx, proposal.id)
     await decideProposal(fixture.ctx, proposal.id, 'won')
@@ -380,17 +404,97 @@ describe('proposal to invoice', () => {
       createInvoice: true,
     })
 
-    expect(result.invoiceId).not.toBeNull()
+    expect(result.depositInvoiceId).toBeNull()
+    expect(result.sovStageCount).toBe(0)
+
+    // And nothing was raised at all, which is the part that matters: the client
+    // is not holding an invoice for work that has not started.
+    const { invoices } = await import('@/db/schema')
+    const raised = await db
+      .select()
+      .from(invoices)
+      .where(eq(invoices.customerId, result.customerId))
+    expect(raised).toHaveLength(0)
+  })
+
+  it('bills the deposit and schedules the rest when the proposal says so', async () => {
+    const { fixture, opportunity, proposal } = await proposalFixture()
+    // Job costing on, because the schedule of values is where the earning stages
+    // go and that is a job-costing artifact. The schedule itself does **not**
+    // need the module — the next test's company does not have it — which is the
+    // distinction running this found: `setScheduleOfValues` calls
+    // `requireModule`, so telling the job unconditionally threw the whole
+    // conversion for any company that does not bill progressively.
+    await setModuleEnabled(fixture.ctx, 'job_costing', true)
+    await setBillingSchedule(fixture.ctx, proposal.id, [
+      { label: 'On signing', kind: 'deposit', percentBp: 2_500 },
+      { label: 'Foundation poured', kind: 'milestone', percentBp: 2_500 },
+      { label: 'On handover', kind: 'on-completion', percentBp: 5_000 },
+    ])
+    await sendProposal(fixture.ctx, proposal.id)
+    await decideProposal(fixture.ctx, proposal.id, 'won')
+    await changeStage(fixture.ctx, opportunity.id, { stage: 'won' })
+
+    const result = await convertWonOpportunity(fixture.ctx, opportunity.id, {
+      createInvoice: true,
+    })
+
+    // 25% of $18,000 is payable now. The other 75% is work, and is on the job.
+    expect(result.depositInvoiceId).not.toBeNull()
+    expect(result.sovStageCount).toBe(2)
 
     const { invoices } = await import('@/db/schema')
     const [invoice] = await db
       .select()
       .from(invoices)
-      .where(eq(invoices.id, result.invoiceId!))
+      .where(eq(invoices.id, result.depositInvoiceId!))
 
-    // Only the selected item is billed, matching the proposal total.
-    expect(invoice.totalCents).toBe(1_800_000)
+    expect(invoice.totalCents).toBe(450_000)
     expect(invoice.customerId).toBe(result.customerId)
+  })
+
+  it('posts the deposit to unearned revenue, not to revenue', async () => {
+    // The distinction the phase is built on. Money taken before any work is a
+    // liability until it is earned — `2500 Unearned Revenue`, whose entry in the
+    // chart of accounts says exactly that. Crediting revenue instead would
+    // recognise a quarter of the contract on signing day, which is the defect
+    // one step smaller.
+    const { fixture, opportunity, proposal, revenue } = await proposalFixture()
+    await setBillingSchedule(fixture.ctx, proposal.id, [
+      { label: 'On signing', kind: 'deposit', percentBp: 2_500 },
+      { label: 'On handover', kind: 'on-completion', percentBp: 7_500 },
+    ])
+    await sendProposal(fixture.ctx, proposal.id)
+    await decideProposal(fixture.ctx, proposal.id, 'won')
+    await changeStage(fixture.ctx, opportunity.id, { stage: 'won' })
+
+    const result = await convertWonOpportunity(fixture.ctx, opportunity.id, {
+      createInvoice: true,
+    })
+
+    const { chartAccounts, journalEntries, journalLines } = await import('@/db/schema')
+    const lines = await db
+      .select({ number: chartAccounts.number, credit: journalLines.creditCents })
+      .from(journalLines)
+      .innerJoin(chartAccounts, eq(chartAccounts.id, journalLines.chartAccountId))
+      .innerJoin(journalEntries, eq(journalEntries.id, journalLines.journalEntryId))
+      .where(eq(journalEntries.sourceId, result.depositInvoiceId!))
+
+    const credited = lines.filter((line) => line.credit > 0)
+    expect(credited.map((line) => line.number)).toContain('2500')
+    expect(credited.map((line) => line.number)).not.toContain('4000')
+    expect(credited.find((line) => line.number === '2500')?.credit).toBe(450_000)
+  })
+
+  it('refuses a schedule that does not come to the contract', async () => {
+    const { fixture, proposal } = await proposalFixture()
+
+    await expect(
+      setBillingSchedule(fixture.ctx, proposal.id, [
+        { label: 'On signing', kind: 'deposit', percentBp: 2_500 },
+        { label: 'On handover', kind: 'on-completion', percentBp: 2_500 },
+      ]),
+    ).rejects.toThrow(/50\.00% of the contract/)
   })
 
   it('carries the proposal total onto the job', async () => {

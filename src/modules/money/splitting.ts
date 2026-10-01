@@ -265,6 +265,22 @@ export const SPLIT_SITES: readonly SplitSite[] = [
       'a division — the practitioner share is rounded and the rest is what is left.',
   },
   {
+    file: 'src/modules/crm/billing-schedule.ts',
+    symbol: 'scheduleAmounts',
+    policy: 'largest-remainder',
+    provenance: 'whole-first',
+    foundBy: null,
+    because:
+      'A contract carved into billing stages (Phase 154). `whole-first` without argument: the ' +
+      'contract is the figure both sides signed and the stages are percentages of it, so 50/25/25 ' +
+      'of $100,000.01 has to come back to $100,000.01. No form reaches it for the opposite reason ' +
+      'to `splitFor` above — not because the split is a subtraction, but because there is no ' +
+      'arithmetic here at all. It hands the whole question to `splitExactly` and maps the answer ' +
+      'onto its stages, so a scan looking for a multiply over a divide finds nothing to look at. ' +
+      'That is the best shape a split site can have and the one the forms cannot see, which is ' +
+      'worth writing down rather than leaving as an absence.',
+  },
+  {
     file: 'src/modules/payroll/tax-rounding.ts',
     symbol: 'taxPerCode',
     policy: 'largest-remainder',

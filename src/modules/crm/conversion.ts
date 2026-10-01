@@ -14,6 +14,17 @@ import { createInvoice } from '@/modules/receivables/service'
 import { logActivity } from './opportunities'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
+import {
+  depositStage,
+  scheduleAmounts,
+  scheduleStands,
+  sovStages,
+  type ScheduledStage,
+} from './billing-schedule'
+import { billingSchedule } from './proposals'
+import { setScheduleOfValues } from '@/modules/jobs/billing'
+import { moduleEnabled } from '@/modules/industry/modules'
+import { resolveRetainerAccount } from '@/modules/timebilling/billing'
 
 /**
  * Turning a win into work (spec §6).
@@ -30,7 +41,22 @@ import { missing } from '@/modules/errors/missing'
 export type ConversionResult = {
   customerId: string
   projectId: string
-  invoiceId: string | null
+  /**
+   * The deposit invoice, when the proposal's schedule asks for one (Phase 154).
+   *
+   * Was the whole proposal, invoiced on the day of conversion. Spec §6 asks for
+   * an invoice *schedule* and this module quoted that sentence while billing a
+   * $500,000 contract in full on signing day — revenue recognised for work not
+   * performed, and a job overbilled by its entire value from the moment it
+   * existed.
+   *
+   * A deposit invoice is the one thing that genuinely is payable at conversion,
+   * and it posts to the unearned revenue account rather than to revenue, because
+   * money taken before any work is a liability until it is earned.
+   */
+  depositInvoiceId: string | null
+  /** How many stages were written onto the job's schedule of values. */
+  sovStageCount: number
   alreadyConverted: boolean
 }
 
@@ -60,7 +86,8 @@ export async function convertWonOpportunity(
     return {
       customerId: opportunity.convertedCustomerId,
       projectId: opportunity.convertedProjectId,
-      invoiceId: null,
+      depositInvoiceId: null,
+      sovStageCount: 0,
       alreadyConverted: true,
     }
   }
@@ -202,20 +229,168 @@ export async function convertWonOpportunity(
     return { customerId: customer.id, projectId: project.id }
   })
 
-  // Invoicing is a separate transaction because it posts to the ledger and can
-  // fail on its own terms — a closed period, a missing revenue account. The
-  // client and job are already correctly created either way.
-  let invoiceId: string | null = null
+  /**
+   * The invoice schedule spec §6 asks for (Phase 154).
+   *
+   * A separate transaction from the client and the job, because it posts to the
+   * ledger and can fail on its own terms — a closed period, a missing revenue
+   * account. The client and job are correctly created either way.
+   *
+   * Two things come out of the proposal's stages and they are not the same kind
+   * of thing:
+   *
+   * - the **milestones** become the job's schedule of values, which is what
+   *   progress billing already draws against;
+   * - the **deposit**, if there is one, becomes an invoice now — the one figure
+   *   that genuinely is payable at conversion — posting to unearned revenue
+   *   rather than to revenue, because money taken before any work is a liability
+   *   until it is earned.
+   *
+   * A proposal with no stages gets neither, and that is deliberate: a schedule
+   * invented at conversion would be payment terms nobody agreed to.
+   */
+  let depositInvoiceId: string | null = null
+  let sovStageCount = 0
+
   if (opts.createInvoice && winningProposal) {
-    invoiceId = await invoiceFromProposal(
-      ctx,
-      winningProposal.id,
-      result.customerId,
-      result.projectId,
-    )
+    const scheduled = await scheduleForProposal(ctx, winningProposal.id, winningProposal.totalCents)
+
+    if (scheduled.length > 0) {
+      sovStageCount = await scheduleOnJob(ctx, result.projectId, winningProposal.id, scheduled)
+      depositInvoiceId = await depositInvoice(
+        ctx,
+        scheduled,
+        result.customerId,
+        result.projectId,
+      )
+    } else {
+      // No schedule, so nothing has been agreed about when this is billed.
+      // Billing the whole contract here is what this function used to do and is
+      // the defect Phase 154 removed: it recognises a contract's revenue on
+      // signing day. The honest answer is to raise nothing and say so.
+      depositInvoiceId = null
+    }
   }
 
-  return { ...result, invoiceId, alreadyConverted: false }
+  return { ...result, depositInvoiceId, sovStageCount, alreadyConverted: false }
+}
+
+/** The proposal's stages with the money worked out, or none if it has no schedule. */
+async function scheduleForProposal(
+  ctx: ActorContext,
+  proposalId: string,
+  contractCents: number,
+): Promise<ScheduledStage[]> {
+  const stages = await billingSchedule(ctx, proposalId)
+  if (stages.length === 0) return []
+
+  // Refused here as well as when the schedule was written, because a proposal
+  // may have been edited into an impossible state by anything with database
+  // access and this is the moment it turns into money.
+  const verdict = scheduleStands(stages)
+  if (!verdict.ok) throw new Refusal(verdict.why)
+
+  return scheduleAmounts(contractCents, stages)
+}
+
+/**
+ * Writes the earning stages onto the job as its schedule of values.
+ *
+ * The deposit is not among them, which is the one thing `sovStages` exists to
+ * say: a schedule of values is what the job will earn, and a deposit is money
+ * held before it earns anything. On the SOV it would make the contract value the
+ * work plus money that is not work, so every WIP report would show the job
+ * overbilled by the deposit from the day it was signed.
+ */
+async function scheduleOnJob(
+  ctx: ActorContext,
+  projectId: string,
+  proposalId: string,
+  scheduled: readonly ScheduledStage[],
+): Promise<number> {
+  const earning = sovStages(scheduled)
+  if (earning.length === 0) return 0
+
+  /**
+   * A billing schedule must not require job costing.
+   *
+   * `setScheduleOfValues` calls `requireModule(ctx, 'job_costing')`, so without
+   * this the whole conversion threw for any company that does not run that
+   * module — and a plumber taking 50% up front and the rest on completion has a
+   * perfectly ordinary schedule and no use for a construction schedule of
+   * values. Found by running the test rather than by reading the call: the
+   * schedule lives on the proposal, and the SOV is an additional projection of
+   * it for companies that bill progressively.
+   *
+   * So the stages are kept either way and the job is told only when it can
+   * listen. `sovStageCount` comes back zero, which is what the caller reports.
+   */
+  if (!(await moduleEnabled(ctx.companyId, 'job_costing'))) return 0
+
+  const items = await db
+    .select()
+    .from(proposalItems)
+    .where(scoped(ctx, proposalItems, eq(proposalItems.proposalId, proposalId)))
+    .orderBy(proposalItems.sortOrder)
+
+  // The revenue account the proposal's own lines named. Taking the first rather
+  // than guessing: a schedule of values breaks the contract into stages of work,
+  // not into the proposal's line items, so there is no per-stage account to
+  // read and inventing one would be inventing an allocation.
+  const revenueAccountId = items.find((item) => item.chartAccountId)?.chartAccountId
+  if (!revenueAccountId) return 0
+
+  await setScheduleOfValues(
+    ctx,
+    projectId,
+    earning.map((stage, index) => ({
+      itemNumber: String(index + 1).padStart(3, '0'),
+      description: stage.label,
+      scheduledValueCents: stage.amountCents,
+      chartAccountId: revenueAccountId,
+    })),
+  )
+
+  return earning.length
+}
+
+/**
+ * Invoices the deposit, against unearned revenue rather than against revenue.
+ *
+ * `2500 Unearned Revenue` — or a dedicated retainers account when the company
+ * has one — and `resolveRetainerAccount` is reused rather than reimplemented so
+ * that a firm holding retainers and deposits puts both in the same place.
+ * Phase 105 built that resolver to say *which* of the two it landed on, because
+ * the reconciliation differs: on a dedicated account the subledger and the
+ * ledger must be equal, and on the shared one only "not more than" can be
+ * claimed. A deposit arriving in the shared case is exactly what that
+ * distinction was written for.
+ */
+async function depositInvoice(
+  ctx: ActorContext,
+  scheduled: readonly ScheduledStage[],
+  customerId: string,
+  projectId: string,
+): Promise<string | null> {
+  const deposit = depositStage(scheduled)
+  if (!deposit || deposit.amountCents <= 0) return null
+
+  const { account } = await resolveRetainerAccount(ctx.companyId)
+
+  const invoice = await createInvoice(ctx, {
+    customerId,
+    issueDate: new Date().toISOString().slice(0, 10),
+    projectId,
+    lines: [
+      {
+        chartAccountId: account.id,
+        description: deposit.label,
+        unitPriceCents: deposit.amountCents,
+      },
+    ],
+  })
+
+  return invoice.id
 }
 
 /** The proposal that closed the deal: the named one, or the won one. */
@@ -242,51 +417,20 @@ async function findWinningProposal(
 }
 
 /**
- * Raises an invoice from the winning proposal's line items (spec §6).
+ * `invoiceFromProposal` stood here until Phase 154, and what it did is the defect.
  *
- * Only selected items are billed, matching what the proposal totalled.
- * Items without a revenue account are skipped rather than guessed at — the
- * caller gets no invoice instead of a wrong one.
+ * It billed every selected item at `issueDate: today`, so a $500,000 contract
+ * invoiced the client the whole contract value on the day they signed it. Its own
+ * doc comment argued for the dimension it carried — *"a schedule that missed it
+ * would show every converted job as underbilled by its own first invoice"* —
+ * which was true about the dimension and silent about the amount.
  *
- * The invoice carries the new job as its dimension, which is what keeps the
- * WIP schedule honest: revenue billed the moment a proposal is won is billed
- * *on that job*, and a schedule that missed it would show every converted job
- * as underbilled by its own first invoice.
+ * Deleted rather than left unreferenced: a function with no caller is a feature
+ * that does not exist (Phase 49), and one that *would* be wrong if it were called
+ * is worse than absent. What replaced it is `scheduleOnJob` and `depositInvoice`,
+ * which between them raise at most the deposit and leave the rest on the job's
+ * schedule of values to be billed as it is earned.
  */
-async function invoiceFromProposal(
-  ctx: ActorContext,
-  proposalId: string,
-  customerId: string,
-  projectId: string,
-): Promise<string | null> {
-  const items = await db
-    .select()
-    .from(proposalItems)
-    .where(scoped(ctx, proposalItems, eq(proposalItems.proposalId, proposalId)))
-    .orderBy(proposalItems.sortOrder)
-
-  const billable = items.filter(
-    (item) => (!item.isOptional || item.isSelected) && item.chartAccountId,
-  )
-
-  if (billable.length === 0) return null
-
-  const invoice = await createInvoice(ctx, {
-    customerId,
-    issueDate: new Date().toISOString().slice(0, 10),
-    // Tagged with the job it came from (Phase 7), so revenue billed at
-    // conversion appears in the job's WIP rather than going missing from it.
-    projectId,
-    lines: billable.map((item) => ({
-      chartAccountId: item.chartAccountId!,
-      description: item.description,
-      quantityMilli: item.quantityMilli,
-      unitPriceCents: item.unitPriceCents,
-    })),
-  })
-
-  return invoice.id
-}
 
 /** Next sequential job code, e.g. JOB-1004. */
 async function nextProjectCode(

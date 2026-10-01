@@ -18,6 +18,7 @@ import {
   createProposal,
   decideProposal,
   sendProposal,
+  setBillingSchedule,
   updateProposalItems,
 } from '@/modules/crm/proposals'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
@@ -291,6 +292,48 @@ export async function updateProposalItemsAction(
   })
 }
 
+/**
+ * The billing schedule on a proposal (spec §6, §7, Phase 154).
+ *
+ * Shares are entered as percentages because that is how people quote them, and
+ * converted to basis points here so a half is 5000 rather than 0.5 — the unit the
+ * contract is actually split in. `scheduleStands` is what refuses a schedule, so
+ * this parses and hands over rather than validating twice.
+ */
+export async function setBillingScheduleAction(
+  proposalId: string,
+  stages: Array<{ label: string; kind: string; percent: string }>,
+): Promise<ActionResult> {
+  return run('/crm/proposals', async () => {
+    const actor = await requireActor()
+
+    const parsed = z
+      .array(
+        z.object({
+          label: z.string().trim().min(1, 'Every stage needs a name.'),
+          kind: z.enum(['deposit', 'milestone', 'on-completion']),
+          percent: z.string(),
+        }),
+      )
+      .parse(stages)
+
+    const result = await setBillingSchedule(
+      actor,
+      proposalId,
+      parsed.map((stage) => ({
+        label: stage.label,
+        kind: stage.kind,
+        // Basis points, rounded: 33.33% is 3333 and not 3333.0000000000005.
+        percentBp: Math.round((Number(stage.percent) || 0) * 100),
+      })),
+    )
+
+    return result.stages === 0
+      ? 'Billing schedule cleared. Winning this proposal will raise nothing until somebody decides what to bill.'
+      : `Billing schedule saved: ${result.stages} stage${result.stages === 1 ? '' : 's'}.`
+  })
+}
+
 // --- Conversion ------------------------------------------------------------
 
 export async function convertAction(
@@ -302,9 +345,14 @@ export async function convertAction(
     const result = await convertWonOpportunity(actor, opportunityId, { createInvoice })
 
     if (result.alreadyConverted) return 'This opportunity was already converted.'
-    return result.invoiceId
-      ? 'Created the client, the job, and a draft invoice.'
-      : 'Created the client and the job.'
+
+    // What was actually created, said plainly (Phase 154). "A draft invoice" was
+    // true and hid what the invoice was for: the whole contract, on signing day.
+    const made = ['the client', 'the job']
+    if (result.sovStageCount > 0) made.push(`a ${result.sovStageCount}-stage billing schedule`)
+    if (result.depositInvoiceId) made.push('an invoice for the deposit')
+
+    return `Created ${made.slice(0, -1).join(', ')} and ${made[made.length - 1]}.`
   })
 }
 

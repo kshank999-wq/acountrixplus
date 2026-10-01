@@ -1,7 +1,7 @@
 import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
-import { listProposals } from '@/modules/crm/proposals'
+import { listProposals, schedulesFor } from '@/modules/crm/proposals'
 import { listOpportunities } from '@/modules/crm/opportunities'
 import { categorizableAccounts } from '@/modules/coa/service'
 import { CRM_NAV } from '../nav'
@@ -40,6 +40,9 @@ export default async function ProposalsPage() {
   // proposal. What a client was sent is the question this list is most often
   // opened to answer, so it belongs here and not behind a click.
   const versions = await sentVersions(actor)
+  // One query for every proposal's schedule rather than one per row, which is
+  // the same reason `sentVersions` is fetched here (Phase 154).
+  const schedules = await schedulesFor(actor)
 
   return (
     <AppShell
@@ -67,6 +70,7 @@ export default async function ProposalsPage() {
             sentAt: version.sentAt.toISOString().slice(0, 10),
             hasPdf: version.pdfDocumentId !== null,
           })),
+          schedule: schedules.get(p.id) ?? [],
         }))}
         opportunities={opportunities.map((o) => ({
           id: o.id,

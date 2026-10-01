@@ -8,6 +8,7 @@ import {
   createProposalAction,
   decideProposalAction,
   sendProposalAction,
+  setBillingScheduleAction,
 } from '@/app/actions/crm'
 
 type Proposal = {
@@ -22,6 +23,8 @@ type Proposal = {
   expiresOn: string | null
   publicToken: string
   versions: Array<{ id: string; versionNumber: number; sentAt: string; hasPdf: boolean }>
+  /** The billing schedule, in order. Empty when the proposal has none (Phase 154). */
+  schedule: Array<{ label: string; kind: string; percentBp: number }>
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -59,6 +62,7 @@ export function ProposalList({
   const [pending, startTransition] = useTransition()
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null)
   const [showNew, setShowNew] = useState(false)
+  const [schedulingFor, setSchedulingFor] = useState<string | null>(null)
 
   function notify(result: { ok: boolean; message?: string; error?: string }) {
     setToast({
@@ -154,7 +158,49 @@ export function ProposalList({
                   >
                     Client link
                   </Link>
+                  {canManage && (
+                    <button
+                      onClick={() =>
+                        setSchedulingFor(schedulingFor === proposal.id ? null : proposal.id)
+                      }
+                      className="btn px-2 py-1 text-xs"
+                    >
+                      {schedulingFor === proposal.id
+                        ? 'Close'
+                        : proposal.schedule.length > 0
+                          ? `Schedule (${proposal.schedule.length})`
+                          : 'Billing schedule'}
+                    </button>
+                  )}
                 </div>
+
+                {proposal.schedule.length > 0 && schedulingFor !== proposal.id && (
+                  <p className="mt-1.5 text-xs text-muted">
+                    Billed:{' '}
+                    {proposal.schedule
+                      .map(
+                        (stage) =>
+                          `${stage.label} ${(stage.percentBp / 100).toFixed(0)}%${
+                            stage.kind === 'deposit' ? ' (deposit)' : ''
+                          }`,
+                      )
+                      .join(' · ')}
+                  </p>
+                )}
+
+                {schedulingFor === proposal.id && (
+                  <ScheduleEditor
+                    proposalId={proposal.id}
+                    initial={proposal.schedule}
+                    onDone={(result) => {
+                      notify(result)
+                      if (result.ok) {
+                        setSchedulingFor(null)
+                        router.refresh()
+                      }
+                    }}
+                  />
+                )}
 
                 {proposal.versions.length > 0 && (
                   <p className="mt-1.5 text-xs text-muted">
@@ -419,5 +465,121 @@ function NewProposalForm({
         </button>
       </div>
     </section>
+  )
+}
+
+type StageRow = { label: string; kind: string; percent: string }
+
+const BLANK_STAGE: StageRow = { label: '', kind: 'milestone', percent: '' }
+
+/**
+ * When a won proposal asks to be paid (spec §6, §7, Phase 154).
+ *
+ * The screen that makes the capability exist. `convertWonOpportunity` could
+ * raise an invoice schedule and nothing could ask it to: `pipeline-board.tsx`
+ * called `convertAction(id, false)` with the flag hardcoded, so by Phase 49's
+ * rule the feature did not exist.
+ *
+ * The running total is shown because the stages have to come to exactly 100% and
+ * finding that out on submit is a worse experience than watching it while you
+ * type — the same reasoning the remittance form gives for showing what the ledger
+ * says is owed.
+ */
+function ScheduleEditor({
+  proposalId,
+  initial,
+  onDone,
+}: {
+  proposalId: string
+  initial: Array<{ label: string; kind: string; percentBp: number }>
+  onDone: (result: { ok: boolean; message?: string; error?: string }) => void
+}) {
+  const [pending, startTransition] = useTransition()
+  const [stages, setStages] = useState<StageRow[]>(
+    initial.length > 0
+      ? initial.map((stage) => ({
+          label: stage.label,
+          kind: stage.kind,
+          percent: String(stage.percentBp / 100),
+        }))
+      : [{ ...BLANK_STAGE }],
+  )
+
+  const usable = stages.filter((stage) => stage.label.trim() && stage.percent.trim())
+  const totalBp = usable.reduce((sum, stage) => sum + Math.round((Number(stage.percent) || 0) * 100), 0)
+  const foots = totalBp === 10_000
+
+  function update(index: number, patch: Partial<StageRow>) {
+    setStages((current) => current.map((stage, i) => (i === index ? { ...stage, ...patch } : stage)))
+  }
+
+  return (
+    <div className="mt-2 space-y-2 rounded-lg bg-raised/40 p-3">
+      <p className="text-xs text-muted">
+        What the client is invoiced, and when. A <strong>deposit</strong> is money taken before any
+        work — held as a liability until it is earned, not revenue. A <strong>milestone</strong> bills
+        work and goes on the job&rsquo;s schedule of values.
+      </p>
+
+      {stages.map((stage, index) => (
+        <div key={index} className="flex flex-wrap items-center gap-2">
+          <input
+            value={stage.label}
+            onChange={(event) => update(index, { label: event.target.value })}
+            placeholder="On signing"
+            className="field min-w-40 flex-1 py-1 text-xs"
+          />
+          <select
+            value={stage.kind}
+            onChange={(event) => update(index, { kind: event.target.value })}
+            className="field w-36 py-1 text-xs"
+          >
+            <option value="deposit">Deposit</option>
+            <option value="milestone">Milestone</option>
+            <option value="on-completion">On completion</option>
+          </select>
+          <input
+            value={stage.percent}
+            onChange={(event) => update(index, { percent: event.target.value })}
+            placeholder="%"
+            inputMode="decimal"
+            className="field w-20 py-1 text-right text-xs"
+          />
+          <button
+            onClick={() => setStages((current) => current.filter((_, i) => i !== index))}
+            className="btn btn-ghost px-2 py-1 text-xs"
+            aria-label="Remove stage"
+          >
+            &times;
+          </button>
+        </div>
+      ))}
+
+      <div className="flex flex-wrap items-center gap-3">
+        <button
+          onClick={() => setStages((current) => [...current, { ...BLANK_STAGE }])}
+          className="btn px-2 py-1 text-xs"
+        >
+          Add stage
+        </button>
+        <span className={`tnum text-xs ${foots ? 'text-positive' : 'text-warning'}`}>
+          {(totalBp / 100).toFixed(2)}% of the contract
+          {!foots && totalBp < 10_000 && ' — the rest would never be invoiced'}
+          {!foots && totalBp > 10_000 && ' — more than the client agreed to'}
+        </span>
+
+        <button
+          onClick={() =>
+            startTransition(async () => {
+              onDone(await setBillingScheduleAction(proposalId, usable))
+            })
+          }
+          disabled={pending || !foots || usable.length === 0}
+          className="btn btn-primary ml-auto px-3 py-1 text-xs"
+        >
+          {pending ? 'Saving…' : 'Save schedule'}
+        </button>
+      </div>
+    </div>
   )
 }

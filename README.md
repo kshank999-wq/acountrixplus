@@ -6189,6 +6189,64 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The invoice schedule that billed everything (Phase 154)
+
+ADR 0153 nominated spec §7's vector design engine as "the largest unbuilt piece",
+and the first finding is that this is false. §7 is substantially built — 16 block
+types, a versioned clause library, optional items, expiry, view tracking,
+acceptances, a template gallery, merge fields, brand kits, PDF with running
+headers and `N of M` page numbering. What is absent is absent **by decision**: ADR
+0004 chose an ordered block model over a free vector canvas and quotes the spec's
+own sentence licensing it. A phase taking that nomination as instruction would
+have built a canvas and thrown ADR 0004's reasoning away.
+
+**The defect was in §6.** *"Won proposal can create a client, job/project,
+contract, invoice schedule, and accounting dimensions without re-entry."*
+`conversion.ts` quotes that sentence in its own doc comment, and what it had
+raised **one invoice for every selected item, dated the day of conversion** — a
+$500,000 contract invoiced in full on signing day, revenue recognised for work not
+performed, the job overbilled by its entire value from the moment it existed. A
+test asserted it as correct, because the test and the code came from the same idea
+and so the check could not disagree (Phase 121).
+
+**And no screen could reach it.** `pipeline-board.tsx` called
+`convertAction(id, false)` with the flag hardcoded; the only `createInvoice: true`
+in the repository was that one test. So the capability spec §6 names did not exist
+(Phase 49), *and* the thing standing in for it would have been wrong if it had —
+Phase 49's rule and its inversion in one function.
+
+**A deposit is not a milestone**, and that is the design. A milestone bills work:
+revenue when billed, and a line on the job's schedule of values. A deposit is money
+taken before any work — a liability until it is earned, which is what `2500
+Unearned Revenue` already says it is for. `SovLineInput` needs a `chartAccountId`
+and a schedule of values is a breakdown of *billable work*, so a deposit cannot be
+a line on it; there it would make the contract value the work plus money that is
+not work, and every WIP report would show the job overbilled by the deposit from
+the day it was signed. Phase 153's create-or-relieve question, one module over.
+
+The contract is the whole and the stages are carved out of it, so 50/25/25 of
+$100,000.01 comes back to $100,000.01 — `splitExactly` (Phase 145), not a
+per-stage rounding summed up.
+
+**Three things reused rather than invented**, all measured before building. `2500`,
+whose only caller was retainers. `resolveRetainerAccount`, which Phase 105 built to
+say *which* account retainers landed on because the reconciliation differs — so
+adding a liability to that shared control account cannot break its reconciliation,
+by an earlier phase's design. And `setScheduleOfValues`.
+
+**A billing schedule must not require job costing**, found by running the test
+rather than reading the call. `setScheduleOfValues` calls `requireModule`, so
+telling the job unconditionally threw the *whole conversion* for any company
+without that module — and a plumber taking 50% up front has an ordinary schedule
+and no use for a construction schedule of values. The stages are kept either way
+and the job is told only when it can listen.
+
+`invoiceFromProposal` is deleted rather than left unreferenced, and the test that
+asserted the whole-contract invoice is settled with the old assertion quoted in it
+— a proposal with no schedule now raises nothing at all, because inventing terms
+at conversion would be inventing terms nobody agreed to.
+
+
 ### The field four paths were waiting for (Phase 153)
 
 `PENDING_WIRING` carried `mayPostToBank` as its one blocked entry for seventeen
@@ -7325,6 +7383,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/billing-schedule.test.ts` | **The invoice schedule that billed everything** (Phase 154): spec §6 requires a won proposal to create an "invoice schedule" and `conversion.ts` quoted that sentence while raising one invoice for every selected item, dated the day of conversion — a $500,000 contract billed in full on signing day, with a test asserting it as correct because test and code came from the same idea. And no screen could reach it: the pipeline board hardcoded the flag off, so the only `createInvoice: true` in the repository was that test. Phase 49's rule and its inversion in one function. The design is that a deposit is not a milestone: a milestone bills work and belongs on the job's schedule of values, a deposit is money before work and is a liability until earned, so it cannot be an SOV line without showing the job overbilled by the deposit forever. The contract is the whole and the stages are carved out of it, through `splitExactly`. Running it found that a billing schedule must not require the job-costing module, which `setScheduleOfValues` does — telling the job unconditionally threw the entire conversion for any company that does not bill progressively |
 | `tests/bank-money.test.ts`, `tests/banking-in-euros.test.ts` | **The field four paths were waiting for** (Phase 153): the acceptance test ADR 0136 said could not be written yet, and the columns that let it be. Four paths refused a foreign bank account outright, so a business banking in euros could not remit a liability, take a pledge, or hold and return a deposit at all — a missing capability rather than a wrong figure. The arithmetic was already built twice over in `settleHeld` and `recoverHeld`; what was missing is whether each act **creates** the balance it posts against or **relieves** one. Three relieve, so the bank takes the day's rate and the gap is realised; `receiveDeposit` creates, so a difference is impossible rather than absent, and a test checks that it is the one path that does *not* reach `ensureFxAccount`. Both mistakes balance. `amount_cents` keeps meaning the ledger figure — making it the face amount would have compared a euro against a dollar balance, which is Phase 152's own defect one phase later — and three columns describe the bank side. Five registries caught the schema change, one of them finding a column misclassified since before this phase, so `FACE_COLUMNS` shrank for the first time. A sixth caught the phase correcting itself: three sites were given an invented ground to keep them in `DOMESTIC_GROUNDS` after they stopped being domestic, and the register's exact-correspondence check said so |
 | `tests/fx-summing.test.ts`, `tests/sums-that-add-currencies.test.ts` | **A number with no reader** (Phase 152): the three sums `BLIND_FACE_SUMS` held since Phase 143, and they were not one problem. Two needed converting — a 1099 threshold met by adding whatever currencies a contractor was paid in, and a sales tax return adding euro and dollar invoices — and the third needed the question asked earlier: `cashBasisCaveats` summed `invoices.tax_cents` and read the total only as `> 0`, so there was no rate to argue about because there was no reader. It counts rows, which is the answer its own sibling query three lines above had reached nine phases earlier and nobody carried across. The register also named the wrong column, because `document_tax_lines` carries no currency and so is on no face-column list — the entry was written from what the scan could reach. Then the repair blinded that scan: the arithmetic moved behind `functionalSumSql` and ``sum(${table.column})`` stopped matching, so `converted_sum` is declared as a third addition form and judged, not waved through — the second argument must be a rate and its table must be joined, since a null rate coalesces to the identity and an unjoined one is null on every row. Verified by disagreement in both directions |
 | `tests/deposit-against-foreign-invoice.test.ts`, `recovery-at-two-rates.test.ts`, `contribution-into-a-foreign-account.test.ts`, `tax-that-foots-on-the-document.test.ts`, `a-preview-that-matches-the-post.test.ts` | **The wiring pass** (Phase 151): the five acceptance tests `PENDING_WIRING` had been pointing at for thirteen phases, skipped until the thing each was waiting for existed. They run now, and thirty skipped tests became passing ones. Each names one repair: a donation into a euro account refused rather than posted as dollars; an invoice charging what its printed base times its printed rate comes to; a recovery banking what the statement will show with the difference named as a realised gain; a deposit taking the invoice's worth off the tenancy rather than its face amount; and a billing preview showing every problem at once instead of a total the server declines. Unskipping them found four faults no register held — one of these files was a **stub** that created an invoice, asserted two ids were truthy and never called the function it was written for, which is what a skipped test makes easy to keep |
