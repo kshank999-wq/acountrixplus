@@ -16,6 +16,9 @@ import { PAYROLL_ACCOUNTS } from './accounts'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 import { bankGlAccountFor } from '@/modules/banking/bank-guard'
+import { bankMoneyLines } from '@/modules/fx/bank-money'
+import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
+import { RATE_ONE } from '@/modules/fx/rates'
 
 /**
  * Remitting what was withheld (spec §13, §19).
@@ -148,7 +151,18 @@ export async function recordRemittance(
     periodStart: string
     periodEnd: string
     paidOn: string
+    /** What comes off the liability, in the company's own money. Unchanged. */
     amountCents: number
+    /**
+     * What the bank actually moved, when it is not the company's own money
+     * (Phase 153).
+     *
+     * Omitted for a domestic account, which is every remittance that could be
+     * recorded before Phase 153 — the gate refused anything else. Given, the
+     * liability still comes off at `amountCents` and the bank is credited what
+     * `faceCents` is worth on `paidOn`, with the difference realised.
+     */
+    bank?: { faceCents: number; currency: string }
     liabilityAccountId: string
     financialAccountId: string
     reference?: string
@@ -212,6 +226,30 @@ export async function recordRemittance(
     )
   }
 
+  /**
+   * What the bank gives up, and the difference (Phase 153).
+   *
+   * `already-carried`: the liability was accrued when the payroll ran or the
+   * sale was made, so it comes off at the figure the books hold while the bank
+   * is credited what actually left it on the day. `BANK_MONEY_SITES` declares
+   * that and `tests/bank-money.test.ts` measures the declaration against this
+   * function.
+   */
+  const homeCurrency = await functionalCurrency(ctx.companyId)
+  const currency = input.bank?.currency ?? homeCurrency
+  const dayRateMillionths =
+    currency === homeCurrency
+      ? RATE_ONE
+      : (await rateFor(ctx, currency, input.paidOn)).rateMillionths
+
+  const lines = bankMoneyLines({
+    faceCents: input.bank?.faceCents ?? input.amountCents,
+    dayRateMillionths,
+    origin: 'already-carried',
+    direction: 'out',
+    carriedCents: input.amountCents,
+  })
+
   return db.transaction(async (tx) => {
     const [remittance] = await tx
       .insert(taxRemittances)
@@ -223,6 +261,9 @@ export async function recordRemittance(
         periodEnd: input.periodEnd,
         paidOn: input.paidOn,
         amountCents: input.amountCents,
+        bankFaceCents: input.bank?.faceCents ?? input.amountCents,
+        currency,
+        exchangeRateMillionths: dayRateMillionths,
         liabilityAccountId: input.liabilityAccountId,
         financialAccountId: input.financialAccountId,
         reference: input.reference ?? null,
@@ -231,12 +272,18 @@ export async function recordRemittance(
       .returning()
 
     // Phase 133: the ledger account, and whether this account may take it.
+    // The currency may be handed over since Phase 153 — `bank_face_cents`,
+    // `currency` and `exchange_rate_millionths` are the field ADR 0136 said had
+    // to come before the wiring.
     const bankGl = await bankGlAccountFor(
       ctx,
       input.financialAccountId,
       'remitting this liability',
       tx,
+      currency,
     )
+
+    const fxAccount = lines.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
     const entry = await createJournalEntry(
       ctx,
@@ -249,8 +296,17 @@ export async function recordRemittance(
         lines: [
           // No expense on either side. The cost was recognized when the
           // payroll ran or the sale was made.
-          { chartAccountId: input.liabilityAccountId, debitCents: input.amountCents },
-          { chartAccountId: bankGl, creditCents: input.amountCents },
+          { chartAccountId: input.liabilityAccountId, debitCents: lines.againstCents },
+          { chartAccountId: bankGl, creditCents: lines.bankCents },
+          // Positive credits the exchange account, negative debits it — the
+          // convention `Settlement` owns and this does not restate.
+          ...(fxAccount
+            ? [
+                lines.realisedCents > 0
+                  ? { chartAccountId: fxAccount, creditCents: lines.realisedCents }
+                  : { chartAccountId: fxAccount, debitCents: -lines.realisedCents },
+              ]
+            : []),
         ],
       },
       tx,
@@ -350,6 +406,10 @@ export async function remittanceAccounts(ctx: ActorContext) {
       id: financialAccounts.id,
       name: financialAccounts.name,
       mask: financialAccounts.mask,
+      // So the screen can ask what the bank paid only when the answer is not
+      // obvious (Phase 153). A field shown on every remittance would be a field
+      // ignored on every remittance.
+      currency: financialAccounts.currency,
     })
     .from(financialAccounts)
     .where(scoped(ctx, financialAccounts))

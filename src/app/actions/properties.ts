@@ -158,6 +158,17 @@ export async function receiveDepositAction(input: unknown): Promise<ActionResult
       .object({
         leaseId: uuid,
         amountCents: cents.positive('A deposit must be more than nothing.'),
+        /**
+         * What the tenant paid in, when it is not the company's own money
+         * (Phase 153).
+         *
+         * One field rather than two here, unlike the refund below, because this
+         * act creates the liability: the amount typed *is* the face amount and
+         * the liability takes what it converts to. `BANK_MONEY_SITES` calls that
+         * `created-here` and the difference between the two deposit paths is the
+         * reason it is declared per site.
+         */
+        currency: z.string().trim().length(3).toUpperCase().optional(),
         occurredOn: isoDate,
         financialAccountId: uuid,
         memo: z.string().trim().optional(),
@@ -175,14 +186,43 @@ export async function refundDepositAction(input: unknown): Promise<ActionResult>
     const parsed = z
       .object({
         leaseId: uuid,
+        /** What comes off the deposits liability, in the company's own money. */
         amountCents: cents.positive('A refund must be more than nothing.'),
+        /**
+         * What the bank actually paid out, when the account is not in the
+         * company's own money (Phase 153).
+         *
+         * Two fields here and one above, which is the whole difference between
+         * the siblings: a refund relieves a liability the books may have carried
+         * for years, so what leaves the bank today and what comes off the
+         * liability are different numbers and the gap is realised.
+         */
+        bankFaceCents: cents.positive('Say what the bank actually paid out.').optional(),
+        bankCurrency: z.string().trim().length(3).toUpperCase().optional(),
         occurredOn: isoDate,
         financialAccountId: uuid,
         memo: z.string().trim().optional(),
       })
+      .refine(
+        (value) => (value.bankFaceCents === undefined) === (value.bankCurrency === undefined),
+        {
+          message:
+            'Give both what the bank paid out and the currency it paid in, or neither. One ' +
+            'without the other cannot be posted.',
+          path: ['bankFaceCents'],
+        },
+      )
       .parse(input)
 
-    await refundDeposit(actor, parsed)
+    const { bankFaceCents, bankCurrency, ...refund } = parsed
+
+    await refundDeposit(actor, {
+      ...refund,
+      bank:
+        bankFaceCents !== undefined && bankCurrency !== undefined
+          ? { faceCents: bankFaceCents, currency: bankCurrency }
+          : undefined,
+    })
     return `${formatCents(parsed.amountCents)} returned. Not an expense — it was never income.`
   })
 }

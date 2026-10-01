@@ -235,13 +235,16 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
   {
     file: 'src/modules/payroll/remittance.ts',
     symbol: 'recordRemittance',
-    handling: 'refuses',
+    handling: 'matched',
     because:
       'The one ADR 0131 and ADR 0132 both named. The amount is refused unless it is no larger ' +
       'than what `liabilityPositions` says the ledger account owes, so it is measured against a ' +
-      'ledger balance and is the books’ money — right by `LEDGER_POSTINGS` and still wrong ' +
-      'against a euro account, because nothing asks what left it and there is no field to say.',
-    withheld: 'no-field',
+      'ledger balance and is the books’ money. It was `refuses` with `withheld: \'no-field\'` from ' +
+      'Phase 136 until Phase 153 gave `tax_remittances` the three columns that say what left the ' +
+      'account: `amount_cents` still comes off the liability, `bank_face_cents` is what the bank ' +
+      'gave up, and `bankMoneyLines` realises the gap. `BANK_MONEY_SITES` declares the liability ' +
+      '`already-carried` — it was accrued when the payroll ran — and a test measures that against ' +
+      'this function reaching `ensureFxAccount`.',
   },
   {
     file: 'src/modules/funds/contributions.ts',
@@ -256,22 +259,26 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
   {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'receiveDeposit',
-    handling: 'refuses',
+    handling: 'matched',
     because:
       'A tenant’s security deposit into a bank account — somebody else’s money, which Phase 23 ' +
-      'was careful to keep as a liability rather than income. The care stops at the currency: the ' +
-      'figure is typed by a person and the account is chosen from a list that includes foreign ones.',
-    withheld: 'no-field',
+      'was careful to keep as a liability rather than income. The care stopped at the currency ' +
+      'until Phase 153, when `deposit_movements` learned to say what the tenant handed over. The ' +
+      'only one of the four that `BANK_MONEY_SITES` calls `created-here`: this act raises the ' +
+      'liability, so the credit is exactly the converted debit and a realised difference is ' +
+      'impossible rather than absent — which is why it is the one path here that must *not* reach ' +
+      '`ensureFxAccount`, and a test measures that too.',
   },
   {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'refundDeposit',
-    handling: 'refuses',
+    handling: 'matched',
     because:
-      'The other end of the same act, and refused for the same reason. Returning it is the half ' +
-      'where getting the currency wrong is worst: the liability was raised at one figure and ' +
-      'relieving it at another leaves a balance no tenant can be shown.',
-    withheld: 'no-field',
+      'The other end of the same act and the opposite answer, which is why these are declared per ' +
+      'site. Returning a deposit relieves a liability the books may have carried for years, so it ' +
+      'is `already-carried`: the liability comes off at the figure it holds, the bank gives up ' +
+      'what the refund is worth today, and the movement between the two days is realised. Wired ' +
+      'in Phase 153 with its sibling, from the same migration and to a different rule.',
   },
   {
     file: 'src/modules/payments/service.ts',

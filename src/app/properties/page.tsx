@@ -3,6 +3,7 @@ import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled, companyTerminology } from '@/modules/industry/modules'
 import { listFinancialAccounts } from '@/modules/banking/sync'
+import { functionalCurrency } from '@/modules/fx/service'
 import { listCustomers } from '@/modules/receivables/service'
 import { listProperties } from '@/modules/properties/service'
 import { occupancy, rentRoll } from '@/modules/properties/reporting'
@@ -62,7 +63,18 @@ export default async function PropertiesPage({
   const params = await searchParams
   const month = params.month ?? new Date().toISOString().slice(0, 7).concat('-01')
 
-  const [properties, roll, stats, preview, charges, deposits, customers, accounts, terms] =
+  const [
+    properties,
+    roll,
+    stats,
+    preview,
+    charges,
+    deposits,
+    customers,
+    accounts,
+    terms,
+    homeCurrency,
+  ] =
     await Promise.all([
       listProperties(actor),
       rentRoll(actor),
@@ -73,6 +85,7 @@ export default async function PropertiesPage({
       listCustomers(actor),
       listFinancialAccounts(actor),
       companyTerminology(actor.companyId),
+      functionalCurrency(actor.companyId),
     ])
 
   return (
@@ -95,7 +108,15 @@ export default async function PropertiesPage({
         charges={charges}
         deposits={deposits}
         customers={customers.map((customer) => ({ id: customer.id, name: customer.name }))}
-        accounts={accounts.map((account) => ({ id: account.id, name: account.name }))}
+        // The currency travels with the account since Phase 153, so the deposit
+        // panel can ask what the tenant actually paid when it is not the
+        // company's own money — and ask nothing when it is.
+        accounts={accounts.map((account) => ({
+          id: account.id,
+          name: account.name,
+          currency: account.currency,
+        }))}
+        homeCurrency={homeCurrency}
         // The real-estate pack renames a customer to a Tenant (spec §5). The
         // record is the same `customers` row either way — only the word moves.
         tenantWord={terms.customer}

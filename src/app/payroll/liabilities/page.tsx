@@ -7,6 +7,7 @@ import {
   listRemittances,
   remittanceAccounts,
 } from '@/modules/payroll/remittance'
+import { functionalCurrency } from '@/modules/fx/service'
 import { payrollNav } from '../nav'
 import { Card, Empty, NoAccess, SecurityNotice, Table } from '../ui'
 import { yearToDate } from '../period'
@@ -29,10 +30,13 @@ export default async function LiabilitiesPage() {
 
   const period = yearToDate()
 
-  const [positions, remittances, banks] = await Promise.all([
+  const [positions, remittances, banks, homeCurrency] = await Promise.all([
     liabilityPositions(actor, { asOfDate: period.endDate }),
     listRemittances(actor, { limit: 25 }),
     remittanceAccounts(actor),
+    // Phase 153: the form asks what the bank paid only when the account it is
+    // paid from is not held in the company's own money.
+    functionalCurrency(actor.companyId),
   ])
 
   const canRemit = can(actor, 'tax:manage') && can(actor, 'accounting:journal')
@@ -90,6 +94,7 @@ export default async function LiabilitiesPage() {
               balanceCents: entry.balanceCents,
             }))}
             banks={banks}
+            homeCurrency={homeCurrency}
           />
         </div>
       )}

@@ -71,9 +71,23 @@ describe('what money a column holds', () => {
   it('finds enough of them for that to mean something', () => {
     // Measured, not bounded (Phase 126). Fifty-four columns across the carrier
     // tables; the hand-typed list had seventeen.
-    expect(MONEY_COLUMNS.length).toBe(54)
-    expect(FACE_COLUMNS.length).toBe(44)
-    expect(MONEY_COLUMNS.filter((row) => row.side === 'functional').length).toBe(5)
+    //
+    // Fifty-seven since Phase 153, from two new carrier tables rather than from
+    // three new columns. `tax_remittances` gained `bank_face_cents`;
+    // `deposit_movements` gained the same column *and* became a carrier, so its
+    // `amount_cents` is declared for the first time having existed since Phase
+    // 23 — invisible to this list because the table had no currency of its own
+    // to be denominated in. That is Phase 143's finding one table over: a column
+    // nobody classified was not excused, it was unseen.
+    expect(MONEY_COLUMNS.length).toBe(57)
+    // Forty-five, not forty-six: two face columns added and one taken away,
+    // because `tax_remittances.amount_cents` moved to `functional`.
+    expect(FACE_COLUMNS.length).toBe(45)
+    // Seven rather than five, and one of the two is a reclassification:
+    // `tax_remittances.amount_cents` was `face` and is measured against a ledger
+    // balance, so it was the books' money all along and read as a face amount
+    // only because nothing else on the row could be one.
+    expect(MONEY_COLUMNS.filter((row) => row.side === 'functional').length).toBe(7)
     expect(MONEY_COLUMNS.filter((row) => row.side === 'account').length).toBe(5)
   })
 
@@ -87,10 +101,20 @@ describe('what money a column holds', () => {
     // Both directions. A twin that does not exist is a claim the scans would
     // act on, and a twin that exists and is not named leaves the face column
     // looking unpairable.
+    //
+    // **Any real money column, not just a `functional_%_cents` one** (Phase
+    // 153). This matched the naming convention, which held for every pair until
+    // then because in every one of them the face amount came first and the
+    // functional twin was added later with that prefix. `deposit_movements` and
+    // `tax_remittances` are the other way round: the *functional* figure is the
+    // one that already existed, under the plain name `amount_cents`, and the
+    // face column is what Phase 153 added. The convention cannot spell that, and
+    // the check's actual job — "a twin that does not exist is a claim the scans
+    // would act on" — is answered by asking whether the column is there.
     const rows = await db.execute<{ table_name: string; column_name: string }>(sql`
       SELECT table_name, column_name
         FROM information_schema.columns
-       WHERE table_schema = 'public' AND column_name LIKE 'functional%cents'
+       WHERE table_schema = 'public' AND column_name LIKE '%cents'
     `)
 
     const real = new Set([...rows].map((row) => `${row.table_name}.${row.column_name}`))
@@ -99,6 +123,12 @@ describe('what money a column holds', () => {
     )
 
     expect(claimed.filter((key) => !real.has(key))).toEqual([])
+
+    // And the twin is never the column itself, which a widened check could now
+    // let through and the old one could not.
+    expect(
+      MONEY_COLUMNS.filter((row) => row.functionalColumn === row.column).map((row) => row.table),
+    ).toEqual([])
   })
 
   it('agrees with PAIRED_COLUMNS about which face columns have twins', () => {

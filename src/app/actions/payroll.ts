@@ -288,16 +288,43 @@ const remittanceSchema = z.object({
   liabilityAccountId: z.string().uuid(),
   financialAccountId: z.string().uuid('Choose the bank account it was paid from.'),
   reference: z.string().trim().optional(),
+  /**
+   * What the bank actually paid, when the account is not in the company's own
+   * money (Phase 153).
+   *
+   * Both or neither, which the refinement below enforces rather than leaving to
+   * the service: a face amount with no currency does not say what it is, and a
+   * currency with no face amount leaves the bank line with nothing to convert.
+   * The database CHECK says the same thing about the row; this says it to the
+   * person, in time to fix it.
+   */
+  bankFaceCents: cents.positive('Say what the bank actually paid.').optional(),
+  bankCurrency: z.string().trim().length(3).toUpperCase().optional(),
 })
+  .refine(
+    (value) => (value.bankFaceCents === undefined) === (value.bankCurrency === undefined),
+    {
+      message:
+        'Give both what the bank paid and the currency it paid in, or neither. One without the ' +
+        'other cannot be posted.',
+      path: ['bankFaceCents'],
+    },
+  )
 
 export async function recordRemittanceAction(input: unknown): Promise<ActionResult> {
   return run([...PAYROLL_PATHS, '/payroll/sales-tax', '/accounting'], async () => {
     const actor = await requireActor()
     const parsed = remittanceSchema.parse(input)
 
+    const { bankFaceCents, bankCurrency, ...remittance } = parsed
+
     await recordRemittance(actor, {
-      ...parsed,
+      ...remittance,
       reference: parsed.reference || undefined,
+      bank:
+        bankFaceCents !== undefined && bankCurrency !== undefined
+          ? { faceCents: bankFaceCents, currency: bankCurrency }
+          : undefined,
     })
 
     return 'Remittance recorded and the liability cleared.'

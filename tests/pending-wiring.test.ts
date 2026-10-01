@@ -80,11 +80,20 @@ describe('the register of what is staged', () => {
     // problems, the panel calls the same core directly, and the refusal moved
     // to `createProgressBilling` where a commit's refusal belongs.
     //
-    // What is left is `mayPostToBank`, which is blocked by a column and has
-    // been since Phase 136. It names no acceptance test on purpose, and the
-    // register allows that only for a blocked entry.
+    // **One over one since Phase 153.** `mayPostToBank` was blocked by a column
+    // and has been since Phase 136; that phase added the columns and wired three
+    // of its four targets. The fourth, `receivePledge`, is still here with a
+    // *different* blocker: a pledge is received in instalments, so each receipt
+    // has its own rate and there is no row to carry one on. `a row` was added as
+    // a blocker rather than stretching `a field`, which is Phase 130's rule —
+    // argue a new enum value instead of bending the nearest.
+    //
+    // The entry count did not move and the target count did, which is the shape
+    // worth asserting: a register that only ever shrinks by whole entries cannot
+    // show partial progress, and partial progress is what this was.
     expect(PENDING_WIRING.length).toBe(1)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(4)
+    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(1)
+    expect(PENDING_WIRING[0].blockedBy).toBe('a row')
   })
 
   it('still describes the code, entry by entry', () => {
@@ -119,8 +128,15 @@ describe('the register of what is staged', () => {
     // anything — and the list is a spelling, which is the shape this codebase
     // has now found wanting seven times.
     for (const entry of PENDING_WIRING) {
+      // `refuses?` since Phase 153, and the `s` is the whole change: the list
+      // read `refuse\b`, which does not match "refuses". Every entry that had
+      // used the word happened to have written the bare stem, so a check meant
+      // to find a present-tense verb about live code was rejecting the most
+      // natural present tense of one of its own six words. Widened rather than
+      // worked around by rewording the entry, which is the direction Phase 145
+      // settled: the sentence is the thing that has to be true.
       expect(entry.liveDefect, entry.core).toMatch(
-        /\b(?:compares|posts|refuse|reports|puts|rounds)\b/,
+        /\b(?:compares|posts|refuses?|reports|puts|rounds)\b/,
       )
     }
   })
@@ -209,10 +225,16 @@ describe('what the register refuses', () => {
   })
 
   it('lets a blocked entry name no test, which is the honest answer', () => {
-    // The argued exception. The four paths that refuse a foreign bank account
-    // need a column and a screen before anything can be wired, and a test
-    // written against a column that does not exist would be fiction.
-    const blocked = PENDING_WIRING.find((row) => row.blockedBy === 'a field')
+    // The argued exception. A path that cannot ask what currency the money was in
+    // needs somewhere to record the answer before anything can be wired, and a
+    // test written against a column — or a table — that does not exist would be
+    // fiction rather than a definition of done.
+    //
+    // `a field` until Phase 153 and `a row` after it, which is the exception
+    // getting narrower rather than looser: three of the four were cleared by a
+    // migration and the one left needs a table.
+    const blocked = PENDING_WIRING.find((row) => row.blockedBy !== 'nothing')
+    expect(blocked).toBeDefined()
     expect(blocked?.acceptance).toBe(null)
 
     expect(

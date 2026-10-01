@@ -91,7 +91,9 @@ type Props = {
     }>
   } | null
   customers: Named[]
-  accounts: Named[]
+  accounts: Array<Named & { currency: string }>
+  /** What the books are kept in, so the deposit panel asks only when it must. */
+  homeCurrency: string
   tenantWord: string
   canManage: boolean
 }
@@ -721,6 +723,7 @@ function Deposits(props: Props & Acting) {
                       <DepositMovement
                         leaseId={row.leaseId}
                         accounts={props.accounts}
+                        homeCurrency={props.homeCurrency}
                         act={props.act}
                         pending={props.pending}
                         onDone={() => setMovingFor(null)}
@@ -740,24 +743,45 @@ function Deposits(props: Props & Acting) {
 function DepositMovement({
   leaseId,
   accounts,
+  homeCurrency,
   act,
   pending,
   onDone,
-}: Acting & { leaseId: string; accounts: Named[]; onDone: () => void }) {
+}: Acting & {
+  leaseId: string
+  accounts: Array<Named & { currency: string }>
+  homeCurrency: string
+  onDone: () => void
+}) {
   const [amount, setAmount] = useState('')
   const [occurredOn, setOccurredOn] = useState(new Date().toISOString().slice(0, 10))
   const [accountId, setAccountId] = useState(accounts[0]?.id ?? '')
   const [memo, setMemo] = useState('')
+  const [offLiability, setOffLiability] = useState('')
 
   const cents = Math.round(Number(amount || '0') * 100)
   const ready = cents > 0
+
+  /**
+   * Shown only for an account not held in the company's own money (Phase 153).
+   *
+   * The two buttons below take the amount differently and that is not a quirk of
+   * the form — it is `BANK_MONEY_SITES`. Taking a deposit **creates** the
+   * liability, so the amount typed is what the tenant paid and the liability
+   * takes what it converts to. Giving it back **relieves** a liability the books
+   * may have carried for years, so what comes off it and what leaves the bank
+   * are different numbers.
+   */
+  const account = accounts.find((entry) => entry.id === accountId)
+  const foreign = account !== undefined && account.currency !== homeCurrency
+  const offCents = Math.round(Number(offLiability || '0') * 100)
 
   return (
     <div className="mt-2 flex flex-wrap gap-2 rounded-lg bg-raised/40 p-3">
       <input
         value={amount}
         onChange={(event) => setAmount(event.target.value)}
-        placeholder="Amount"
+        placeholder={foreign ? `Amount (${account?.currency})` : 'Amount'}
         className="field w-32 py-1 text-xs"
         inputMode="decimal"
       />
@@ -778,6 +802,15 @@ function DepositMovement({
           </option>
         ))}
       </select>
+      {foreign && (
+        <input
+          value={offLiability}
+          onChange={(event) => setOffLiability(event.target.value)}
+          placeholder={`Off the deposit (${homeCurrency})`}
+          className="field w-44 py-1 text-xs"
+          inputMode="decimal"
+        />
+      )}
       <input
         value={memo}
         onChange={(event) => setMemo(event.target.value)}
@@ -791,7 +824,10 @@ function DepositMovement({
           act(() =>
             receiveDepositAction({
               leaseId,
+              // What the tenant paid, in the account's own currency. The
+              // liability takes what it is worth.
               amountCents: cents,
+              currency: foreign ? account?.currency : undefined,
               occurredOn,
               financialAccountId: accountId,
               memo: memo || undefined,
@@ -809,7 +845,11 @@ function DepositMovement({
           act(() =>
             refundDepositAction({
               leaseId,
-              amountCents: cents,
+              // What comes off the liability, in the books' own money, and
+              // separately what the bank paid out.
+              amountCents: foreign ? offCents : cents,
+              bankFaceCents: foreign ? cents : undefined,
+              bankCurrency: foreign ? account?.currency : undefined,
               occurredOn,
               financialAccountId: accountId,
               memo: memo || undefined,
@@ -820,6 +860,14 @@ function DepositMovement({
       >
         Give it back
       </button>
+      {foreign && (
+        <p className="w-full text-xs text-muted">
+          {account?.name} is held in {account?.currency}. Taking a deposit raises the liability at
+          what the money is worth on the day, so one amount is enough. Giving one back relieves a
+          liability the books have been carrying — say what comes off it as well, and the difference
+          between the two days is posted as a realised exchange gain or loss.
+        </p>
+      )}
       <button
         className="btn btn-ghost text-xs"
         disabled={pending || !ready}

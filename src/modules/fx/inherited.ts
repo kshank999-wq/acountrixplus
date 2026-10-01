@@ -245,20 +245,21 @@ export const INHERITED_CURRENCY: readonly InheritedCurrency[] = [
       'in one currency. The invoice says what it sold for; this says what it cost, and those are ' +
       'not the same money even when they are the same number.',
   },
-  {
-    table: 'tax_remittances',
-    property: 'taxRemittances',
-    parents: [{ table: 'financial_accounts', column: 'financial_account_id' }],
-    faceColumns: [],
-    faceOf: [],
-    booksColumns: ['amount_cents'],
-    because:
-      'The books’. `recordRemittance` refuses an amount larger than what `liabilityPositions` says ' +
-      'is owed on the ledger account, so the figure is measured against a ledger balance and is ' +
-      'therefore in the ledger’s money. The account is where it was paid from, not what it is ' +
-      'denominated in — which is a real gap when that account is foreign, and is named in ADR 0131.',
-  },
 ]
+
+/**
+ * `tax_remittances` was here until Phase 153.
+ *
+ * Its entry said the right thing — *"the account is where it was paid from, not
+ * what it is denominated in — which is a real gap when that account is foreign,
+ * and is named in ADR 0131"* — and that gap is what Phase 153 closed. The table
+ * carries its own `currency` now, beside `bank_face_cents`, so it is a
+ * `CURRENCY_CARRIERS` entry rather than an inheriting one.
+ *
+ * Kept as a note rather than deleted silently, because the sentence that moved
+ * was the one naming the defect, and an ADR citation that vanishes with the
+ * entry takes the reason with it.
+ */
 
 /**
  * What a table's money belongs to, or a refusal.

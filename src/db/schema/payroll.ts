@@ -316,7 +316,30 @@ export const taxRemittances = pgTable(
     periodEnd: date('period_end').notNull(),
     paidOn: date('paid_on').notNull(),
 
+    /** What comes off the liability, in the company's own money. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    /**
+     * What the bank actually moved, and the rate it was posted at (Phase 153).
+     *
+     * `amountCents` above is unchanged: the figure the **ledger balance** moves
+     * by, in the company's own money. These three describe the other side — what
+     * left or entered the account, in what currency — so the two sides of the
+     * entry can differ by a realised gain instead of being forced to be one
+     * number.
+     *
+     * The rate is stored rather than looked up again, which is Phase 129's rule:
+     * `rateFor` answers from a table the company keeps adding to, and a movement
+     * reconciled six months later has to be reconciled against the rate it was
+     * actually posted at.
+     *
+     * Null together on every row written before Phase 153, because the gate
+     * refused any account not held in the company's own money — so for all of
+     * them the bank face amount *is* `amountCents`, which the migration writes
+     * down rather than leaving as an absence.
+     */
+    bankFaceCents: bigint('bank_face_cents', { mode: 'number' }),
+    currency: text('currency'),
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' }),
     liabilityAccountId: uuid('liability_account_id')
       .notNull()
       .references(() => chartAccounts.id, { onDelete: 'restrict' }),
@@ -336,6 +359,12 @@ export const taxRemittances = pgTable(
   (t) => ({
     companyIdx: index('tax_remittances_company_idx').on(t.companyId, t.paidOn),
     positive: check('tax_remittances_positive', sql`${t.amountCents} > 0`),
+    // All three or none. A face amount with no currency does not say what it
+    // is, and a currency with no rate cannot be converted for the ledger.
+    bankFaceSane: check(
+      'tax_remittances_bank_face_sane',
+      sql`(${t.bankFaceCents} IS NULL AND ${t.currency} IS NULL AND ${t.exchangeRateMillionths} IS NULL) OR (${t.bankFaceCents} > 0 AND ${t.currency} IS NOT NULL AND ${t.exchangeRateMillionths} > 0)`,
+    ),
   }),
 )
 

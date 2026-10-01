@@ -6189,6 +6189,67 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The field four paths were waiting for (Phase 153)
+
+`PENDING_WIRING` carried `mayPostToBank` as its one blocked entry for seventeen
+phases, with `acceptance: null` because a test written against a column that does
+not exist would be fiction. Verified before acting: `information_schema` says the
+three tables carry no currency and no rate, and `BANK_POSTINGS` records exactly
+the four paths the entry names. The blocker was real and it was the one claimed.
+
+**What was wrong was a capability, not a figure.** All four refused a foreign bank
+account outright, so a business banking in euros could not remit a payroll or
+sales tax liability, take a pledge, or hold and return a tenancy deposit through
+that account at all.
+
+**The core was already here, twice.** `settleHeld` and `recoverHeld` have decided
+the arithmetic since Phase 68. What was missing is the answer to a question the
+four paths answer differently and none of them stated: *does this act create the
+balance it posts against, or relieve one?* Three relieve — the liability was
+accrued when the payroll ran, the receivable when the promise was made, the
+deposit when it was taken — so the bank takes the rate on the day and the gap is
+realised. One creates: `receiveDeposit` raises the liability, so the credit is
+exactly the converted debit and a difference is **impossible** rather than absent.
+ADR 0147's question, asked about a balance instead of a division.
+
+Both mistakes balance, which is why it is declared and measured. Omit a
+difference that belongs and the bank is understated by exactly the movement; post
+one that cannot exist and you have a gain nobody earned. A test checks that the
+three that relieve reach `ensureFxAccount` and the one that creates does not.
+
+**`amount_cents` keeps its meaning**, and the first attempt got that wrong. Making
+it the face amount with a `currency` beside it means `recordRemittance` compares a
+euro figure against a dollar ledger balance — the `contractorPayments` defect
+Phase 152 repaired, reintroduced one phase later somewhere else. So the ledger
+side is untouched and three new columns describe the bank side, the rate among
+them because Phase 129's rule is that a posting records the rate it used.
+
+**`receivePledge` is still blocked, with a sharper blocker.** It needs a row, not
+a column: a pledge is received in instalments, each with its own day and its own
+rate, and there is nowhere for a receipt to carry them. `a row` joins `Blocker`
+rather than stretching `a field` (Phase 130), and the register shows partial
+progress for the first time — one entry over one target where it was one over
+four.
+
+**Four registries caught the change and one was wrong before it.**
+`CURRENCY_CARRIERS` gained two tables; `INHERITED_CURRENCY` lost
+`tax_remittances`, whose entry had named this very gap; `DOMESTIC_GROUNDS` needed
+a new ground, `converts-here`, because its three sites no longer refuse;
+`MONEY_COLUMNS` gained a column that has existed since Phase 23 and was invisible
+for want of a currency on its table. And `tax_remittances.amount_cents` was
+declared a face amount when it is measured against a ledger balance — the books'
+money all along, reading as face only because nothing else on the row could be.
+So `FACE_COLUMNS` **shrank**: 28 unpaired columns to 27, the first time a register
+in this family has gone down.
+
+**Two runtime throws became a type.** `bankMoneyLines` threw when a created
+balance was handed a carried figure and when a carried one had none. A constraint
+beats a check (Phase 116), and `RegistryError` means "no entry is declared for
+this key" rather than "you called this wrongly" — so `origin` discriminates a
+union and both mistakes fail to compile. `registry-error.test.ts` watched its
+count go to 22 and back to 20, and caught a fifth registry while it was there.
+
+
 ### A number with no reader (Phase 152)
 
 `BLIND_FACE_SUMS` held three sums known to add two currencies, from Phase 143
@@ -6901,6 +6962,10 @@ The argued exception: four paths refuse a foreign bank account because nothing
 records what currency their money is in, so they are blocked by **a field**, not
 by wiring — and their acceptance test is `null`, because one written against a
 column that does not exist would be fiction rather than a definition of done.
+(Three of the four were wired in Phase 153, which added the columns. The fourth,
+`receivePledge`, is still here with a narrower blocker: **a row**, because a
+pledge is received in instalments and there is nowhere for one receipt's rate to
+live.)
 
 Both named acceptance tests are skipped rather than red. A red suite nobody can
 fix teaches people to ignore the suite, which is what ADR 0137 said about
@@ -7252,6 +7317,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/bank-money.test.ts`, `tests/banking-in-euros.test.ts` | **The field four paths were waiting for** (Phase 153): the acceptance test ADR 0136 said could not be written yet, and the columns that let it be. Four paths refused a foreign bank account outright, so a business banking in euros could not remit a liability, take a pledge, or hold and return a deposit at all — a missing capability rather than a wrong figure. The arithmetic was already built twice over in `settleHeld` and `recoverHeld`; what was missing is whether each act **creates** the balance it posts against or **relieves** one. Three relieve, so the bank takes the day's rate and the gap is realised; `receiveDeposit` creates, so a difference is impossible rather than absent, and a test checks that it is the one path that does *not* reach `ensureFxAccount`. Both mistakes balance. `amount_cents` keeps meaning the ledger figure — making it the face amount would have compared a euro against a dollar balance, which is Phase 152's own defect one phase later — and three columns describe the bank side. Four registries caught the schema change, one of them finding a column misclassified since before this phase: `FACE_COLUMNS` shrank for the first time |
 | `tests/fx-summing.test.ts`, `tests/sums-that-add-currencies.test.ts` | **A number with no reader** (Phase 152): the three sums `BLIND_FACE_SUMS` held since Phase 143, and they were not one problem. Two needed converting — a 1099 threshold met by adding whatever currencies a contractor was paid in, and a sales tax return adding euro and dollar invoices — and the third needed the question asked earlier: `cashBasisCaveats` summed `invoices.tax_cents` and read the total only as `> 0`, so there was no rate to argue about because there was no reader. It counts rows, which is the answer its own sibling query three lines above had reached nine phases earlier and nobody carried across. The register also named the wrong column, because `document_tax_lines` carries no currency and so is on no face-column list — the entry was written from what the scan could reach. Then the repair blinded that scan: the arithmetic moved behind `functionalSumSql` and ``sum(${table.column})`` stopped matching, so `converted_sum` is declared as a third addition form and judged, not waved through — the second argument must be a rate and its table must be joined, since a null rate coalesces to the identity and an unjoined one is null on every row. Verified by disagreement in both directions |
 | `tests/deposit-against-foreign-invoice.test.ts`, `recovery-at-two-rates.test.ts`, `contribution-into-a-foreign-account.test.ts`, `tax-that-foots-on-the-document.test.ts`, `a-preview-that-matches-the-post.test.ts` | **The wiring pass** (Phase 151): the five acceptance tests `PENDING_WIRING` had been pointing at for thirteen phases, skipped until the thing each was waiting for existed. They run now, and thirty skipped tests became passing ones. Each names one repair: a donation into a euro account refused rather than posted as dollars; an invoice charging what its printed base times its printed rate comes to; a recovery banking what the statement will show with the difference named as a realised gain; a deposit taking the invoice's worth off the tenancy rather than its face amount; and a billing preview showing every problem at once instead of a total the server declines. Unskipping them found four faults no register held — one of these files was a **stub** that created an invoice, asserted two ids were truthy and never called the function it was written for, which is what a skipped test makes easy to keep |
 | `tests/isolation-reads.test.ts` | **What a read stands on** (Phase 150): ADR 0149 measured only the writes and said so — a select that returns another company's rows is a breach whether or not anything was written. **866** reads from company-scoped tables, every one guarded, by eleven mechanisms; `scoped()` covers 61% of reads against 25% of writes, so the two halves are guarded quite differently and nothing had counted either. A write can be guarded by a refusal that fired earlier; a read that leaks has already leaked, so its guard must be in the statement or in the id it was handed — which is why `owner-helper` is write-only and `derives-tenant-from-row` and `id-from-fetched-row` are read-only. It corrected the phase before it: ADR 0149's table detector ran past a closing brace, falsely counting two content-addressed tables and missing seven real ones, so the write numbers become 164 tables and 109 writes — still zero unguarded. The scan itself was wrong twice more first, both kept as cases: a line-based statement reader that cut multi-line `where` clauses, and a helper detector that only recognised the word "Own" |

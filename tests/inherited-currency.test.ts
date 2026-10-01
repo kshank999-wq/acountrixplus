@@ -140,7 +140,23 @@ describe('what inherits a currency', () => {
     // Phase 128 plus the eleven inheritors whose money is a parent's — the two
     // that answer "the books'" are deliberately not here, because a page
     // reaching `invoice_costings` learns nothing about foreign money.
-    expect(denominatedProperties().length).toBe(24)
-    expect(new Set(denominatedProperties()).size).toBe(24)
+    //
+    // Twenty-six since Phase 153, and the arithmetic is worth following because
+    // it is not simply "+2". `deposit_movements` is a new carrier, so that is
+    // one. `tax_remittances` is also a new carrier and it **left**
+    // `INHERITED_CURRENCY` on the way — but it was one of the two answering "the
+    // books'", so it was never counted here as an inheritor. It arrives as a
+    // carrier without leaving as an inheritor, which is a net gain of one.
+    //
+    // `invoice_costings` is now the only table left that holds *nothing but* the
+    // books' money and is therefore excluded from this count entirely. Three
+    // tables have `booksColumns` — `bank_transactions` and
+    // `retainer_applications` are the other two — but those also carry face
+    // amounts, so they are counted. Measured rather than remembered: the first
+    // draft of this comment said "exactly one table still answering the books'",
+    // which was a true sentence about exclusion written as a false one about
+    // declaration.
+    expect(denominatedProperties().length).toBe(26)
+    expect(new Set(denominatedProperties()).size).toBe(26)
   })
 })

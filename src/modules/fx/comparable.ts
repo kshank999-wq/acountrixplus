@@ -496,10 +496,34 @@ export const MONEY_COLUMNS: readonly MoneyColumn[] = [
   {
     table: 'tax_remittances',
     column: 'amount_cents',
-    side: 'face',
+    side: 'functional',
     functionalColumn: null,
     because:
-      'What was paid over to a tax authority. `tax_remittances` inherits its currency from the account it was paid from (`INHERITED_CURRENCY`), which is why Phase 133 made `recordRemittance` refuse a foreign account rather than post a figure nobody could trace.',
+      'What comes off the liability. `face` until Phase 153 and that was the wrong side all along: `recordRemittance` refuses an amount larger than what `liabilityPositions` says the ledger account owes, so this figure is measured against a ledger balance and is in the ledger’s money. It read as a face amount only because nothing else on the row could be one.',
+  },
+  {
+    table: 'tax_remittances',
+    column: 'bank_face_cents',
+    side: 'face',
+    functionalColumn: 'amount_cents',
+    because:
+      'What actually left the account, in the row’s own `currency` (Phase 153). The face twin the table had been missing, which is why its sibling above looked like a face amount: a row with one money column and a currency somewhere reads as denominated whatever the figure means. `bankMoneyLines` posts this at the day’s rate and realises the difference against the liability.',
+  },
+  {
+    table: 'deposit_movements',
+    column: 'amount_cents',
+    side: 'functional',
+    functionalColumn: null,
+    because:
+      'What the tenancy deposits liability moves by, in the company’s own money. `depositPosition` sums these to say what is held, and `refundDeposit` refuses more than that — so it is a ledger figure on both ends, including for a movement that never touched a bank at all.',
+  },
+  {
+    table: 'deposit_movements',
+    column: 'bank_face_cents',
+    side: 'face',
+    functionalColumn: 'amount_cents',
+    because:
+      'What the tenant handed over or was handed back, in the movement’s own `currency` (Phase 153). Null together with the currency and the rate on an `applied` movement, because applying a deposit to an invoice moves it between two of the company’s own accounts and no bank is touched — the one face column here that is legitimately absent rather than undeclared.',
   },
   {
     table: 'financial_accounts',

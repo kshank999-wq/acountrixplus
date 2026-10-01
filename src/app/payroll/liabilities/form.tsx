@@ -25,9 +25,12 @@ type Position = {
 export function RemittanceForm({
   positions,
   banks,
+  homeCurrency,
 }: {
   positions: Position[]
-  banks: Array<{ id: string; name: string; mask: string | null }>
+  banks: Array<{ id: string; name: string; mask: string | null; currency: string }>
+  /** What the books are kept in, so the extra field appears only when it matters. */
+  homeCurrency: string
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -44,12 +47,24 @@ export function RemittanceForm({
   )
   const [financialAccountId, setFinancialAccountId] = useState(banks[0]?.id ?? '')
   const [reference, setReference] = useState('')
+  const [bankPaid, setBankPaid] = useState('')
 
   // Only the accounts this kind of remittance can clear. The service refuses a
   // mismatch outright — a payroll remittance against Sales Tax Payable balances
   // and leaves both accounts wrong — so the list never offers one.
   const choices = accountsFor(kind, positions)
   const selected = choices.find((entry) => entry.accountId === liabilityAccountId)
+
+  /**
+   * The field ADR 0136 said had to come before the wiring (Phase 153).
+   *
+   * Shown only for an account that is not held in the company's own money,
+   * because that is the only case where the two figures differ. A field on every
+   * remittance would be a field ignored on every remittance, and the amount it
+   * asks for is not a detail — it is what the bank statement will say.
+   */
+  const bank = banks.find((entry) => entry.id === financialAccountId)
+  const foreign = bank !== undefined && bank.currency !== homeCurrency
 
   function changeKind(next: 'payroll' | 'sales_tax') {
     setKind(next)
@@ -65,6 +80,19 @@ export function RemittanceForm({
       return
     }
 
+    let bankFaceCents: number | undefined
+    if (foreign) {
+      try {
+        bankFaceCents = parseAmountToCents(bankPaid)
+      } catch (error) {
+        setMessage({
+          text: messageFor(error, `Say what left the account, in ${bank?.currency}.`),
+          ok: false,
+        })
+        return
+      }
+    }
+
     startTransition(async () => {
       const result = await recordRemittanceAction({
         kind,
@@ -76,6 +104,8 @@ export function RemittanceForm({
         liabilityAccountId,
         financialAccountId,
         reference,
+        bankFaceCents,
+        bankCurrency: foreign ? bank?.currency : undefined,
       })
 
       setMessage({
@@ -86,6 +116,7 @@ export function RemittanceForm({
       if (result.ok) {
         setAmount('')
         setReference('')
+        setBankPaid('')
         router.refresh()
       }
     })
@@ -188,7 +219,7 @@ export function RemittanceForm({
             </select>
           </label>
           <label className="text-xs text-muted">
-            Amount
+            Amount{foreign ? ` off the liability (${homeCurrency})` : ''}
             <input
               className="field mt-1 text-right"
               placeholder="0.00"
@@ -196,7 +227,26 @@ export function RemittanceForm({
               onChange={(event) => setAmount(event.target.value)}
             />
           </label>
+          {foreign && (
+            <label className="text-xs text-muted">
+              Paid from the account ({bank?.currency})
+              <input
+                className="field mt-1 text-right"
+                placeholder="0.00"
+                value={bankPaid}
+                onChange={(event) => setBankPaid(event.target.value)}
+              />
+            </label>
+          )}
         </div>
+        {foreign && (
+          <p className="px-4 pb-1 text-xs text-muted">
+            {bank?.name} is held in {bank?.currency} and these books are kept in {homeCurrency}. The
+            liability comes off at what the ledger says is owed; the account gives up what you
+            actually paid, at the rate on the day. Any difference between the two is posted as a
+            realised exchange gain or loss rather than quietly left out of the bank balance.
+          </p>
+        )}
 
         {selected && (
           <p className="text-xs text-faint">

@@ -48,6 +48,19 @@ export type Blocker =
    * is the shape ADR 0136 called "a real change to a real screen".
    */
   | 'a field'
+  /**
+   * A table. Not a column on an existing row but a **row that does not exist**
+   * (Phase 153).
+   *
+   * Stronger than `a field` and sharper: a column can be added to the row the
+   * act already writes, and this cannot, because the act writes no row of its
+   * own. Separated from `a field` when `receivePledge` turned out to be the one
+   * of four that could not be cleared by a migration — it accumulates into
+   * `contributions.received_cents` and each instalment has its own day and its
+   * own rate, so a single rate column would be right for the first receipt and
+   * quietly wrong for the second.
+   */
+  | 'a row'
 
 export type Pending = {
   /** The core that exists and is not called. */
@@ -80,26 +93,23 @@ export const PENDING_WIRING: readonly Pending[] = [
   {
     core: 'mayPostToBank',
     coreFile: 'src/modules/fx/bank-side.ts',
-    targets: [
-      { symbol: 'recordRemittance', file: 'src/modules/payroll/remittance.ts' },
-      { symbol: 'receivePledge', file: 'src/modules/funds/contributions.ts' },
-      { symbol: 'receiveDeposit', file: 'src/modules/properties/deposits.ts' },
-      { symbol: 'refundDeposit', file: 'src/modules/properties/deposits.ts' },
-    ],
+    targets: [{ symbol: 'receivePledge', file: 'src/modules/funds/contributions.ts' }],
     phase: 136,
-    blockedBy: 'a field',
+    blockedBy: 'a row',
     acceptance: null,
     liveDefect:
-      'These four refuse a foreign bank account outright, so a business banking in euros cannot ' +
-      'remit a payroll liability, take a pledge, or hold and return a tenancy deposit through ' +
-      'that account at all. The refusal is honest — nothing records what currency the money was ' +
-      'in — but it is a capability that does not exist rather than a figure that is wrong.',
+      '`receivePledge` refuses a foreign bank account outright, so a fund keeping a euro account ' +
+      'has to record a donor’s receipt against a home-currency account the money did not go into, ' +
+      'or not record it at all. Three of the four paths this entry named were cleared in Phase 153 ' +
+      'by a migration; this one needs a row rather than a column and is the only one left.',
     because:
-      '`mayPostToBank` has taken a `moneyCurrency` since Phase 136 and these four have nothing to ' +
-      'pass it. ADR 0136 called that "a real change to a real screen" and declined to make it, ' +
-      'and that is still right: a column, a form field and a migration come before the wiring. ' +
-      'The acceptance test is `null` on purpose — one written against a column that does not ' +
-      'exist would be fiction rather than a definition of done.',
+      'A pledge is received in instalments — `received_cents` accumulates and the function refuses ' +
+      'more than is outstanding — so each receipt has its own day and its own rate, and there is ' +
+      'no row for a receipt to carry them on. Phase 129’s rule is that a posting records the rate ' +
+      'it used; a single `exchange_rate_millionths` on `contributions` would be right for the ' +
+      'first instalment and wrong for the second, which is worse than the refusal it replaced. ' +
+      'The acceptance test is `null` for the same reason it was in Phase 136: one written against ' +
+      'a table that does not exist would be fiction rather than a definition of done.',
   },
 ]
 

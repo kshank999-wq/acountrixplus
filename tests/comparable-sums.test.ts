@@ -189,8 +189,15 @@ describe('what counts as a face amount', () => {
     // the schema has fifty-four money columns on these tables and the list had
     // seventeen, so the other twenty-seven were not "paired" — they were
     // unclassified, and a sum over any of them was unseen rather than excused.
+    //
+    // Twenty-seven since Phase 153, and down rather than up for once: that phase
+    // added two face columns and **both arrived with a twin**, because the
+    // functional figure was the one that already existed on each row. One of the
+    // two also took a column off this list by reclassifying it as functional. A
+    // register that had only ever grown shrank, which is what a repair looks
+    // like here.
     const unpaired = FACE_COLUMNS.filter((row) => row.functionalColumn === null)
-    expect(unpaired.length).toBe(28)
+    expect(unpaired.length).toBe(27)
     expect(unpaired.map((row) => `${row.table}.${row.column}`)).toContain('payments.amount_cents')
     expect(unpaired.map((row) => `${row.table}.${row.column}`)).toContain(
       'payment_applications.amount_cents',

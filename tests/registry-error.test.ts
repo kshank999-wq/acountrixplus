@@ -164,7 +164,16 @@ describe('every registry refuses the same way', () => {
     //
     // Nineteen since Phase 149 and `ISOLATION_GUARDS`, which is the second
     // outside the money domain and the first about security.
-    expect(thrown.length).toBe(19)
+    //
+    // Twenty since Phase 153 and `BANK_MONEY_SITES`, which caught this file a
+    // fifth time — written against the registries in `fx/` and not against this
+    // test. Worth recording that it was briefly twenty-two: two more throws in
+    // the same file were argument validation wearing a registry's error, and
+    // `RegistryError` means "no entry is declared for this key" rather than "you
+    // called this wrongly". Both became a discriminated union instead, so the
+    // compiler refuses the call and the count came back down. A constraint beats
+    // a check (Phase 116), and it also keeps a registry's error type honest.
+    expect(thrown.length).toBe(20)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

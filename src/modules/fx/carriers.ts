@@ -177,6 +177,26 @@ export const CURRENCY_CARRIERS: readonly CurrencyCarrier[] = [
       'fee in the same currency, which is what `postFee` puts on the profit and loss.',
   },
   {
+    table: 'deposit_movements',
+    property: 'depositMovements',
+    because:
+      'What a tenant actually handed over or was handed back, in the currency it moved in (Phase ' +
+      '153). On the movement rather than the lease, because a deposit taken in March and returned ' +
+      'two years later crosses any amount of rate movement and each end has to say what it was ' +
+      'worth on its own day. Null together with the rate on a movement that never touched a bank ' +
+      '— applying a deposit to an invoice moves it between two of the company’s own accounts.',
+  },
+  {
+    table: 'tax_remittances',
+    property: 'taxRemittances',
+    because:
+      'What left the account to reach an agency, in the currency it left in (Phase 153). It was on ' +
+      '`INHERITED_CURRENCY` until then, taking the currency of the account it was paid from — ' +
+      'which was true and was not enough, because inheriting a currency tells you what the money ' +
+      'was in and not how much of it there was. `bank_face_cents` is the amount and this is its ' +
+      'currency.',
+  },
+  {
     table: 'payouts',
     property: 'payouts',
     because:

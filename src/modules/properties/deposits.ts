@@ -21,7 +21,9 @@ import { settleInvoiceWithoutCash } from '@/modules/receivables/service'
 import { PropertyError, propertyDimension } from './service'
 import { bankGlAccountFor } from '@/modules/banking/bank-guard'
 import { spends } from '@/modules/fx/spent-against'
-import { functionalCurrency } from '@/modules/fx/service'
+import { ensureFxAccount, functionalCurrency, rateFor } from '@/modules/fx/service'
+import { bankMoneyLines } from '@/modules/fx/bank-money'
+import { RATE_ONE } from '@/modules/fx/rates'
 import { formatCents } from '@/lib/money'
 
 /**
@@ -131,7 +133,18 @@ export async function receiveDeposit(
   ctx: ActorContext,
   input: {
     leaseId: string
+    /**
+     * What the tenant paid, in `currency`.
+     *
+     * The one site of the four where this *is* the face amount, because this act
+     * creates the liability rather than relieving one. `BANK_MONEY_SITES` calls
+     * that `created-here`: there is no earlier figure for the day's rate to
+     * disagree with, so the liability is credited exactly what the bank was
+     * debited and a realised difference is impossible rather than absent.
+     */
     amountCents: number
+    /** What currency it was paid in. Defaults to the company's own money. */
+    currency?: string
     occurredOn: string
     financialAccountId: string
     memo?: string | null
@@ -146,6 +159,22 @@ export async function receiveDeposit(
 
   const liability = await depositAccount(ctx)
 
+  const homeCurrency = await functionalCurrency(ctx.companyId)
+  const currency = input.currency ?? homeCurrency
+  const dayRateMillionths =
+    currency === homeCurrency
+      ? RATE_ONE
+      : (await rateFor(ctx, currency, input.occurredOn)).rateMillionths
+
+  // No `carriedCents`, and `bankMoneyLines` throws if one is passed. Both
+  // figures are the conversion and the difference is zero by construction.
+  const lines = bankMoneyLines({
+    faceCents: input.amountCents,
+    dayRateMillionths,
+    origin: 'created-here',
+    direction: 'in',
+  })
+
   return db.transaction(async (tx) => {
     const lease = await leaseForMovement(ctx, input.leaseId, tx)
 
@@ -158,7 +187,14 @@ export async function receiveDeposit(
     if (!bank) throw new PropertyError('That account does not exist.')
 
     // Phase 133: the ledger account, and whether this account may take it.
-    const bankGl = await bankGlAccountFor(ctx, input.financialAccountId, 'holding this deposit', tx)
+    // The currency goes through since Phase 153.
+    const bankGl = await bankGlAccountFor(
+      ctx,
+      input.financialAccountId,
+      'holding this deposit',
+      tx,
+      currency,
+    )
 
     const entry = await createJournalEntry(
       ctx,
@@ -169,10 +205,10 @@ export async function receiveDeposit(
         sourceType: 'lease_deposit',
         sourceId: input.leaseId,
         lines: [
-          { chartAccountId: bankGl, debitCents: input.amountCents },
+          { chartAccountId: bankGl, debitCents: lines.bankCents },
           {
             chartAccountId: liability.id,
-            creditCents: input.amountCents,
+            creditCents: lines.againstCents,
             memo: 'Held on behalf of the tenant',
           },
         ],
@@ -186,7 +222,12 @@ export async function receiveDeposit(
         companyId: ctx.companyId,
         leaseId: input.leaseId,
         kind: 'received',
-        amountCents: input.amountCents,
+        // The liability, in home money. `bank_face_cents` is what the tenant
+        // handed over, which is the same number for a domestic account.
+        amountCents: lines.againstCents,
+        bankFaceCents: input.amountCents,
+        currency,
+        exchangeRateMillionths: dayRateMillionths,
         occurredOn: input.occurredOn,
         journalEntryId: entry.id,
         memo: input.memo?.trim() || null,
@@ -221,7 +262,19 @@ export async function refundDeposit(
   ctx: ActorContext,
   input: {
     leaseId: string
+    /** What comes off the deposits liability, in the company's own money. */
     amountCents: number
+    /**
+     * What the bank actually paid out, when it is not the company's own money
+     * (Phase 153).
+     *
+     * The sibling of `receiveDeposit` and the opposite case. The liability has
+     * been carried since the deposit was taken — possibly years, across any
+     * amount of rate movement — so it comes off at the figure the books hold
+     * while the bank gives up what `faceCents` is worth today, and the gap is
+     * realised.
+     */
+    bank?: { faceCents: number; currency: string }
     occurredOn: string
     financialAccountId: string
     memo?: string | null
@@ -235,6 +288,21 @@ export async function refundDeposit(
   }
 
   const liability = await depositAccount(ctx)
+
+  const homeCurrency = await functionalCurrency(ctx.companyId)
+  const currency = input.bank?.currency ?? homeCurrency
+  const dayRateMillionths =
+    currency === homeCurrency
+      ? RATE_ONE
+      : (await rateFor(ctx, currency, input.occurredOn)).rateMillionths
+
+  const lines = bankMoneyLines({
+    faceCents: input.bank?.faceCents ?? input.amountCents,
+    dayRateMillionths,
+    origin: 'already-carried',
+    direction: 'out',
+    carriedCents: input.amountCents,
+  })
 
   return db.transaction(async (tx) => {
     const lease = await leaseForMovement(ctx, input.leaseId, tx)
@@ -258,12 +326,16 @@ export async function refundDeposit(
     if (!bank) throw new PropertyError('That account does not exist.')
 
     // Phase 133: the ledger account, and whether this account may take it.
+    // The currency goes through since Phase 153.
     const bankGl = await bankGlAccountFor(
       ctx,
       input.financialAccountId,
       'returning this deposit',
       tx,
+      currency,
     )
+
+    const fxAccount = lines.realisedCents === 0 ? null : await ensureFxAccount(ctx, tx)
 
     const entry = await createJournalEntry(
       ctx,
@@ -274,8 +346,15 @@ export async function refundDeposit(
         sourceType: 'lease_deposit',
         sourceId: input.leaseId,
         lines: [
-          { chartAccountId: liability.id, debitCents: input.amountCents },
-          { chartAccountId: bankGl, creditCents: input.amountCents },
+          { chartAccountId: liability.id, debitCents: lines.againstCents },
+          { chartAccountId: bankGl, creditCents: lines.bankCents },
+          ...(fxAccount
+            ? [
+                lines.realisedCents > 0
+                  ? { chartAccountId: fxAccount, creditCents: lines.realisedCents }
+                  : { chartAccountId: fxAccount, debitCents: -lines.realisedCents },
+              ]
+            : []),
         ],
       },
       tx,
@@ -288,6 +367,9 @@ export async function refundDeposit(
         leaseId: input.leaseId,
         kind: 'refunded',
         amountCents: input.amountCents,
+        bankFaceCents: input.bank?.faceCents ?? input.amountCents,
+        currency,
+        exchangeRateMillionths: dayRateMillionths,
         occurredOn: input.occurredOn,
         journalEntryId: entry.id,
         memo: input.memo?.trim() || null,
@@ -462,6 +544,11 @@ export async function applyDeposit(
         companyId: ctx.companyId,
         leaseId: input.leaseId,
         kind: 'applied',
+        // No bank face amount, currency or rate, and the CHECK allows all three
+        // to be null together for exactly this: applying a deposit to an invoice
+        // moves it between two of the company's own accounts and the bank is
+        // never touched, so there is nothing for a bank-side figure to describe.
+        //
         // The worth, not the face amount — this is what the tenancy gave up,
         // and `depositPosition` sums these to say what is left.
         amountCents: appliedCents,
