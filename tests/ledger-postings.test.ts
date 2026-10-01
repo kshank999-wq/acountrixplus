@@ -126,7 +126,19 @@ describe('what the ledger will accept', () => {
     // A hundred and twenty-one since Phase 151, whose wiring added a realised
     // exchange line to the write-off recovery — the difference between what
     // arrived and what was carried, which previously had nowhere to go.
-    expect(postingSites().length).toBe(121)
+    //
+    // A hundred and twenty-three since Phase 153, and the two new sites are the
+    // same line in two places: `recordRemittance` and `refundDeposit` each gained
+    // a realised exchange line, because each relieves a balance the books already
+    // carry while the bank moves at the rate on the day. `receiveDeposit` gained
+    // none and could not have — it creates the liability it credits, so there is
+    // no earlier rate for today's to differ from, and a third line there would be
+    // a gain conjured out of one conversion.
+    //
+    // Two sites rather than four, unlike Phase 137's credit notes: the sign is
+    // decided by a conditional inside one `lines` array rather than by two
+    // branches each writing their own entry.
+    expect(postingSites().length).toBe(123)
     expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(39)
   })
 

@@ -168,7 +168,7 @@ describe('every place money reaches a bank account', () => {
     }
   })
 
-  it('counts the four that convert, the five that ask, and the five that do not', () => {
+  it('counts the four that convert, the nine that ask, and the one that cannot', () => {
     const converts = BANK_POSTINGS.filter((row) => row.handling === 'converts')
     const refuses = BANK_POSTINGS.filter((row) => row.handling === 'refuses')
     const matched = BANK_POSTINGS.filter((row) => row.handling === 'matched')
@@ -196,9 +196,23 @@ describe('every place money reaches a bank account', () => {
     // Four and six since Phase 151 wired `recoverWriteOff`: it had the money's
     // currency all along and was refused the right to pass it because the
     // figure it banked was struck at the wrong rate. A day rate moved it.
-    expect(refuses.length).toBe(4)
+    //
+    // **One and nine since Phase 153**, which is the largest single move this
+    // count has made and the last one it can make by migration. The three that
+    // went — `recordRemittance`, `receiveDeposit`, `refundDeposit` — were all
+    // `withheld: 'no-field'`, and that phase added the field: `bank_face_cents`,
+    // `currency` and `exchange_rate_millionths` on `tax_remittances` and
+    // `deposit_movements`.
+    //
+    // `receivePledge` is the one left, and it is left for a different reason
+    // than the one it shared with the other three. A pledge is received in
+    // instalments, so each receipt has its own day and its own rate and there is
+    // no row to carry them on — `PENDING_WIRING` calls that blocker `a row`
+    // rather than `a field`.
+    expect(refuses.length).toBe(1)
+    expect(refuses.map((row) => row.symbol)).toEqual(['receivePledge'])
     expect(refuses.every((row) => row.withheld !== undefined)).toBe(true)
-    expect(matched.length).toBe(6)
+    expect(matched.length).toBe(9)
     expect(matched.some((row) => row.symbol === 'importPayouts')).toBe(true)
   })
 

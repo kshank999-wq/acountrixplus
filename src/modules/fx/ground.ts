@@ -114,35 +114,9 @@ export type Ground =
    * argument rather than restating it keeps one answer to one question.
    */
   | 'sum-is-one-currency'
-  /**
-   * Something does, and **this function converts it**, here, at the rate on the
-   * day the money moved (Phase 153).
-   *
-   * The ground three paths needed when Phase 153 stopped them refusing. They are
-   * not `converted-downstream` — no callee did it, the conversion is in the
-   * function — and they are certainly no longer `refuses-foreign`, which is a
-   * ground that says the figure is the books' money *because nothing foreign
-   * gets through*. Argued as its own value rather than squeezed into the
-   * nearest, which is Phase 130's rule and the reason that rule exists: the
-   * nearest fit would have been `converted-downstream` naming `bankMoneyLines`
-   * as a `via`, and a pure core that takes two numbers and returns three is not
-   * where a currency is kept out.
-   *
-   * What makes it checkable is the register beside it. A site arguing this must
-   * be declared in `BANK_MONEY_SITES` — which says whether the balance it posts
-   * against was created here or carried in, and therefore whether a realised
-   * difference is mandatory or impossible — and `BANK_POSTINGS` must agree that
-   * it no longer refuses. Two registers that would both have to be wrong
-   * together.
-   */
-  | 'converts-here'
 
 /** Grounds that argue from the site itself, and so may name no callee. */
-const ARGUES_ALONE: readonly Ground[] = [
-  'nothing-in-reach',
-  'refuses-foreign',
-  'converts-here',
-]
+const ARGUES_ALONE: readonly Ground[] = ['nothing-in-reach', 'refuses-foreign']
 
 /** One `domestic` entry, and the kind of argument it makes. */
 export type DomesticGround = {
@@ -178,16 +152,6 @@ export type Grounded = {
   covered: readonly string[]
   /** Does `BANK_POSTINGS` say this path refuses a foreign account? */
   refusesForeign: boolean
-  /**
-   * Measured: is this site declared in `BANK_MONEY_SITES`, and does
-   * `BANK_POSTINGS` record it as a path that hands the gate a currency?
-   *
-   * The checkable half of `converts-here`. A site that converts has to say which
-   * balance it converts *against*, because that is what decides whether a
-   * realised difference belongs in the entry — and both of the ways of getting
-   * that wrong still balance.
-   */
-  declaresBankMoney?: boolean
   /** Named `via` that do not do what the ground claims of them. */
   unsound: readonly string[]
 }
@@ -247,24 +211,6 @@ export function groundStands(input: Grounded): GroundVerdict {
         `and it reaches ${reaches.join(', ')}, which does. Nothing in it refuses when the two ` +
         'differ and nothing converted it on the way, so the figure it posts can be a face amount ' +
         'in another currency. Either name what keeps the currency out, or the basis is wrong.',
-    }
-  }
-
-  if (ground === 'converts-here') {
-    if (input.declaresBankMoney === true && !refusesForeign) return { ok: true }
-
-    return {
-      ok: false,
-      why: refusesForeign
-        ? `${symbol} argues that it converts here, and \`BANK_POSTINGS\` still says it refuses a ` +
-          'foreign account. One of the two is out of date, and the register that says a path ' +
-          'refuses is the one a reader will believe.'
-        : `${symbol} argues that it converts here and is not declared in \`BANK_MONEY_SITES\`, so ` +
-          'nothing says which balance it converts against. A site that posts a converted figure ' +
-          'to a bank account either relieves a balance the books already carry — in which case the ' +
-          'difference between the two rates is a realised gain and has to be posted — or creates ' +
-          'the balance, in which case a difference is impossible. Both mistakes balance, so the ' +
-          'entry footing proves nothing.',
     }
   }
 
@@ -420,50 +366,6 @@ export const DOMESTIC_GROUNDS: readonly DomesticGround[] = [
       'records as `refuses` and `bank-side.test.ts` checks against the source.',
   },
   {
-    file: 'src/modules/payroll/remittance.ts',
-    symbol: 'recordRemittance',
-    ground: 'converts-here',
-    via: [],
-    because:
-      'Paying over what was withheld. No payroll table carries a currency — a run is computed by a ' +
-      'provider in the jurisdiction the company files in — and `tax_remittances` carries its own ' +
-      'since Phase 153, having inherited one from the paying account until then. `refuses-foreign` ' +
-      'from Phase 133 until Phase 153, which is the ground this entry had and the capability it ' +
-      'cost: the refusal was honest and it meant a company banking in euros could not remit at ' +
-      'all. It converts now — `amount_cents` comes off the liability at the figure the ledger ' +
-      'holds, `bank_face_cents` leaves the account at the rate on the day, and `bankMoneyLines` ' +
-      'realises the gap against `7100`.',
-  },
-  {
-    file: 'src/modules/properties/deposits.ts',
-    symbol: 'receiveDeposit',
-    ground: 'converts-here',
-    via: [],
-    because:
-      'A security deposit is somebody else’s money held against a lease (Phase 23). `leases` still ' +
-      'records no currency and `deposit_movements` does since Phase 153, which is also when this ' +
-      'stopped being `refuses-foreign`. The one site of the four that **creates** the balance it ' +
-      'posts against: the tenancy was owed nothing a moment ago, so the liability is credited ' +
-      'exactly the converted debit and a realised difference is impossible rather than absent. ' +
-      '`BANK_MONEY_SITES` calls that `created-here` and a test measures that this path does not ' +
-      'reach `ensureFxAccount`, which is the half that would otherwise conjure a gain.',
-  },
-  {
-    file: 'src/modules/properties/deposits.ts',
-    symbol: 'refundDeposit',
-    ground: 'converts-here',
-    via: [],
-    because:
-      'Giving the deposit back, and the sibling of the entry above with the opposite answer inside ' +
-      'the same ground — which is why these are declared per site. This one **relieves** a ' +
-      'liability the books may have carried for years: what was held comes off at the figure it ' +
-      'was held at, the bank gives up what the refund is worth today, and the movement between ' +
-      'those two days is a realised gain or loss. Was `refuses-foreign` until Phase 153 on the ' +
-      'argument that "the figure that moves is the books’ money by refusal rather than by luck" — ' +
-      'true, and the cost was that no euro deposit could be returned through the account it came ' +
-      'into.',
-  },
-  {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'applyDeposit',
     ground: 'nothing-in-reach',
@@ -477,6 +379,28 @@ export const DOMESTIC_GROUNDS: readonly DomesticGround[] = [
       'tracks the repair.',
   },
 ]
+
+/**
+ * Three entries left this register in Phase 153, and the way they left is the
+ * correction worth recording.
+ *
+ * `recordRemittance`, `receiveDeposit` and `refundDeposit` were all
+ * `refuses-foreign`: declared `domestic` in `LEDGER_POSTINGS` on the ground that
+ * the path declines a foreign account rather than assert a figure nobody asked
+ * for. Phase 153 gave them the columns to ask, so they convert — and a converted
+ * posting is not a domestic one, so there is nothing left for this register to
+ * explain about them. Their argument lives in `LEDGER_POSTINGS` (`basis:
+ * 'converted'`), in `BANK_POSTINGS` (`matched`) and in `BANK_MONEY_SITES`, which
+ * says which balance each converts against.
+ *
+ * **The first attempt added a `converts-here` ground instead**, to keep them
+ * here with a new label. That was wrong in a way worth naming: this register is
+ * defined as the ground every *domestic* entry stands on, and its membership is
+ * `LEDGER_POSTINGS`'s own, so inventing a value to retain three entries that had
+ * stopped qualifying was arguing with the definition rather than reading it. The
+ * exact-correspondence check caught it — `expected 11 to be 14` — which is what
+ * that check is for.
+ */
 
 /** The ground declared for one posting site, or a defect if none is. */
 export function groundFor(file: string, symbol: string): DomesticGround {

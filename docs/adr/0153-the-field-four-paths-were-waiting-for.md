@@ -114,9 +114,9 @@ replaced.
 one entry, one target, where it was one entry over four. A register that can only
 shrink by whole entries cannot say what this phase did.
 
-## Four registries caught the change, and one was wrong before it
+## Five registries caught the change, and one was wrong before it
 
-The schema change made five separate declarations false, and every one was found
+The schema change made six separate declarations false, and every one was found
 by its own test rather than by anybody remembering:
 
 - **`CURRENCY_CARRIERS`** gained `deposit_movements` and `tax_remittances`.
@@ -126,13 +126,25 @@ by its own test rather than by anybody remembering:
   foreign"*. That is the gap this phase closed, so the entry is replaced by a note
   saying where it went — an ADR citation that vanishes with its entry takes the
   reason with it.
-- **`DOMESTIC_GROUNDS`** had all three sites on `refuses-foreign`, which is now
-  false: they convert. Argued as a new ground, `converts-here`, rather than
-  squeezed into `converted-downstream` — no callee does it, and naming
-  `bankMoneyLines` as a `via` would claim a pure core taking two numbers is where
-  a currency is kept out. Its checkable half is that the site is declared in
-  `BANK_MONEY_SITES` and that `BANK_POSTINGS` agrees it no longer refuses: two
-  registers that would both have to be wrong together.
+- **`LEDGER_POSTINGS`** had all three sites on `basis: 'domestic'`, which is now
+  false: they post a figure struck at a rate, so they are `converted`.
+  `registry-agreement.test.ts` is what said so — a path `BANK_POSTINGS` calls
+  `matched` cannot also be producing a bare domestic figure.
+- **`DOMESTIC_GROUNDS`** lost all three, and *how* they left is a correction this
+  phase made to itself. They were `refuses-foreign`, which stopped being true; the
+  first attempt added a new ground, `converts-here`, to keep them in the register
+  under a new label. That was arguing with the register's definition rather than
+  reading it — `DOMESTIC_GROUNDS` holds the ground every **domestic** entry stands
+  on, and its membership *is* `LEDGER_POSTINGS`'s, so three entries that had
+  stopped being domestic had stopped qualifying. A converted posting needs no
+  explanation of why no currency reached it.
+
+  The exact-correspondence check caught it, in the form `expected 11 to be 14`,
+  which is precisely what that check exists for. `converts-here` was removed —
+  leaving it would have been a declared value with no users, Phase 147's rule —
+  and `ground.ts` carries a note saying where the three went: their argument now
+  lives in `LEDGER_POSTINGS`, in `BANK_POSTINGS` and in `BANK_MONEY_SITES`, which
+  says which balance each converts against.
 - **`MONEY_COLUMNS`** gained three columns, one of which —
   `deposit_movements.amount_cents` — has existed since Phase 23 and was invisible
   because the table had no currency of its own to be denominated in. Phase 143's

@@ -11,7 +11,6 @@ import { LEDGER_POSTINGS } from '@/modules/fx/ledger'
 import { BANK_POSTINGS } from '@/modules/fx/bank-side'
 import { SAFE_FACE_SUMS } from '@/modules/fx/comparable'
 import { CURRENCY_CARRIERS } from '@/modules/fx/carriers'
-import { BANK_MONEY_SITES } from '@/modules/fx/bank-money'
 import { INHERITED_CURRENCY } from '@/modules/fx/inherited'
 import { withoutComments } from '@/modules/source/enclosing'
 
@@ -216,13 +215,6 @@ function measured(entry: DomesticGround) {
     // in here, which is what stops a failing entry being rescued by relabelling.
     covered: [...new Set(sound.flatMap((hop) => hop.carriers))].sort(),
     refusesForeign: REFUSES_FOREIGN.has(entry.symbol),
-    // Measured, for `converts-here` (Phase 153). A site that converts has to say
-    // which balance it converts against, because that decides whether a realised
-    // difference belongs in the entry — and both ways of getting it wrong still
-    // balance, so the entry footing proves nothing.
-    declaresBankMoney: BANK_MONEY_SITES.some(
-      (row) => row.file === entry.file && row.symbol === entry.symbol,
-    ),
     unsound: entry.via.filter((callee) => !sound.some((hop) => hop.callee === callee)),
   }
 }
@@ -237,7 +229,13 @@ describe('the ground every domestic entry stands on', () => {
     )
     const grounded = DOMESTIC_GROUNDS.map((row) => `${row.file}:${row.symbol}`)
 
-    expect(domestic.length).toBe(14)
+    // Eleven since Phase 153, down from fourteen. `recordRemittance`,
+    // `receiveDeposit` and `refundDeposit` stopped being `domestic` when they
+    // started converting, so they left both sides of this correspondence
+    // together — which is the only way it can move without failing, and is what
+    // the assertion is for. It did fail first: the three were given a new ground
+    // to keep them here, and this line said `expected 11 to be 14`.
+    expect(domestic.length).toBe(11)
     expect(grounded.sort()).toEqual([...domestic].sort())
   })
 
@@ -250,19 +248,21 @@ describe('the ground every domestic entry stands on', () => {
 
     expect([...counts.keys()].sort()).toEqual([
       'converted-downstream',
-      'converts-here',
       'nothing-in-reach',
       'refuses-foreign',
       'sum-is-one-currency',
       'writes-rate-one',
     ])
-    // Six kinds since Phase 153, and the movement between two of them is the
-    // phase: three sites went from `refuses-foreign` to `converts-here`, leaving
-    // one path still refusing. `refuses-foreign` is not decoration at one entry —
-    // `receivePledge` still refuses, and still has nowhere to record a receipt's
-    // rate, which `PENDING_WIRING` says in those words.
+    // One `refuses-foreign` since Phase 153, down from four. The other three
+    // **left this register** rather than changing ground: they convert now, and a
+    // converted posting is not a domestic one, so `LEDGER_POSTINGS` moved them to
+    // `basis: 'converted'` and their membership here went with it.
+    //
+    // One entry is not decoration. `receivePledge` still refuses, still has
+    // nowhere to record a receipt's rate, and `PENDING_WIRING` says so in those
+    // words — so the ground is doing exactly the job it was added for, for the
+    // one path that still needs it.
     expect(counts.get('refuses-foreign')).toBe(1)
-    expect(counts.get('converts-here')).toBe(3)
     expect(counts.get('nothing-in-reach')).toBe(7)
   })
 
@@ -293,27 +293,6 @@ describe('the ground every domestic entry stands on', () => {
       .map(({ row }) => row.symbol)
 
     expect(contradicted.sort()).toEqual(['applyDeposit', 'recordContribution', 'redeemGiftCard'])
-  })
-
-  it('refuses a converts-here site that no register backs', () => {
-    // A check only ever seen to agree is not a check (Phase 121), and this ground
-    // is the one most able to pass for free: it says "this function converts",
-    // which a reader cannot disprove by looking at the ground.
-    const site = groundFor('src/modules/properties/deposits.ts', 'refundDeposit')
-
-    const undeclared = groundStands({ ...measured(site), declaresBankMoney: false })
-    expect(undeclared.ok).toBe(false)
-    expect(undeclared.ok === false && undeclared.why).toMatch(/Both mistakes balance/)
-  })
-
-  it('refuses a converts-here site that BANK_POSTINGS still says refuses', () => {
-    // The other way the two registers can disagree, and the direction that
-    // matters more: a reader who is told a path refuses will believe it.
-    const site = groundFor('src/modules/payroll/remittance.ts', 'recordRemittance')
-
-    const stale = groundStands({ ...measured(site), refusesForeign: true })
-    expect(stale.ok).toBe(false)
-    expect(stale.ok === false && stale.why).toMatch(/One of the two is out of date/)
   })
 
   it('says what is wrong in a sentence somebody can act on', () => {

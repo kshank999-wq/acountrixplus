@@ -134,11 +134,17 @@ describe('what every posting site actually does with the money’s currency', ()
     // Measured, not bounded (Phase 126). Four `converts` reach the account
     // through the feed rather than the guard, so ten call the guard.
     expect(sites.length).toBe(14)
-    // Six since Phase 151 wired `recoverWriteOff`, which is the only entry in
-    // `BANK_POSTINGS` whose handling has ever changed — and this line is what
+    // Six since Phase 151 wired `recoverWriteOff`, which was then the only entry
+    // in `BANK_POSTINGS` whose handling had ever changed — and this line is what
     // noticed, exactly as intended: the code started passing a currency while
     // the registry still said it could not.
-    expect(sites.filter((site) => site.passesMoneyCurrency).length).toBe(6)
+    //
+    // Nine since Phase 153 wired three more. `recordRemittance`,
+    // `receiveDeposit` and `refundDeposit` were all `withheld: 'no-field'`, and
+    // that phase added the field. Nine of the ten paths that call the guard hand
+    // it a currency now; the tenth is `receivePledge`, which still has nowhere to
+    // record one.
+    expect(sites.filter((site) => site.passesMoneyCurrency).length).toBe(9)
   })
 
   it('agrees with what each entry declares', () => {
@@ -152,34 +158,47 @@ describe('what every posting site actually does with the money’s currency', ()
     expect(disagreements).toEqual([])
   })
 
-  it('counts the three handlings, and the six that ask', () => {
+  it('counts the three handlings, and the nine that ask', () => {
     const by = (handling: string) => BANK_POSTINGS.filter((row) => row.handling === handling)
 
     expect(by('converts').length).toBe(4)
-    // `recoverWriteOff` joined them in Phase 151 and is the only entry whose
-    // handling has ever moved. It had the currency all along and was refused
-    // the right to pass it because the figure it banked was struck at the
-    // write-off's carried rate; wiring `recoverHeld` gave it a day rate, and
-    // the reason for withholding went with it.
+    // `recoverWriteOff` joined them in Phase 151, the first entry whose handling
+    // ever moved. It had the currency all along and was refused the right to
+    // pass it because the figure it banked was struck at the write-off's carried
+    // rate; wiring `recoverHeld` gave it a day rate, and the reason for
+    // withholding went with it.
+    //
+    // Three more in Phase 153, which is the largest move this list has made and
+    // the last one a migration can make: `recordRemittance`, `receiveDeposit`
+    // and `refundDeposit` were the `no-field` entries, and that phase added the
+    // field.
     expect(by('matched').map((row) => row.symbol).sort()).toEqual([
       'importPayouts',
+      'receiveDeposit',
       'receiveRetainer',
+      'recordRemittance',
       'recoverWriteOff',
       'refundCredit',
+      'refundDeposit',
       'refundRetainer',
       'refundVendorCredit',
     ])
-    expect(by('refuses').length).toBe(4)
+    expect(by('refuses').length).toBe(1)
   })
 
   it('makes every refusing path say why it cannot ask, and only one blame the rate', () => {
     const refuses = BANK_POSTINGS.filter((row) => row.handling === 'refuses')
 
+    // One since Phase 153, and the remaining entry is the one whose blocker was
+    // never really the same as the other three's. `no-field` is honest for it in
+    // the sense that no field records a receipt's currency — but a pledge is
+    // received in instalments, so what it needs is a **row**, which is the
+    // distinction `PENDING_WIRING` now draws and this register does not have the
+    // vocabulary for. Left as `no-field` rather than given a fourth `Withheld`
+    // value, because the two registers answer different questions and only one
+    // of them is about what to build next.
     expect(refuses.filter((row) => row.withheld === 'no-field').map((row) => row.symbol)).toEqual([
-      'recordRemittance',
       'receivePledge',
-      'receiveDeposit',
-      'refundDeposit',
     ])
 
     // `no-day-rate` was `recoverWriteOff`'s alone and is nobody's since Phase

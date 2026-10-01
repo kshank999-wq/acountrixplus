@@ -442,30 +442,40 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
   {
     file: 'src/modules/payroll/remittance.ts',
     symbol: 'recordRemittance',
-    basis: 'domestic',
+    basis: 'converted',
     because:
       'Paying over what was withheld. No payroll table carries a currency — a payroll run is ' +
-      'computed by a provider in the jurisdiction the company files in — so the liability and the ' +
-      'payment that clears it are both the books’ money. Reached by this scan only because the ' +
-      'module reads `financial_accounts` to find the bank it pays from.',
+      'computed by a provider in the jurisdiction the company files in — so the liability this ' +
+      'clears is the books’ money, and `domestic` was the whole answer until Phase 153. It is not ' +
+      'any more: `tax_remittances` carries its own currency now, and the bank is credited ' +
+      '`convert(bank_face_cents, rate_on_the_day)` while the liability comes off at the figure the ' +
+      'ledger holds. One line converted and one not, with the difference realised against `7100` — ' +
+      'which is `converted`, because the figure reaching the bank was struck at a rate.',
   },
   {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'receiveDeposit',
-    basis: 'domestic',
+    basis: 'converted',
     because:
-      'A security deposit is somebody else’s money held against a lease (Phase 23), and neither ' +
-      '`leases` nor the deposit tables record a currency. The figure is the company’s own; the ' +
-      'module reaches this scan through the bank account it is banked into, which does have one.',
+      'A security deposit is somebody else’s money held against a lease (Phase 23), and `leases` ' +
+      'still records no currency — but `deposit_movements` does since Phase 153, so what the tenant ' +
+      'handed over is converted at the rate on the day and **both** lines take that figure. The ' +
+      'only one of the three wired in that phase where the two sides are equal by construction: ' +
+      'this act raises the liability, so there is no earlier rate to differ from and no realised ' +
+      'line. `converted` all the same — the figure posted is the product of a rate, which is what ' +
+      'this basis asserts and what `domestic` denied.',
   },
   {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'refundDeposit',
-    basis: 'domestic',
+    basis: 'converted',
     because:
-      'Giving the deposit back, against the same liability it created. Same construction and the ' +
-      'same tables: what was held is what is returned, in the currency it was held in, and no ' +
-      'row in the properties module records that as anything but the company’s own.',
+      'Giving the deposit back, and since Phase 153 the sibling above’s opposite. The liability has ' +
+      'been carried since the deposit was taken, so it comes off at the figure it was held at while ' +
+      'the bank gives up what the refund is worth today — a deposit taken at 1.10 and returned at ' +
+      '1.20 costs the company the movement, and that difference is realised rather than absorbed ' +
+      'into the liability. The old entry said "what was held is what is returned, in the currency ' +
+      'it was held in", which was true of the face amount and never of its worth.',
   },
   {
     file: 'src/modules/properties/deposits.ts',
