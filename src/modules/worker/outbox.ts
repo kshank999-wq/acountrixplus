@@ -110,7 +110,12 @@ export async function recordEvent(
  * opened.
  */
 const SUBSCRIBERS: Record<EventType, string[]> = {
-  'proposal.accepted': ['notify.proposal_decided'],
+  // Two subscribers since Phase 155, and the order in the array is not the
+  // order they run — they are independent jobs. Telling the team and invoicing
+  // the deposit are different kinds of failure: a push notification that does
+  // not land is a nuisance, and a deposit that is never raised is the reason the
+  // contract asked for one.
+  'proposal.accepted': ['notify.proposal_decided', 'receivables.deposit_on_acceptance'],
   'proposal.declined': ['notify.proposal_decided'],
   'invoice.paid': ['notify.invoice_paid'],
   'opportunity.won': [],

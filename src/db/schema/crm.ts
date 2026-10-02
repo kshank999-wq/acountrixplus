@@ -1,3 +1,4 @@
+import type { AnyPgColumn } from 'drizzle-orm/pg-core'
 import {
   pgTable,
   uuid,
@@ -15,6 +16,17 @@ import {
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
+/**
+ * `invoices` for `proposal_schedule_stages.invoice_id` (Phase 155).
+ *
+ * `receivables` imports this file, so this is an import cycle on paper.
+ * Drizzle's `references(() => …)` is lazy for exactly that reason — the arrow is
+ * not called until a query is built — and the annotation is what keeps
+ * TypeScript from trying to infer a type through the cycle.
+ */
+import { invoices } from './receivables'
+import { journalEntries } from './ledger'
+
 
 /**
  * CRM: organizations, contacts, opportunities, and proposals (spec §6, §9).
@@ -331,6 +343,19 @@ export const proposals = pgTable(
     decidedAt: timestamp('decided_at', { withTimezone: true }),
     expiresOn: date('expires_on'),
 
+    /**
+     * The entry that turned the held deposit into revenue (Phase 155).
+     *
+     * On the proposal rather than on a stage, because it is a fact about the
+     * deposit and the deposit is one stage however many milestones there are.
+     * Null until the last stage is billed; set once, which is what stops a
+     * second recognition double-counting the revenue.
+     */
+    depositRecognisedEntryId: uuid('deposit_recognised_entry_id').references(
+      (): AnyPgColumn => journalEntries.id,
+      { onDelete: 'set null' },
+    ),
+
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -422,6 +447,17 @@ export const proposalScheduleStages = pgTable(
      * one.
      */
     percentBp: integer('percent_bp').notNull(),
+    /**
+     * The invoice that billed this stage, null until it is billed (Phase 155).
+     *
+     * `set null` rather than `cascade`: voiding an invoice must not delete the
+     * stage from the contract. The stage goes back to unbilled and somebody can
+     * bill it again, which is honest — the contract did not change because an
+     * invoice was voided.
+     */
+    invoiceId: uuid('invoice_id').references((): AnyPgColumn => invoices.id, {
+      onDelete: 'set null',
+    }),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },

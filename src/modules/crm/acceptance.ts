@@ -234,6 +234,12 @@ export async function acceptProposal(
             clientName: input.signerName,
             won: true,
             acceptedTotalCents: totals.totalCents,
+            // For `receivables.deposit_on_acceptance` (Phase 155), which
+            // converts the opportunity and invoices the deposit the contract
+            // asks for on signing. The id rather than the whole proposal: the
+            // job reads the current rows, because an event is a statement that
+            // something happened and not a copy of the record.
+            proposalId: proposal.id,
           },
         },
         tx,

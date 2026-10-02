@@ -175,10 +175,14 @@ describe('every write that can be aimed at a row', () => {
     const by: Record<string, number> = {}
     for (const write of WRITES) by[write.kind ?? 'none'] = (by[write.kind ?? 'none'] ?? 0) + 1
 
-    expect(WRITES.length).toBe(109)
+    // A hundred and ten since Phase 155, which added one: marking a stage
+    // billed. `scoped-write` at 28 — the update is keyed by proposal and sort
+    // order *and* scoped to the company, which is what makes the id a caller
+    // hands in unable to reach another tenant's contract.
+    expect(WRITES.length).toBe(110)
     expect(by).toEqual({
       'explicit-company': 61,
-      'scoped-write': 27,
+      'scoped-write': 28,
       'read-then-refuse': 9,
       'owner-helper': 4,
       'system-actor': 4,

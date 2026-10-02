@@ -155,9 +155,16 @@ describe('every read from a company-scoped table', () => {
     // billing schedule a proposal carries, read per proposal when one is
     // converted and in bulk for the list. Both go through `scoped()`, which is
     // why the whole increase lands on one guard.
-    expect(READS.length).toBe(868)
+    //
+    // Eight hundred and seventy-five since Phase 155 and `stage-invoicing.ts`,
+    // which reads the schedule, the proposal, the opportunity's client and the
+    // proposal's revenue account to bill a stage. All seven go through
+    // `scoped()` — measured, not assumed: the length assertion fails before this
+    // map is compared, so the figure below came from running it and reading the
+    // diff rather than from counting call sites.
+    expect(READS.length).toBe(875)
     expect(by).toEqual({
-      'scoped-read': 532,
+      'scoped-read': 539,
       'explicit-company': 247,
       'established-above': 28,
       'id-from-fetched-row': 17,

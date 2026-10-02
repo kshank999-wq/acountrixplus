@@ -501,12 +501,23 @@ describe('the outbox', () => {
 
     const relayed = await relayPendingEvents()
     expect(relayed.relayed).toBe(1)
-    expect(relayed.jobsQueued).toBe(1)
+    // Two jobs from one event since Phase 155: telling the team, and invoicing
+    // the deposit the contract asks for on signing. One event fanning out to
+    // several independent jobs is what the relay is for, and this is the first
+    // event with more than one subscriber — so the count moving is the table in
+    // `outbox.ts` being read rather than assumed.
+    expect(relayed.jobsQueued).toBe(2)
     expect(await pendingEventCount(fixture.companyId)).toBe(0)
 
     const jobs = await listJobs({ companyId: fixture.companyId, kind: 'notify.proposal_decided' })
     expect(jobs).toHaveLength(1)
     expect(jobs[0].payload).toMatchObject({ proposalNumber: 'PRO-1001' })
+
+    const deposit = await listJobs({
+      companyId: fixture.companyId,
+      kind: 'receivables.deposit_on_acceptance',
+    })
+    expect(deposit).toHaveLength(1)
   })
 
   it('relaying twice does not send twice', async () => {

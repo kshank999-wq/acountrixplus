@@ -22,6 +22,8 @@ import {
   updateProposalItems,
 } from '@/modules/crm/proposals'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
+import { billStage } from '@/modules/crm/stage-invoicing'
+import { formatCents } from '@/lib/money'
 import {
   ORGANIZATION_FIELDS,
   describeChanges,
@@ -331,6 +333,28 @@ export async function setBillingScheduleAction(
     return result.stages === 0
       ? 'Billing schedule cleared. Winning this proposal will raise nothing until somebody decides what to bill.'
       : `Billing schedule saved: ${result.stages} stage${result.stages === 1 ? '' : 's'}.`
+  })
+}
+
+/**
+ * Invoicing the next stage of a contract (spec §6, §7, Phase 155).
+ *
+ * The stage index rather than its id, because the schedule is ordered and the
+ * order is what `billStageStands` checks: a schedule is billed in the sequence
+ * it was agreed, and an index is the thing that cannot disagree with the list
+ * the person is looking at.
+ */
+export async function billStageAction(
+  proposalId: string,
+  stageIndex: number,
+): Promise<ActionResult> {
+  return run('/crm/proposals', async () => {
+    const actor = await requireActor()
+    const billed = await billStage(actor, { proposalId, stageIndex })
+
+    return billed.recognitionEntryId
+      ? `Invoiced ${formatCents(billed.amountCents)} for ${billed.label}. The contract is fully billed, so the deposit has been earned.`
+      : `Invoiced ${formatCents(billed.amountCents)} for ${billed.label}.`
   })
 }
 

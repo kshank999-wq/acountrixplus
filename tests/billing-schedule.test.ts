@@ -1,7 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
   FULL_BP,
+  billStageStands,
+  billedSoFar,
   depositStage,
+  nextBillable,
+  recognisesDeposit,
   scheduleAmounts,
   scheduleStands,
   sovStages,
@@ -211,5 +215,84 @@ describe('what a schedule has to be before anybody is billed from it', () => {
         { label: 'Month 4', kind: 'milestone', percentBp: 2_500 },
       ]),
     ).toEqual({ ok: true })
+  })
+})
+
+describe('which stage may be billed, and when the deposit is earned', () => {
+  const priced = (invoiced: Array<string | null>) =>
+    scheduleAmounts(2_000_000, [
+      { label: 'On signing', kind: 'deposit', percentBp: 2_500 },
+      { label: 'Frame complete', kind: 'milestone', percentBp: 2_500 },
+      { label: 'On handover', kind: 'on-completion', percentBp: 5_000 },
+    ]).map((stage, index) => ({ ...stage, invoiceId: invoiced[index] ?? null }))
+
+  it('bills the first unbilled stage', () => {
+    expect(billStageStands(priced([]), 0)).toEqual({ ok: true })
+    expect(nextBillable(priced([]))?.label).toBe('On signing')
+    expect(nextBillable(priced(['inv-1']))?.label).toBe('Frame complete')
+    expect(nextBillable(priced(['inv-1', 'inv-2', 'inv-3']))).toBeNull()
+  })
+
+  it('refuses a stage already invoiced', () => {
+    const verdict = billStageStands(priced(['inv-1']), 0)
+    expect(verdict.ok).toBe(false)
+    expect(verdict.ok === false && verdict.why).toMatch(/charge the client twice/)
+  })
+
+  it('refuses a stage whose predecessor is unbilled, and names it', () => {
+    // Order is a decision: billing the handover first is either a mistake or a
+    // change to the contract, and the refusal says which stage to bill instead
+    // rather than just "not allowed" (Phase 119).
+    const verdict = billStageStands(priced([]), 2)
+    expect(verdict.ok).toBe(false)
+    expect(verdict.ok === false && verdict.why).toMatch(/“On signing” comes before “On handover”/)
+  })
+
+  it('refuses a stage that is not on the schedule', () => {
+    const verdict = billStageStands(priced([]), 7)
+    expect(verdict.ok).toBe(false)
+    expect(verdict.ok === false && verdict.why).toMatch(/not on this contract/)
+  })
+
+  it('counts what has been invoiced', () => {
+    expect(billedSoFar(priced([]))).toBe(0)
+    expect(billedSoFar(priced(['inv-1']))).toBe(500_000)
+    expect(billedSoFar(priced(['inv-1', 'inv-2', 'inv-3']))).toBe(2_000_000)
+  })
+
+  it('earns the deposit on the last stage and not before', () => {
+    const billed = priced(['inv-1', 'inv-2'])
+
+    expect(recognisesDeposit(billed, 0)).toBe(false)
+    expect(recognisesDeposit(billed, 1)).toBe(false)
+    // The last stage that is not the deposit: billing it completes the contract,
+    // so what the deposit was held against has been delivered.
+    expect(recognisesDeposit(billed, 2)).toBe(true)
+  })
+
+  it('earns nothing when the deposit has not been billed', () => {
+    // Nothing is held, so there is nothing to recognise — and recognising it
+    // would credit revenue against a liability that was never raised.
+    expect(recognisesDeposit(priced([null, 'inv-2']), 2)).toBe(false)
+  })
+
+  it('earns nothing on a contract with no deposit', () => {
+    const noDeposit = scheduleAmounts(1_000_000, [
+      { label: 'Halfway', kind: 'milestone', percentBp: 5_000 },
+      { label: 'On handover', kind: 'on-completion', percentBp: 5_000 },
+    ]).map((stage) => ({ ...stage, invoiceId: null }))
+
+    expect(recognisesDeposit(noDeposit, 1)).toBe(false)
+  })
+
+  it('earns it on the last stage of a deposit-plus-one contract', () => {
+    // The smallest contract that can hold a deposit: one stage of work, so the
+    // first milestone is also the last and recognition happens there.
+    const two = scheduleAmounts(1_000_000, [
+      { label: 'On signing', kind: 'deposit', percentBp: 3_000 },
+      { label: 'On handover', kind: 'on-completion', percentBp: 7_000 },
+    ]).map((stage, index) => ({ ...stage, invoiceId: index === 0 ? 'inv-1' : null }))
+
+    expect(recognisesDeposit(two, 1)).toBe(true)
   })
 })

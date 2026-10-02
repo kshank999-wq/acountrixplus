@@ -6189,6 +6189,51 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### Billing a contract in stages (Phase 155)
+
+Two things asked for: progress invoicing from a single contract, and a deposit
+invoice raised digitally the moment a proposal is accepted.
+
+**There were already two kinds of progress billing, and one was missing.**
+`jobs/billing.ts` is AIA-style — schedule of values, percent complete per line,
+retainage, numbered applications — and it stays exactly as it is. What was
+missing is what most contracts outside construction say: *"50% on signing, 25% at
+the frame, 25% on handover."* Phase 154 gave a proposal that schedule and
+**nothing could bill it**: the milestones went onto the job's schedule of values,
+which needs the `job_costing` module, so a company without it had stages on a
+contract and no way to invoice any of them. Phase 49's rule again. Billing a stage
+is one invoice for an agreed share — no percent complete to assess, no retainage,
+nothing to price — so building it on the applications machinery would have meant
+inventing a schedule of values for a two-stage plumbing job.
+
+**Digital acceptance marked the deal won and stopped.** `acceptProposal` writes
+the acceptance, marks the proposal and opportunity won, logs it, records a
+`proposal.accepted` event — and the deposit the contract asks for did not exist
+until somebody noticed and clicked Convert. For a deposit that is the whole
+point: a deposit invoiced on Monday because a human got round to it is a deposit
+that did not do its job over the weekend. `receivables.deposit_on_acceptance`
+subscribes to the event that is already written inside the acceptance
+transaction, so a rollback takes it along and a commit guarantees it happens —
+and a failure is a retried job rather than a signature the client could not give.
+It is the first event with two subscribers, which `worker.test.ts` noticed.
+
+**Recognising the deposit is the accounting in this phase**, and it is a
+recognition rather than a credit. A retainer drawdown applies held money against
+a receivable; a deposit here is a *stage of the contract*, so the stages already
+come to 100% and the deposit invoice collected its own share. What was never done
+is recognising it — `Dr Unearned Revenue / Cr Revenue`, once, on the last stage,
+because that is when the work it was held against is done. Without it, billing
+every stage leaves revenue at 75% of a finished contract with a quarter stranded
+in a liability for ever.
+
+**A hole this phase nearly opened.** Conversion writes the earning stages onto
+the job's schedule of values, and progress applications bill against that — so
+making stages billable without a check would have made this change *the way to
+bill a job twice*. `billStage` refuses a stage once the job has any application.
+The draft ADR had it as "nothing yet stops somebody doing both, and that is the
+next thing worth a look", which was true and was the wrong thing to write.
+
+
 ### The invoice schedule that billed everything (Phase 154)
 
 ADR 0153 nominated spec §7's vector design engine as "the largest unbuilt piece",
@@ -7383,6 +7428,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/progress-billing-from-a-contract.test.ts` | **Billing a contract in stages** (Phase 155): progress invoicing from a contract, and a deposit raised digitally on signature. There were already two kinds of progress billing — `jobs/billing.ts` is AIA-style with a schedule of values, percent complete and retainage, and it is untouched — and the missing one is what most contracts say: 50% on signing, 25% at the frame, 25% on handover. Phase 154 gave a proposal that schedule and nothing could bill it without the job-costing module. Digital acceptance marked the deal won and stopped, so the deposit did not exist until somebody clicked Convert; it now rides the `proposal.accepted` event the acceptance already records, making that the first event with two subscribers. The deposit is **recognised** rather than credited — a stage of the contract, so the stages already come to 100% and what was never done is turning it into revenue, once, on the last stage. And the check that nearly was not written: conversion also writes the stages onto the job's schedule of values, so making stages billable without refusing one path would have made this phase the way to bill a job twice |
 | `tests/billing-schedule.test.ts` | **The invoice schedule that billed everything** (Phase 154): spec §6 requires a won proposal to create an "invoice schedule" and `conversion.ts` quoted that sentence while raising one invoice for every selected item, dated the day of conversion — a $500,000 contract billed in full on signing day, with a test asserting it as correct because test and code came from the same idea. And no screen could reach it: the pipeline board hardcoded the flag off, so the only `createInvoice: true` in the repository was that test. Phase 49's rule and its inversion in one function. The design is that a deposit is not a milestone: a milestone bills work and belongs on the job's schedule of values, a deposit is money before work and is a liability until earned, so it cannot be an SOV line without showing the job overbilled by the deposit forever. The contract is the whole and the stages are carved out of it, through `splitExactly`. Running it found that a billing schedule must not require the job-costing module, which `setScheduleOfValues` does — telling the job unconditionally threw the entire conversion for any company that does not bill progressively |
 | `tests/bank-money.test.ts`, `tests/banking-in-euros.test.ts` | **The field four paths were waiting for** (Phase 153): the acceptance test ADR 0136 said could not be written yet, and the columns that let it be. Four paths refused a foreign bank account outright, so a business banking in euros could not remit a liability, take a pledge, or hold and return a deposit at all — a missing capability rather than a wrong figure. The arithmetic was already built twice over in `settleHeld` and `recoverHeld`; what was missing is whether each act **creates** the balance it posts against or **relieves** one. Three relieve, so the bank takes the day's rate and the gap is realised; `receiveDeposit` creates, so a difference is impossible rather than absent, and a test checks that it is the one path that does *not* reach `ensureFxAccount`. Both mistakes balance. `amount_cents` keeps meaning the ledger figure — making it the face amount would have compared a euro against a dollar balance, which is Phase 152's own defect one phase later — and three columns describe the bank side. Five registries caught the schema change, one of them finding a column misclassified since before this phase, so `FACE_COLUMNS` shrank for the first time. A sixth caught the phase correcting itself: three sites were given an invented ground to keep them in `DOMESTIC_GROUNDS` after they stopped being domestic, and the register's exact-correspondence check said so |
 | `tests/fx-summing.test.ts`, `tests/sums-that-add-currencies.test.ts` | **A number with no reader** (Phase 152): the three sums `BLIND_FACE_SUMS` held since Phase 143, and they were not one problem. Two needed converting — a 1099 threshold met by adding whatever currencies a contractor was paid in, and a sales tax return adding euro and dollar invoices — and the third needed the question asked earlier: `cashBasisCaveats` summed `invoices.tax_cents` and read the total only as `> 0`, so there was no rate to argue about because there was no reader. It counts rows, which is the answer its own sibling query three lines above had reached nine phases earlier and nobody carried across. The register also named the wrong column, because `document_tax_lines` carries no currency and so is on no face-column list — the entry was written from what the scan could reach. Then the repair blinded that scan: the arithmetic moved behind `functionalSumSql` and ``sum(${table.column})`` stopped matching, so `converted_sum` is declared as a third addition form and judged, not waved through — the second argument must be a rate and its table must be joined, since a null rate coalesces to the identity and an unjoined one is null on every row. Verified by disagreement in both directions |

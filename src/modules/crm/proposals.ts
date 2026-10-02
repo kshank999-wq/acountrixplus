@@ -726,7 +726,7 @@ export async function billingSchedule(
 export async function schedulesFor(
   ctx: ActorContext,
   exec: Executor = db,
-): Promise<Map<string, ScheduleStage[]>> {
+): Promise<Map<string, Array<ScheduleStage & { invoiceId: string | null }>>> {
   requirePermission(ctx, 'proposals:view')
 
   const rows = await exec
@@ -735,21 +735,40 @@ export async function schedulesFor(
       label: proposalScheduleStages.label,
       kind: proposalScheduleStages.kind,
       percentBp: proposalScheduleStages.percentBp,
+      // What has been billed, so the list can show it and offer the next stage
+      // without a query per row (Phase 155).
+      invoiceId: proposalScheduleStages.invoiceId,
     })
     .from(proposalScheduleStages)
     .where(scoped(ctx, proposalScheduleStages))
     .orderBy(asc(proposalScheduleStages.proposalId), asc(proposalScheduleStages.sortOrder))
 
-  const byProposal = new Map<string, ScheduleStage[]>()
+  const byProposal = new Map<string, Array<ScheduleStage & { invoiceId: string | null }>>()
   for (const row of rows) {
     const stages = byProposal.get(row.proposalId) ?? []
     stages.push({
       label: row.label,
       kind: row.kind as ScheduleStage['kind'],
       percentBp: row.percentBp,
+      invoiceId: row.invoiceId,
     })
     byProposal.set(row.proposalId, stages)
   }
 
   return byProposal
+}
+
+/** The opportunity a proposal belongs to, for a worker holding only its id. */
+export async function opportunityIdFor(
+  ctx: ActorContext,
+  proposalId: string,
+  exec: Executor = db,
+): Promise<string | null> {
+  const [row] = await exec
+    .select({ opportunityId: proposals.opportunityId })
+    .from(proposals)
+    .where(scoped(ctx, proposals, eq(proposals.id, proposalId)))
+    .limit(1)
+
+  return row?.opportunityId ?? null
 }

@@ -278,6 +278,7 @@ export type AuditAction =
   | 'proposal.update'
   | 'proposal.send'
   | 'proposal.schedule'
+  | 'proposal.stage_billed'
   | 'proposal.decide'
   | 'lead.intake'
   | 'intake_key.create'

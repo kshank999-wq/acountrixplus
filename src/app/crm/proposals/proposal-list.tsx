@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { formatCents } from '@/lib/money'
 import {
+  billStageAction,
   createProposalAction,
   decideProposalAction,
   sendProposalAction,
@@ -24,7 +25,7 @@ type Proposal = {
   publicToken: string
   versions: Array<{ id: string; versionNumber: number; sentAt: string; hasPdf: boolean }>
   /** The billing schedule, in order. Empty when the proposal has none (Phase 154). */
-  schedule: Array<{ label: string; kind: string; percentBp: number }>
+  schedule: Array<{ label: string; kind: string; percentBp: number; invoiceId: string | null }>
 }
 
 const STATUS_STYLES: Record<string, string> = {
@@ -175,17 +176,14 @@ export function ProposalList({
                 </div>
 
                 {proposal.schedule.length > 0 && schedulingFor !== proposal.id && (
-                  <p className="mt-1.5 text-xs text-muted">
-                    Billed:{' '}
-                    {proposal.schedule
-                      .map(
-                        (stage) =>
-                          `${stage.label} ${(stage.percentBp / 100).toFixed(0)}%${
-                            stage.kind === 'deposit' ? ' (deposit)' : ''
-                          }`,
-                      )
-                      .join(' · ')}
-                  </p>
+                  <ScheduleProgress
+                    proposalId={proposal.id}
+                    schedule={proposal.schedule}
+                    totalCents={proposal.totalCents}
+                    canManage={canManage}
+                    pending={pending}
+                    act={act}
+                  />
                 )}
 
                 {schedulingFor === proposal.id && (
@@ -579,6 +577,67 @@ function ScheduleEditor({
         >
           {pending ? 'Saving…' : 'Save schedule'}
         </button>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * What is billed on a contract, and the one button that bills the next stage.
+ *
+ * The stages are shown in order with the billed ones struck through, because the
+ * question somebody opens this to answer is "what do I invoice next" and a list
+ * of percentages does not answer it. Only the next unbilled stage gets a button:
+ * `billStageStands` refuses a stage whose predecessor is unbilled, and offering
+ * a button that is always refused is the preview-versus-commit split Phase 151
+ * spent a phase repairing.
+ */
+function ScheduleProgress({
+  proposalId,
+  schedule,
+  totalCents,
+  canManage,
+  pending,
+  act,
+}: {
+  proposalId: string
+  schedule: Array<{ label: string; kind: string; percentBp: number; invoiceId: string | null }>
+  totalCents: number
+  canManage: boolean
+  pending: boolean
+  act: (fn: () => Promise<{ ok: boolean; message?: string; error?: string }>) => void
+}) {
+  const nextIndex = schedule.findIndex((stage) => stage.invoiceId === null)
+  const billedCents = schedule
+    .filter((stage) => stage.invoiceId !== null)
+    .reduce((sum, stage) => sum + Math.round((totalCents * stage.percentBp) / 10_000), 0)
+
+  return (
+    <div className="mt-1.5 space-y-1">
+      <p className="text-xs text-muted">
+        {schedule.map((stage, index) => (
+          <span key={index}>
+            {index > 0 && ' · '}
+            <span className={stage.invoiceId ? 'text-faint line-through' : undefined}>
+              {stage.label} {(stage.percentBp / 100).toFixed(0)}%
+              {stage.kind === 'deposit' ? ' (deposit)' : ''}
+            </span>
+          </span>
+        ))}
+      </p>
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="tnum text-xs text-faint">
+          {formatCents(billedCents)} of {formatCents(totalCents)} invoiced
+        </span>
+        {canManage && nextIndex >= 0 && (
+          <button
+            className="btn px-2 py-1 text-xs"
+            disabled={pending}
+            onClick={() => act(() => billStageAction(proposalId, nextIndex))}
+          >
+            Invoice “{schedule[nextIndex].label}”
+          </button>
+        )}
       </div>
     </div>
   )

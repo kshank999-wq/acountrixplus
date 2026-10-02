@@ -1,3 +1,4 @@
+import { formatCents } from '@/lib/money'
 import { runChases } from '@/modules/receivables/chase-run'
 import { runStatements } from '@/modules/receivables/statement-run'
 import { registerHandler, type JobContext } from '../registry'
@@ -120,6 +121,88 @@ registerHandler({
       sent: result.sent,
       failed: result.failed,
       notes: result.notes,
+    }
+  },
+})
+
+/**
+ * Raising the deposit the moment a client signs (spec §6, §7, Phase 155).
+ *
+ * ## The gap this closes
+ *
+ * `acceptProposal` is the digital signature path: it writes the acceptance,
+ * marks the proposal and the opportunity won, logs the activity, and records a
+ * `proposal.accepted` event. Then it stops. The client has signed and the
+ * deposit the contract asks for does not exist until somebody notices, opens
+ * the pipeline board and clicks Convert.
+ *
+ * For a deposit that is the whole point. The reason a contract says "50% on
+ * signing" is that the money arrives before the work does, and a deposit
+ * invoiced on Monday because a human got round to it is a deposit that did not
+ * do its job over the weekend.
+ *
+ * ## Why a job and not part of the acceptance
+ *
+ * The acceptance is a client-facing HTTP request holding a signature, and it
+ * must not fail because the chart of accounts is missing a revenue account or a
+ * period is closed. `acceptProposal`'s own comment makes this argument about
+ * notifications — the swallowed `announceAcceptance(...).catch(() => {})` it
+ * replaced — and the same reasoning is stronger here, because conversion writes
+ * to the ledger.
+ *
+ * So the event is recorded inside the acceptance transaction and this runs
+ * after: a rollback takes it with it, a commit guarantees it happens, and a
+ * failure is a retried job with backoff and a dead letter rather than a
+ * signature the client could not give.
+ *
+ * ## Idempotent, and it has to be
+ *
+ * The queue promises at least once (Phase 10). `convertWonOpportunity` returns
+ * what it already created rather than making a second client and job, and
+ * `billStage` refuses a stage that already has an invoice — so a second run
+ * finds the work done and reports it rather than billing the deposit twice.
+ */
+registerHandler({
+  kind: 'receivables.deposit_on_acceptance',
+  label: 'Convert an accepted proposal and invoice its deposit',
+  handler: async (context: JobContext) => {
+    const actor = context.actor!
+    const proposalId = String(context.payload.proposalId ?? '')
+    if (!proposalId) return { ok: true, detail: 'No proposal on the event.' }
+
+    const { opportunityIdFor } = await import('@/modules/crm/proposals')
+    const opportunityId = await opportunityIdFor(actor, proposalId)
+    if (!opportunityId) return { ok: true, detail: 'That proposal is gone.' }
+
+    const { convertWonOpportunity } = await import('@/modules/crm/conversion')
+    const { stagesDue, billStage } = await import('@/modules/crm/stage-invoicing')
+
+    // Conversion creates the client and the job and writes the schedule of
+    // values; it raises no invoice of its own now, because billing a stage is
+    // this module's job and doing it in two places would be two answers to one
+    // question.
+    const converted = await convertWonOpportunity(actor, opportunityId, {
+      createInvoice: false,
+      proposalId,
+    })
+
+    const due = await stagesDue(actor, proposalId)
+    if (!due.next || due.next.kind !== 'deposit') {
+      return {
+        ok: true,
+        detail: due.next
+          ? `Nothing to invoice on signing: the first stage is “${due.next.label}”.`
+          : 'This contract has no billing schedule, so nothing is due on signing.',
+      }
+    }
+
+    const billed = await billStage(actor, { proposalId, stageIndex: due.nextIndex! })
+
+    return {
+      ok: true,
+      detail:
+        `Invoiced ${formatCents(billed.amountCents)} for “${billed.label}” against client ` +
+        `${converted.customerId}.`,
     }
   },
 })

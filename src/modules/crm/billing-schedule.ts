@@ -233,3 +233,105 @@ export function sovStages(stages: readonly ScheduledStage[]): ScheduledStage[] {
 export function depositStage(stages: readonly ScheduledStage[]): ScheduledStage | null {
   return stages.find((stage) => stage.kind === 'deposit') ?? null
 }
+
+/** A stage with what has happened to it. */
+export type StageState = ScheduledStage & {
+  /** The invoice that billed this stage, when one has. */
+  invoiceId: string | null
+}
+
+export type BillVerdict = { ok: true } | { ok: false; why: string }
+
+/**
+ * Whether this stage may be billed now (Phase 155).
+ *
+ * The stages are **in order** and billed in order, which is a decision rather
+ * than an accident: a schedule reads "on signing, then at the frame, then on
+ * handover", and billing the handover first is either a mistake or a change to
+ * the contract. Refusing it costs a company nothing it cannot undo by editing
+ * the schedule, and allowing it would let a job be billed to completion without
+ * the work in between ever appearing.
+ */
+export function billStageStands(stages: readonly StageState[], index: number): BillVerdict {
+  const stage = stages[index]
+  if (!stage) {
+    return { ok: false, why: 'That stage is not on this contract’s billing schedule.' }
+  }
+
+  if (stage.invoiceId !== null) {
+    return {
+      ok: false,
+      why:
+        `“${stage.label}” has already been invoiced. Billing it again would charge the client ` +
+        'twice for the same stage of the contract.',
+    }
+  }
+
+  const unbilledBefore = stages.slice(0, index).filter((earlier) => earlier.invoiceId === null)
+  if (unbilledBefore.length > 0) {
+    return {
+      ok: false,
+      why:
+        `“${unbilledBefore[0].label}” comes before “${stage.label}” and has not been invoiced. ` +
+        'A schedule is billed in the order it was agreed — bill that one first, or change the ' +
+        'schedule if the work really did happen out of order.',
+    }
+  }
+
+  return { ok: true }
+}
+
+/** The next stage due, or `null` when the contract is fully billed. */
+export function nextBillable(stages: readonly StageState[]): StageState | null {
+  return stages.find((stage) => stage.invoiceId === null) ?? null
+}
+
+/** What has been invoiced so far, in the company's own money. */
+export function billedSoFar(stages: readonly StageState[]): number {
+  return stages
+    .filter((stage) => stage.invoiceId !== null)
+    .reduce((sum, stage) => sum + stage.amountCents, 0)
+}
+
+/**
+ * Whether billing this stage also turns the held deposit into revenue.
+ *
+ * ## Why recognition and not a credit
+ *
+ * A retainer drawdown in `timebilling` posts `Dr Unearned Revenue / Cr Accounts
+ * Receivable`: the money is held and later *applied* to reduce what a client
+ * owes. That is a different act from this one and copying it would be wrong
+ * here.
+ *
+ * A deposit on this schedule is a **stage of the contract**, so the stages
+ * already come to 100% — the client pays 25% on signing and 75% across the
+ * rest, and the total invoiced is the contract. There is nothing to apply
+ * against the later invoices, because the deposit invoice collected its own
+ * share.
+ *
+ * What is left is that the deposit was credited to unearned revenue and has
+ * never been recognised. Bill every other stage and the revenue account holds
+ * 75% of a contract that is finished, with 25% sitting in a liability for ever.
+ * So the entry is `Dr Unearned Revenue / Cr Revenue` — a recognition, posted
+ * once.
+ *
+ * ## When
+ *
+ * On the **last** stage, because that is when the work the deposit was taken
+ * against is done. Recognising it earlier would call money earned while the job
+ * it belongs to is still running, which is the thing `deferred_revenue` exists
+ * to prevent; recognising it in slices would need a rule about which slice, and
+ * every such rule this project has met turned out to be a decision somebody
+ * should make rather than one to bury in arithmetic.
+ */
+export function recognisesDeposit(stages: readonly StageState[], index: number): boolean {
+  const deposit = stages.find((stage) => stage.kind === 'deposit')
+  if (!deposit || deposit.invoiceId === null) return false
+
+  // The last stage that is not the deposit itself: billing it completes the
+  // contract, so whatever the deposit was held against has now been delivered.
+  const earning = stages.filter((stage) => stage.kind !== 'deposit')
+  if (earning.length === 0) return false
+
+  return stages[index] === earning[earning.length - 1]
+}
