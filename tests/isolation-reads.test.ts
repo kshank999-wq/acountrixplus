@@ -151,9 +151,13 @@ describe('every read from a company-scoped table', () => {
     // Eight hundred and sixty-six since Phase 151: `recordContribution` reads
     // the bank account through `bankGlAccountFor` now instead of selecting it
     // itself, so a read left this file for a gate that was already counted.
-    expect(READS.length).toBe(866)
+    // Eight hundred and sixty-eight since Phase 154, which added two: the
+    // billing schedule a proposal carries, read per proposal when one is
+    // converted and in bulk for the list. Both go through `scoped()`, which is
+    // why the whole increase lands on one guard.
+    expect(READS.length).toBe(868)
     expect(by).toEqual({
-      'scoped-read': 530,
+      'scoped-read': 532,
       'explicit-company': 247,
       'established-above': 28,
       'id-from-fetched-row': 17,

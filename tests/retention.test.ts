@@ -123,7 +123,11 @@ describe('the retention policy', () => {
    * table fails here. Yes, that means a one-line edit on every migration. That
    * is the price of the moment where somebody decides.
    */
-  const TABLE_COUNT = 178
+  // 179 since Phase 154 added `proposal_schedule_stages`, which answered the
+  // question above by going in `NEVER_SWEPT`: a billing schedule is the payment
+  // terms a client agreed to, and sweeping it would delete the terms behind
+  // invoices that are themselves never swept.
+  const TABLE_COUNT = 179
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

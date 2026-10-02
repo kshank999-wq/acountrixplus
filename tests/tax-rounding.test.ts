@@ -353,7 +353,12 @@ describe('the register of places a whole is split', () => {
     // a statement about the money, so it can be true while the site is wrong —
     // which is what makes the site a defect rather than a design.
     expect(unplaced[0].provenance).toBe('whole-first')
-    expect(SPLIT_SITES.filter((site) => site.provenance === 'whole-first')).toHaveLength(7)
+    // Eight since Phase 154 and `scheduleAmounts`, which is `whole-first`
+    // without argument: the contract is the figure both sides signed and the
+    // stages are percentages of it. `parts-first` stays at one — `createDeposit`,
+    // the counter-example ADR 0147 was named for — so the ratio moving is the
+    // register recording that the common case is common.
+    expect(SPLIT_SITES.filter((site) => site.provenance === 'whole-first')).toHaveLength(8)
     expect(SPLIT_SITES.filter((site) => site.provenance === 'parts-first')).toHaveLength(1)
   })
 

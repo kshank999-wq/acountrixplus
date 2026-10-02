@@ -177,6 +177,32 @@ the test and the reason it was wrong. A proposal with no billing schedule has
 agreed no payment terms, so inventing one at conversion would be inventing terms
 nobody agreed to, and billing the lot is what this replaced.
 
+## Four registers the full suite moved
+
+Every one found by its own test, and one of them is a decision rather than a
+count:
+
+- **`RETENTION_POLICIES`' table tripwire** asked the question it exists to ask:
+  `proposal_schedule_stages` either grows with traffic and needs a sweep, or it is
+  the business and goes in `NEVER_SWEPT`. It is the business — a billing schedule
+  is the payment terms a client agreed to, and a deposit stage is the difference
+  between money held as a liability and money recognised as revenue. Sweeping it
+  would delete the terms behind invoices that are themselves never swept, leaving
+  a deposit invoice nobody can explain. It needs no age policy because it does not
+  grow with traffic: a proposal has a handful of stages and they cascade away with
+  it.
+- **`SPLIT_SITES`** at nine, `whole-first` at eight, and `parts-first` still at one
+  — `createDeposit`, the counter-example ADR 0147 was named for. The ratio moving
+  is the register recording that the common case is common.
+- **`SITE_REGISTRIES`** at seventy declarations, which is what holds
+  `scheduleAmounts` to being a real function despite no form reaching it: a
+  registry entry naming a function nothing scans for is the shape Phase 140 found
+  two fictions in.
+- **`isolation-reads`** at 868, both new reads on `scoped-read`. Measured rather
+  than assumed — the length assertion fails before the per-guard map is compared,
+  so "both go through `scoped()`" was checked by making the claim and watching it
+  pass rather than by reading the code.
+
 ## What this does not do
 
 **It does not bill the milestones.** They become the job's schedule of values, and

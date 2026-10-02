@@ -145,8 +145,15 @@ describe('what the broken scanner did to the registries', () => {
     // which no registry had ever named, `createDeposit`, and `grossFor`. All
     // three were found by a form rather than by somebody reading, which is the
     // difference this assertion exists to keep track of.
+    // Seventy since Phase 154 added `scheduleAmounts` to `SPLIT_SITES` — the
+    // second entry there that no division form reaches, and for the opposite
+    // reason to the first: `splitFor` hides a subtraction, and this one contains
+    // no arithmetic at all because it hands the whole question to `splitExactly`.
+    // Which is exactly why it has to be held to the source here: a registry entry
+    // naming a function nothing scans for is the shape Phase 140 found two
+    // fictions in.
     expect(SITE_REGISTRIES.length).toBe(4)
-    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(69)
+    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(70)
   })
 
   it('disagrees with the old scanner, on sites the registries do not yet reach', () => {

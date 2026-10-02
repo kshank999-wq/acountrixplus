@@ -236,6 +236,15 @@ export const NEVER_SWEPT = [
   // What was said and what was promised (Phase 22).
   'communications',
   'tasks',
+  // The payment terms a client agreed to (Phase 154). A billing schedule is part
+  // of the contract: it says what is invoiced and when, and a deposit stage is
+  // the difference between money held as a liability and money recognised as
+  // revenue. Sweeping it would delete the terms behind invoices that are
+  // themselves never swept, leaving a deposit invoice nobody can explain.
+  //
+  // It needs no age policy of its own because it does not grow with traffic — a
+  // proposal has a handful of stages and the rows cascade away with the proposal.
+  'proposal_schedule_stages',
   // Failures nobody has looked at yet. A dead job swept is a question
   // deleted before it was asked.
   'background_jobs',
