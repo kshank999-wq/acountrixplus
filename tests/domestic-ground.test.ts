@@ -235,34 +235,41 @@ describe('the ground every domestic entry stands on', () => {
     // together — which is the only way it can move without failing, and is what
     // the assertion is for. It did fail first: the three were given a new ground
     // to keep them here, and this line said `expected 11 to be 14`.
-    expect(domestic.length).toBe(11)
+    //
+    // Ten since Phase 157 and `receivePledge`, which went the same way for the
+    // same reason — the fourth and last of the sites Phase 136 recorded as
+    // withholding a currency.
+    expect(domestic.length).toBe(10)
     expect(grounded.sort()).toEqual([...domestic].sort())
   })
 
-  it('names every kind of argument at least once, so none is decoration', () => {
+  it('names every kind of argument it uses, and says why one has no users', () => {
     // A ground nothing uses is a ground nobody has had to defend. Five kinds,
     // and the counts are the measurement: four refusals, three that are wrong,
     // and one apiece for the three that argue through a callee.
     const counts = new Map<string, number>()
     for (const row of DOMESTIC_GROUNDS) counts.set(row.ground, (counts.get(row.ground) ?? 0) + 1)
 
+    // Four kinds in use since Phase 157. `refuses-foreign` was four entries at
+    // Phase 153, one after it, and none now: all four **left this register**
+    // rather than changing ground, because they convert and a converted posting
+    // is not a domestic one — `LEDGER_POSTINGS` moved each to `basis:
+    // 'converted'` and its membership here went with it.
+    //
+    // The value stays declared with no users, which is the opposite call to the
+    // `converts-here` ground Phase 153 removed, and the difference is which way
+    // a ground points. `converts-here` would have *excused* a site, so an unused
+    // one is a label waiting to be misapplied. `refuses-foreign` says a figure is
+    // the books' money *because the path declines* — the gate still refuses a
+    // euro payment into a dollar account, and the next path that reaches money it
+    // cannot describe should find the vocabulary here rather than argue it again.
     expect([...counts.keys()].sort()).toEqual([
       'converted-downstream',
       'nothing-in-reach',
-      'refuses-foreign',
       'sum-is-one-currency',
       'writes-rate-one',
     ])
-    // One `refuses-foreign` since Phase 153, down from four. The other three
-    // **left this register** rather than changing ground: they convert now, and a
-    // converted posting is not a domestic one, so `LEDGER_POSTINGS` moved them to
-    // `basis: 'converted'` and their membership here went with it.
-    //
-    // One entry is not decoration. `receivePledge` still refuses, still has
-    // nowhere to record a receipt's rate, and `PENDING_WIRING` says so in those
-    // words — so the ground is doing exactly the job it was added for, for the
-    // one path that still needs it.
-    expect(counts.get('refuses-foreign')).toBe(1)
+    expect(counts.get('refuses-foreign')).toBeUndefined()
     expect(counts.get('nothing-in-reach')).toBe(7)
   })
 

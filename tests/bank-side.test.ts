@@ -168,7 +168,7 @@ describe('every place money reaches a bank account', () => {
     }
   })
 
-  it('counts the four that convert, the nine that ask, and the one that cannot', () => {
+  it('counts the four that convert and the ten that ask, with none refusing', () => {
     const converts = BANK_POSTINGS.filter((row) => row.handling === 'converts')
     const refuses = BANK_POSTINGS.filter((row) => row.handling === 'refuses')
     const matched = BANK_POSTINGS.filter((row) => row.handling === 'matched')
@@ -209,10 +209,18 @@ describe('every place money reaches a bank account', () => {
     // instalments, so each receipt has its own day and its own rate and there is
     // no row to carry them on — `PENDING_WIRING` calls that blocker `a row`
     // rather than `a field`.
-    expect(refuses.length).toBe(1)
-    expect(refuses.map((row) => row.symbol)).toEqual(['receivePledge'])
+    //
+    // **None and ten since Phase 157.** `receivePledge` was the last entry that
+    // refused anything, and it needed a row rather than a column:
+    // `contribution_receipts`, because a pledge arrives in instalments and each
+    // has its own day and its own rate.
+    //
+    // Phase 133 found ten paths that refused a foreign bank account. Twenty-four
+    // phases later none of them does, and the count got there one entry at a
+    // time with a register saying why each was still outstanding.
+    expect(refuses.length).toBe(0)
     expect(refuses.every((row) => row.withheld !== undefined)).toBe(true)
-    expect(matched.length).toBe(9)
+    expect(matched.length).toBe(10)
     expect(matched.some((row) => row.symbol === 'importPayouts')).toBe(true)
   })
 

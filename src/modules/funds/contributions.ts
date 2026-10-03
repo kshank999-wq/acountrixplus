@@ -1,6 +1,6 @@
 import { and, asc, desc, eq, sql } from 'drizzle-orm'
 import { db } from '@/db'
-import { contributions, customers, financialAccounts, funds } from '@/db/schema'
+import { contributionReceipts, contributions, customers, financialAccounts, funds } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
@@ -8,6 +8,9 @@ import { createJournalEntry } from '@/modules/ledger/journal'
 import { INDUSTRY_ACCOUNTS } from '@/modules/coa/standard'
 import { FundError, fundAccounts, fundDimensionId, requireFund } from './service'
 import { bankGlAccountFor } from '@/modules/banking/bank-guard'
+import { bankMoneyLines } from '@/modules/fx/bank-money'
+import { functionalCurrency, rateFor } from '@/modules/fx/service'
+import { RATE_ONE } from '@/modules/fx/rates'
 
 /**
  * Money in, to a fund (spec §5, "Nonprofit — grants, donors").
@@ -199,18 +202,59 @@ export async function receivePledge(
   ctx: ActorContext,
   input: {
     contributionId: string
+    /**
+     * What the donor sent, in `currency` (Phase 157).
+     *
+     * Was the home-currency figure and is now the face amount. For a domestic
+     * account the two are the same number, which is why no caller had to change.
+     */
     amountCents: number
+    /**
+     * What currency it arrived in. Defaults to the company's own money, which is
+     * every receipt that could be recorded before Phase 157 — the gate refused
+     * anything else.
+     */
+    currency?: string
     receivedOn: string
     financialAccountId: string
     memo?: string | null
   },
-): Promise<{ receivedCents: number; outstandingCents: number; journalEntryId: string }> {
+): Promise<{
+  receivedCents: number
+  outstandingCents: number
+  journalEntryId: string
+  /** What the receipt was worth in the books, which is what came off the promise. */
+  functionalCents: number
+}> {
   requirePermission(ctx, 'accounting:journal')
   await requireModule(ctx, 'funds')
 
   if (input.amountCents <= 0) {
     throw new FundError('A receipt must be more than nothing.')
   }
+
+  /**
+   * What the money is worth in the books (Phase 157).
+   *
+   * `carried-in-home-money`: the pledge receivable predates the cash and is held
+   * in the company's own money — `contributions` has no currency column — so the
+   * receipt relieves it by exactly what it converts to and there is nothing to
+   * realise. `BANK_MONEY_SITES` declares that, and a test measures that this
+   * path does **not** reach `ensureFxAccount`.
+   */
+  const homeCurrency = await functionalCurrency(ctx.companyId)
+  const currency = input.currency ?? homeCurrency
+  const dayRateMillionths =
+    currency === homeCurrency
+      ? RATE_ONE
+      : (await rateFor(ctx, currency, input.receivedOn)).rateMillionths
+
+  const lines = bankMoneyLines({
+    faceCents: input.amountCents,
+    dayRateMillionths,
+    origin: 'carried-in-home-money',
+    direction: 'in',
+  })
 
   const accounts = await fundAccounts(ctx)
   const receivableId = accounts.need(
@@ -234,8 +278,17 @@ export async function receivePledge(
       throw new FundError('That is a gift, not a promise — the money is already in.')
     }
 
+    /**
+     * Compared in the books' money, not against the face amount.
+     *
+     * `amount_cents` and `received_cents` are both the company's own money, so a
+     * €600 receipt has to be weighed as the $660 it is worth. Comparing the face
+     * figure against a dollar balance is the `contractorPayments` defect Phase
+     * 152 repaired — a figure measured against a threshold in another currency —
+     * so the conversion happens before the comparison.
+     */
     const outstanding = row.amountCents - row.receivedCents
-    if (input.amountCents > outstanding) {
+    if (lines.againstCents > outstanding) {
       throw new FundError(
         `That is more than is still promised. ${(outstanding / 100).toFixed(2)} is outstanding.`,
       )
@@ -254,11 +307,16 @@ export async function receivePledge(
     const dimension = { [await fundDimensionFor(ctx)]: fund.dimensionValueId }
 
     // Phase 133: the ledger account, and whether this account may take it.
+    // The currency may be handed over since Phase 157 — `contribution_receipts`
+    // is the row ADR 0136 said had to come before the wiring, and
+    // `PENDING_WIRING` called the blocker `a row` rather than `a field` for
+    // exactly this reason: each instalment has its own day and its own rate.
     const bankGl = await bankGlAccountFor(
       ctx,
       input.financialAccountId,
       'recording this contribution',
       tx,
+      currency,
     )
 
     const entry = await createJournalEntry(
@@ -270,10 +328,10 @@ export async function receivePledge(
         sourceType: 'contribution',
         sourceId: row.id,
         lines: [
-          { chartAccountId: bankGl, debitCents: input.amountCents, dimensions: dimension },
+          { chartAccountId: bankGl, debitCents: lines.bankCents, dimensions: dimension },
           {
             chartAccountId: receivableId,
-            creditCents: input.amountCents,
+            creditCents: lines.againstCents,
             dimensions: dimension,
             memo: 'Promise settled — the revenue was recognised when it was made',
           },
@@ -282,12 +340,36 @@ export async function receivePledge(
       tx,
     )
 
-    const receivedCents = row.receivedCents + input.amountCents
+    const receivedCents = row.receivedCents + lines.againstCents
 
     await tx
       .update(contributions)
       .set({ receivedCents })
       .where(eq(contributions.id, row.id))
+
+    /**
+     * The instalment, written down (Phase 157).
+     *
+     * The row `PENDING_WIRING` has been waiting on since Phase 136. The face
+     * amount and its currency because that is what the donor sent; the rate
+     * because Phase 129's rule is that a posting records the rate it used; and
+     * the functional figure stored rather than recomputed, which is Phase 156's
+     * lesson one phase old — a figure describing a recorded event must not be
+     * derived from an input that can move.
+     */
+    await tx.insert(contributionReceipts).values({
+      companyId: ctx.companyId,
+      contributionId: row.id,
+      receivedOn: input.receivedOn,
+      amountCents: input.amountCents,
+      currency,
+      exchangeRateMillionths: dayRateMillionths,
+      functionalCents: lines.againstCents,
+      financialAccountId: input.financialAccountId,
+      journalEntryId: entry.id,
+      memo: input.memo?.trim() || null,
+      recordedBy: ctx.userId,
+    })
 
     await recordAudit(
       ctx,
@@ -305,6 +387,7 @@ export async function receivePledge(
       receivedCents,
       outstandingCents: row.amountCents - receivedCents,
       journalEntryId: entry.id,
+      functionalCents: lines.againstCents,
     }
   })
 }

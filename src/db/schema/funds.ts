@@ -15,6 +15,7 @@ import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { customers } from './receivables'
 import { journalEntries } from './ledger'
+import { financialAccounts } from './accounting'
 import { dimensionValues } from './dimensions'
 
 /**
@@ -202,6 +203,81 @@ export const contributions = pgTable(
     receivedWithinAmount: check(
       'contributions_received_within_amount',
       sql`${t.receivedCents} >= 0 AND ${t.receivedCents} <= ${t.amountCents}`,
+    ),
+  }),
+)
+
+/**
+ * One instalment of a pledge (Phase 157).
+ *
+ * ## Why a row and not columns on the contribution
+ *
+ * `PENDING_WIRING` carried `mayPostToBank` from Phase 136 and Phase 153 cleared
+ * three of its four targets by adding columns. It said in those words why this
+ * one could not go with them: a pledge is received in instalments, so each
+ * receipt has its own day and its own rate, and a single
+ * `exchange_rate_millionths` on `contributions` would be right for the first
+ * instalment and quietly wrong for the second. `a row` was argued as a blocker
+ * distinct from `a field` rather than bending the nearest (Phase 130), and this
+ * is the row.
+ *
+ * ## What it carries, and why each one
+ *
+ * The face amount and its currency, because that is what the donor sent. The
+ * rate, because Phase 129's rule is that a posting records the rate it used —
+ * `rateFor` answers from a table the company keeps adding to, and a receipt
+ * reconciled six months later must be reconciled against the rate it was posted
+ * at. And the functional figure, stored rather than recomputed, which is Phase
+ * 156's lesson one phase old: a figure describing a recorded event must not be
+ * derived from an input that can move.
+ */
+export const contributionReceipts = pgTable(
+  'contribution_receipts',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    contributionId: uuid('contribution_id')
+      .notNull()
+      .references(() => contributions.id, { onDelete: 'cascade' }),
+
+    /** Its own date, which is the whole reason this is a row. */
+    receivedOn: date('received_on').notNull(),
+
+    /** What the donor sent, in `currency`. */
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    currency: text('currency').notNull(),
+    exchangeRateMillionths: bigint('exchange_rate_millionths', { mode: 'number' }).notNull(),
+    /** What it was worth in the books, at the rate above. */
+    functionalCents: bigint('functional_cents', { mode: 'number' }).notNull(),
+
+    financialAccountId: uuid('financial_account_id')
+      .notNull()
+      .references(() => financialAccounts.id, { onDelete: 'restrict' }),
+    journalEntryId: uuid('journal_entry_id').references(() => journalEntries.id, {
+      onDelete: 'set null',
+    }),
+
+    memo: text('memo'),
+    recordedBy: uuid('recorded_by').references(() => users.id, { onDelete: 'set null' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    contributionIdx: index('contribution_receipts_contribution_idx').on(
+      t.companyId,
+      t.contributionId,
+      t.receivedOn,
+    ),
+    // A receipt is money arriving; nothing arrives as nothing or as a negative.
+    // Refunding a pledge receipt is its own act, not a negative instalment.
+    positive: check(
+      'contribution_receipts_positive',
+      sql`${t.amountCents} > 0 AND ${t.functionalCents} > 0`,
+    ),
+    ratePositive: check(
+      'contribution_receipts_rate_positive',
+      sql`${t.exchangeRateMillionths} > 0`,
     ),
   }),
 )

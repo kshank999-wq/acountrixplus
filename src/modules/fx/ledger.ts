@@ -433,11 +433,16 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
   {
     file: 'src/modules/funds/contributions.ts',
     symbol: 'receivePledge',
-    basis: 'domestic',
+    basis: 'converted',
     because:
-      'A promise to give, recognised when it is made rather than when it arrives. Same ' +
-      'construction as the contribution it becomes: no table in the funds module records a ' +
-      'currency, so a pledge is in the company’s own money and there is nothing to convert.',
+      'A promise to give, recognised when it is made rather than when it arrives. `domestic` until ' +
+      'Phase 157, on the argument that "no table in the funds module records a currency" — true of ' +
+      '`contributions`, which still records none, and no longer true of the module: ' +
+      '`contribution_receipts` records what the donor sent and at what rate. The receivable is ' +
+      'still the books’ own money and both ledger lines still take one figure, but that figure is ' +
+      'now the product of a rate, which is what this basis asserts and what `domestic` denied. ' +
+      'The one `converted` entry where no realised difference can arise — `BANK_MONEY_SITES` calls ' +
+      'the receivable `carried-in-home-money`, so there is no second rate to differ from.',
   },
   {
     file: 'src/modules/payroll/remittance.ts',

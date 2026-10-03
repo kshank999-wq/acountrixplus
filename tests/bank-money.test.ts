@@ -44,17 +44,20 @@ function stillBlocked(site: BankMoneySite): boolean {
 }
 
 describe('the sites, and that they are the four that were blocked', () => {
-  it('names the four, three of them no longer withheld', () => {
+  it('names the four, none of them withheld any longer', () => {
     // The set is four because `withheld: 'no-field'` was four when Phase 136
-    // measured it. Three were cleared by Phase 153's migration and now read
-    // `matched`; the fourth needs a row rather than a column and is still on
-    // `PENDING_WIRING`, which is what excuses it from the source checks below.
+    // measured it. Three were cleared by Phase 153's migration; the fourth needed
+    // a row rather than a column and was cleared by Phase 157, which is the last
+    // path on `BANK_POSTINGS` that refused anything.
     expect(BANK_MONEY_SITES).toHaveLength(4)
 
     const withheld = BANK_POSTINGS.filter((row) => row.withheld === 'no-field').map(
       (row) => `${row.file}:${row.symbol}`,
     )
-    expect(withheld).toEqual(['src/modules/funds/contributions.ts:receivePledge'])
+    expect(withheld).toEqual([])
+    // And nothing refuses a foreign account at all now, which is what the ten
+    // paths Phase 133 found all did.
+    expect(BANK_POSTINGS.filter((row) => row.handling === 'refuses')).toEqual([])
 
     // And every site is in `BANK_POSTINGS` under one heading or the other, so
     // the two registers cannot drift into describing different sets.
@@ -66,17 +69,12 @@ describe('the sites, and that they are the four that were blocked', () => {
     }
   })
 
-  it('leaves exactly one site blocked, and the register says why', () => {
-    const blocked = BANK_MONEY_SITES.filter(stillBlocked).map((site) => site.symbol)
-    expect(blocked).toEqual(['receivePledge'])
-
-    // Phase 139's rule: an entry that cannot be finished still has to say what
-    // is in the way, in a sentence somebody can check.
-    const entry = PENDING_WIRING.find((row) =>
-      row.targets.some((target) => target.symbol === 'receivePledge'),
-    )!
-    expect(entry.blockedBy).toBe('a row')
-    expect(entry.because).toMatch(/instalments/)
+  it('leaves no site blocked, which it did for twenty-one phases', () => {
+    // `PENDING_WIRING` is empty since Phase 157 — the first time since Phase 139
+    // built it. So every site here is held to the source below, with nothing
+    // excused.
+    expect(BANK_MONEY_SITES.filter(stillBlocked)).toEqual([])
+    expect(PENDING_WIRING).toEqual([])
   })
 
   it('points every entry at a function that exists', () => {
@@ -93,14 +91,26 @@ describe('the sites, and that they are the four that were blocked', () => {
     }
   })
 
-  it('uses both origins, so neither is decoration', () => {
+  it('uses all three origins, so none is decoration', () => {
     // Phase 147's rule. A registry where every entry answers the same way is a
     // registry that has not been asked anything.
+    //
+    // Three since Phase 157, and the third was found by **wiring** the site this
+    // registry had declared and never acted on. `origin` as Phase 153 wrote it
+    // asked whether the balance pre-exists; what decides whether a difference
+    // arises is whether it carries a rate. `receivePledge`'s receivable
+    // pre-exists and is held in the books' own money, which the first two values
+    // could not spell — so `already-carried` goes from three entries to two.
     const origins = new Set(BANK_MONEY_SITES.map((row) => row.origin))
-    expect([...origins].sort()).toEqual(['already-carried', 'created-here'])
+    expect([...origins].sort()).toEqual([
+      'already-carried',
+      'carried-in-home-money',
+      'created-here',
+    ])
 
-    expect(BANK_MONEY_SITES.filter((row) => row.origin === 'already-carried')).toHaveLength(3)
+    expect(BANK_MONEY_SITES.filter((row) => row.origin === 'already-carried')).toHaveLength(2)
     expect(BANK_MONEY_SITES.filter((row) => row.origin === 'created-here')).toHaveLength(1)
+    expect(BANK_MONEY_SITES.filter((row) => row.origin === 'carried-in-home-money')).toHaveLength(1)
   })
 
   it('tells the two deposit siblings apart', () => {
@@ -284,30 +294,32 @@ describe('the declaration held to the source', () => {
     expect(wrong).toEqual([])
   })
 
-  it('still says no about the one that is blocked', () => {
-    // The excusing filter above is only honest if the thing it excuses would
-    // otherwise fail. `receivePledge` is on `PENDING_WIRING` because it cannot
-    // pass a currency, and this is that sentence rather than a promise of it.
+  it('says no to a home-money balance that reaches the exchange account', () => {
+    // The measurable half of the third origin, and a check seen to disagree
+    // (Phase 121). `receivePledge` relieves a receivable carrying no rate, so a
+    // posting to `7100` from there would be the difference between a figure and
+    // itself.
     const site = bankMoneySiteFor('src/modules/funds/contributions.ts', 'receivePledge')
-    expect(passesCurrency(site)).toBe(false)
+    expect(site.origin).toBe('carried-in-home-money')
+    expect(reachesFxAccount(site)).toBe(false)
 
-    const verdict = bankMoneyStands({
-      site,
-      reachesFxAccount: reachesFxAccount(site),
-      passesCurrency: passesCurrency(site),
-    })
+    const verdict = bankMoneyStands({ site, reachesFxAccount: true, passesCurrency: true })
     expect(verdict.ok).toBe(false)
+    expect(verdict.ok === false && verdict.why).toMatch(/a figure and itself/)
   })
 
   it('reaches the exchange account from the two wired sites that relieve', () => {
     // Measured both ways rather than asserted once. The one that creates its
     // balance must *not* reach it, and that is the half a looser check would
     // have excused.
-    const reaching = BANK_MONEY_SITES.filter((site) => !stillBlocked(site))
-      .filter(reachesFxAccount)
+    const reaching = BANK_MONEY_SITES.filter(reachesFxAccount)
       .map((site) => site.symbol)
       .sort()
 
+    // The two that relieve a balance carrying its own rate, and only those.
+    // `receiveDeposit` creates its balance and `receivePledge`'s is home money,
+    // so neither may reach it — for different reasons, which is the whole point
+    // of the third origin.
     expect(reaching).toEqual(['recordRemittance', 'refundDeposit'])
     expect(reachesFxAccount(bankMoneySiteFor('src/modules/properties/deposits.ts', 'receiveDeposit'))).toBe(
       false,

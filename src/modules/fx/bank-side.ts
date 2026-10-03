@@ -249,12 +249,18 @@ export const BANK_POSTINGS: readonly BankPosting[] = [
   {
     file: 'src/modules/funds/contributions.ts',
     symbol: 'receivePledge',
-    handling: 'refuses',
+    handling: 'matched',
     because:
-      'A donation arriving. The amount is what the donor gave and the account is where it landed, ' +
-      'and nothing joins the two: a euro gift into a euro account would post the euro figure to a ' +
-      'dollar ledger, which is Phase 127’s defect exactly, one module over.',
-    withheld: 'no-field',
+      'A donation arriving. The amount was what the donor gave and the account was where it ' +
+      'landed, with nothing joining the two — a euro gift into a euro account would have posted ' +
+      'the euro figure to a dollar ledger, which is Phase 127’s defect one module over. It was ' +
+      '`refuses` with `withheld: \'no-field\'` from Phase 136 until Phase 157, and it was the last ' +
+      'entry on this register that refused anything. `contribution_receipts` is the row it needed: ' +
+      'a pledge arrives in instalments, so each has its own day and its own rate and a column on ' +
+      '`contributions` could only have been right for the first. `BANK_MONEY_SITES` declares the ' +
+      'receivable `carried-in-home-money` — it predates the cash and carries no rate of its own — ' +
+      'so the receipt relieves it by exactly what it converts to and a test measures that this ' +
+      'path does not reach `ensureFxAccount`.',
   },
   {
     file: 'src/modules/properties/deposits.ts',

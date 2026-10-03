@@ -94,6 +94,33 @@ export type BalanceOrigin =
    * figure, and a realised difference is impossible rather than absent.
    */
   | 'created-here'
+  /**
+   * The balance exists before this act and is held in the **company's own
+   * money**, with no rate of its own (Phase 157).
+   *
+   * The case the first two could not spell, found by wiring the site this
+   * registry had declared and never acted on. `origin` as Phase 153 wrote it
+   * asked *does the balance pre-exist?* — and what actually decides whether a
+   * difference arises is *does the balance carry its own rate?*
+   *
+   * ```
+   * site               pre-exists   carries a rate   difference
+   * receiveDeposit     no           —                impossible
+   * refundDeposit      yes          yes              realised
+   * recordRemittance   yes          yes              realised
+   * receivePledge      yes          NO               none
+   * ```
+   *
+   * `contributions` has no currency column, so a pledge's `amount_cents` is the
+   * books' own money: a €600 receipt worth $660 relieves $660 of a dollar
+   * receivable, exactly. Nothing for a day rate to differ from.
+   *
+   * Declared as a third value rather than squeezed into `already-carried`
+   * (Phase 130). Passing that one with `carriedCents` set to the converted
+   * figure would have produced the right numbers **by accident**, which is
+   * exactly the coincidence a registry exists to stop somebody relying on.
+   */
+  | 'carried-in-home-money'
 
 /** Which way the money goes, which is what decides the sign. */
 export type MoneyDirection =
@@ -130,14 +157,18 @@ export const BANK_MONEY_SITES: readonly BankMoneySite[] = [
   {
     file: 'src/modules/funds/contributions.ts',
     symbol: 'receivePledge',
-    origin: 'already-carried',
+    origin: 'carried-in-home-money',
     direction: 'in',
     against: 'Pledges Receivable',
     because:
       'The revenue was recognised when the promise was made — the code’s own line memo says so, ' +
-      '"Promise settled — the revenue was recognised when it was made". `contributions.amount_cents` ' +
-      'and the receivable raised against it predate the cash, so the receivable is relieved at what ' +
-      'it has been carried at and the bank takes what actually arrived.',
+      '"Promise settled — the revenue was recognised when it was made" — so the receivable predates ' +
+      'the cash. **`already-carried` until Phase 157, and wrong.** That entry argued the receivable ' +
+      'was "relieved at what it has been carried at" while the bank took what arrived, which implies ' +
+      'a difference between them. `contributions` has no currency column: a pledge’s `amount_cents` ' +
+      'is the books’ own money, so a €600 receipt worth $660 relieves $660 of a dollar receivable ' +
+      'exactly and there is no second rate to differ from. Written in Phase 153 for a site nobody ' +
+      'had wired, and contradicted the moment somebody did.',
   },
   {
     file: 'src/modules/properties/deposits.ts',
@@ -227,6 +258,16 @@ export type BankMoneyInput = {
       carriedCents?: never
     }
   | {
+      origin: 'carried-in-home-money'
+      /**
+       * Forbidden for the same reason as above, and a different one: the balance
+       * does exist, but it is the books' own money and has no rate — so there is
+       * no second figure, and offering one would invite a difference that cannot
+       * arise (Phase 157).
+       */
+      carriedCents?: never
+    }
+  | {
       origin: 'already-carried'
       /** The home-money figure the other account already holds. */
       carriedCents: number
@@ -244,7 +285,10 @@ export type BankMoneyInput = {
 export function bankMoneyLines(input: BankMoneyInput): BankMoneyLines {
   const bankCents = convert(input.faceCents, input.dayRateMillionths)
 
-  if (input.origin === 'created-here') {
+  // Both of these put the converted figure on each side. Different reasons —
+  // one has no earlier balance and the other has one with no rate — and the same
+  // arithmetic, which is why they share a branch and not a name.
+  if (input.origin === 'created-here' || input.origin === 'carried-in-home-money') {
     return { bankCents, againstCents: bankCents, realisedCents: 0 }
   }
 
@@ -320,6 +364,17 @@ export function bankMoneyStands(input: {
         `${input.site.symbol} creates the balance it posts against and reaches ensureFxAccount. ` +
         'There is no earlier figure for the day’s rate to differ from, so whatever it posts there ' +
         'is a gain conjured out of one conversion.',
+    }
+  }
+
+  if (input.site.origin === 'carried-in-home-money' && input.reachesFxAccount) {
+    return {
+      ok: false,
+      why:
+        `${input.site.symbol} relieves a balance held in the company’s own money and reaches ` +
+        'ensureFxAccount. That balance carries no rate, so the converted receipt relieves it ' +
+        'exactly and there is nothing to realise — whatever it posts to the exchange account is a ' +
+        'difference between a figure and itself.',
     }
   }
 

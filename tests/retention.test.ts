@@ -123,11 +123,16 @@ describe('the retention policy', () => {
    * table fails here. Yes, that means a one-line edit on every migration. That
    * is the price of the moment where somebody decides.
    */
+  // 180 since Phase 157 added `contribution_receipts`, also `NEVER_SWEPT`: a
+  // pledge receipt is the evidence behind a restricted fund's balance, and the
+  // migration declined to backfill one for existing pledges precisely because
+  // what made up `received_cents` was never recorded.
+  //
   // 179 since Phase 154 added `proposal_schedule_stages`, which answered the
   // question above by going in `NEVER_SWEPT`: a billing schedule is the payment
   // terms a client agreed to, and sweeping it would delete the terms behind
   // invoices that are themselves never swept.
-  const TABLE_COUNT = 179
+  const TABLE_COUNT = 180
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

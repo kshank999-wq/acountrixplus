@@ -40,7 +40,7 @@ function measured(entry: Pending) {
 }
 
 describe('the register of what is staged', () => {
-  it('finds entries, so an empty register cannot pass as a finished one', () => {
+  it('is empty, and says so rather than letting that pass unnoticed', () => {
     // Measured, not bounded (Phase 126). Four entries covering seven targets:
     // the deposit application, the write-off recovery, the four paths that
     // refuse a foreign bank account because nothing records their currency, and
@@ -91,9 +91,18 @@ describe('the register of what is staged', () => {
     // The entry count did not move and the target count did, which is the shape
     // worth asserting: a register that only ever shrinks by whole entries cannot
     // show partial progress, and partial progress is what this was.
-    expect(PENDING_WIRING.length).toBe(1)
-    expect(PENDING_WIRING.flatMap((entry) => entry.targets).length).toBe(1)
-    expect(PENDING_WIRING[0].blockedBy).toBe('a row')
+    //
+    // **Empty since Phase 157**, for the first time since Phase 139 built this.
+    // `contribution_receipts` is the row `receivePledge` was waiting on, so the
+    // last entry is gone — and the emptiness is asserted rather than tolerated,
+    // because a register nobody checks for staleness is how a finished backlog
+    // and a forgotten one come to look alike.
+    //
+    // The four assertions in the next block test `wiringStateFor` against a
+    // fixture written in this file, so the rules are still checked on a day when
+    // nothing is outstanding. They were moved off the live register in Phase 151
+    // for exactly this day.
+    expect(PENDING_WIRING).toEqual([])
   })
 
   it('still describes the code, entry by entry', () => {
@@ -230,21 +239,40 @@ describe('what the register refuses', () => {
     // test written against a column — or a table — that does not exist would be
     // fiction rather than a definition of done.
     //
-    // `a field` until Phase 153 and `a row` after it, which is the exception
-    // getting narrower rather than looser: three of the four were cleared by a
-    // migration and the one left needs a table.
-    const blocked = PENDING_WIRING.find((row) => row.blockedBy !== 'nothing')
-    expect(blocked).toBeDefined()
-    expect(blocked?.acceptance).toBe(null)
+    // `a field` from Phase 136, `a row` from Phase 153, and nothing since Phase
+    // 157 cleared the last one. Asked of a fixture rather than the live register
+    // now, which is the point of having one: the rule outlives the entries it was
+    // written for, and a blocked entry will arrive again.
+    const blocked: Pending = {
+      ...entry,
+      core: 'someStagedCore',
+      blockedBy: 'a row',
+      acceptance: null,
+      because:
+        'A fixture standing in for a blocked entry, so this rule is still checked on a day when ' +
+        'the register is empty. The real ones were `mayPostToBank`’s four targets: three needed a ' +
+        'column and the fourth needed a table, because a pledge arrives in instalments.',
+    }
 
     expect(
       wiringStateFor({
-        entry: blocked as Pending,
+        entry: blocked,
         targetsCallingCore: [],
         coreExists: true,
         acceptanceExists: null,
       }).ok,
     ).toBe(true)
+
+    // And the exception is only for a blocked entry: unblocked with no test is
+    // still "wire it up" with no definition of done.
+    expect(
+      wiringStateFor({
+        entry: { ...blocked, blockedBy: 'nothing' },
+        targetsCallingCore: [],
+        coreExists: true,
+        acceptanceExists: null,
+      }).ok,
+    ).toBe(false)
   })
 })
 

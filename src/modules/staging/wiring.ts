@@ -89,29 +89,41 @@ export type Pending = {
   because: string
 }
 
-export const PENDING_WIRING: readonly Pending[] = [
-  {
-    core: 'mayPostToBank',
-    coreFile: 'src/modules/fx/bank-side.ts',
-    targets: [{ symbol: 'receivePledge', file: 'src/modules/funds/contributions.ts' }],
-    phase: 136,
-    blockedBy: 'a row',
-    acceptance: null,
-    liveDefect:
-      '`receivePledge` refuses a foreign bank account outright, so a fund keeping a euro account ' +
-      'has to record a donor’s receipt against a home-currency account the money did not go into, ' +
-      'or not record it at all. Three of the four paths this entry named were cleared in Phase 153 ' +
-      'by a migration; this one needs a row rather than a column and is the only one left.',
-    because:
-      'A pledge is received in instalments — `received_cents` accumulates and the function refuses ' +
-      'more than is outstanding — so each receipt has its own day and its own rate, and there is ' +
-      'no row for a receipt to carry them on. Phase 129’s rule is that a posting records the rate ' +
-      'it used; a single `exchange_rate_millionths` on `contributions` would be right for the ' +
-      'first instalment and wrong for the second, which is worse than the refusal it replaced. ' +
-      'The acceptance test is `null` for the same reason it was in Phase 136: one written against ' +
-      'a table that does not exist would be fiction rather than a definition of done.',
-  },
-]
+export const PENDING_WIRING: readonly Pending[] = []
+
+/**
+ * **Empty since Phase 157**, for the first time since this register was written.
+ *
+ * It held seven entries over eleven targets when Phase 139 built it, and the
+ * entries left one at a time rather than in a clear-out:
+ *
+ * ```
+ * 139  seven entries, eleven targets   built
+ * 151  two entries                     the wiring pass took five
+ * 153  one entry, one target           three of mayPostToBank's four targets
+ * 157  none                            receivePledge, which needed a row
+ * ```
+ *
+ * The last one is the one worth remembering. Phase 153 cleared three of
+ * `mayPostToBank`'s four targets by adding columns and could not clear the
+ * fourth, because a pledge is received in instalments and each has its own day
+ * and its own rate — so it argued `a row` as a blocker distinct from `a field`
+ * rather than adding a column that would be right for the first instalment and
+ * wrong for the second. Four phases later that row exists and the entry is gone.
+ *
+ * ## Kept rather than deleted
+ *
+ * `wiringStateFor` still refuses an entry whose target already calls its core,
+ * an entry naming a core that is not exported, and an unblocked entry with no
+ * acceptance test. Those rules are what made the register worth having, and the
+ * situation it was built for — a core built in one phase and wired in a later
+ * one — is how this project works. The next staged core should find the
+ * vocabulary already here rather than argue it again.
+ *
+ * `tests/pending-wiring.test.ts` asserts the emptiness rather than tolerating
+ * it, and holds every rule against a fixture entry written in the test so that
+ * the rules are still checked on a day when nothing is outstanding.
+ */
 
 export type WiringVerdict = { ok: true } | { ok: false; why: string }
 

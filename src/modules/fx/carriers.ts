@@ -177,6 +177,18 @@ export const CURRENCY_CARRIERS: readonly CurrencyCarrier[] = [
       'fee in the same currency, which is what `postFee` puts on the profit and loss.',
   },
   {
+    table: 'contribution_receipts',
+    property: 'contributionReceipts',
+    because:
+      'What a donor actually sent, in the currency they sent it (Phase 157). On the receipt rather ' +
+      'than on the contribution, because a pledge arrives in instalments and each has its own day ' +
+      'and its own rate — `PENDING_WIRING` called that blocker `a row` rather than `a field` for ' +
+      'four phases, and a single rate column on `contributions` would have been right for the ' +
+      'first instalment and wrong for the second. Not null here, unlike the deposit and remittance ' +
+      'columns Phase 153 added: a receipt cannot exist without money arriving, so there is no row ' +
+      'for which the currency is unknown.',
+  },
+  {
     table: 'deposit_movements',
     property: 'depositMovements',
     because:

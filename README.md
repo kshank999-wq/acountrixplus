@@ -6189,6 +6189,53 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The row a pledge receipt needed (Phase 157)
+
+ADR 0156 nominated a scan for money figures recomputed from a mutable input after
+the event they describe. **Measured, the population is one and it was already
+fixed** — `appointments`, `progress_billing_lines`, `document_tax_lines`,
+`fixed_assets` and `repair_orders` all store the figure their ratio produced, and
+the progress-billing line is stricter still, copying the *base* onto the line so
+editing a schedule of values cannot move a filed application. A scan for a rule
+nothing violates is Phase 121's "a check only ever seen to agree", so the
+nomination is recorded as checked and withdrawn rather than quietly replaced.
+
+The phase went to the oldest live defect on a register instead.
+`PENDING_WIRING` carried `mayPostToBank` from Phase 139. Phase 153 cleared three
+of its four targets with columns and said why the fourth could not go with them:
+a pledge arrives in instalments, so each has its own day and its own rate, and a
+single rate column on `contributions` would be right for the first and quietly
+wrong for the second. That is why `a row` was argued as a blocker distinct from
+`a field`. Four phases later, `contribution_receipts` is the row — so a fund
+banking in euros can record a donor's receipt into the account it actually
+arrived in.
+
+**A third origin, found by wiring a declaration nobody had acted on.**
+`BANK_MONEY_SITES` called this receivable `already-carried`, implying a realised
+difference between what it was carried at and what arrived. But `contributions`
+has no currency column: a pledge is the books' own money, so a €600 receipt worth
+$660 relieves $660 exactly. `origin` asked *does the balance pre-exist?* when
+what decides a difference is *does it carry its own rate?* — three cases, two
+values. `carried-in-home-money` is the third, argued rather than bent. Passing
+`already-carried` with the converted figure would have produced the right numbers
+**by accident**, which is the coincidence a registry exists to prevent anyone
+relying on.
+
+**Two registers emptied, with opposite calls on the values left unused.**
+`PENDING_WIRING` is empty for the first time since Phase 139 built it with seven
+entries over eleven targets — they left one at a time, each with a sentence
+saying what was in the way. And `BANK_POSTINGS` has no `refuses` left: Phase 133
+found ten paths posting into a bank account without asking what currency the
+money was in, and twenty-four phases later every one asks.
+
+That leaves `Withheld` and the `refuses-foreign` ground with no users, and both
+are **kept** — while Phase 153 **removed** the `converts-here` ground in the same
+situation. The rule that settles it, which Phase 147 had stated too broadly: a
+declared value with no users should be deleted when it *excuses* and kept when it
+*accuses*. An empty indictment is a form ready for use; an empty excuse is a
+label waiting to be misapplied.
+
+
 ### What a billed stage was billed for (Phase 156)
 
 ADR 0155 nominated part-billing a stage and said it *"is a real request before it
@@ -7470,6 +7517,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/a-pledge-paid-in-euros.test.ts` | **The row a pledge receipt needed** (Phase 157): the acceptance test `PENDING_WIRING` carried as `null` for twenty-one phases, honest twice over — first the column did not exist, then the one path left needed a **row**, because a pledge arrives in instalments and each has its own day and its own rate. Two instalments of the same €600 at 1.10 and 1.20, worth $660 and $720, each recorded at the rate it was posted at, with the promise coming down by their worth and not by their face amount. And no realised difference anywhere: the receivable predates the cash and is held in the books' own money, which is the third `origin` this phase had to argue — found by wiring a declaration Phase 153 wrote for a site nobody had acted on, where `already-carried` would have produced the right numbers by accident. Empties `PENDING_WIRING` for the first time since Phase 139, and leaves `BANK_POSTINGS` with nothing that refuses a foreign account |
 | `tests/progress-billing-from-a-contract.test.ts` (Phase 156 half) | **What a billed stage was billed for** (Phase 156): two defects Phase 155 shipped, found by measuring its own output rather than taking its nomination. A billed stage's amount was still derived from the proposal's current total, and a won proposal's items can still be edited — so a $20,000 contract billed 25% then edited to $40,000 reported its first stage as $10,000 against a $5,000 invoice, and the deposit recognition drove unearned revenue negative. And `setBillingSchedule` is delete-then-insert with no guard, so rewriting a part-billed schedule orphaned the invoices and let the same stage be charged twice — reachable from the screen Phase 155 added, whose ADR had made a point of closing the double-billing hole *between* the two billing paths while missing this one inside its own. Repaired by storing what was billed, which is `PAIRED_COLUMNS` and Phase 129's rule a third time. Both defects were proved by reverting the fix and watching the tests fail |
 | `tests/progress-billing-from-a-contract.test.ts` | **Billing a contract in stages** (Phase 155): progress invoicing from a contract, and a deposit raised digitally on signature. There were already two kinds of progress billing — `jobs/billing.ts` is AIA-style with a schedule of values, percent complete and retainage, and it is untouched — and the missing one is what most contracts say: 50% on signing, 25% at the frame, 25% on handover. Phase 154 gave a proposal that schedule and nothing could bill it without the job-costing module. Digital acceptance marked the deal won and stopped, so the deposit did not exist until somebody clicked Convert; it now rides the `proposal.accepted` event the acceptance already records, making that the first event with two subscribers. The deposit is **recognised** rather than credited — a stage of the contract, so the stages already come to 100% and what was never done is turning it into revenue, once, on the last stage. And the check that nearly was not written: conversion also writes the stages onto the job's schedule of values, so making stages billable without refusing one path would have made this phase the way to bill a job twice |
 | `tests/billing-schedule.test.ts` | **The invoice schedule that billed everything** (Phase 154): spec §6 requires a won proposal to create an "invoice schedule" and `conversion.ts` quoted that sentence while raising one invoice for every selected item, dated the day of conversion — a $500,000 contract billed in full on signing day, with a test asserting it as correct because test and code came from the same idea. And no screen could reach it: the pipeline board hardcoded the flag off, so the only `createInvoice: true` in the repository was that test. Phase 49's rule and its inversion in one function. The design is that a deposit is not a milestone: a milestone bills work and belongs on the job's schedule of values, a deposit is money before work and is a liability until earned, so it cannot be an SOV line without showing the job overbilled by the deposit forever. The contract is the whole and the stages are carved out of it, through `splitExactly`. Running it found that a billing schedule must not require the job-costing module, which `setScheduleOfValues` does — telling the job unconditionally threw the entire conversion for any company that does not bill progressively |

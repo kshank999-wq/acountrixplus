@@ -156,7 +156,9 @@ describe('what inherits a currency', () => {
     // draft of this comment said "exactly one table still answering the books'",
     // which was a true sentence about exclusion written as a false one about
     // declaration.
-    expect(denominatedProperties().length).toBe(26)
-    expect(new Set(denominatedProperties()).size).toBe(26)
+    // Twenty-seven since Phase 157 and `contribution_receipts`, a new carrier
+    // and no change on the inheriting side.
+    expect(denominatedProperties().length).toBe(27)
+    expect(new Set(denominatedProperties()).size).toBe(27)
   })
 })

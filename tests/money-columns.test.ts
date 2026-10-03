@@ -79,10 +79,13 @@ describe('what money a column holds', () => {
     // 23 — invisible to this list because the table had no currency of its own
     // to be denominated in. That is Phase 143's finding one table over: a column
     // nobody classified was not excused, it was unseen.
-    expect(MONEY_COLUMNS.length).toBe(57)
+    // Fifty-eight since Phase 157 and `contribution_receipts.amount_cents`, a
+    // properly paired column: the donor's euros with the functional twin stored
+    // beside it rather than derived.
+    expect(MONEY_COLUMNS.length).toBe(58)
     // Forty-five, not forty-six: two face columns added and one taken away,
     // because `tax_remittances.amount_cents` moved to `functional`.
-    expect(FACE_COLUMNS.length).toBe(45)
+    expect(FACE_COLUMNS.length).toBe(46)
     // Seven rather than five, and one of the two is a reclassification:
     // `tax_remittances.amount_cents` was `face` and is measured against a ledger
     // balance, so it was the books' money all along and read as a face amount

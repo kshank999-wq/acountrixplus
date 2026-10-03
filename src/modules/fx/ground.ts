@@ -354,18 +354,6 @@ export const DOMESTIC_GROUNDS: readonly DomesticGround[] = [
       'a spelling rather than for the fact.',
   },
   {
-    file: 'src/modules/funds/contributions.ts',
-    symbol: 'receivePledge',
-    ground: 'refuses-foreign',
-    via: [],
-    because:
-      'A promise to give, settled when the money arrives. No table in the funds module records a ' +
-      'currency — but the bank account it is banked into does, so "nothing is in reach" would be ' +
-      'false here as it is false for its sibling. What makes the figure the books’ money is that ' +
-      '`bankGlAccountFor` declines a foreign account outright (Phase 133), which `BANK_POSTINGS` ' +
-      'records as `refuses` and `bank-side.test.ts` checks against the source.',
-  },
-  {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'applyDeposit',
     ground: 'nothing-in-reach',
@@ -379,6 +367,27 @@ export const DOMESTIC_GROUNDS: readonly DomesticGround[] = [
       'tracks the repair.',
   },
 ]
+
+/**
+ * `receivePledge` left this register in Phase 157, and with it the last
+ * `refuses-foreign` entry.
+ *
+ * Its argument was that *"`bankGlAccountFor` declines a foreign account outright
+ * (Phase 133), which `BANK_POSTINGS` records as `refuses`"*. That is no longer
+ * what the code does: `contribution_receipts` is the row `PENDING_WIRING` had
+ * been waiting on since Phase 136, so the path hands the gate a currency and a
+ * euro receipt into a euro account is accepted. A converted posting is not a
+ * domestic one, so there is nothing left for this register to explain about it —
+ * exactly as happened to three sites in Phase 153.
+ *
+ * `refuses-foreign` now has no users. It stays declared: it is the ground for a
+ * path that is sound *because it declines*, which is a real and recurring answer
+ * — the gate still refuses a euro payment into a dollar account, and the next
+ * path that reaches money it cannot describe should find the vocabulary here
+ * rather than argue it again. The same call as `Withheld` in `asking.ts`, and
+ * the opposite of the `converts-here` ground Phase 153 removed, because that one
+ * *excused* a site and an unused excuse is a label waiting to be misapplied.
+ */
 
 /**
  * Three entries left this register in Phase 153, and the way they left is the

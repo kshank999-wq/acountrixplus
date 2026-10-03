@@ -236,6 +236,14 @@ export const NEVER_SWEPT = [
   // What was said and what was promised (Phase 22).
   'communications',
   'tasks',
+  // What a donor actually gave, and when (Phase 157). A pledge receipt is the
+  // evidence behind a restricted fund's balance: a charity asked how much of the
+  // roof appeal has arrived answers from these rows, and an auditor asked which
+  // instalment paid for what answers from their dates and rates. Sweeping them
+  // would leave `contributions.received_cents` as a total with nothing behind it,
+  // which is the state Phase 157's migration declined to backfill *because* it
+  // could not be reconstructed.
+  'contribution_receipts',
   // The payment terms a client agreed to (Phase 154). A billing schedule is part
   // of the contract: it says what is invoiced and when, and a deposit stage is
   // the difference between money held as a liability and money recognised as

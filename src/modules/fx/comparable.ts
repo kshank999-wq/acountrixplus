@@ -510,6 +510,14 @@ export const MONEY_COLUMNS: readonly MoneyColumn[] = [
       'What actually left the account, in the row’s own `currency` (Phase 153). The face twin the table had been missing, which is why its sibling above looked like a face amount: a row with one money column and a currency somewhere reads as denominated whatever the figure means. `bankMoneyLines` posts this at the day’s rate and realises the difference against the liability.',
   },
   {
+    table: 'contribution_receipts',
+    column: 'amount_cents',
+    side: 'face',
+    functionalColumn: 'functional_cents',
+    because:
+      'What a donor actually sent, in the receipt’s own `currency` (Phase 157). A properly paired column, and the first one added since Phase 153 where the face amount is the figure that came first in the ordinary sense — the donor’s euros — with the functional twin stored beside it rather than derived. `received_cents` on the contribution is the running total of those twins, which is why the promise comes down by what the money is worth and not by its face amount.',
+  },
+  {
     table: 'deposit_movements',
     column: 'amount_cents',
     side: 'functional',
