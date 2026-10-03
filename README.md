@@ -6189,6 +6189,48 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### What a billed stage was billed for (Phase 156)
+
+ADR 0155 nominated part-billing a stage and said it *"is a real request before it
+is a defect, so it should wait for somebody to ask"* — so this phase measured
+instead, starting with the code Phase 155 had just shipped. **Two defects, both
+introduced by that phase, both from one root:** a billed stage's facts were not
+recorded as facts.
+
+**A billed stage's amount was still derived.** `stageStates` computed every stage
+from the proposal's current total, which is right for a stage still to be billed
+and wrong for one already invoiced. `loadProposal` carries no status guard — the
+won/lost check lives in `sendProposal` — so a won proposal's items can still be
+edited. A $20,000 contract billed 25% and then edited to $40,000 reported its
+first stage as $10,000 against a $5,000 invoice, `billedSoFar` lied, and the
+deposit recognition debited `2500` by $10,000 against a $5,000 credit —
+**driving the liability negative**.
+
+**Rewriting the schedule forgot what was billed.** `setBillingSchedule` is
+`delete` then `insert` with no guard, so on a part-billed contract it dropped the
+rows holding `invoice_id`, reinserted them null, orphaned the invoices and let
+`billStage(0)` charge the same stage again. Reachable from the screen Phase 155
+added. Worth saying plainly: ADR 0155 made a point of closing the double-billing
+hole *between* the two progress-billing paths and missed this one inside its own.
+
+The repair is the answer this codebase has given three times —
+`PAIRED_COLUMNS`, Phase 153's `bank_face_cents`, Phase 129's *"a posting records
+the rate it used"*: when a stage is billed, write down what it was billed for.
+`billed_cents` beside `invoice_id` with a CHECK for both or neither;
+`stageStates` returns the stored figure for a billed stage and the derived one
+for an unbilled one, choosing once so no caller has to; the recognition reads the
+billed figure; and `scheduleMayBeReplaced` refuses a rewrite that would drop a
+billed stage, naming it. Refused rather than merged, because the incoming list
+has no ids and matching on label or position is wrong the moment somebody renames
+a stage.
+
+**Both defects were proved before they were fixed.** With the fix reverted the
+amount tests fail `expected 1000000 to be 500000` and the rewrite test fails
+`promise resolved "{ stages: 1 }" instead of rejecting`. A test written after a
+fix that has never been seen to fail may be asserting the fix rather than the
+defect.
+
+
 ### Billing a contract in stages (Phase 155)
 
 Two things asked for: progress invoicing from a single contract, and a deposit
@@ -7428,6 +7470,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/progress-billing-from-a-contract.test.ts` (Phase 156 half) | **What a billed stage was billed for** (Phase 156): two defects Phase 155 shipped, found by measuring its own output rather than taking its nomination. A billed stage's amount was still derived from the proposal's current total, and a won proposal's items can still be edited — so a $20,000 contract billed 25% then edited to $40,000 reported its first stage as $10,000 against a $5,000 invoice, and the deposit recognition drove unearned revenue negative. And `setBillingSchedule` is delete-then-insert with no guard, so rewriting a part-billed schedule orphaned the invoices and let the same stage be charged twice — reachable from the screen Phase 155 added, whose ADR had made a point of closing the double-billing hole *between* the two billing paths while missing this one inside its own. Repaired by storing what was billed, which is `PAIRED_COLUMNS` and Phase 129's rule a third time. Both defects were proved by reverting the fix and watching the tests fail |
 | `tests/progress-billing-from-a-contract.test.ts` | **Billing a contract in stages** (Phase 155): progress invoicing from a contract, and a deposit raised digitally on signature. There were already two kinds of progress billing — `jobs/billing.ts` is AIA-style with a schedule of values, percent complete and retainage, and it is untouched — and the missing one is what most contracts say: 50% on signing, 25% at the frame, 25% on handover. Phase 154 gave a proposal that schedule and nothing could bill it without the job-costing module. Digital acceptance marked the deal won and stopped, so the deposit did not exist until somebody clicked Convert; it now rides the `proposal.accepted` event the acceptance already records, making that the first event with two subscribers. The deposit is **recognised** rather than credited — a stage of the contract, so the stages already come to 100% and what was never done is turning it into revenue, once, on the last stage. And the check that nearly was not written: conversion also writes the stages onto the job's schedule of values, so making stages billable without refusing one path would have made this phase the way to bill a job twice |
 | `tests/billing-schedule.test.ts` | **The invoice schedule that billed everything** (Phase 154): spec §6 requires a won proposal to create an "invoice schedule" and `conversion.ts` quoted that sentence while raising one invoice for every selected item, dated the day of conversion — a $500,000 contract billed in full on signing day, with a test asserting it as correct because test and code came from the same idea. And no screen could reach it: the pipeline board hardcoded the flag off, so the only `createInvoice: true` in the repository was that test. Phase 49's rule and its inversion in one function. The design is that a deposit is not a milestone: a milestone bills work and belongs on the job's schedule of values, a deposit is money before work and is a liability until earned, so it cannot be an SOV line without showing the job overbilled by the deposit forever. The contract is the whole and the stages are carved out of it, through `splitExactly`. Running it found that a billing schedule must not require the job-costing module, which `setScheduleOfValues` does — telling the job unconditionally threw the entire conversion for any company that does not bill progressively |
 | `tests/bank-money.test.ts`, `tests/banking-in-euros.test.ts` | **The field four paths were waiting for** (Phase 153): the acceptance test ADR 0136 said could not be written yet, and the columns that let it be. Four paths refused a foreign bank account outright, so a business banking in euros could not remit a liability, take a pledge, or hold and return a deposit at all — a missing capability rather than a wrong figure. The arithmetic was already built twice over in `settleHeld` and `recoverHeld`; what was missing is whether each act **creates** the balance it posts against or **relieves** one. Three relieve, so the bank takes the day's rate and the gap is realised; `receiveDeposit` creates, so a difference is impossible rather than absent, and a test checks that it is the one path that does *not* reach `ensureFxAccount`. Both mistakes balance. `amount_cents` keeps meaning the ledger figure — making it the face amount would have compared a euro against a dollar balance, which is Phase 152's own defect one phase later — and three columns describe the bank side. Five registries caught the schema change, one of them finding a column misclassified since before this phase, so `FACE_COLUMNS` shrank for the first time. A sixth caught the phase correcting itself: three sites were given an invented ground to keep them in `DOMESTIC_GROUNDS` after they stopped being domestic, and the register's exact-correspondence check said so |

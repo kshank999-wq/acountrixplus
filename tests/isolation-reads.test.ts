@@ -162,9 +162,14 @@ describe('every read from a company-scoped table', () => {
     // `scoped()` — measured, not assumed: the length assertion fails before this
     // map is compared, so the figure below came from running it and reading the
     // diff rather than from counting call sites.
-    expect(READS.length).toBe(875)
+    //
+    // Eight hundred and seventy-eight since Phase 156 and `stageStatesFor`, which
+    // reads the stored stages to ask whether a schedule may be replaced. Three
+    // reads, all `scoped-read`, measured the same way: by writing the length and
+    // reading which guard the map said had grown.
+    expect(READS.length).toBe(878)
     expect(by).toEqual({
-      'scoped-read': 539,
+      'scoped-read': 542,
       'explicit-company': 247,
       'established-above': 28,
       'id-from-fetched-row': 17,

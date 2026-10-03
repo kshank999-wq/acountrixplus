@@ -659,6 +659,24 @@ export async function setBillingSchedule(
     if (!verdict.ok) throw new Refusal(verdict.why)
   }
 
+  /**
+   * Not over the top of a stage that has been invoiced (Phase 156).
+   *
+   * This function is `delete` then `insert`, and Phase 155 left it that way on a
+   * part-billed contract: it dropped the rows holding `invoice_id`, reinserted
+   * them null, left the invoices orphaned, and let `billStage` charge the same
+   * stage a second time. Reachable from the screen that phase added, which
+   * offers the Billing schedule button on any proposal — won and part-billed
+   * included.
+   *
+   * Checked before the transaction rather than inside it: nothing here should
+   * have started deleting before the question was asked.
+   */
+  const { scheduleMayBeReplaced } = await import('./billing-schedule')
+  const current = await stageStatesFor(ctx, proposal.id)
+  const replaceable = scheduleMayBeReplaced(current, stages)
+  if (!replaceable.ok) throw new Refusal(replaceable.why)
+
   return db.transaction(async (tx) => {
     await tx
       .delete(proposalScheduleStages)
@@ -771,4 +789,36 @@ export async function opportunityIdFor(
     .limit(1)
 
   return row?.opportunityId ?? null
+}
+
+/**
+ * The stored stages with what has happened to each, for the replace check.
+ *
+ * Local rather than `stage-invoicing`'s `stageStates`, which imports this file —
+ * and unlike that one this needs no pricing, because the question is only which
+ * stages carry an invoice.
+ */
+async function stageStatesFor(ctx: ActorContext, proposalId: string) {
+  const rows = await db
+    .select({
+      label: proposalScheduleStages.label,
+      kind: proposalScheduleStages.kind,
+      percentBp: proposalScheduleStages.percentBp,
+      invoiceId: proposalScheduleStages.invoiceId,
+      billedCents: proposalScheduleStages.billedCents,
+    })
+    .from(proposalScheduleStages)
+    .where(scoped(ctx, proposalScheduleStages, eq(proposalScheduleStages.proposalId, proposalId)))
+    .orderBy(asc(proposalScheduleStages.sortOrder))
+
+  return rows.map((row) => ({
+    label: row.label,
+    kind: row.kind as ScheduleStage['kind'],
+    percentBp: row.percentBp,
+    // Not priced: `scheduleMayBeReplaced` asks only which stages were invoiced.
+    amountCents: row.billedCents ?? 0,
+    earnsRevenue: row.kind !== 'deposit',
+    invoiceId: row.invoiceId,
+    billedCents: row.billedCents,
+  }))
 }

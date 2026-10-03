@@ -238,6 +238,16 @@ export function depositStage(stages: readonly ScheduledStage[]): ScheduledStage 
 export type StageState = ScheduledStage & {
   /** The invoice that billed this stage, when one has. */
   invoiceId: string | null
+  /**
+   * What it was billed for, when it was (Phase 156).
+   *
+   * `amountCents` above is derived from the contract's current total.
+   * `billedCents` is what an invoice was actually raised for, and the two can
+   * differ because a won proposal's items can still be edited. For a billed
+   * stage this is the figure that counts; `stageStates` is where the choice is
+   * made, so no caller has to remember.
+   */
+  billedCents: number | null
 }
 
 export type BillVerdict = { ok: true } | { ok: false; why: string }
@@ -286,11 +296,16 @@ export function nextBillable(stages: readonly StageState[]): StageState | null {
   return stages.find((stage) => stage.invoiceId === null) ?? null
 }
 
-/** What has been invoiced so far, in the company's own money. */
+/**
+ * What has been invoiced so far, in the company's own money.
+ *
+ * `billedCents` and not `amountCents` (Phase 156). Summing the derived figure
+ * reported what the billed stages *would* be worth if they were billed today,
+ * which is a different number from what the client was charged the moment
+ * anybody edits the contract.
+ */
 export function billedSoFar(stages: readonly StageState[]): number {
-  return stages
-    .filter((stage) => stage.invoiceId !== null)
-    .reduce((sum, stage) => sum + stage.amountCents, 0)
+  return stages.reduce((sum, stage) => sum + (stage.billedCents ?? 0), 0)
 }
 
 /**
@@ -334,4 +349,51 @@ export function recognisesDeposit(stages: readonly StageState[], index: number):
   if (earning.length === 0) return false
 
   return stages[index] === earning[earning.length - 1]
+}
+
+/**
+ * Whether a schedule may be replaced by this one (Phase 156).
+ *
+ * ## The second defect Phase 155 shipped
+ *
+ * `setBillingSchedule` is `delete` then `insert` with no guard. On a part-billed
+ * contract it deleted the rows holding `invoice_id`, reinserted them null, left
+ * the invoices orphaned, and let `billStage(0)` bill the same stage **again** —
+ * reachable from the screen that phase added, which offers the Billing schedule
+ * button on any proposal, won and part-billed included.
+ *
+ * ADR 0155 made a point of closing the double-billing hole *between* the two
+ * progress-billing paths and missed this one inside its own.
+ *
+ * ## Why a refusal and not a merge
+ *
+ * Keeping the billed stages and replacing only the tail sounds kinder and is
+ * ambiguous: the incoming list has no ids, so matching it to the stored rows
+ * means matching on label or on position, and both are wrong the moment somebody
+ * renames a stage or inserts one in the middle. A refusal naming the invoiced
+ * stage is a sentence somebody can act on (Phase 119); a merge is a guess about
+ * what they meant.
+ *
+ * Appending is not special-cased either, for the same reason: this cannot tell
+ * an append from a rename plus an append.
+ */
+export function scheduleMayBeReplaced(
+  current: readonly StageState[],
+  incoming: readonly ScheduleStage[],
+): BillVerdict {
+  const billed = current.filter((stage) => stage.invoiceId !== null)
+  if (billed.length === 0) return { ok: true }
+
+  // Clearing a schedule that has been billed is the same act with a shorter
+  // list, and the same damage.
+  const names = billed.map((stage) => `“${stage.label}”`).join(', ')
+
+  return {
+    ok: false,
+    why:
+      `${names} ${billed.length === 1 ? 'has' : 'have'} already been invoiced on this contract, ` +
+      'so the schedule cannot be rewritten — the stages that were billed would lose the invoices ' +
+      'that billed them, and could be billed a second time. Void those invoices first if the ' +
+      'contract really has changed.',
+  }
 }

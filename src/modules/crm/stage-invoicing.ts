@@ -77,6 +77,7 @@ export async function stageStates(
       kind: proposalScheduleStages.kind,
       percentBp: proposalScheduleStages.percentBp,
       invoiceId: proposalScheduleStages.invoiceId,
+      billedCents: proposalScheduleStages.billedCents,
     })
     .from(proposalScheduleStages)
     .where(scoped(ctx, proposalScheduleStages, eq(proposalScheduleStages.proposalId, proposalId)))
@@ -84,10 +85,24 @@ export async function stageStates(
 
   if (rows.length === 0) return []
 
-  // The amounts are derived from the contract rather than stored, so a proposal
-  // whose total changed cannot leave a schedule quietly adding up to something
-  // else. `splitExactly` makes the parts come back to the whole whatever the
-  // whole is.
+  /**
+   * Derived for what is still to bill, stored for what has been (Phase 156).
+   *
+   * The derivation is right for an unbilled stage: a proposal whose total
+   * changed cannot leave a schedule quietly adding up to something else, and
+   * `splitExactly` makes the parts come back to the whole whatever the whole is.
+   *
+   * It was wrong for a billed one, which is the defect Phase 155 shipped. A won
+   * proposal's items can still be edited — `loadProposal` carries no status
+   * guard — so a $20,000 contract billed 25% and then edited to $40,000 reported
+   * its first stage as $10,000 against a $5,000 invoice. `billedSoFar` lied, and
+   * `recogniseDeposit` debited unearned revenue by more than had ever been
+   * credited to it, driving the liability negative.
+   *
+   * So `amountCents` is what this stage *would* be billed for and `billedCents`
+   * is what it *was*. The choice between them is made here, once, rather than at
+   * each caller.
+   */
   const priced = scheduleAmounts(
     proposal.totalCents,
     rows.map((row) => ({
@@ -97,7 +112,14 @@ export async function stageStates(
     })),
   )
 
-  return priced.map((stage, index) => ({ ...stage, invoiceId: rows[index].invoiceId }))
+  return priced.map((stage, index) => ({
+    ...stage,
+    // A billed stage's amount is the figure it was billed at, so nothing
+    // downstream has to know which of the two to read.
+    amountCents: rows[index].billedCents ?? stage.amountCents,
+    invoiceId: rows[index].invoiceId,
+    billedCents: rows[index].billedCents,
+  }))
 }
 
 export type StageBilling = {
@@ -216,7 +238,9 @@ export async function billStage(
   const recognitionEntryId = await db.transaction(async (tx) => {
     const marked = await tx
       .update(proposalScheduleStages)
-      .set({ invoiceId: invoice.id })
+      // What it was billed for, beside the invoice that billed it (Phase 156).
+      // The CHECK on the table requires both or neither.
+      .set({ invoiceId: invoice.id, billedCents: stage.amountCents })
       .where(
         scoped(
           ctx,
@@ -289,8 +313,16 @@ async function recogniseDeposit(
   entryDate: string,
   tx: Executor,
 ): Promise<string | null> {
+  /**
+   * What the deposit was actually invoiced for, not what it would be today.
+   *
+   * The figure that drove the liability negative. `2500` was credited by the
+   * deposit invoice, so it has to be relieved by exactly that — and after an
+   * edit to the contract the derived share is a different number.
+   */
   const deposit = stages.find((stage) => stage.kind === 'deposit')
-  if (!deposit || deposit.amountCents <= 0) return null
+  const creditedCents = deposit?.billedCents ?? 0
+  if (!deposit || creditedCents <= 0) return null
 
   const held = (await resolveRetainerAccount(ctx.companyId, tx)).account
   const revenueAccountId = await revenueForProposal(ctx, proposalId, tx)
@@ -318,10 +350,10 @@ async function recogniseDeposit(
       sourceType: 'proposal',
       sourceId: proposalId,
       lines: [
-        { chartAccountId: held.id, debitCents: deposit.amountCents },
+        { chartAccountId: held.id, debitCents: creditedCents },
         {
           chartAccountId: revenueAccountId,
-          creditCents: deposit.amountCents,
+          creditCents: creditedCents,
           memo: 'Held until the work was done',
         },
       ],

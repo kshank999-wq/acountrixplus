@@ -9,6 +9,7 @@ import {
   sendProposal,
   setBillingSchedule,
   decideProposal,
+  updateProposalItems,
 } from '@/modules/crm/proposals'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
 import { billStage, stagesDue } from '@/modules/crm/stage-invoicing'
@@ -358,5 +359,103 @@ describe('one contract, one billing path', () => {
 
     const billed = await billStage(fixture.ctx, { proposalId, stageIndex: 0 })
     expect(billed.amountCents).toBe(500_000)
+  })
+})
+
+describe('what a billed stage was billed for (Phase 156)', () => {
+  it('does not move when the contract is edited underneath it', async () => {
+    /**
+     * The defect Phase 155 shipped, and the arithmetic that made it serious.
+     *
+     * `stageStates` derived every stage from the proposal's current total, and
+     * `loadProposal` carries no status guard — the won/lost check lives in
+     * `sendProposal` — so a won proposal's items can still be edited. A $20,000
+     * contract billed 25% and then edited to $40,000 reported its first stage as
+     * $10,000 against a $5,000 invoice.
+     */
+    await won()
+    const first = await billStage(fixture.ctx, { proposalId, stageIndex: 0 })
+    expect(first.amountCents).toBe(500_000)
+
+    const revenue = await fixture.account('4000')
+    await updateProposalItems(fixture.ctx, proposalId, [
+      { description: 'Fit-out, enlarged', unitPriceCents: 4_000_000, chartAccountId: revenue.id },
+    ])
+
+    const due = await stagesDue(fixture.ctx, proposalId)
+
+    // The billed stage is still what it was billed for.
+    expect(due.stages[0].billedCents).toBe(500_000)
+    expect(due.stages[0].amountCents).toBe(500_000)
+    expect(due.billedCents).toBe(500_000)
+
+    // And the stages still to bill follow the contract, which is the half the
+    // derivation was always right about.
+    expect(due.stages[1].amountCents).toBe(1_000_000)
+    expect(due.next?.label).toBe('Frame complete')
+  })
+
+  it('relieves unearned revenue by exactly what was credited to it', async () => {
+    // The consequence that mattered. `recogniseDeposit` read the derived figure,
+    // so after an edit it debited `2500` by more than had ever been credited —
+    // driving a liability negative, which no report knows how to show.
+    await won()
+    await billStage(fixture.ctx, { proposalId, stageIndex: 0 })
+
+    const revenue = await fixture.account('4000')
+    await updateProposalItems(fixture.ctx, proposalId, [
+      { description: 'Fit-out, enlarged', unitPriceCents: 4_000_000, chartAccountId: revenue.id },
+    ])
+
+    await billStage(fixture.ctx, { proposalId, stageIndex: 1 })
+    await billStage(fixture.ctx, { proposalId, stageIndex: 2 })
+
+    const held = await movement('2500')
+    expect(held.credit).toBe(500_000)
+    expect(held.debit).toBe(500_000)
+    // Square, not negative.
+    expect(held.credit - held.debit).toBe(0)
+  })
+})
+
+describe('rewriting a schedule that has been billed (Phase 156)', () => {
+  it('is refused, and names the stage that was invoiced', async () => {
+    /**
+     * The second defect Phase 155 shipped. `setBillingSchedule` is `delete` then
+     * `insert`: on a part-billed contract it dropped the rows holding
+     * `invoice_id`, reinserted them null, left the invoices orphaned, and let
+     * `billStage(0)` charge the same stage again. Reachable from the screen that
+     * phase added.
+     */
+    await won()
+    await billStage(fixture.ctx, { proposalId, stageIndex: 0 })
+
+    await expect(
+      setBillingSchedule(fixture.ctx, proposalId, [
+        { label: 'All at the end', kind: 'on-completion', percentBp: 10_000 },
+      ]),
+    ).rejects.toThrow(/“On signing” has already been invoiced/)
+
+    // Clearing it is the same act with a shorter list, and the same damage.
+    await expect(setBillingSchedule(fixture.ctx, proposalId, [])).rejects.toThrow(
+      /already been invoiced/,
+    )
+
+    // Nothing was dropped, so nothing can be billed twice.
+    const due = await stagesDue(fixture.ctx, proposalId)
+    expect(due.stages[0].invoiceId).not.toBeNull()
+    expect(due.next?.label).toBe('Frame complete')
+  })
+
+  it('is allowed while nothing has been billed', async () => {
+    // The refusal is about billed stages, not about editing a schedule. Changing
+    // one before anybody is invoiced is ordinary.
+    await setBillingSchedule(fixture.ctx, proposalId, [
+      { label: 'Half now', kind: 'deposit', percentBp: 5_000 },
+      { label: 'Half later', kind: 'on-completion', percentBp: 5_000 },
+    ])
+
+    const due = await stagesDue(fixture.ctx, proposalId)
+    expect(due.stages.map((stage) => stage.label)).toEqual(['Half now', 'Half later'])
   })
 })

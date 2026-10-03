@@ -458,6 +458,22 @@ export const proposalScheduleStages = pgTable(
     invoiceId: uuid('invoice_id').references((): AnyPgColumn => invoices.id, {
       onDelete: 'set null',
     }),
+    /**
+     * What this stage was billed for, in the company's own money (Phase 156).
+     *
+     * Null until it is billed, and a **fact** once it is. Phase 155 derived every
+     * stage's amount from the proposal's current total, which is right for a
+     * stage still to be billed and wrong for one already invoiced: a won
+     * proposal's items can still be edited, so a $20,000 contract billed 25% and
+     * then edited to $40,000 reported its first stage as $10,000 against a
+     * $5,000 invoice — and the deposit recognition then debited unearned revenue
+     * by more than had ever been credited to it.
+     *
+     * The same answer as `PAIRED_COLUMNS`, Phase 153's `bank_face_cents` and
+     * Phase 129's rule that a posting records the rate it used: write down what
+     * happened rather than recomputing it from inputs that can move.
+     */
+    billedCents: bigint('billed_cents', { mode: 'number' }),
     sortOrder: integer('sort_order').notNull().default(0),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
@@ -476,6 +492,12 @@ export const proposalScheduleStages = pgTable(
       sql`${t.kind} IN ('deposit', 'milestone', 'on-completion')`,
     ),
     labelled: check('proposal_schedule_stages_labelled', sql`btrim(${t.label}) <> ''`),
+    // Both or neither. A stage with an invoice and no figure is the defect this
+    // closes; a figure with no invoice is a stage claiming to have been billed.
+    billedPairSane: check(
+      'proposal_schedule_stages_billed_pair_sane',
+      sql`(${t.invoiceId} IS NULL AND ${t.billedCents} IS NULL) OR (${t.invoiceId} IS NOT NULL AND ${t.billedCents} > 0)`,
+    ),
   }),
 )
 

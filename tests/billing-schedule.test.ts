@@ -224,7 +224,13 @@ describe('which stage may be billed, and when the deposit is earned', () => {
       { label: 'On signing', kind: 'deposit', percentBp: 2_500 },
       { label: 'Frame complete', kind: 'milestone', percentBp: 2_500 },
       { label: 'On handover', kind: 'on-completion', percentBp: 5_000 },
-    ]).map((stage, index) => ({ ...stage, invoiceId: invoiced[index] ?? null }))
+    ]).map((stage, index) => ({
+      ...stage,
+      invoiceId: invoiced[index] ?? null,
+      // A billed stage carries what it was billed for (Phase 156). Equal to the
+      // derived share here because nothing has edited the contract.
+      billedCents: invoiced[index] ? stage.amountCents : null,
+    }))
 
   it('bills the first unbilled stage', () => {
     expect(billStageStands(priced([]), 0)).toEqual({ ok: true })
@@ -280,7 +286,7 @@ describe('which stage may be billed, and when the deposit is earned', () => {
     const noDeposit = scheduleAmounts(1_000_000, [
       { label: 'Halfway', kind: 'milestone', percentBp: 5_000 },
       { label: 'On handover', kind: 'on-completion', percentBp: 5_000 },
-    ]).map((stage) => ({ ...stage, invoiceId: null }))
+    ]).map((stage) => ({ ...stage, invoiceId: null, billedCents: null }))
 
     expect(recognisesDeposit(noDeposit, 1)).toBe(false)
   })
@@ -291,7 +297,11 @@ describe('which stage may be billed, and when the deposit is earned', () => {
     const two = scheduleAmounts(1_000_000, [
       { label: 'On signing', kind: 'deposit', percentBp: 3_000 },
       { label: 'On handover', kind: 'on-completion', percentBp: 7_000 },
-    ]).map((stage, index) => ({ ...stage, invoiceId: index === 0 ? 'inv-1' : null }))
+    ]).map((stage, index) => ({
+      ...stage,
+      invoiceId: index === 0 ? 'inv-1' : null,
+      billedCents: index === 0 ? stage.amountCents : null,
+    }))
 
     expect(recognisesDeposit(two, 1)).toBe(true)
   })
