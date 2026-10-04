@@ -6189,6 +6189,115 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### Exporting to the accountant's software (Phase 158)
+
+A new specification arrived — the *Professional Accountant Export Engine* — with
+the instruction *"you need to be able to export to all the major accounting
+software, excluding anything that would be competition."* Its own Phase 1 is the
+normalized data model, the balancing engine, the audit log and a universal CSV
+package, and it is the only one of its five phases that needs no vendor research:
+§13 requires a one-page integration worksheet citing official vendor
+documentation **before** any adapter code, and §7 says why — *"do not assume an
+API exists. Professional tax and workpaper products often rely on
+vendor-specific import files, trial-balance mappings, desktop utilities, SDKs,
+partner programs, or controlled integrations."*
+
+So all twenty of §3's targets are declared `unresearched`, `adapterMayBeBuilt`
+refuses every one of them, and the refusal names what would change that. That is
+a limit on what was delivered and it is stated rather than papered over: writing
+`api: 'REST'` against a product whose real import path is a desktop bridge
+utility is a declaration argued from a fact that is not a fact (Phases 110, 125),
+in the one place where being wrong means a firm's trial balance silently fails to
+arrive at a filing deadline.
+
+**The exclusion is a constraint, not a note.** §15's first acceptance criterion
+is that direct competitor bookkeeping products are not presented as export
+destinations, and a sentence in a document cannot enforce that — the next person
+to add a destination will not have read it. The seven products §2 names are
+declared with their reasons, `mayExportTo('quickbooks-online')` returns the
+decision rather than "nobody declared that key", and a test asserts no
+destination appears among them. The exclusion is about a product's *position*,
+not a vendor's name: §2 qualifies Sage as *"products positioned primarily as
+small-business bookkeeping replacements"* while §3 lists Sage Intacct as a
+target, so the entry says so. And because §2 permits reading these products as
+migration sources, the refusal says the books can go out as a universal package
+instead — reading QuickBooks to bring books *in* is a different act from pushing
+books *out*.
+
+**`companies` could not say which return the books feed.** §11 makes an
+incomplete client profile a red exception, because the entity type decides which
+return the figures feed. Measured: `companies` held a name, a legal name, an
+industry, a fiscal year start month, a currency and an inventory cost method, and
+no entity type at all. So the check would have fired on every company in
+existence — and a red check that can only fail is worth exactly as little as
+Phase 121's check that can only agree. `industry` is not it: a joinery can be a
+sole proprietorship, a partnership or an S corporation, and the industry drives
+the chart of accounts while this drives the return.
+
+**§11's continuity check had no fact behind it either.** *Does this period's
+opening equity equal the prior period's closing equity* is not a check: both come
+from summing the same lines to the same date. The real break is the one
+`staleCloses` has measured since ADR 0011 — closing and locking are separate
+here, so an entry can land in a closed year, the books still balance because the
+entry has two sides, and the figure moved into retained earnings is now wrong.
+That *is* an opening balance that does not carry forward.
+
+**§15's reconciliation has two readings and one is unsound.** Having the exporter
+write its own queries and compare them to the reports' is two answers to one
+question, and the comparison is a check that will one day disagree — leaving an
+accountant holding two trial balances with no way to tell which is the books. So
+`assemble` calls the same functions the screens call and reconciliation is
+structural (Phase 116). What is left is narrower and real: the **rendering**,
+checked by reading the trial balance file back and footing it with a parser that
+honours the writer's quoting, and the **general ledger detail against the
+balances**, which genuinely are two queries with separately written filters
+because `generalLedger` reports one account at a time. The orphan-line check
+earns its place through the same seam — `detailLines` inner-joins, so a line with
+no entry is silently absent from the detail while its figures stay in the
+balances.
+
+**Three states for what is in the package, not two.** `source: null` means
+Accountrix does not hold it; `exported: false` means held and not yet written to
+a file; omitted at run time means the caller may not read it. A firm reads those
+as "the client does not have this", "ask Accountrix" and "ask somebody with the
+permission" — three different phone calls. The four true gaps are loan schedules
+(`loan` is a *kind of financial account*, with no amortisation stored), adjusting
+entries separately (nothing flags an entry as an adjustment), tax-code mappings
+(§10's store does not exist) and supporting-document references. The registry's
+claims are measured, not trusted: a test reads every `produces` out of the file
+it names and every `permission` out of that function's own `requirePermission`
+call, and it earned itself immediately — the first draft claimed a
+`tenancy/companies:companyProfile` that did not exist, which is how the missing
+entity type was found.
+
+**A held export is a row.** §11 produces red and no file, and that event is the
+most valuable thing in the log: somebody tried to send these books to
+professional software and could not, and the exception report says why in
+sentences. A log of only successes cannot answer *did anybody try*, asked when a
+filing is late. `(readiness = 'red') = (result = 'held')` is a database
+constraint, which turns §15's *"every export is balanced and validated before
+release"* into something the path that skipped the validation cannot record
+having skipped.
+
+**Permissions omit rather than refuse or over-reach.** §5's sections sit behind
+eight permissions. Taking the broadest would let anybody who can see a report
+take the payroll home; calling every producer unconditionally would throw halfway
+through for a bookkeeper and produce no package at all. So the section is left
+out and the manifest names it — a firm then knows the payroll summary is absent
+because of who asked rather than because the client has no payroll, which is the
+one thing a missing file cannot say for itself.
+
+**Declared not done:** XLSX (a ZIP of XML, and this project has nine
+dependencies and no archive writer — a dependency decision, not something to slip
+in), the PDF reporting package, the optional ZIP, and §10's mapping store. The
+last one is *enforced* rather than recorded: the three `mapped-destination`
+checks read `null`, `null` is red, and asking to export to Lacerte today returns
+*"no account mapping has been established for Lacerte Tax"*. Phase 157's rule
+decides they belong — a declared value with no users is kept when it accuses and
+deleted when it excuses, and these accuse. Also removed: a `refuseDestination`
+with no caller, found by the only part of it that did anything.
+
+
 ### The row a pledge receipt needed (Phase 157)
 
 ADR 0156 nominated a scan for money figures recomputed from a mutable input after
@@ -7517,6 +7626,8 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/export-engine.test.ts` | **Exporting to the accountant's software** (Phase 158): the export engine's registries and its §11 validation, with no database and no clock — the only way to see each check *disagree*, since real books are hard to get into most of these states and impossible to get into some. Asserts §15's first acceptance criterion structurally (no destination appears among the excluded competitors), that `mayExportTo` refuses a competitor with the decision and a planned target with the absence, that `adapterMayBeBuilt` refuses all twenty of §3's targets, and that every §11 clause has a check and every check has been seen to fire. Also measures the §5 registry's own claims: each `produces` read out of the file it names, each `permission` out of that function's `requirePermission` call, following one level of same-file delegation because `trialBalance` takes none of its own |
+| `tests/an-export-to-the-accountant.test.ts` | **Exporting to the accountant's software** (Phase 158): the acceptance test, over real books. A $4,000 sale and a $1,200 timber bill, exported as the universal package — the trial balance footing to $5,200 both sides *read back out of the file a firm receives*, the detail tying to the balances, $4,000.00 in units and not 400000 in cents, and `"Sales, retail"` quoted so it cannot shift every column after it. Holds the export until somebody records which return the books feed, which is the migration this phase found. Writes a log row either way, and the database refuses a red row claiming to have produced files. A bookkeeper gets the same ledger without the statements or the payroll, named in the manifest; the EIN appears in no file |
 | `tests/a-pledge-paid-in-euros.test.ts` | **The row a pledge receipt needed** (Phase 157): the acceptance test `PENDING_WIRING` carried as `null` for twenty-one phases, honest twice over — first the column did not exist, then the one path left needed a **row**, because a pledge arrives in instalments and each has its own day and its own rate. Two instalments of the same €600 at 1.10 and 1.20, worth $660 and $720, each recorded at the rate it was posted at, with the promise coming down by their worth and not by their face amount. And no realised difference anywhere: the receivable predates the cash and is held in the books' own money, which is the third `origin` this phase had to argue — found by wiring a declaration Phase 153 wrote for a site nobody had acted on, where `already-carried` would have produced the right numbers by accident. Empties `PENDING_WIRING` for the first time since Phase 139, and leaves `BANK_POSTINGS` with nothing that refuses a foreign account |
 | `tests/progress-billing-from-a-contract.test.ts` (Phase 156 half) | **What a billed stage was billed for** (Phase 156): two defects Phase 155 shipped, found by measuring its own output rather than taking its nomination. A billed stage's amount was still derived from the proposal's current total, and a won proposal's items can still be edited — so a $20,000 contract billed 25% then edited to $40,000 reported its first stage as $10,000 against a $5,000 invoice, and the deposit recognition drove unearned revenue negative. And `setBillingSchedule` is delete-then-insert with no guard, so rewriting a part-billed schedule orphaned the invoices and let the same stage be charged twice — reachable from the screen Phase 155 added, whose ADR had made a point of closing the double-billing hole *between* the two billing paths while missing this one inside its own. Repaired by storing what was billed, which is `PAIRED_COLUMNS` and Phase 129's rule a third time. Both defects were proved by reverting the fix and watching the tests fail |
 | `tests/progress-billing-from-a-contract.test.ts` | **Billing a contract in stages** (Phase 155): progress invoicing from a contract, and a deposit raised digitally on signature. There were already two kinds of progress billing — `jobs/billing.ts` is AIA-style with a schedule of values, percent complete and retainage, and it is untouched — and the missing one is what most contracts say: 50% on signing, 25% at the frame, 25% on handover. Phase 154 gave a proposal that schedule and nothing could bill it without the job-costing module. Digital acceptance marked the deal won and stopped, so the deposit did not exist until somebody clicked Convert; it now rides the `proposal.accepted` event the acceptance already records, making that the first event with two subscribers. The deposit is **recognised** rather than credited — a stage of the contract, so the stages already come to 100% and what was never done is turning it into revenue, once, on the last stage. And the check that nearly was not written: conversion also writes the stages onto the job's schedule of values, so making stages billable without refusing one path would have made this phase the way to bill a job twice |
