@@ -167,10 +167,28 @@ describe('every read from a company-scoped table', () => {
     // reads the stored stages to ask whether a schedule may be replaced. Three
     // reads, all `scoped-read`, measured the same way: by writing the length and
     // reading which guard the map said had grown.
-    expect(READS.length).toBe(878)
+    //
+    // Eight hundred and eighty-three since Phase 158 and the accountant export
+    // engine. Five reads, and all five land on `explicit-company` rather than
+    // `scoped()` — the first time a phase's additions have gone entirely to that
+    // guard, which is worth a sentence rather than letting the figure move.
+    //
+    // Four are in `exporter/package.ts`: the general ledger detail, its totals,
+    // the orphan-line count and the draft count. Each joins `journal_lines` to
+    // `journal_entries` and filters on the company column of the table the date
+    // and status filters are already on — the same three filters
+    // `accountBalances` applies, written a second time on purpose, because
+    // §11's `detail_ties_to_balances` is what notices if the two ever stop
+    // matching. The fifth is `exportHistory` over the export log.
+    //
+    // `companyProfile` and `taxIdentifier` are not here, and should not be: they
+    // read the `companies` row itself, which carries no `company_id` because its
+    // own `id` is the tenant. Measured the same way as the phases above — by
+    // writing the length and reading which guard the map said had grown.
+    expect(READS.length).toBe(883)
     expect(by).toEqual({
       'scoped-read': 542,
-      'explicit-company': 247,
+      'explicit-company': 252,
       'established-above': 28,
       'id-from-fetched-row': 17,
       'join-inherited': 13,

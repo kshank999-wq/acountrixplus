@@ -253,6 +253,17 @@ export const NEVER_SWEPT = [
   // It needs no age policy of its own because it does not grow with traffic — a
   // proposal has a handful of stages and the rows cascade away with the proposal.
   'proposal_schedule_stages',
+  // Every attempt to hand these books to professional software (Phase 158).
+  // Exporter spec §12 requires the log and §15 requires that every export
+  // generate one, which settles it: a retention policy on this table would be a
+  // policy on how long a requirement holds.
+  //
+  // The held rows are the reason it is here rather than merely permitted to
+  // stay. A row saying somebody tried to send December to a tax program and
+  // could not, with the exception report that explained why, is what answers
+  // "did anybody try" — and that question is asked months later, when a filing
+  // is late, which is exactly when a sweep would have taken it.
+  'accountant_exports',
   // Failures nobody has looked at yet. A dead job swept is a question
   // deleted before it was asked.
   'background_jobs',

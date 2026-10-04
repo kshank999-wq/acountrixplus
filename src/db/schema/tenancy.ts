@@ -56,6 +56,30 @@ export const companies = pgTable('companies', {
   fiscalYearStartMonth: integer('fiscal_year_start_month').notNull().default(1),
   currency: text('currency').notNull().default('USD'),
   /**
+   * Which return these books feed (Phase 158, Exporter spec §5).
+   *
+   * Null means nobody has said, and that is deliberately not a default.
+   * `industry` is the nearest existing column and is a different question: a
+   * restaurant can be a sole proprietorship, a partnership or an S corporation,
+   * and the industry drives the chart of accounts while this drives the return.
+   * Bending one to mean both would be Phase 130's defect in the field a federal
+   * return is selected from.
+   *
+   * Values are `TAX_CLASSIFICATIONS` in `modules/exporter/entity.ts`, which
+   * carries the argument for each and what it files.
+   */
+  taxClassification: text('tax_classification'),
+  /**
+   * The EIN or TIN, if one is on file.
+   *
+   * Carried because a professional system cannot open a client record without
+   * it. Note what the readiness assessment carries instead: *whether* one
+   * exists. An assessment is shown on screen, written to the export log and
+   * pasted into support tickets, and §12 says not to move sensitive fields that
+   * are not required.
+   */
+  taxIdentifier: text('tax_identifier'),
+  /**
    * How stock is costed (Phase 14, spec §5).
    *
    * One setting for the company, not one per item. Mixing methods within a set

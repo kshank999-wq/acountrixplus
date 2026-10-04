@@ -123,6 +123,13 @@ describe('the retention policy', () => {
    * table fails here. Yes, that means a one-line edit on every migration. That
    * is the price of the moment where somebody decides.
    */
+  // 181 since Phase 158 added `accountant_exports`, also `NEVER_SWEPT`: spec
+  // §12 requires an export log and §15 requires that every export generate one,
+  // so a retention policy here would be a policy on how long a requirement
+  // holds. The held rows are the point — "did anybody try to send December to a
+  // tax program" is asked when a filing is late, months after a sweep would
+  // have taken the answer.
+  //
   // 180 since Phase 157 added `contribution_receipts`, also `NEVER_SWEPT`: a
   // pledge receipt is the evidence behind a restricted fund's balance, and the
   // migration declined to backfill one for existing pledges precisely because
@@ -132,7 +139,7 @@ describe('the retention policy', () => {
   // question above by going in `NEVER_SWEPT`: a billing schedule is the payment
   // terms a client agreed to, and sweeping it would delete the terms behind
   // invoices that are themselves never swept.
-  const TABLE_COUNT = 180
+  const TABLE_COUNT = 181
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

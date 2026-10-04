@@ -173,7 +173,17 @@ describe('every registry refuses the same way', () => {
     // called this wrongly". Both became a discriminated union instead, so the
     // compiler refuses the call and the count came back down. A constraint beats
     // a check (Phase 116), and it also keeps a registry's error type honest.
-    expect(thrown.length).toBe(20)
+    //
+    // Twenty-five since Phase 158 and the export engine, which added five in one
+    // phase: `EXPORT_DESTINATIONS`, `PACKAGE_SECTIONS`, `READINESS_CHECKS`,
+    // `TAX_CLASSIFICATIONS` and `ADAPTERS`. Five at once is worth a sentence
+    // rather than a shrug — the specification it was built from names its
+    // destinations, its package sections and its validation checks as lists, and
+    // a list whose lookup returns `undefined` lets somebody export to a
+    // competitor, skip a section or miss a check by typing a key wrong. The
+    // device is the same one Phase 101 set; what is new is that one phase needed
+    // it five times, which is what the twelfth registry costing nothing bought.
+    expect(thrown.length).toBe(25)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

@@ -26,6 +26,11 @@ export const ACCOUNTING_NAV = [
   { href: '/accounting/periods', label: 'Recurring & close' },
   { href: '/accounting/reconcile', label: 'Reconcile' },
   { href: '/accounting/documents', label: 'Documents' },
+  // Phase 158. Beside Documents rather than beside Reports, because it is not a
+  // report: a report is read on screen and this hands the books to somebody
+  // else's software. The screen it most resembles is the one that collects
+  // evidence for an accountant.
+  { href: '/accounting/export', label: 'Export to accountant' },
   // Last, because it is the screen somebody opens when something has already
   // gone wrong — and until Phase 71 there was none, so the audit log had been
   // written for seventy phases and read by nothing.
