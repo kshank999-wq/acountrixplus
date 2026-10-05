@@ -8,7 +8,7 @@ import {
   proposalVersions,
 } from '@/db/schema'
 import { parseBlocks } from '@/modules/design/blocks'
-import { proposalRenderContext } from '@/modules/design/documents'
+import { disclosureForDocument, proposalRenderContext } from '@/modules/design/documents'
 import { storeDocument, attachDocument } from '@/modules/evidence/service'
 import { scoped, requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
@@ -121,6 +121,14 @@ export async function proposalRenderInput(
     // rather than nothing (Phase 76). `documentFooter` has been on every
     // invoice since Phase 75 and reached no proposal at all.
     footerText: document.footerText ?? rendered?.context['company.footer'] ?? null,
+    /*
+      Phase 165. Its own field rather than folded into the footer, because the
+      footer is the author's to write and a disclosure the author can edit out is
+      not a disclosure. Null for every proposal today — nothing yet produces an
+      asset with a machine origin — and the point is that it will not be null and
+      silent the day something does.
+    */
+    disclosureText: await disclosureForDocument(companyId, document.id, exec),
     showPageNumbers: document.showPageNumbers,
     lines: items.map((item) => ({
       description: item.description,

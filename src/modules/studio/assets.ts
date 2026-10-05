@@ -127,6 +127,16 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
       storageProvider: store.key,
       storageKey,
       uploadedBy: ctx.userId,
+      /*
+        Said explicitly, because Phase 165's migration dropped the column's
+        default on purpose. A caller that forgot would otherwise get 'uploaded'
+        silently — which is the false declaration the column exists to prevent,
+        reintroduced as a convenience. A person chose this file from their disk,
+        so this is a measured fact rather than a default.
+      */
+      provenanceOrigin: 'uploaded',
+      aiRequestId: null,
+      derivedFromId: null,
     })
     .returning()
 

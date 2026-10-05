@@ -6189,6 +6189,67 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### What the client is told (Phase 165)
+
+ADR 0164's audit nominated **AI Design Assistant** first because §11 asks it to
+*"preserve user control and provenance"*, and provenance is a data decision that
+should be settled before a prompt is written. First nomination in five phases
+measurement did not have to correct — what it did was sharpen it.
+
+**Control already exists; provenance does not — and `ai_requests` is not it.**
+`ai_suggestions` records the accept/reject with the person who decided, as
+`suggestions.ts` says in those words. `ai_requests` is §12's *usage ledger* —
+tokens, cost, latency, outcome. It records that a request happened and what it
+cost, and nothing about what was produced or where it ended up. Conflating them
+is how a product ends up able to bill for a generated image and unable to say
+which client proposal it is sitting in.
+
+**`assets.uploadedBy` encoded an assumption about to become false.** Every asset
+was uploaded by a person, so a nullable `uploaded_by` and no provenance column
+together said *"a person put this here"* — a declaration the first generated
+asset would falsify on every row carrying it, in the table whose contents get
+emailed to clients. Which is also why the backfill can **assert** rather than
+guess: unlike Phase 157, the fact exists. The migration then **drops the
+default**, because keeping it would mean an assistant that forgot got
+`'uploaded'` silently — the false declaration reintroduced as a convenience. The
+compiler caught `uploadAsset` the moment the column existed.
+
+**Provenance that does not propagate is true once and false forever after.** A
+crop of an AI-generated background is a crop of AI-generated material;
+`authored` would be true about what the person did and false about what the file
+contains, and the file is what is sent. So `strongerOf` takes the join and the
+lattice ranks **disclosure, not credit** — someone who heavily edits a generated
+image has done most of the work and the result still contains generated
+material.
+
+**A disclosure the author can edit out is not a disclosure.** The chain,
+measured: `assets` → a block's `assetId` → `design_documents` → the rendered
+proposal → a client. `disclosureForDocument` reads the blocks and takes the join,
+so one generated background in an otherwise hand-made document still discloses —
+and it is its own field on `RenderInput` rather than appended to `footerText`,
+because mixing a chosen string with a mandatory fact lets somebody remove the
+second by editing the first.
+
+The CHECK is deliberately bidirectional: a machine origin **requires** an
+`ai_request_id` and a human origin **forbids** one. The second direction is the
+one that matters — without it a row could carry an AI request and be disclosed
+as human-made. Writing the test found an *unknown* origin trips both
+constraints, because `matches_request` enumerates the four valid origins on both
+branches and is doing double duty as a whitelist; the test asserts one of the two
+refused it rather than which, since pinning the name would assert an evaluation
+order nothing promises.
+
+Also found by the test: **`ai_feature` had no `'design'` value** — eight values,
+§11's five implemented capabilities and no more. With no value for a design
+generation there was no honest way to write the ledger row a machine origin must
+point at, so the provenance column could never have been populated.
+`'strategic_account'` waits for the phase that builds it, on Phase 157's rule.
+
+**What it does not do:** build the assistant. Nothing yet produces a machine
+origin, so `disclosureText` is null on every proposal today — the point being
+that it will not be null *and silent* the day something does.
+
+
 ### A nomination inherited is a nomination unmeasured (Phase 164)
 
 ADR 0163 recorded that **three consecutive nominations had been wrong** — 0161
@@ -8013,6 +8074,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/what-the-client-is-told.test.ts` | **What the client is told** (Phase 165): the provenance decision §11 requires before a Design Assistant can exist. The lattice ranks disclosure rather than credit — a crop of an AI-generated image still contains AI-generated material, so `strongerOf` takes the join and a parent's disclosure survives the child's edit. The database refuses both incoherent shapes, and the dangerous direction is the second: a human origin carrying an AI request would let generated material be disclosed as human-made. An unknown origin trips both constraints, asserted as *one of the two* because pinning the name would assert an evaluation order nothing promises. Then the chain to the client: one generated background in an otherwise hand-made document still discloses, and the disclosure is its own render field rather than appended to the author's footer — because a disclosure the author can edit out is not a disclosure |
 | `tests/a-blinded-sweep.test.ts` | **The sweep that deleted nothing and said it worked** (Phase 163): the distinction a row count cannot make, proved on two real connections. `proposal_views` is empty *and* policed, so a count returns 0 as the owner and as `accountrix_app` — identical and meaningless — while `crossTenantSight` returns `[]` for one and `['proposal_views']` for the other. Then the register: six cross-tenant paths under three authorities, the swept tables derived from `RETENTION_POLICIES` rather than copied, every declared function checked to exist, and the one positive grant (`a-practice-engagement`) told apart from the two absences. And the refusal: a blinded retention sweep throws with the authority it was relying on, rather than returning `{ removed: 0 }` and being recorded as succeeded — asserted as wired *before* `sweepAll`, not after |
 | `tests/a-job-through-the-policies.test.ts` | **The queue that could not see itself** (Phase 162): opens with the three-line probe that refuted ADR 0161's nomination — an `AsyncLocalStorage` scope does not survive the function that opened it returning, so a page cannot open one for the async children React invokes afterwards. Then the worker, which can: a real job handler calling a real service runs inside a tenant scope and sees its own company, two companies' jobs in one tick each get their own scope, the scope is unbound between them, a global handler runs with none and says so, a failure is still recorded because the bookkeeping sits outside the scope, and one tick still claims across both tenants — which is why the two queue tables had to be exempted. Plus the tripwire counting `definition.handler(` in the source, so a second dispatch site cannot bypass the scope silently |
 | `tests/a-report-through-the-policies.test.ts` | **The executor nobody could pass** (Phase 161): real service functions running behind row level security without having been modified for it. `trialBalance`, `accountBalances`, `arAging` and `listAccounts` — none of which takes an executor, all of which read the module-level `db` — run on a connection as `accountrix_app` inside a tenant scope and return the same figures as the owner connection, with Alpha footing to $4,000 and Beta to $11. Outside a scope the same connection sees nothing. Also the scope itself: bound by `withTenant` and visible three levels down, re-entrant for the same company so two services opening one are a single transaction, refused outright for a different company, unbound when the body throws, and absent until something opens it — which is why applying Phase 161 changes nothing for the 903 call sites that did not change |

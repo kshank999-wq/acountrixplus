@@ -14,6 +14,7 @@ import {
 } from 'drizzle-orm/pg-core'
 import { companies, users } from './tenancy'
 import { chartAccounts } from './accounting'
+import { aiRequests } from './ai'
 
 /**
  * The Design Center — "Company Studio" in spec §15.
@@ -159,6 +160,31 @@ export const assets = pgTable(
     storageKey: text('storage_key').notNull(),
 
     uploadedBy: uuid('uploaded_by').references(() => users.id, { onDelete: 'set null' }),
+    /**
+     * Where this came from (Phase 165, spec §11's "preserve … provenance").
+     *
+     * One of `PROVENANCE_ORIGINS` in `modules/ai/provenance.ts`. It exists
+     * because `uploaded_by` alone says "a person put this here", which was true
+     * of every row until a Design Assistant could produce one — and a false
+     * declaration in the table whose contents get emailed to clients is the
+     * worst place for one.
+     *
+     * No database default, deliberately: a caller that forgets would otherwise
+     * get `'uploaded'` silently, which is the false declaration reintroduced as
+     * a convenience.
+     */
+    provenanceOrigin: text('provenance_origin').notNull(),
+    /** The `ai_requests` row behind a machine origin. Required by a CHECK. */
+    aiRequestId: uuid('ai_request_id').references(() => aiRequests.id, { onDelete: 'set null' }),
+    /**
+     * What it was made from.
+     *
+     * `set null` rather than cascade: deleting the background a flyer was built
+     * from must not delete the flyer, and the flyer's own origin already carries
+     * the disclosure forward — which is why `derivedProvenance` takes the join
+     * at write time rather than looking the parent up at render time.
+     */
+    derivedFromId: uuid('derived_from_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

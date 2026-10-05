@@ -41,6 +41,15 @@ export const aiFeatureEnum = pgEnum('ai_feature', [
   'proposal_draft',
   'marketing_draft',
   'business_insights',
+  /**
+   * A design generation (Phase 165, spec §11's AI Design Assistant).
+   *
+   * Added by the phase that settled provenance rather than the one that will
+   * build the assistant, because `assets.ai_request_id` is what makes a machine
+   * origin checkable — an `ai-generated` asset must point at a ledger row
+   * saying what produced it, and there was no value to write.
+   */
+  'design',
 ])
 
 /**

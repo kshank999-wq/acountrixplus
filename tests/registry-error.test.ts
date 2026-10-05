@@ -200,7 +200,13 @@ describe('every registry refuses the same way', () => {
     // the last one, one level out: an undeclared cross-tenant path returns zero
     // rows and reports success, so a lookup that answered `undefined` for a
     // mistyped key would hand back silence exactly where silence is the defect.
-    expect(thrown.length).toBe(28)
+    //
+    // Twenty-nine since Phase 165 and `PROVENANCE_ORIGINS`. The argument that
+    // earns it: each entry carries what must be *disclosed* because of it, so a
+    // lookup answering `undefined` for a mistyped origin would return no
+    // disclosure — and "nothing to disclose" is the one wrong answer that
+    // reaches a client looking exactly like the right one.
+    expect(thrown.length).toBe(29)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

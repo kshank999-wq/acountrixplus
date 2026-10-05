@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
-import { and, asc, desc, eq, isNull, or } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNull, or } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
+  assets,
   companies,
   companyProfiles,
   contacts,
@@ -18,6 +19,10 @@ import type { Permission } from '@/modules/permissions'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { defaultBrandKit } from '@/modules/studio/service'
 import { letterheadFor } from '@/modules/brand/letterhead'
+import {
+  documentDisclosure,
+  type ProvenanceOrigin,
+} from '@/modules/ai/provenance'
 import { parseBlocks, validateBlocks, type Block } from './blocks'
 import { buildMergeContext, type MergeContext } from './merge-fields'
 import { builtInTemplate, templatesForIndustry, type TemplateDefinition } from './templates'
@@ -562,4 +567,54 @@ export async function duplicateDocument(ctx: ActorContext, documentId: string, n
 
     return copy
   })
+}
+
+/**
+ * What a document has to disclose about the assets it embeds (Phase 165).
+ *
+ * Spec §11 asks the Design Assistant to *"preserve user control and
+ * provenance"*. Control is `ai_suggestions`, which already records the person
+ * who accepted rather than the model, because the person is who decided.
+ * Provenance is `assets.provenance_origin`, and this is where it surfaces — on
+ * the artifact a client actually receives.
+ *
+ * The chain, which is why this reads blocks rather than a column: an asset is
+ * referenced by a block's `assetId`, the blocks are a document, the document is
+ * rendered into a proposal, and the proposal is sent. A disclosure that stopped
+ * at the asset row would be true and invisible.
+ *
+ * Takes the join across everything embedded (`documentDisclosure`), so a
+ * document containing one AI-generated background discloses that even if
+ * everything else in it was drawn by hand — because an artifact is as
+ * disclosable as the most disclosable thing it is made of.
+ */
+export async function disclosureForDocument(
+  companyId: string,
+  documentId: string,
+  exec: Executor = db,
+): Promise<string | null> {
+  const [document] = await exec
+    .select({ blocks: designDocuments.blocks })
+    .from(designDocuments)
+    .where(and(eq(designDocuments.id, documentId), eq(designDocuments.companyId, companyId)))
+    .limit(1)
+
+  if (!document) return null
+
+  const assetIds = [
+    ...new Set(
+      parseBlocks(document.blocks)
+        .map((block) => (block as { assetId?: string | null }).assetId)
+        .filter((id): id is string => typeof id === 'string' && id.length > 0),
+    ),
+  ]
+
+  if (assetIds.length === 0) return null
+
+  const rows = await exec
+    .select({ origin: assets.provenanceOrigin })
+    .from(assets)
+    .where(and(eq(assets.companyId, companyId), inArray(assets.id, assetIds)))
+
+  return documentDisclosure(rows.map((row) => row.origin as ProvenanceOrigin))
 }

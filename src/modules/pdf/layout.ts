@@ -65,6 +65,19 @@ export type RenderInput = {
   orientation: 'portrait' | 'landscape'
   headerText?: string | null
   footerText?: string | null
+  /**
+   * What has to be disclosed about the content (Phase 165, spec §11).
+   *
+   * Its own field rather than appended to `footerText`, and the reason is the
+   * whole point: the footer is the author's to write, and **a disclosure the
+   * author can edit out is not a disclosure.** Mixing a chosen string with a
+   * mandatory fact would let somebody remove the second by editing the first.
+   *
+   * Drawn on its own line above the footer, in the same muted grey, because a
+   * disclosure set apart in bold reads as a disclaimer and one hidden in the
+   * footer text reads as nothing.
+   */
+  disclosureText?: string | null
   showPageNumbers: boolean
   /** Supplied by the caller so the figures cannot drift from the record. */
   lines?: PricingLine[]
@@ -988,7 +1001,10 @@ export function renderDocumentPdf(input: RenderInput): Buffer {
   for (const block of input.blocks) composer.add(block)
 
   const hasHeader = Boolean(input.headerText?.trim())
-  const hasFooter = Boolean(input.footerText?.trim()) || input.showPageNumbers
+  const hasFooter =
+    Boolean(input.footerText?.trim()) ||
+    Boolean(input.disclosureText?.trim()) ||
+    input.showPageNumbers
 
   const contentTop = MARGIN + (hasHeader ? HEADER_BAND : 0)
   const contentBottom = pageHeight - MARGIN - (hasFooter ? FOOTER_BAND : 0)
@@ -1069,6 +1085,19 @@ export function renderDocumentPdf(input: RenderInput): Buffer {
           canvas.text(
             truncateToWidth(footerText, { font: body, size: 9, maxWidth: contentWidth - 60 }),
             { x: MARGIN, y: footerY, font: body, size: 9, color: muted },
+          )
+        }
+
+        if (input.disclosureText?.trim()) {
+          // Above the footer line, so it is neither mixed into the author's
+          // words nor competing with the page number.
+          canvas.text(
+            truncateToWidth(input.disclosureText.trim(), {
+              font: body,
+              size: 8,
+              maxWidth: contentWidth,
+            }),
+            { x: MARGIN, y: footerY - 11, font: body, size: 8, color: muted },
           )
         }
 
