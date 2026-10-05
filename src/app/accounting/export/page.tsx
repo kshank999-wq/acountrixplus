@@ -7,6 +7,7 @@ import {
   mayExportTo,
   offerableDestinations,
 } from '@/modules/exporter/destinations'
+import { worksheetFor } from '@/modules/exporter/worksheets'
 import { TAX_CLASSIFICATIONS } from '@/modules/exporter/entity'
 import { companyProfile } from '@/modules/exporter/entity'
 import { exportHistory } from '@/modules/exporter/service'
@@ -53,14 +54,25 @@ export default async function ExportPage() {
   const now = new Date()
   const year = now.getUTCFullYear()
 
+  // Everything that is not offerable, with the sentence saying why. The sentence
+  // differs by destination now — researched-but-unverified, no third-party route,
+  // or nobody has looked — and a firm reading this list is entitled to the
+  // difference rather than fourteen rows of "coming soon".
+  const offerable = new Set(offerableDestinations().map((destination) => destination.key))
   const planned = EXPORT_DESTINATIONS.filter(
-    (destination) => destination.integration === 'unresearched',
+    (destination) => !offerable.has(destination.key),
   ).map((destination) => {
     const verdict = mayExportTo(destination.key)
+    const worksheet = worksheetFor(destination.key)
     return {
       key: destination.key,
       product: `${destination.vendor} ${destination.product}`,
       why: verdict.ok ? '' : verdict.why,
+      state: worksheet
+        ? worksheet.finding === 'no-third-party-path'
+          ? 'no third-party route'
+          : 'researched, awaiting verification'
+        : 'not yet researched',
     }
   })
 

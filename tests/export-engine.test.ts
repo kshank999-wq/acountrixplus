@@ -17,6 +17,7 @@ import {
   requiresMapping,
   type PackageFacts,
 } from '@/modules/exporter/readiness'
+import { integrationFor } from '@/modules/exporter/destinations'
 import {
   PACKAGE_SECTIONS,
   exportedSections,
@@ -160,11 +161,20 @@ describe('the destinations a firm may be offered', () => {
      * at a time, each with a worksheet behind it.
      */
     expect(offerableDestinations().map((row) => row.key)).toEqual(['universal'])
-    expect(EXPORT_DESTINATIONS.filter((row) => row.integration === 'unresearched')).toHaveLength(20)
+
+    // Phase 159 researched the fourteen Priority 1 targets, so they are no
+    // longer `unresearched` — and none is offerable, because none is verified.
+    // The six Priority 2 targets have no worksheet at all.
+    const states = EXPORT_DESTINATIONS.map((row) => integrationFor(row.key))
+    expect(states.filter((state) => state === 'researched-unverified')).toHaveLength(14)
+    expect(states.filter((state) => state === 'unresearched')).toHaveLength(6)
   })
 
   it('refuses a planned destination differently from an excluded one', () => {
-    const planned = mayExportTo('ultratax-cs')
+    // A Priority 2 target, because Phase 159 researched Priority 1 and this is
+    // the "nobody has looked yet" refusal. The researched ones get their own
+    // sentences, asserted in `export-worksheets.test.ts`.
+    const planned = mayExportTo('netsuite')
 
     expect(planned.ok).toBe(false)
     if (planned.ok) return

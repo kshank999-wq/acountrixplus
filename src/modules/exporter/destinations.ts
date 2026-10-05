@@ -31,17 +31,28 @@
  * integrations."* And §13 requires a one-page integration worksheet, citing
  * official vendor documentation, **before** adapter code is written.
  *
- * Every target below therefore carries `integration: 'unresearched'`. That is
- * not a placeholder to be filled in optimistically — it is the honest value, and
- * `adapterMayBeBuilt` refuses to treat a destination as implementable until a
- * worksheet exists. Writing `api: 'REST'` against a product whose real import
- * path is a desktop bridge utility would be this project's oldest defect — a
- * declaration argued from a fact that is not a fact (Phase 110, Phase 125) — in
+ * Phase 158 therefore marked every target `unresearched` and Phase 159 did the
+ * research: fourteen worksheets in `docs/exporter/worksheets/`, registered in
+ * `worksheets.ts`. **Not one of them is verified**, because the research ran in
+ * an environment whose egress policy blocked every vendor documentation host, so
+ * every answer rests on a summary of a page nobody opened. §13 is a clause about
+ * having read the documentation, so `adapterMayBeBuilt` still refuses all
+ * fourteen — with a different sentence from before, because "nobody has looked"
+ * and "somebody looked and could not open the page" are different problems.
+ *
+ * What the research found, which is the argument for having done it this way:
+ * **twelve of fourteen are file imports**, one of the two programmatic paths
+ * needs a vendor's approval, and two targets have no third-party route at all.
+ * An exporter built on the assumption that professional software is reached
+ * through APIs would have been wrong about twelve of fourteen. Writing
+ * `api: 'REST'` against any of them would have been this project's oldest defect
+ * — a declaration argued from a fact that is not a fact (Phases 110, 125) — in
  * the one place where being wrong means a firm's trial balance silently fails to
  * arrive.
  */
 
 import { RegistryError } from '@/modules/errors/registry'
+import { worksheetFor } from './worksheets'
 
 /** Why a product is not an export destination. */
 export type ExclusionGround =
@@ -168,6 +179,12 @@ export function exclusionFor(keyOrProduct: string): ExcludedDestination | null {
  *
  * Exporter spec §7's point, as a type: the absence of research is a state the
  * code can hold, rather than something a comment hopes somebody remembers.
+ *
+ * **Derived from the worksheet, never stored on a destination.** Phase 158 put
+ * this on `ExportDestination` and Phase 159 took it off, because once worksheets
+ * existed the destination's copy was a second answer to a question the worksheet
+ * already answers — and the copy is the one that drifts, silently, into a
+ * product decision about what to offer a firm. `integrationFor` is the reader.
  */
 export type IntegrationState =
   /**
@@ -178,12 +195,20 @@ export type IntegrationState =
    */
   | 'unresearched'
   /**
-   * The worksheet exists and says the product has no programmatic import, so
-   * the path is a generated file plus instructions (§8's
-   * `generateManualImportInstructions`).
+   * A worksheet exists and has not been checked against the pages it cites.
+   *
+   * Phase 159's finding, and the state all fourteen Priority 1 targets are in:
+   * the research is done and written up, and every answer rests on a summary of
+   * a vendor page that the egress policy would not let anybody open. §13 is a
+   * clause about having read the documentation, so this is short of it.
+   */
+  | 'researched-unverified'
+  /**
+   * The worksheet is verified and says the path is a generated file plus
+   * instructions (§8's `generateManualImportInstructions`).
    */
   | 'file-import'
-  /** The worksheet exists and names a programmatic path this product supports. */
+  /** The worksheet is verified and names a programmatic path. */
   | 'programmatic'
 
 export type DestinationKind =
@@ -206,7 +231,6 @@ export type ExportDestination = {
   priority: 1 | 2 | null
   /** What a firm uses it for, in §3's words. */
   use: string
-  integration: IntegrationState
 }
 
 /**
@@ -216,11 +240,10 @@ export type ExportDestination = {
  * criterion — the product offers what this list says and nothing else, so
  * enabling a destination is an entry here rather than a branch somewhere.
  *
- * Every §3 target is `unresearched`. The universal package is not, and is the
- * only destination this phase can honestly build: §4 requires it to exist
- * regardless, *"so a firm can import or manipulate the data even if its exact
- * professional system does not yet have a native adapter"* — which is also the
- * fallback §15 asks for where no API exists.
+ * The list carries no integration state. What is known about reaching each one
+ * lives in `WORKSHEETS` and is read through `integrationFor`, because the
+ * worksheet is what establishes it and a second copy here is a second answer to
+ * one question (Phase 159).
  */
 export const EXPORT_DESTINATIONS: readonly ExportDestination[] = [
   {
@@ -230,36 +253,35 @@ export const EXPORT_DESTINATIONS: readonly ExportDestination[] = [
     kind: 'universal',
     priority: null,
     use: 'Any firm, any system — CSV and delimited text plus a reporting package',
-    integration: 'file-import',
   },
 
   // Priority 1 — professional tax preparation (§3).
-  { key: 'lacerte', product: 'Lacerte Tax', vendor: 'Intuit', kind: 'tax', priority: 1, use: 'Professional tax preparation', integration: 'unresearched' },
-  { key: 'proseries', product: 'ProSeries Tax', vendor: 'Intuit', kind: 'tax', priority: 1, use: 'Professional tax preparation', integration: 'unresearched' },
-  { key: 'proconnect', product: 'ProConnect Tax', vendor: 'Intuit', kind: 'tax', priority: 1, use: 'Professional tax preparation', integration: 'unresearched' },
-  { key: 'ultratax-cs', product: 'UltraTax CS', vendor: 'Thomson Reuters', kind: 'tax', priority: 1, use: 'Professional tax preparation', integration: 'unresearched' },
-  { key: 'gosystem-tax-rs', product: 'GoSystem Tax RS', vendor: 'Thomson Reuters', kind: 'tax', priority: 1, use: 'Enterprise professional tax', integration: 'unresearched' },
-  { key: 'cch-axcess-tax', product: 'CCH Axcess Tax', vendor: 'Wolters Kluwer', kind: 'tax', priority: 1, use: 'Professional / enterprise tax', integration: 'unresearched' },
-  { key: 'cch-prosystem-fx-tax', product: 'CCH ProSystem fx Tax', vendor: 'Wolters Kluwer', kind: 'tax', priority: 1, use: 'Professional tax', integration: 'unresearched' },
-  { key: 'drake-tax', product: 'Drake Tax', vendor: 'Drake Software', kind: 'tax', priority: 1, use: 'Professional tax preparation', integration: 'unresearched' },
+  { key: 'lacerte', product: 'Lacerte Tax', vendor: 'Intuit', kind: 'tax', priority: 1, use: 'Professional tax preparation' },
+  { key: 'proseries', product: 'ProSeries Tax', vendor: 'Intuit', kind: 'tax', priority: 1, use: 'Professional tax preparation' },
+  { key: 'proconnect', product: 'ProConnect Tax', vendor: 'Intuit', kind: 'tax', priority: 1, use: 'Professional tax preparation' },
+  { key: 'ultratax-cs', product: 'UltraTax CS', vendor: 'Thomson Reuters', kind: 'tax', priority: 1, use: 'Professional tax preparation' },
+  { key: 'gosystem-tax-rs', product: 'GoSystem Tax RS', vendor: 'Thomson Reuters', kind: 'tax', priority: 1, use: 'Enterprise professional tax' },
+  { key: 'cch-axcess-tax', product: 'CCH Axcess Tax', vendor: 'Wolters Kluwer', kind: 'tax', priority: 1, use: 'Professional / enterprise tax' },
+  { key: 'cch-prosystem-fx-tax', product: 'CCH ProSystem fx Tax', vendor: 'Wolters Kluwer', kind: 'tax', priority: 1, use: 'Professional tax' },
+  { key: 'drake-tax', product: 'Drake Tax', vendor: 'Drake Software', kind: 'tax', priority: 1, use: 'Professional tax preparation' },
 
   // Priority 2 — professional tax (§3).
-  { key: 'atx', product: 'ATX', vendor: 'Wolters Kluwer', kind: 'tax', priority: 2, use: 'Professional tax preparation', integration: 'unresearched' },
-  { key: 'taxwise', product: 'TaxWise / TaxWise Online', vendor: 'Wolters Kluwer', kind: 'tax', priority: 2, use: 'Professional tax preparation', integration: 'unresearched' },
+  { key: 'atx', product: 'ATX', vendor: 'Wolters Kluwer', kind: 'tax', priority: 2, use: 'Professional tax preparation' },
+  { key: 'taxwise', product: 'TaxWise / TaxWise Online', vendor: 'Wolters Kluwer', kind: 'tax', priority: 2, use: 'Professional tax preparation' },
 
   // Priority 1 — workpapers, trial balance and engagement (§3).
-  { key: 'caseware-working-papers', product: 'Caseware Working Papers', vendor: 'Caseware', kind: 'workpapers', priority: 1, use: 'Trial balance, audit, review, workpapers', integration: 'unresearched' },
-  { key: 'caseware-cloud', product: 'Caseware Cloud / Engagements', vendor: 'Caseware', kind: 'workpapers', priority: 1, use: 'Cloud audit and engagement workpapers', integration: 'unresearched' },
-  { key: 'cch-axcess-engagement', product: 'CCH Axcess Engagement', vendor: 'Wolters Kluwer', kind: 'workpapers', priority: 1, use: 'Cloud engagement / workpapers', integration: 'unresearched' },
-  { key: 'cch-prosystem-fx-engagement', product: 'CCH ProSystem fx Engagement', vendor: 'Wolters Kluwer', kind: 'workpapers', priority: 1, use: 'Engagement / workpapers', integration: 'unresearched' },
-  { key: 'workpapers-cs', product: 'Workpapers CS', vendor: 'Thomson Reuters', kind: 'workpapers', priority: 1, use: 'Workpapers and trial balance', integration: 'unresearched' },
-  { key: 'accounting-cs', product: 'Accounting CS', vendor: 'Thomson Reuters', kind: 'workpapers', priority: 1, use: 'Professional accounting / trial balance', integration: 'unresearched' },
+  { key: 'caseware-working-papers', product: 'Caseware Working Papers', vendor: 'Caseware', kind: 'workpapers', priority: 1, use: 'Trial balance, audit, review, workpapers' },
+  { key: 'caseware-cloud', product: 'Caseware Cloud / Engagements', vendor: 'Caseware', kind: 'workpapers', priority: 1, use: 'Cloud audit and engagement workpapers' },
+  { key: 'cch-axcess-engagement', product: 'CCH Axcess Engagement', vendor: 'Wolters Kluwer', kind: 'workpapers', priority: 1, use: 'Cloud engagement / workpapers' },
+  { key: 'cch-prosystem-fx-engagement', product: 'CCH ProSystem fx Engagement', vendor: 'Wolters Kluwer', kind: 'workpapers', priority: 1, use: 'Engagement / workpapers' },
+  { key: 'workpapers-cs', product: 'Workpapers CS', vendor: 'Thomson Reuters', kind: 'workpapers', priority: 1, use: 'Workpapers and trial balance' },
+  { key: 'accounting-cs', product: 'Accounting CS', vendor: 'Thomson Reuters', kind: 'workpapers', priority: 1, use: 'Professional accounting / trial balance' },
 
   // Priority 2 — audit workflow, firm and ERP (§3).
-  { key: 'tr-cloud-audit-suite', product: 'Cloud Audit Suite', vendor: 'Thomson Reuters', kind: 'workpapers', priority: 2, use: 'Audit workflow and engagement', integration: 'unresearched' },
-  { key: 'sage-intacct', product: 'Sage Intacct', vendor: 'Sage', kind: 'firm-or-erp', priority: 2, use: 'Mid-market / firm and client accounting ecosystem', integration: 'unresearched' },
-  { key: 'netsuite', product: 'NetSuite', vendor: 'Oracle', kind: 'firm-or-erp', priority: 2, use: 'ERP / larger client accounting environment', integration: 'unresearched' },
-  { key: 'dynamics-365-bc', product: 'Dynamics 365 Business Central', vendor: 'Microsoft', kind: 'firm-or-erp', priority: 2, use: 'ERP / larger client accounting environment', integration: 'unresearched' },
+  { key: 'tr-cloud-audit-suite', product: 'Cloud Audit Suite', vendor: 'Thomson Reuters', kind: 'workpapers', priority: 2, use: 'Audit workflow and engagement' },
+  { key: 'sage-intacct', product: 'Sage Intacct', vendor: 'Sage', kind: 'firm-or-erp', priority: 2, use: 'Mid-market / firm and client accounting ecosystem' },
+  { key: 'netsuite', product: 'NetSuite', vendor: 'Oracle', kind: 'firm-or-erp', priority: 2, use: 'ERP / larger client accounting environment' },
+  { key: 'dynamics-365-bc', product: 'Dynamics 365 Business Central', vendor: 'Microsoft', kind: 'firm-or-erp', priority: 2, use: 'ERP / larger client accounting environment' },
 ]
 
 /** The destination a key names. Throws on one nobody declared. */
@@ -278,18 +300,50 @@ export function destinationFor(key: string): ExportDestination {
   return found
 }
 
+/**
+ * What is known about reaching a destination, read from its worksheet.
+ *
+ * The universal package is the one destination with no worksheet and a known
+ * path, because §4's package is Accountrix's own file rather than somebody
+ * else's import — there is no vendor to research. Every other key without a
+ * worksheet is `unresearched`.
+ */
+export function integrationFor(key: string): IntegrationState {
+  if (key === 'universal') return 'file-import'
+
+  const worksheet = worksheetFor(key)
+  if (!worksheet) return 'unresearched'
+  if (worksheet.status === 'draft') return 'researched-unverified'
+
+  // A verified worksheet reports what it found. `no-third-party-path` is not an
+  // integration state: a verified worksheet saying there is no route means the
+  // destination cannot be offered, which is what `unresearched` already means
+  // for the purpose of offering it — and the refusal below says which it is.
+  return worksheet.finding === 'programmatic' ? 'programmatic' : 'file-import'
+}
+
 /** Destinations a firm may actually be offered today. */
 export function offerableDestinations(): ExportDestination[] {
-  return EXPORT_DESTINATIONS.filter((row) => row.integration !== 'unresearched')
+  return EXPORT_DESTINATIONS.filter((row) => {
+    const state = integrationFor(row.key)
+    if (state === 'unresearched' || state === 'researched-unverified') return false
+    return worksheetFor(row.key)?.finding !== 'no-third-party-path'
+  })
 }
 
 /**
  * Whether a destination may be exported to at all.
  *
- * Two refusals, and they are different in kind. An excluded product is a
- * decision — it will not become available by doing more work. An unresearched
- * one is an absence: §13's worksheet is what turns it into a destination, and
- * saying so is more useful than "not supported".
+ * Four refusals now, and keeping them apart is the point. An excluded product is
+ * a **decision** and will not change by doing more work. An unresearched one is
+ * an **absence of research**. One with a draft worksheet is an absence of
+ * *verification*, and the refusal can name the question that is outstanding. And
+ * a verified worksheet that found no third-party route is a **finding**: the
+ * work was done and the answer is that the vendor has to open a door.
+ *
+ * Four sentences rather than one "not supported", because each tells somebody a
+ * different thing about what would change it — which is Phase 119's rule that a
+ * refusal is worth writing when a person can act on it.
  */
 export function mayExportTo(key: string): { ok: true; destination: ExportDestination } | { ok: false; why: string } {
   const excluded = exclusionFor(key)
@@ -303,8 +357,9 @@ export function mayExportTo(key: string): { ok: true; destination: ExportDestina
   }
 
   const destination = destinationFor(key)
+  const worksheet = worksheetFor(key)
 
-  if (destination.integration === 'unresearched') {
+  if (!worksheet && key !== 'universal') {
     return {
       ok: false,
       why:
@@ -313,6 +368,29 @@ export function mayExportTo(key: string): { ok: true; destination: ExportDestina
         'be assumed — professional tax and workpaper products often import through a vendor file, ' +
         'a desktop bridge or a partner programme — so an adapter waits on a worksheet citing that ' +
         'vendor’s own documentation. Export the universal package in the meantime.',
+    }
+  }
+
+  if (worksheet && worksheet.finding === 'no-third-party-path') {
+    return {
+      ok: false,
+      why:
+        `${destination.product} has been researched and has no route a third party can take. ` +
+        `${worksheet.recommendation} The outstanding question is one for the vendor rather than ` +
+        `for more searching: ${worksheet.blocker} See ${worksheet.path}.`,
+    }
+  }
+
+  if (worksheet && worksheet.status === 'draft') {
+    return {
+      ok: false,
+      why:
+        `${destination.product} has been researched and the research has not been checked against ` +
+        'the vendor’s own pages, so no adapter has been written. ' +
+        `What it found: ${worksheet.recommendation} ` +
+        `Outstanding: ${worksheet.blocker} See ${worksheet.path}. ` +
+        'Export the universal accountant package in the meantime — any professional system can ' +
+        'read it.',
     }
   }
 
@@ -337,7 +415,9 @@ export function adapterMayBeBuilt(key: string): { ok: true } | { ok: false; why:
   }
 
   const destination = destinationFor(key)
-  if (destination.integration === 'unresearched') {
+  const worksheet = worksheetFor(key)
+
+  if (!worksheet && key !== 'universal') {
     return {
       ok: false,
       why:
@@ -347,6 +427,19 @@ export function adapterMayBeBuilt(key: string): { ok: true } | { ok: false; why:
         'entries, which file formats it accepts, which tax and account codes it requires, what ' +
         'vendor approval or certification applies, and which official documentation supports each ' +
         'answer. Until that exists an adapter would be a guess at somebody else’s format.',
+    }
+  }
+
+  if (worksheet && worksheet.status === 'draft') {
+    return {
+      ok: false,
+      why:
+        `The ${destination.product} worksheet is a draft. Every answer in it rests on a summary of ` +
+        'a vendor page that nobody opened — the research environment’s egress policy blocked every ' +
+        'vendor documentation host — and §13 is a clause about having read the documentation. ' +
+        `Verifying it means opening the pages ${worksheet.path} cites, confirming each answer, and ` +
+        'getting a sample file or sandbox where the vendor offers one. The question most likely to ' +
+        `change the design: ${worksheet.blocker}`,
     }
   }
 

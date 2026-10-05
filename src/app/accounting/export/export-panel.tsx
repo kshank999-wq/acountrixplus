@@ -19,7 +19,7 @@ import {
 
 type Destination = { key: string; product: string; vendor: string; use: string }
 
-type Refused = { key: string; product: string; why: string }
+type Refused = { key: string; product: string; why: string; state: string }
 
 export function ExportPanel({
   destinations,
@@ -205,16 +205,23 @@ export function ExportPanel({
 
       <section className="rounded border bg-white p-4">
         <h2 className="text-sm font-semibold">Not yet available</h2>
-        <p className="mt-1 text-xs text-slate-600">
-          These are the professional systems the exporter is being built for. Each one waits on a
-          worked-out integration path — professional tax and workpaper products import through
-          vendor files, desktop bridges and partner programmes as often as through an API, and
-          guessing at a format produces a file that is rejected without saying why.
+        <p className="mt-1 max-w-3xl text-xs text-slate-600">
+          These are the professional systems the exporter is being built for, and they are not all
+          waiting on the same thing. Professional tax and workpaper products import through vendor
+          files, desktop bridges and partner programmes as often as through an API, so each one was
+          researched separately — and guessing at a format produces a file that is rejected without
+          saying why.
         </p>
-        <ul className="mt-3 grid gap-1 text-xs text-slate-700 sm:grid-cols-2">
+        <ul className="mt-3 space-y-2 text-xs text-slate-700">
           {planned.map((destination) => (
             <li key={destination.key}>
-              {destination.product} <span className="text-slate-500">— waiting on research</span>
+              <details>
+                <summary className="cursor-pointer">
+                  <span className="font-medium">{destination.product}</span>{' '}
+                  <span className="text-slate-500">— {destination.state}</span>
+                </summary>
+                <p className="mt-1 pl-4 text-slate-600">{destination.why}</p>
+              </details>
             </li>
           ))}
         </ul>

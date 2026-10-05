@@ -386,8 +386,16 @@ describe('the export log §12 requires', () => {
   })
 
   it('refuses a planned destination with the sentence that says what is missing', async () => {
+    // Phase 159 researched this one, so the refusal moved on from "nobody has
+    // established how it accepts a trial balance" to naming what the research
+    // found and what is still outstanding. The sentence a person can act on
+    // (Phase 119) got longer because there is more to act on.
     await expect(
       exportForAccountant(fixture.ctx, { ...YEAR, destinationKey: 'cch-axcess-tax' }),
+    ).rejects.toThrow(/has not been checked against the vendor’s own pages/)
+
+    await expect(
+      exportForAccountant(fixture.ctx, { ...YEAR, destinationKey: 'netsuite' }),
     ).rejects.toThrow(/nobody has established how it actually accepts a trial balance/)
   })
 

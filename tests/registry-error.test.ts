@@ -183,7 +183,13 @@ describe('every registry refuses the same way', () => {
     // competitor, skip a section or miss a check by typing a key wrong. The
     // device is the same one Phase 101 set; what is new is that one phase needed
     // it five times, which is what the twelfth registry costing nothing bought.
-    expect(thrown.length).toBe(25)
+    //
+    // Twenty-six since Phase 159 and `WORKSHEETS`, the §13 integration
+    // worksheets. The sixth registry in two phases, and the one with the most
+    // riding on a lookup that throws: a `worksheetFor` returning `undefined`
+    // for a mistyped key would read as "no research has been done", which is
+    // the one answer that must never be given by accident.
+    expect(thrown.length).toBe(26)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
