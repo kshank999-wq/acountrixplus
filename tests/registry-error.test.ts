@@ -195,7 +195,12 @@ describe('every registry refuses the same way', () => {
     // entries leave the database *reporting* that RLS is on, so a lookup
     // returning `undefined` for a mistyped reason would quietly drop the one
     // check standing between inert policies and a claim of isolation.
-    expect(thrown.length).toBe(27)
+    //
+    // Twenty-eight since Phase 163 and `CROSS_TENANT_PATHS`. Same argument as
+    // the last one, one level out: an undeclared cross-tenant path returns zero
+    // rows and reports success, so a lookup that answered `undefined` for a
+    // mistyped key would hand back silence exactly where silence is the defect.
+    expect(thrown.length).toBe(28)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

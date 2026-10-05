@@ -1,5 +1,6 @@
 import { registerHandler, type JobContext } from '../registry'
 import { sweepAll } from '@/modules/retention/sweep'
+import { assertCrossTenantSight } from '@/modules/tenancy/cross-tenant'
 
 /**
  * Retention (spec §19).
@@ -35,6 +36,21 @@ registerHandler({
     // `asOf` from the payload rather than the clock, so a run can be replayed
     // for a date — and so a test can assert on one.
     const asOf = context.payload.asOf ? new Date(String(context.payload.asOf)) : new Date()
+
+    /*
+      Before sweeping, not after (Phase 163).
+
+      This handler sums what it removed and returns `{ removed, byPolicy }`.
+      Blinded by a tenant policy it returns `{ removed: 0, byPolicy: {} }` — which
+      is exactly what it returns when there was genuinely nothing to remove — and
+      the job is then recorded as **succeeded**. Retention stops working and the
+      first symptom is tables growing that a policy says should not.
+
+      No amount of care after the fact distinguishes those two, because the
+      information is not in the result: zero rows and zero visible rows are the
+      same number. It is in the catalogue, so that is what is asked.
+    */
+    await assertCrossTenantSight('retention/sweep:sweepAll')
 
     const results = await sweepAll(asOf)
     const removed = results.reduce((sum, row) => sum + row.removed, 0)

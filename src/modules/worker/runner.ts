@@ -6,6 +6,7 @@ import { workerHeartbeats } from '@/db/schema'
 import { claimJobs, completeJob, failJob, type ClaimedJob } from './queue'
 import { getHandler, UnknownJobKindError, type JobContext } from './registry'
 import { withTenant } from '@/modules/tenancy/with-tenant'
+import { assertCrossTenantSight } from '@/modules/tenancy/cross-tenant'
 import { relayPendingEvents } from './outbox'
 import { runDueSchedules } from './schedules'
 import { ensureSchedules } from './defaults'
@@ -73,6 +74,24 @@ export async function runOnce(options: RunnerOptions = {}): Promise<TickResult> 
     jobsFailed: 0,
     jobsDead: 0,
   }
+
+  /*
+    Can this connection see the queue at all (Phase 163)?
+
+    One catalogue query per tick, before the work, because the two paths below —
+    `relayPendingEvents` and `claimJobs` — read across every tenant with no
+    company filter, and a tenant policy would leave both returning nothing. The
+    tick would then report zero events relayed and zero jobs run, which is
+    exactly what an idle queue reports. `heartbeat`'s own comment names that
+    failure: an outage that looks like calm.
+
+    A count cannot tell an empty queue from an invisible one, so the catalogue is
+    asked instead. On the owner connection this is a cheap no-op and always has
+    been; it earns itself the day the application connects as a restricted role,
+    which is the day the whole tick would otherwise go quiet.
+  */
+  await assertCrossTenantSight('worker/queue:claimJobs')
+  await assertCrossTenantSight('worker/outbox:relayPendingEvents')
 
   // Before anything is due, make sure it exists. A company created through the
   // sign-up form got no schedules at all until Phase 33 — see `ensureSchedules`

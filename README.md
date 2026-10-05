@@ -6189,6 +6189,60 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The sweep that deleted nothing and said it worked (Phase 163)
+
+ADR 0162 nominated an `accountrix_worker` principal to close both halves it left
+open. **One role closes neither, because the worker is not a principal** —
+`runOnce` has three callers, and two of them (`api/cron/worker/route.ts` and the
+"Run now" server action) run inside the web process on the web connection. The
+codebase already explains why they share the code: `operations.ts` says it
+*"calls the same `runOnce` the worker loop calls, so there is no second
+implementation"*, which was right for correctness and is exactly what makes one
+role insufficient. Handing the web process worker credentials would give the
+queue-wide view to anything that can run code there.
+
+Worth saying plainly: that is the third nomination in a row measurement has had
+to correct. ADRs 0161, 0162 and 0163 each reasoned about how something would
+behave and each was wrong in a way a ten-minute measurement caught. The
+nominations earn their place by making the correction findable — they should be
+read as hypotheses.
+
+**The queue was two of six.** The five `global` handlers are four more
+cross-tenant paths, and `housekeeping.retention` is worse than the queue: it
+sweeps every company's expiring rows, sums what it removed, and returns
+`{ removed: 0, byPolicy: {} }` when blinded — *the same value it returns when
+there was genuinely nothing to remove* — and the job is recorded **succeeded**.
+Retention stops and the first symptom is tables growing that a policy says
+should not. It cannot be fixed by scoping it either: a per-tenant sweep would
+need a list of tenants, which is itself a cross-tenant read.
+
+**The thing worth building is the distinction all of them lack.** A cross-tenant
+path cannot tell *"I can see this table and it is empty"* from *"I cannot see
+this table"* by counting — both are zero, and no care at the call site fixes it
+because the information is not in the result. It is in the catalogue. So
+`CROSS_TENANT_PATHS` declares six paths under three authorities, each naming the
+tables it needs unrestricted sight of and **what stands in for a tenant
+setting**; `crossTenantSight` answers from `pg_class` and `pg_policies`; and a
+blinded path **throws** instead of reporting success. The test proves the
+distinction rather than asserting it — `proposal_views` is empty *and* policed,
+so a count returns 0 on both connections while the catalogue says the owner can
+see it and the restricted role cannot.
+
+`a-practice-engagement` is its own authority rather than folded into
+`the-schedule`, because it is the only one of the three a **policy** could
+express: a firm may see its clients because somebody signed an engagement — a
+positive grant rather than the absence of a tenant. The sweep's table list is
+derived from `RETENTION_POLICIES` rather than copied, because the copy is what
+goes stale when a policy is added, leaving a table swept by a path the register
+says nothing about — the register's own failure one level up.
+
+**What it is not:** a permission. These paths already have cross-tenant sight,
+because they run on a connection not subject to a tenant policy. The register
+says who relies on that and for what. And it does not make the retention sweep
+work on a restricted connection — it makes it *refuse* to run there, which is
+correct and is not the same as solved.
+
+
 ### The queue that could not see itself (Phase 162)
 
 ADR 0161 nominated *"opening the scope on one real surface — the accounting
@@ -7915,6 +7969,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/a-blinded-sweep.test.ts` | **The sweep that deleted nothing and said it worked** (Phase 163): the distinction a row count cannot make, proved on two real connections. `proposal_views` is empty *and* policed, so a count returns 0 as the owner and as `accountrix_app` — identical and meaningless — while `crossTenantSight` returns `[]` for one and `['proposal_views']` for the other. Then the register: six cross-tenant paths under three authorities, the swept tables derived from `RETENTION_POLICIES` rather than copied, every declared function checked to exist, and the one positive grant (`a-practice-engagement`) told apart from the two absences. And the refusal: a blinded retention sweep throws with the authority it was relying on, rather than returning `{ removed: 0 }` and being recorded as succeeded — asserted as wired *before* `sweepAll`, not after |
 | `tests/a-job-through-the-policies.test.ts` | **The queue that could not see itself** (Phase 162): opens with the three-line probe that refuted ADR 0161's nomination — an `AsyncLocalStorage` scope does not survive the function that opened it returning, so a page cannot open one for the async children React invokes afterwards. Then the worker, which can: a real job handler calling a real service runs inside a tenant scope and sees its own company, two companies' jobs in one tick each get their own scope, the scope is unbound between them, a global handler runs with none and says so, a failure is still recorded because the bookkeeping sits outside the scope, and one tick still claims across both tenants — which is why the two queue tables had to be exempted. Plus the tripwire counting `definition.handler(` in the source, so a second dispatch site cannot bypass the scope silently |
 | `tests/a-report-through-the-policies.test.ts` | **The executor nobody could pass** (Phase 161): real service functions running behind row level security without having been modified for it. `trialBalance`, `accountBalances`, `arAging` and `listAccounts` — none of which takes an executor, all of which read the module-level `db` — run on a connection as `accountrix_app` inside a tenant scope and return the same figures as the owner connection, with Alpha footing to $4,000 and Beta to $11. Outside a scope the same connection sees nothing. Also the scope itself: bound by `withTenant` and visible three levels down, re-entrant for the same company so two services opening one are a single transaction, refused outright for a different company, unbound when the body throws, and absent until something opens it — which is why applying Phase 161 changes nothing for the 903 call sites that did not change |
 | `tests/rls-bites.test.ts` | **The policies that would have done nothing** (Phase 160): row level security proved rather than declared. Opens its own connection as `accountrix_app` — not a superuser, owns nothing — and makes the policies bite: two companies see only their own rows, a write aimed at another tenant is refused by `WITH CHECK`, an update or delete across tenants affects zero rows, and a query with no tenant set sees nothing at all. Asserts coverage against the schema source rather than the catalogue the migration looped over, so a table added later fails here instead of going unprotected. Then the honest half: `rlsStands` refuses to call *this* application's connection isolated because it is a superuser, agrees about the restricted one — seen to agree and to disagree on two real connections in one file — and every one of the five declared bypasses is exercised on a fixture. Also the four exempt tables, and that a restricted connection can still read `memberships`, which is what sign-in needs |
