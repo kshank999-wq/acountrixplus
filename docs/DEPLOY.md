@@ -73,6 +73,44 @@ DATABASE_URL='postgres://…@….pooler.supabase.com:5432/postgres' npm run db:m
 Do **not** run `npm run db:seed` against production. It creates demo companies
 with a published password.
 
+### Row level security is installed and not switched on (Phase 160)
+
+Migration `0085` creates the role `accountrix_app`, grants it DML on the schema,
+and forces a `tenant_isolation` policy on all 163 tenant-scoped tables. It
+deliberately does **not** change which role the application connects as, so
+applying it changes nothing about how the application behaves.
+
+That is because row level security is never applied to a superuser, and is not
+applied to a table's owner without `FORCE`. `DATABASE_URL` here points at a role
+that is both, so the policies are skipped before they are consulted — 163 rows in
+`pg_policies`, 163 tables reporting `relrowsecurity`, and no isolation. If you
+are answering a security questionnaire from `pg_policies`, read this paragraph
+first.
+
+Turning it on is two steps and the second is the work:
+
+1. Give the role a password and a login, and point the application at it:
+
+   ```bash
+   psql "$DATABASE_URL" -c "ALTER ROLE accountrix_app LOGIN PASSWORD '…'"
+   # then set DATABASE_URL for the application (not for migrations) to use it
+   ```
+
+   Keep a separate, owning role for `npm run db:migrate`: `accountrix_app` has
+   no DDL rights on purpose.
+
+2. **Route every query through `withTenant`.** The policy reads the tenant from
+   `current_setting('app.company_id')`, and `withTenant` is the only thing that
+   sets it — inside a transaction, because a plain `SET` lasts for the life of a
+   pooled connection and the next request to be handed that backend would inherit
+   it. Until that is done, a query outside `withTenant` returns **no rows** on
+   the restricted role. It fails closed, which is the right direction and is
+   still an outage.
+
+`RLS_ROLLOUT` in `src/modules/tenancy/rls.ts` records how far this has got, and
+`rlsStands` refuses to report isolation on a connection that bypasses it. Run
+`observeRls` against a candidate connection before believing a switch worked.
+
 ## 3. Generate the secrets
 
 ```bash

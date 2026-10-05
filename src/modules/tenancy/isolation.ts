@@ -291,13 +291,48 @@ export const ALL_ISOLATION_GUARDS: readonly IsolationGuard[] = [
  * where the next `export const … = pgTable(` begins.
  */
 export function companyScopedTablesIn(schemaSource: string): string[] {
-  const declarations = [...schemaSource.matchAll(/export const (\w+)\s*=\s*pgTable\(/g)]
-  const scoped: string[] = []
+  return scopedDeclarations(schemaSource).map((row) => row.constName)
+}
 
-  for (let index = 0; index < declarations.length; index++) {
-    const start = declarations[index].index
-    const end = index + 1 < declarations.length ? declarations[index + 1].index : schemaSource.length
-    if (/companyId:/.test(schemaSource.slice(start, end))) scoped.push(declarations[index][1])
+/**
+ * The same tables, named as the database names them (Phase 160).
+ *
+ * Row level security is installed with SQL, so it needs `chart_accounts` where
+ * the isolation scans needed `chartAccounts`. Two projections of one rule rather
+ * than two rules: `scopedDeclarations` does the splitting, and the mistake Phase
+ * 149 made cannot be made twice in two places.
+ */
+export function companyScopedSqlTablesIn(schemaSource: string): string[] {
+  return scopedDeclarations(schemaSource)
+    .map((row) => row.sqlName)
+    .filter((name): name is string => name !== null)
+}
+
+/**
+ * Tenant-scoped declarations, with both names.
+ *
+ * The declaration-boundary split is here and only here. Phase 149 matched
+ * `pgTable\(([\s\S]*?)\n\)` and a table whose body ends `\n})` ran past its own
+ * closing brace into the next declaration; splitting on where the next
+ * `export const … = pgTable(` begins cannot.
+ */
+function scopedDeclarations(
+  schemaSource: string,
+): Array<{ constName: string; sqlName: string | null }> {
+  const declarations = [
+    ...schemaSource.matchAll(/export const (\w+)\s*=\s*pgTable\(\s*'([^']+)'/g),
+  ]
+  const bare = [...schemaSource.matchAll(/export const (\w+)\s*=\s*pgTable\(/g)]
+  const sqlByConst = new Map(declarations.map((match) => [match[1], match[2]]))
+
+  const scoped: Array<{ constName: string; sqlName: string | null }> = []
+
+  for (let index = 0; index < bare.length; index++) {
+    const start = bare[index].index
+    const end = index + 1 < bare.length ? bare[index + 1].index : schemaSource.length
+    if (!/companyId:/.test(schemaSource.slice(start, end))) continue
+    const constName = bare[index][1]
+    scoped.push({ constName, sqlName: sqlByConst.get(constName) ?? null })
   }
 
   return scoped

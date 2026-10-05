@@ -189,7 +189,13 @@ describe('every registry refuses the same way', () => {
     // riding on a lookup that throws: a `worksheetFor` returning `undefined`
     // for a mistyped key would read as "no research has been done", which is
     // the one answer that must never be given by accident.
-    expect(thrown.length).toBe(26)
+    //
+    // Twenty-seven since Phase 160 and `RLS_BYPASSES`, which is the register of
+    // ways row level security can be installed and do nothing. Four of its five
+    // entries leave the database *reporting* that RLS is on, so a lookup
+    // returning `undefined` for a mistyped reason would quietly drop the one
+    // check standing between inert policies and a claim of isolation.
+    expect(thrown.length).toBe(27)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
