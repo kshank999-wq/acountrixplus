@@ -236,7 +236,15 @@ describe('every registry refuses the same way', () => {
     // Twenty-one entries, ten of them one pattern, is a rule with a category
     // missing rather than a rule with exceptions. What is left is configuration,
     // crypto envelopes and invariants — no two alike.
-    expect(ALLOWED_BARE_REFUSALS.length).toBe(11)
+    //
+    // **Twelve since Phase 167**, which is the first entry added since Phase 132
+    // took ten out. `withTenant`'s refusal of a nested scope for a different
+    // tenant had been a bare person-facing throw since Phase 161 and this
+    // tripwire had been red ever since — nothing caught it, because no full
+    // suite completed between Phase 161 and Phase 167. The twelfth entry is
+    // still miscellaneous rather than a pattern: it is an invariant about
+    // execution context, and nothing else here is.
+    expect(ALLOWED_BARE_REFUSALS.length).toBe(12)
     expect(ALLOWED_BARE_REFUSALS.filter((row) => registryShaped(row.message))).toEqual([])
   })
 })

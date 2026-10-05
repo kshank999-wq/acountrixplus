@@ -161,6 +161,32 @@ rather than running a narrower query of its own. A per-account figure computed
 differently from the list's figure is two answers to one question, and the one a
 person would act on is whichever screen they happened to open.
 
+## A tripwire that had been red for six phases
+
+The targeted run for this phase failed on `tests/refusal-audience.test.ts`, in
+nothing this phase wrote. `withTenant`'s refusal of a nested tenant scope for a
+*different* company — Phase 161 — is a bare `throw new Error` with a sentence
+the audience heuristic reads as a person's. It has been failing since Phase 161,
+and **nothing caught it, because no full suite has completed since Phase 160.**
+
+Worth recording plainly rather than fixing quietly. Six phases have ended with a
+suite stopped partway and targeted tests run on the files each phase touched,
+which is fast and finds what a phase broke in its own neighbourhood. It cannot
+find what a phase broke in a tripwire that reads the whole tree, and a tripwire
+is the one kind of test that exists to be read by nobody until it fires.
+
+The fix is the **twelfth** entry in `ALLOWED_BARE_REFUSALS` — the first added
+since Phase 132 removed ten. A nested scope for a different tenant is a
+cross-tenant bug by construction, so nobody at a keyboard caused it and nobody
+at a keyboard can fix it; showing it would also put two company ids on a screen,
+which is the leak ADR 0074 denies by default.
+
+It was added rather than reshaped. Rewriting the sentence as a log fragment would
+have made the heuristic right about it by making the message worse, and Phase 145
+settled that direction: the sentence is the thing that has to be true. It reads
+as prose because it is explaining the trap to whoever comes next, which is
+exactly the false positive this list exists for.
+
 ## What this does not do
 
 **No `apply`.** An outreach draft is text somebody edits and sends; a

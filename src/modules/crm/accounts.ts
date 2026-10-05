@@ -12,7 +12,7 @@
  * reading one file that has no database in it.
  */
 
-import { and, eq, gte, inArray, lt, ne, sql } from 'drizzle-orm'
+import { eq, gte, inArray, lt, ne, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   customers,

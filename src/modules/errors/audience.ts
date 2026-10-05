@@ -273,4 +273,19 @@ export const ALLOWED_BARE_REFUSALS: readonly {
       'A suppression has no letter by construction, so a message id on one would name ' +
       'somebody else\'s letter. Refusing protects the log, and only a caller causes it.',
   },
+  {
+    file: 'src/modules/tenancy/with-tenant.ts',
+    message:
+      'Refusing to open a tenant scope for X inside one for X. Nesting tenants would leave ' +
+      'the outer scope running as the inner company with nothing to say so.',
+    because:
+      'Twelfth entry, and the first since Phase 132 — added rather than reshaped. A nested ' +
+      'scope for a different tenant is a cross-tenant bug by construction (ADR 0161), so ' +
+      'nobody at a keyboard caused it and nobody at a keyboard can fix it. Showing it would ' +
+      'also put two company ids on a screen, which is the leak ADR 0074 denies by default. ' +
+      'It reads as prose because it is explaining the trap to whoever comes next, which is ' +
+      'exactly the false positive this list exists for — rewriting it as a log fragment to ' +
+      'satisfy the heuristic would be weakening the sentence to pass a check, and Phase 145 ' +
+      'settled that the sentence is the thing that has to be true.',
+  },
 ]

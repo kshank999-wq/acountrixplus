@@ -6242,6 +6242,18 @@ asked to be sold to — §11's "neglected high-value prospect" almost exactly, a
 the case nothing in the product surfaced before. The test goes through
 `submitLead` rather than a fixture that could not have found it.
 
+And the run for this phase found a defect six phases old. `refusal-audience`,
+the tripwire that reads the whole source tree, failed on `withTenant`'s refusal
+of a nested tenant scope for a *different* company — Phase 161, thrown as a bare
+`Error` with a sentence the audience heuristic reads as person-facing. It had
+been red since Phase 161, and nothing caught it because **no full suite has
+completed since Phase 160.** Targeted runs find what a phase broke in its own
+neighbourhood; they cannot find what it broke in a test designed to be read by
+nobody until it fires. The fix is the twelfth entry in
+`ALLOWED_BARE_REFUSALS` — added rather than reshaped, because rewriting the
+sentence as a log fragment would make the heuristic right about it by making the
+message worse.
+
 The migration is **one enum value**, and that is the decision. The obvious shape
 would have been an `account_attention` table refreshed on a schedule; every
 figure it would hold is already authoritative in one of six tables, so a stored

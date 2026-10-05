@@ -158,3 +158,11 @@ are now second rather than third: once a scope is opened per request, `app.
 session_id` can be set beside `app.company_id` by the same seam, and a policy on
 `memberships` keyed on the session's user becomes expressible rather than
 circular. Those four tables are still the ones an attacker would want.
+
+> **Corrected by Phase 167.** The refusal this ADR argues for — a nested tenant
+> scope for a different company — was thrown as a bare `Error` with a sentence
+> the Phase 119 audience heuristic reads as person-facing, so
+> `tests/refusal-audience.test.ts` has been red since this phase. Nothing caught
+> it for six phases, because no full suite completed in between. It is now the
+> twelfth entry in `ALLOWED_BARE_REFUSALS`, argued there: the refusal is correct
+> and must not reach a screen, since showing it would put two company ids on one.
