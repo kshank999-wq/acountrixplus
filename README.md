@@ -6189,6 +6189,77 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The policies that would have done nothing (Phase 160)
+
+Spec §19's database-layer tenant isolation, nominated by ADRs 0157, 0158 and
+0159. The nomination survived verification — 0 tables with row level security, 0
+policies, 167 carrying a `company_id` — and the *shape* of the work did not.
+
+**The application connects as `postgres`, a superuser that owns all 181
+tables.** RLS is never applied to a superuser and is not applied to a table's
+owner without `FORCE`, so `ENABLE` plus `CREATE POLICY` across every
+tenant-scoped table would have produced 163 rows in `pg_policies`, 163 tables
+reporting `relrowsecurity`, and **no isolation at all** — while nothing broke, so
+nobody would look, and the next person to audit the database by listing its
+policies would read 163 of them and conclude the tenants were separated. A
+security control that looks present and does nothing is worse than its absence,
+because its absence is legible.
+
+So `RLS_BYPASSES` is the register of the five ways this control can be installed
+and do nothing, and the field that matters on each entry is what it *looks like*
+from outside. Four of the five leave the database reporting that RLS is on. The
+fifth fails neither open nor closed but **sideways**: a plain `SET` lasts for the
+life of a pooled connection, so the next request handed that backend inherits the
+last one's tenant and the policy faithfully applies it — one tenant reading
+another's books through a query that is filtering correctly on the value it was
+given. `withTenant` opens a transaction and uses `set_config(…, true)` for
+exactly that: the transaction is not there for atomicity, it is there because it
+is the only unit Postgres will scope a setting to *and* the driver will keep on
+one backend, and those have to be the same unit.
+
+**Four tenant-scoped tables must not be policed, and that was not the plan.**
+The migration's first draft protected all 167 and the acceptance test failed on
+`memberships`. Chasing it found four, and they are a property of what those
+tables are for: each is read in order to decide who the caller is and what they
+may do, which is strictly before any tenant can be set. `memberships` —
+**sign-in stops working**, because the read that resolves the role *is* the row
+the policy would filter by. `devices` — **a revoked device reads as live**, since
+a left join against an invisible row yields NULL and the code reads that as "not
+revoked", so adding RLS would undo device revocation. `security_policies` — **the
+company's security policy reads as absent**, so lockout, session lifetime and MFA
+fall back to defaults on the path meant to enforce them. `practice_engagements` —
+the audit log stops recording that the person acting works for the client's
+accountants. Two of the four degrade *silently*, which is a security control
+weakening authentication while reporting success — the same shape as the inert
+policies, from the opposite direction.
+
+**The predicate was wrong too, and the same test caught it.** It read
+`company_id = current_setting('app.company_id', true)::uuid`, reasoned as "unset
+is NULL, NULL filters everything out". Once a custom GUC has been set at all in a
+session — including by a `SET LOCAL` that has rolled back — Postgres reverts it to
+the **empty string**, and `''::uuid` raises rather than filtering: a 500 on a
+pooled connection whose previous occupant set a tenant, appearing under load and
+not in development. `nullif(…, '')` turns both states into no rows. Kept beside
+it: the inviting version wraps the setting in a `coalesce` back to `company_id`,
+which returns *every* tenant's rows when it is missing. One function call from
+the right answer and the opposite of it.
+
+**What this does not claim is that production is isolated.** The migration
+changes nothing for the running application by design. `RLS_ROLLOUT` is the
+register — one surface live, one bypassed — `rlsStands` refuses to report
+isolation on a connection that bypasses the mechanism and the test asserts it
+refuses *this* application's, and `docs/DEPLOY.md` has the two steps, the second
+being that 883 reads must go through `withTenant` first. The alternative was
+shipping inert policies and calling them isolation, or not shipping until
+somebody changes a `DATABASE_URL` this session cannot change.
+
+`companyScopedTablesIn` gained a SQL-name sibling sharing one declaration-split
+rule, so Phase 149's parsing mistake — which miscounted nine tables — cannot be
+made twice in two places. The role is created `NOLOGIN` with no password, because
+a credential in a migration is a credential in version control; the test gives it
+a throwaway one and takes it away again.
+
+
 ### Fourteen worksheets, and what they found (Phase 159)
 
 ADR 0158 said Priority 1 adapters wait on §13's integration worksheets and that
@@ -7713,6 +7784,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/rls-bites.test.ts` | **The policies that would have done nothing** (Phase 160): row level security proved rather than declared. Opens its own connection as `accountrix_app` — not a superuser, owns nothing — and makes the policies bite: two companies see only their own rows, a write aimed at another tenant is refused by `WITH CHECK`, an update or delete across tenants affects zero rows, and a query with no tenant set sees nothing at all. Asserts coverage against the schema source rather than the catalogue the migration looped over, so a table added later fails here instead of going unprotected. Then the honest half: `rlsStands` refuses to call *this* application's connection isolated because it is a superuser, agrees about the restricted one — seen to agree and to disagree on two real connections in one file — and every one of the five declared bypasses is exercised on a fixture. Also the four exempt tables, and that a restricted connection can still read `memberships`, which is what sign-in needs |
 | `tests/export-worksheets.test.ts` | **Fourteen worksheets, and what they found** (Phase 159): the §13 integration worksheets, and mostly a test about holding a line. Asserts the registry covers exactly the Priority 1 destinations — derived from the destination registry's own `priority` column, so a new Priority 1 target fails here until it has a worksheet — that every page exists on disk, that each answers all twelve of §13's questions, and that each cites at least three sources and states its own status. Then the line itself: `verifiedWorksheets()` is empty, so nothing authorises an adapter, and promoting one means changing an assertion on purpose. Also that the four refusals stay distinct (a competitor, no worksheet, a draft worksheet, no third-party route), that `integration` is gone from `ExportDestination`, and that the findings count ten file imports, two programmatic and two with no route |
 | `tests/export-engine.test.ts` | **Exporting to the accountant's software** (Phase 158): the export engine's registries and its §11 validation, with no database and no clock — the only way to see each check *disagree*, since real books are hard to get into most of these states and impossible to get into some. Asserts §15's first acceptance criterion structurally (no destination appears among the excluded competitors), that `mayExportTo` refuses a competitor with the decision and a planned target with the absence, that `adapterMayBeBuilt` refuses all twenty of §3's targets, and that every §11 clause has a check and every check has been seen to fire. Also measures the §5 registry's own claims: each `produces` read out of the file it names, each `permission` out of that function's `requirePermission` call, following one level of same-file delegation because `trialBalance` takes none of its own |
 | `tests/an-export-to-the-accountant.test.ts` | **Exporting to the accountant's software** (Phase 158): the acceptance test, over real books. A $4,000 sale and a $1,200 timber bill, exported as the universal package — the trial balance footing to $5,200 both sides *read back out of the file a firm receives*, the detail tying to the balances, $4,000.00 in units and not 400000 in cents, and `"Sales, retail"` quoted so it cannot shift every column after it. Holds the export until somebody records which return the books feed, which is the migration this phase found. Writes a log row either way, and the database refuses a red row claiming to have produced files. A bookkeeper gets the same ledger without the statements or the payroll, named in the manifest; the EIN appears in no file |
