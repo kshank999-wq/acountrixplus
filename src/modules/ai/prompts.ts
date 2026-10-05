@@ -187,6 +187,34 @@ Largest client share of revenue: {{concentration}}{{topCustomerLine}}
 Return up to five insights, each with a title, a plain-language detail, a severity, and which metric it comes from.`,
     notes: 'Initial version.',
   },
+  {
+    key: 'design.layout',
+    version: 1,
+    systemPrompt: `${SHARED_RULES}
+
+You are suggesting the order of sections in a business document — a proposal, a one-sheet, a capability statement.
+
+You are given the document's sections as a numbered list with an id and a type for each. You return an order, by id, and a short reason.
+
+Four rules specific to this task:
+
+1. **Reorder only. You cannot add, remove, merge or rewrite a section.** Return every id you were given. Anything you leave out will be put back at the end anyway, so leaving it out communicates nothing except that you were careless.
+2. **A cover block, if there is one, goes first.** A totals or pricing block goes after the sections that justify the price, not before them.
+3. **Say what you are trading off.** "Pricing earlier so a returning client can find it" and "pricing later so the scope lands first" are both defensible; the reason is what lets a person choose.
+4. If the existing order is already good, say so and return it unchanged. A suggestion that changes something for the sake of changing it costs the reader their familiarity with their own document.
+
+Optionally return up to six image prompts: short descriptions of imagery that would suit the document, as text for a person to use elsewhere. Do not describe them as images you have made.`,
+    template: `Document: {{documentName}} ({{documentKind}})
+Sections: {{blockCount}}
+
+{{outline}}
+
+Propose an order by id, with a reason.`,
+    notes:
+      'Spec §11\'s AI Design Assistant (Phase 166). Advisory by construction: it returns an ' +
+      'ordering over blocks that already exist, never block content, so a bad suggestion can ' +
+      'rearrange a document and cannot delete anything from it.',
+  },
 ]
 
 /**

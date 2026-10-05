@@ -117,6 +117,8 @@ function answerFor(request: CompletionRequest): unknown {
       return draftCampaign(request.input)
     case 'business_insights':
       return businessInsights(request.input)
+    case 'design':
+      return layoutOrdering(request.input)
     default:
       return null
   }
@@ -451,6 +453,80 @@ function businessInsights(input: Record<string, unknown>): unknown {
   }
 
   return { insights }
+}
+
+/**
+ * A reading order for a design document (spec §11 "layout suggestions").
+ *
+ * The heuristic is the convention a sales document follows when somebody reads
+ * it start to finish: who it is from, then what the work is, then what it
+ * costs, then the terms, then where to sign. Blocks of the same kind keep the
+ * order the author put them in, because nothing here knows better than they do
+ * about two headings.
+ *
+ * It returns an **ordering over the ids it was given**, which is the whole of
+ * what `layoutSuggestionSchema` permits. A mock that returned block content
+ * would be exercising a shape the real path forbids.
+ */
+const LAYOUT_RANK: Record<string, number> = {
+  cover: 0,
+  heading: 20,
+  text: 30,
+  list: 30,
+  image: 35,
+  columns: 35,
+  keyValue: 40,
+  pricingTable: 50,
+  clause: 60,
+  button: 70,
+  qrCode: 70,
+  video: 70,
+  signature: 90,
+  // Separators have no place of their own; they follow whatever they divide.
+  divider: 45,
+  spacer: 45,
+  pageBreak: 45,
+}
+
+function layoutOrdering(input: Record<string, unknown>): unknown {
+  const blocks = (input.blocks as Array<{ id: string; type: string }> | undefined) ?? []
+  if (blocks.length === 0) return null
+
+  const ranked = blocks
+    .map((block, index) => ({
+      id: String(block.id),
+      type: String(block.type),
+      rank: LAYOUT_RANK[String(block.type)] ?? 45,
+      index,
+    }))
+    // Stable: equal ranks keep the author's order.
+    .sort((a, b) => a.rank - b.rank || a.index - b.index)
+
+  const moved = ranked.filter((entry, position) => entry.index !== position).length
+  const documentName = String(input.documentName ?? 'this document')
+
+  /*
+    §11's "image prompts" — text for a person to take to an image tool, never
+    a claim to have made an image. Only offered when the document has somewhere
+    to put one.
+  */
+  const imagePrompts = blocks.some((block) => block.type === 'image')
+    ? [
+        'A wide, evenly lit photograph of finished work of this kind, shot straight on with room for text across the top third.',
+      ]
+    : []
+
+  return {
+    order: ranked.map((entry) => entry.id),
+    rationale:
+      moved === 0
+        ? `${documentName} already reads in the usual order — cover, then the written scope, then the price, then the terms and the signature — so there is nothing worth moving.`
+        : `Moved ${moved} block${moved === 1 ? '' : 's'} so ${documentName} opens with its cover, sets out the work in words, then prices it, then closes with terms and a signature. A client reading top to bottom meets the work before the number.`,
+    imagePrompts,
+    // Lower than a categorization: this is a convention, not a measurement,
+    // and a person may well have had a reason for the order they chose.
+    confidence: moved === 0 ? 4000 : 6500,
+  }
 }
 
 /**

@@ -17,10 +17,11 @@ import {
   draftProposalSections,
   explainReconciliation,
 } from '@/modules/ai/assistants'
+import { applyLayoutSuggestion, suggestLayout } from '@/modules/ai/design'
 import { rejectSuggestion } from '@/modules/ai/suggestions'
 import { updateSettings } from '@/modules/ai/settings'
 import { activatePromptVersion, savePromptVersion } from '@/modules/ai/prompts'
-import { messageFor } from '@/modules/errors'
+import { messageFor, Refusal } from '@/modules/errors'
 
 /**
  * Server actions for the AI module.
@@ -101,6 +102,78 @@ export async function rejectSuggestionAction(suggestionId: string): Promise<Acti
     const actor = await requireActor()
     await rejectSuggestion(actor, suggestionId)
     return 'Dismissed.'
+  })
+}
+
+// --- Design assistant (spec §11) -------------------------------------------
+
+/**
+ * The paths a document edit can have been reached from.
+ *
+ * Same list `studio.ts` keeps, and for the same reason it gives: one designer
+ * serves proposals and marketing creative, and the action cannot tell which
+ * list the author came from.
+ */
+const DESIGN_PATHS = ['/crm/proposals', '/marketing/creative']
+
+export type LayoutSuggestionResult =
+  | {
+      ok: true
+      suggestionId: string
+      /** Block ids in the order proposed, so the panel can show the move. */
+      order: string[]
+      rationale: string
+      /** §11's "image prompts": text for a person, never an image. */
+      imagePrompts: string[]
+      confidenceBp: number
+    }
+  | { ok: false; error: string }
+
+export async function suggestLayoutAction(documentId: string): Promise<LayoutSuggestionResult> {
+  try {
+    const actor = await requireActor()
+    const result = await suggestLayout(actor, documentId)
+
+    if (!result.ok) return { ok: false, error: result.message }
+
+    return {
+      ok: true,
+      suggestionId: result.suggestion.id,
+      order: result.data.order,
+      rationale: result.data.rationale,
+      /*
+        `?? []` rather than trusting the Zod default: `ask` is generic over
+        `z.ZodType<T>`, which in Zod 3 pins input and output to the same `T`,
+        so a defaulted field reads as possibly-undefined on the way out even
+        though parsing has already filled it. The coalesce is the honest
+        reading of the type the gateway hands back, not a second default.
+      */
+      imagePrompts: result.data.imagePrompts ?? [],
+      confidenceBp: result.data.confidence,
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: messageFor(error, 'The design assistant is unavailable.'),
+    }
+  }
+}
+
+export async function applyLayoutSuggestionAction(suggestionId: string): Promise<ActionResult> {
+  return run(DESIGN_PATHS, async () => {
+    const actor = await requireActor()
+    const result = await applyLayoutSuggestion(actor, suggestionId)
+
+    /*
+      `applyLayoutSuggestion` returns a refusal rather than throwing, because
+      the two it can give — no ledger row behind the suggestion, and a result
+      that would not validate — are sentences a person can act on (Phase 119)
+      and not defects. `run` only turns thrown errors into messages, so the
+      refusal is raised here to reach the same place.
+    */
+    if (!result.ok) throw new Refusal(result.message)
+
+    return 'Layout applied. The document now records that it was laid out with AI assistance.'
   })
 }
 

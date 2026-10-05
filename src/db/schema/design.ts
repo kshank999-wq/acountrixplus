@@ -14,6 +14,7 @@ import {
 import { companies, users } from './tenancy'
 import { brandKits } from './studio'
 import { proposals, proposalVersions } from './crm'
+import { aiRequests } from './ai'
 
 /**
  * The shared design engine (spec §7, §8).
@@ -73,6 +74,21 @@ export const designDocuments = pgTable(
     /** Repeating page furniture (spec §7 headers/footers, page numbering). */
     headerText: text('header_text'),
     footerText: text('footer_text'),
+    /**
+     * Where this document's layout came from (Phase 166, spec §11).
+     *
+     * One of `PROVENANCE_ORIGINS`. Phase 165 put provenance on `assets`, which
+     * is right for uploads, derivation and a future image generator — and is not
+     * where an accepted layout suggestion lands. Without this, a document laid
+     * out entirely by an accepted suggestion and illustrated with the client's
+     * own photographs would disclose nothing.
+     *
+     * No database default, for Phase 165's reason: a path that forgot would
+     * otherwise claim `'authored'` silently.
+     */
+    provenanceOrigin: text('provenance_origin').notNull(),
+    /** The `ai_requests` row behind a machine origin. Required by a CHECK. */
+    aiRequestId: uuid('ai_request_id').references(() => aiRequests.id, { onDelete: 'set null' }),
     showPageNumbers: boolean('show_page_numbers').notNull().default(true),
 
     /** The ordered block list. Shape is validated in `modules/design/blocks`. */

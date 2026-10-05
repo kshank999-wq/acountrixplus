@@ -10,6 +10,7 @@ import { getProposal } from '@/modules/crm/proposals'
 import { documentForProposal, listTemplates, proposalRenderContext } from '@/modules/design/documents'
 import { listClauses } from '@/modules/studio/service'
 import { listAssets } from '@/modules/studio/assets'
+import { aiAvailable } from '@/modules/ai/settings'
 import { parseBlocks } from '@/modules/design/blocks'
 import { unresolvedInBlocks } from '@/modules/design/merge-fields'
 import { Designer } from '@/components/design/designer'
@@ -43,11 +44,12 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
   const { proposal, items } = proposalData
   const document = await documentForProposal(actor, id)
 
-  const [templates, clauses, assets, render] = await Promise.all([
+  const [templates, clauses, assets, render, aiEnabled] = await Promise.all([
     listTemplates(actor),
     listClauses(actor),
     listAssets(actor),
     proposalRenderContext(actor.companyId, id),
+    aiAvailable(actor),
   ])
 
   const [kit] = document.brandKitId
@@ -128,6 +130,7 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
           approved: Boolean(clause.approvedAt),
         }))}
         assets={assets.map((asset) => ({ id: asset.id, filename: asset.filename }))}
+        aiEnabled={aiEnabled}
       />
     </AppShell>
   )

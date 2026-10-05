@@ -8,6 +8,12 @@ import {
   saveDocumentAction,
 } from '@/app/actions/studio'
 import {
+  applyLayoutSuggestionAction,
+  rejectSuggestionAction,
+  suggestLayoutAction,
+  type LayoutSuggestionResult,
+} from '@/app/actions/ai'
+import {
   definitionsForKind,
   moveBlock,
   type Block,
@@ -70,6 +76,7 @@ export function Designer({
   templates,
   clauses,
   assets,
+  aiEnabled = false,
 }: {
   documentId: string
   /** Which block palette to offer. */
@@ -106,6 +113,14 @@ export function Designer({
   }>
   clauses: Array<{ id: string; title: string; body: string; approved: boolean }>
   assets: Array<{ id: string; filename: string }>
+  /**
+   * Whether the AI module is on for this company.
+   *
+   * Off is the default (§23: the core product works without AI), and an
+   * affordance that is always greyed out is clutter rather than additive — so
+   * the button is absent, not disabled.
+   */
+  aiEnabled?: boolean
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -114,6 +129,16 @@ export function Designer({
   const [dirty, setDirty] = useState(false)
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null)
   const [showTemplates, setShowTemplates] = useState(false)
+  /**
+   * The proposed layout, held in the client until a person decides.
+   *
+   * It is already a row in `ai_suggestions` by the time it arrives — the
+   * service records the proposal and changes nothing — so this is the view of
+   * a pending decision, not the decision itself.
+   */
+  const [proposed, setProposed] = useState<Extract<LayoutSuggestionResult, { ok: true }> | null>(
+    null,
+  )
 
   const definitions = useMemo(() => definitionsForKind(kind), [kind])
   const selected = blocks.find((block) => block.id === selectedId) ?? null
@@ -173,6 +198,25 @@ export function Designer({
 
         {isEditable && (
           <div className="ml-auto flex flex-wrap items-center gap-2">
+            {aiEnabled && (
+              <button
+                onClick={() =>
+                  startTransition(async () => {
+                    const result = await suggestLayoutAction(documentId)
+                    if (!result.ok) {
+                      notify(result)
+                      return
+                    }
+                    setProposed(result)
+                  })
+                }
+                disabled={pending || dirty}
+                title={dirty ? 'Save your changes first — the assistant reads the saved document.' : undefined}
+                className="btn text-xs"
+              >
+                Suggest a layout
+              </button>
+            )}
             <button
               onClick={() => setShowTemplates((value) => !value)}
               className="btn text-xs"
@@ -202,6 +246,89 @@ export function Designer({
           </div>
         )}
       </header>
+
+      {proposed && isEditable && (
+        <section className="card p-4">
+          <h2 className="text-sm font-semibold">A layout the assistant proposes</h2>
+          <p className="mt-1 text-xs text-muted">{proposed.rationale}</p>
+
+          <ol className="mt-3 flex flex-wrap items-center gap-1.5 text-xs">
+            {proposed.order.map((id, index) => {
+              const block = blocks.find((entry) => entry.id === id)
+              const movedTo = blocks.findIndex((entry) => entry.id === id) !== index
+              return (
+                <li
+                  key={id}
+                  className={`chip ${movedTo ? 'bg-action/10 text-action' : 'text-muted'}`}
+                >
+                  {index + 1}. {block ? block.type : id}
+                </li>
+              )
+            })}
+          </ol>
+
+          {proposed.imagePrompts.length > 0 && (
+            <div className="mt-3">
+              {/*
+                §11's "image prompts". Text to take to an image tool — the
+                assistant has not made an image and must not be read as saying
+                it has.
+              */}
+              <p className="text-xs font-medium">Imagery you could brief, in words</p>
+              <ul className="mt-1 space-y-1">
+                {proposed.imagePrompts.map((prompt) => (
+                  <li key={prompt} className="text-xs text-muted">
+                    {prompt}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          <p className="mt-3 text-xs text-muted">
+            Accepting this reorders the blocks and records that the document was laid out with AI
+            assistance. That line appears on the rendered document, and it is not editable — a
+            client is entitled to know.
+          </p>
+
+          <div className="mt-3 flex items-center gap-2">
+            <button
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await applyLayoutSuggestionAction(proposed.suggestionId)
+                  notify(result)
+                  if (result.ok) {
+                    setProposed(null)
+                    router.refresh()
+                  }
+                })
+              }
+              disabled={pending}
+              className="btn btn-primary text-xs"
+            >
+              Apply this order
+            </button>
+            <button
+              onClick={() =>
+                startTransition(async () => {
+                  /*
+                    Dismissing records the rejection against the suggestion
+                    rather than dropping it on the floor, which is what makes
+                    the §12 decision log a log of decisions and not of
+                    acceptances.
+                  */
+                  notify(await rejectSuggestionAction(proposed.suggestionId))
+                  setProposed(null)
+                })
+              }
+              disabled={pending}
+              className="btn text-xs"
+            >
+              No thanks
+            </button>
+          </div>
+        </section>
+      )}
 
       {showTemplates && isEditable && (
         <section className="card p-4">

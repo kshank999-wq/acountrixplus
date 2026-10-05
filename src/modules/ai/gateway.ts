@@ -39,6 +39,8 @@ export type AiFeature =
   | 'proposal_draft'
   | 'marketing_draft'
   | 'business_insights'
+  /** The Design Assistant (Phase 166, spec §11). Advisory: it suggests, a person applies. */
+  | 'design'
 
 export type AskInput<T> = {
   feature: AiFeature

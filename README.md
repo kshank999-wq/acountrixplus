@@ -6189,6 +6189,83 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The document a machine laid out (Phase 166)
+
+ADR 0165 nominated the AI Design Assistant itself, and named three things to
+build: the `design` prompt, a generation path writing `ai-generated` assets, and
+`deriveAsset` getting its caller. Reading §11's sentence found that two of the
+three do not exist to be built.
+
+§11 asks for *"layout suggestions, brand-consistent variations,
+background/graphic concepts, image prompts, and logo ideation"* — every one
+advisory, and the bullet that sounds like pixels, *"image prompts"*, explicitly
+text for a person to take elsewhere. There is no image model behind the gateway
+and §11 does not ask for one. Fifth phase running in which the inherited
+nomination needed correcting (Phase 164).
+
+What it found instead was a gap in Phase 165. What this assistant generates is
+the **layout**, which is the document, and Phase 165 put provenance on `assets`.
+Measured: `disclosureForDocument` read only the assets a document's blocks
+referenced, so a document laid out entirely by an accepted AI suggestion and
+illustrated with the client's own photographs disclosed **nothing**. Phase 165's
+own rule, one level short — true about every part, false about the whole.
+
+So `design_documents` gets the same two columns and the same bidirectional
+CHECK, and dropping the column default made the compiler refuse
+`duplicateDocument` until it said where the layout it was copying came from.
+That is where `derivedProvenance` earned the production caller ADR 0165 admitted
+it lacked: a person pressing duplicate has authored the *act*, and the copy
+contains the same machine-laid-out *artifact*, which is exactly the join
+`strongerOf` exists to take.
+
+The assistant proposes an **ordering over ids it was given**, never a block
+list. Ids it invents are dropped and blocks it omits are appended in their
+original order, so the worst a bad suggestion can do is rearrange — a model
+cannot delete somebody's scope section by leaving it out of a list, and that
+needs no trust to guarantee. A suggestion with no ledger row behind it is
+refused with a sentence rather than left to the CHECK (Phase 119), and
+`markAccepted` runs last so a suggestion is never accepted for a move that did
+not happen.
+
+It is wired, not staged. The first draft of this phase stopped at the service,
+which would have left both functions with no caller — Phase 49's defect, and
+precisely what Phase 139's `PENDING_WIRING` register exists to accuse rather
+than excuse. So there are two server actions and a panel in `Designer` that
+shows the proposed order with the moved blocks marked, the rationale, and the
+image prompts as text. The button is **absent** rather than greyed out when the
+AI module is off (`aiAvailable`'s own argument: §23 makes AI additive, and a
+permanently disabled control is clutter), and disabled while there are unsaved
+changes, because the assistant reads the saved document. "No thanks" records a
+rejection rather than closing the panel — a decision log holding only
+acceptances is not a decision log.
+
+The permission was the sharpest finding. `suggestLayout` asked for
+`proposals:manage`, written out rather than looked up — and one designer serves
+proposals *and* marketing creative, so a marketer was refused the right to
+reorder the creative they had just written. `documents.ts` already held the one
+answer in a private `permissionFor(kind, level)`; it is exported now and both
+paths ask it. Every document in the phase's own test file is a marketing
+document and every test passed with the wrong permission anyway, because the
+fixture actor is an owner and owners hold everything — Phase 121 a third time.
+The apply path checks separately, because `getSuggestion` reads by tenant and
+asks nothing about role, so a reader holding a pending suggestion's id could
+otherwise reorder somebody's proposal.
+
+Two things surfaced while the tests were written. The mock provider had no
+heuristic for `design`, so every call failed — and the mock is what makes the
+suite exercise schema validation, the queue, the approval flow and metering with
+no key and no network, so a feature it cannot answer leaves all of that
+untested. Its first rationale then claimed it put the terms after the price,
+which the rank table does not support: a *heading* ranks with other headings,
+and reading the heading text to tell "Terms" from "Scope of work" would be a
+guess dressed as a rule. The sentence now says what the types support and the
+test asserts the order that follows. And five tests used `if (!suggested.ok)
+return` as a type guard, which is also a way to pass without testing anything —
+they did, while two failed loudly, because the AI module is off by default
+(§23). They assert before they narrow now, and one more test asserts the blocks
+actually moved (Phase 121).
+
+
 ### What the client is told (Phase 165)
 
 ADR 0164's audit nominated **AI Design Assistant** first because §11 asks it to
@@ -8074,6 +8151,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/a-layout-a-machine-proposed.test.ts` | **A layout a machine proposed** (Phase 166): the AI Design Assistant, and the gap in Phase 165 that reading §11 closely found. What this assistant generates is the layout, which is the document, and provenance was on `assets` — so a document laid out entirely by an accepted suggestion and illustrated with the client's own photographs disclosed nothing. The schema permits an ordering over ids the model was given, never a block list, so ids it invents are dropped and blocks it omits are appended: the worst a bad suggestion can do is rearrange. A suggestion with no ledger row is refused with a sentence rather than left to the CHECK, and `markAccepted` runs last. `duplicateDocument` is where `derivedProvenance` earned the caller ADR 0165 said it lacked — a person authored the act, the copy contains the machine-laid-out artifact. Writing it found the mock provider had no `design` heuristic, found that `suggestLayout` asked for `proposals:manage` on documents that are all marketing documents, and found five of its own tests passing vacuously behind `if (!ok) return` while the module sat off by default |
 | `tests/what-the-client-is-told.test.ts` | **What the client is told** (Phase 165): the provenance decision §11 requires before a Design Assistant can exist. The lattice ranks disclosure rather than credit — a crop of an AI-generated image still contains AI-generated material, so `strongerOf` takes the join and a parent's disclosure survives the child's edit. The database refuses both incoherent shapes, and the dangerous direction is the second: a human origin carrying an AI request would let generated material be disclosed as human-made. An unknown origin trips both constraints, asserted as *one of the two* because pinning the name would assert an evaluation order nothing promises. Then the chain to the client: one generated background in an otherwise hand-made document still discloses, and the disclosure is its own render field rather than appended to the author's footer — because a disclosure the author can edit out is not a disclosure |
 | `tests/a-blinded-sweep.test.ts` | **The sweep that deleted nothing and said it worked** (Phase 163): the distinction a row count cannot make, proved on two real connections. `proposal_views` is empty *and* policed, so a count returns 0 as the owner and as `accountrix_app` — identical and meaningless — while `crossTenantSight` returns `[]` for one and `['proposal_views']` for the other. Then the register: six cross-tenant paths under three authorities, the swept tables derived from `RETENTION_POLICIES` rather than copied, every declared function checked to exist, and the one positive grant (`a-practice-engagement`) told apart from the two absences. And the refusal: a blinded retention sweep throws with the authority it was relying on, rather than returning `{ removed: 0 }` and being recorded as succeeded — asserted as wired *before* `sweepAll`, not after |
 | `tests/a-job-through-the-policies.test.ts` | **The queue that could not see itself** (Phase 162): opens with the three-line probe that refuted ADR 0161's nomination — an `AsyncLocalStorage` scope does not survive the function that opened it returning, so a page cannot open one for the async children React invokes afterwards. Then the worker, which can: a real job handler calling a real service runs inside a tenant scope and sees its own company, two companies' jobs in one tick each get their own scope, the scope is unbound between them, a global handler runs with none and says so, a failure is still recorded because the bookkeeping sits outside the scope, and one tick still claims across both tenants — which is why the two queue tables had to be exempted. Plus the tripwire counting `definition.handler(` in the source, so a second dispatch site cannot bypass the scope silently |

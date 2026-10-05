@@ -462,6 +462,7 @@ describe('the prompt registry', () => {
       'proposal.draft',
       'marketing.draft',
       'insights.business',
+      'design.layout',
     ]) {
       expect(keys.has(key)).toBe(true)
     }

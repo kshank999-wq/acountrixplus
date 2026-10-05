@@ -14,6 +14,7 @@ import {
 } from '@/modules/design/documents'
 import { listClauses } from '@/modules/studio/service'
 import { listAssets } from '@/modules/studio/assets'
+import { aiAvailable } from '@/modules/ai/settings'
 import { parseBlocks } from '@/modules/design/blocks'
 import { NoAccess } from '../../ui'
 
@@ -46,11 +47,12 @@ export default async function CreativeDesignPage({
     notFound()
   }
 
-  const [templates, clauses, assets, context] = await Promise.all([
+  const [templates, clauses, assets, context, aiEnabled] = await Promise.all([
     listTemplates(actor),
     listClauses(actor),
     listAssets(actor),
     marketingRenderContext(actor.companyId),
+    aiAvailable(actor),
   ])
 
   const [kit] = document.brandKitId
@@ -117,6 +119,7 @@ export default async function CreativeDesignPage({
           approved: Boolean(clause.approvedAt),
         }))}
         assets={assets.map((asset) => ({ id: asset.id, filename: asset.filename }))}
+        aiEnabled={aiEnabled}
       />
     </AppShell>
   )

@@ -21,6 +21,7 @@ import { defaultBrandKit } from '@/modules/studio/service'
 import { letterheadFor } from '@/modules/brand/letterhead'
 import {
   documentDisclosure,
+  strongerOf,
   type ProvenanceOrigin,
 } from '@/modules/ai/provenance'
 import { parseBlocks, validateBlocks, type Block } from './blocks'
@@ -95,6 +96,11 @@ export async function createDocumentForProposal(
         brandKitId: brandKit?.id ?? null,
         blocks: withFreshIds(blocks),
         createdBy: ctx.userId,
+        // A person started this from a template. Said explicitly because Phase
+        // 166 dropped the column's default, so a path that laid a document out
+        // from a suggestion and forgot cannot claim this silently.
+        provenanceOrigin: 'authored',
+        aiRequestId: null,
       })
       .returning()
 
@@ -258,7 +264,16 @@ export async function getDocument(ctx: ActorContext, documentId: string) {
  * document's own `kind` decides which check applies, so neither role gains
  * reach into the other's work by way of a shared editor.
  */
-function permissionFor(kind: string, level: 'view' | 'manage'): Permission {
+/**
+ * The permission a document of this kind needs.
+ *
+ * Exported since Phase 166, which needed it for the design assistant and found
+ * that writing the answer out again — `proposals:manage`, as the first draft of
+ * `suggestLayout` did — refuses a marketer the right to reorder their own
+ * creative. One designer serves both kinds, so there has to be one answer to
+ * what it takes to edit one: two answers to one question is the defect.
+ */
+export function permissionFor(kind: string, level: 'view' | 'manage'): Permission {
   return kind === 'marketing' ? `marketing:${level}` : `proposals:${level}`
 }
 
@@ -506,6 +521,8 @@ export async function createMarketingDocument(
         brandKitId: brandKit?.id ?? null,
         blocks: withFreshIds(blocks),
         createdBy: ctx.userId,
+        provenanceOrigin: 'authored',
+        aiRequestId: null,
       })
       .returning()
 
@@ -551,6 +568,27 @@ export async function duplicateDocument(ctx: ActorContext, documentId: string, n
         footerText: source.footerText,
         blocks: withFreshIds(parseBlocks(source.blocks)),
         createdBy: ctx.userId,
+        /*
+          Phase 165's propagation rule, and the place it earns itself: **a copy
+          of a machine-laid-out document is machine-laid-out.**
+
+          A person pressed duplicate, so what *they* did is `authored` — and the
+          copy contains the same layout, so `authored` would be true about the
+          act and false about the artifact. `strongerOf` takes the join, which is
+          why the source's request id has to come across too: the CHECK requires
+          a machine origin to point at the ledger row that produced it, and the
+          copy's origin is the source's.
+
+          ADR 0165 noted `derivedProvenance` had no production caller and
+          survived on Phase 157's rule that an unused declaration is kept when it
+          accuses. One phase later, the compiler found it one — by refusing this
+          insert until it said where the layout came from.
+        */
+        provenanceOrigin: strongerOf(
+          source.provenanceOrigin as ProvenanceOrigin,
+          'authored',
+        ),
+        aiRequestId: source.aiRequestId,
       })
       .returning()
 
@@ -594,12 +632,31 @@ export async function disclosureForDocument(
   exec: Executor = db,
 ): Promise<string | null> {
   const [document] = await exec
-    .select({ blocks: designDocuments.blocks })
+    .select({
+      blocks: designDocuments.blocks,
+      origin: designDocuments.provenanceOrigin,
+    })
     .from(designDocuments)
     .where(and(eq(designDocuments.id, documentId), eq(designDocuments.companyId, companyId)))
     .limit(1)
 
   if (!document) return null
+
+  /*
+    The document's **own** origin joins the assets' (Phase 166).
+
+    Phase 165 wrote this function reading only the assets a document's blocks
+    reference, which was Phase 165's own rule applied one level short: a document
+    whose entire layout came from an accepted AI suggestion, illustrated with the
+    client's own photographs, disclosed nothing — true about every part and false
+    about the whole.
+
+    Spec §11's Design Assistant is advisory. It produces *suggestions*,
+    *variations*, *concepts*, *prompts* and *ideation* — none of it pixels — so
+    what it generates is the layout, which is the document, which is exactly what
+    `assets` could not record.
+  */
+  const origins: ProvenanceOrigin[] = [document.origin as ProvenanceOrigin]
 
   const assetIds = [
     ...new Set(
@@ -609,12 +666,14 @@ export async function disclosureForDocument(
     ),
   ]
 
-  if (assetIds.length === 0) return null
+  if (assetIds.length > 0) {
+    const rows = await exec
+      .select({ origin: assets.provenanceOrigin })
+      .from(assets)
+      .where(and(eq(assets.companyId, companyId), inArray(assets.id, assetIds)))
 
-  const rows = await exec
-    .select({ origin: assets.provenanceOrigin })
-    .from(assets)
-    .where(and(eq(assets.companyId, companyId), inArray(assets.id, assetIds)))
+    for (const row of rows) origins.push(row.origin as ProvenanceOrigin)
+  }
 
-  return documentDisclosure(rows.map((row) => row.origin as ProvenanceOrigin))
+  return documentDisclosure(origins)
 }
