@@ -5,6 +5,7 @@ import { db } from '@/db'
 import { workerHeartbeats } from '@/db/schema'
 import { claimJobs, completeJob, failJob, type ClaimedJob } from './queue'
 import { getHandler, UnknownJobKindError, type JobContext } from './registry'
+import { withTenant } from '@/modules/tenancy/with-tenant'
 import { relayPendingEvents } from './outbox'
 import { runDueSchedules } from './schedules'
 import { ensureSchedules } from './defaults'
@@ -133,7 +134,41 @@ async function runJob(job: ClaimedJob, now: Date): Promise<'succeeded' | 'failed
       )
     }
 
-    const outcome = await definition.handler(context)
+    /*
+      The job runs inside a tenant scope, so every query the handler makes --
+      and every query the services *it* calls make, at any depth -- lands on a
+      connection with `app.company_id` set (Phase 162).
+
+      This is the first production caller of `withTenant`. Phase 160 shipped it
+      and nothing could call it; Phase 161 made the tenant travel on the
+      connection rather than in a parameter, which is what lets one line here
+      cover all 24 registered handlers without any of them changing.
+
+      Why the worker and not a page: `runJob` is a single function that
+      dispatches every job and already holds the company, so there is one
+      boundary. The App Router has no equivalent -- an AsyncLocalStorage scope
+      does not survive the function that opened it returning, and a page returns
+      an element tree whose async children React invokes afterwards, so the
+      scope would cover the construction of the tree and none of the fetching
+      inside it. Measured, not assumed; the probe is in
+      `tests/a-job-through-the-policies.test.ts`.
+
+      A `global` handler gets no scope, because it has no company to set. It
+      therefore runs on the pooled handle and would see nothing once the
+      application connects as a restricted role -- which is recorded in
+      `RLS_ROLLOUT` rather than left to be discovered, and is why the five
+      global handlers are the part of the worker this phase does not finish.
+
+      `completeJob` and `failJob` are deliberately *outside* the scope. They
+      write to `background_jobs`, which this phase exempted precisely because the
+      queue is read across tenants, and putting them inside would make the
+      bookkeeping depend on a scope the global jobs do not have.
+    */
+    const outcome =
+      definition.global || !job.companyId
+        ? await definition.handler(context)
+        : await withTenant({ companyId: job.companyId }, () => definition.handler(context))
+
     await completeJob(job.id, outcome ?? {}, now)
     return 'succeeded'
   } catch (error) {

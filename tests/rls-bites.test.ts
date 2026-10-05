@@ -222,7 +222,8 @@ describe('the policies bite', () => {
      */
     const expected = policed()
     expect(tenantTables()).toHaveLength(167)
-    expect(expected).toHaveLength(163)
+    // 161 since Phase 162 exempted the two queue tables.
+    expect(expected).toHaveLength(161)
 
     const rows = (await db.execute(sql`
       select c.relname as table_name, c.relrowsecurity as enabled, c.relforcerowsecurity as forced,
@@ -273,8 +274,14 @@ describe('the policies bite', () => {
      * authentication while reporting success is the same shape as the inert
      * policies this phase is about, from the opposite direction.
      */
+    // Six since Phase 162 added `background_jobs` and `domain_events` on a
+    // second ground — `crosses-tenants-by-design`, because a queue poller reads
+    // every company's jobs and an outbox drain every company's events. Policing
+    // those took all background processing out, silently.
     expect(RLS_EXEMPT.map((row) => row.table).sort()).toEqual([
+      'background_jobs',
       'devices',
+      'domain_events',
       'memberships',
       'practice_engagements',
       'security_policies',
@@ -284,7 +291,10 @@ describe('the policies bite', () => {
     // exempting rather than simply not matching the rule.
     for (const exemption of RLS_EXEMPT) {
       expect(tenantTables(), exemption.table).toContain(exemption.table)
-      expect(exemptionFor(exemption.table)?.ground).toBe('establishes-the-tenant')
+      expect(
+        ['establishes-the-tenant', 'crosses-tenants-by-design'],
+        exemption.table,
+      ).toContain(exemption.ground)
     }
 
     const rows = (await db.execute(sql`
@@ -292,7 +302,8 @@ describe('the policies bite', () => {
       join pg_namespace ns on ns.oid = c.relnamespace
       where ns.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
         and relname in ('users', 'sessions', 'companies', 'document_bytes',
-                        'memberships', 'devices', 'security_policies', 'practice_engagements')
+                        'memberships', 'devices', 'security_policies', 'practice_engagements',
+                        'background_jobs', 'domain_events')
     `)) as unknown as Array<{ relname: string }>
 
     expect(rows).toEqual([])
@@ -436,10 +447,10 @@ describe('what the check says about this connection', () => {
       isSuperuser: false,
       canBypassRls: false,
       ownedTenantTableCount: 0,
-      tenantTableCount: 163,
-      enabledCount: 163,
-      forcedCount: 163,
-      policyCount: 163,
+      tenantTableCount: 161,
+      enabledCount: 161,
+      forcedCount: 161,
+      policyCount: 161,
       settingScope: 'transaction-local',
     }
 
@@ -448,12 +459,12 @@ describe('what the check says about this connection', () => {
     expect(rlsStands({ ...sound, isSuperuser: true })[0]).toContain('is a superuser')
     expect(rlsStands({ ...sound, canBypassRls: true })[0]).toContain('BYPASSRLS')
     expect(
-      rlsStands({ ...sound, ownedTenantTableCount: 163, forcedCount: 0 })[0],
-    ).toContain('owns 163 of the tables')
+      rlsStands({ ...sound, ownedTenantTableCount: 161, forcedCount: 0 })[0],
+    ).toContain('owns 161 of the tables')
     expect(rlsStands({ ...sound, enabledCount: 100 })[0]).toContain(
-      '63 tenant-scoped tables do not have row level security enabled',
+      '61 tenant-scoped tables do not have row level security enabled',
     )
-    expect(rlsStands({ ...sound, policyCount: 156 })[0]).toContain('no tenant_isolation policy')
+    expect(rlsStands({ ...sound, policyCount: 154 })[0]).toContain('no tenant_isolation policy')
     expect(rlsStands({ ...sound, settingScope: 'session' })[0]).toContain(
       'set for the session rather than the transaction',
     )
@@ -475,12 +486,16 @@ describe('how far this got, stated rather than implied', () => {
     // which `withTenant` could not reach when this test was written because 903
     // call sites read the module-level `db` and 802 entry points had no executor
     // parameter to pass one through.
-    expect(RLS_ROLLOUT).toHaveLength(3)
+    // Four since Phase 162 made the background worker a live surface — the
+    // first production caller of `withTenant`, covering all 24 job handlers
+    // from the one line that dispatches them.
+    expect(RLS_ROLLOUT).toHaveLength(4)
 
     const live = RLS_ROLLOUT.filter((entry) => entry.state === 'live')
     expect(live.map((entry) => entry.surface)).toEqual([
       'tests/rls-bites.test.ts',
       'tests/a-report-through-the-policies.test.ts',
+      'the background worker (modules/worker/runner.ts)',
     ])
 
     const bypassed = RLS_ROLLOUT.filter((entry) => entry.state === 'bypassed')

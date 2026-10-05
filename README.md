@@ -6189,6 +6189,72 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The queue that could not see itself (Phase 162)
+
+ADR 0161 nominated *"opening the scope on one real surface — the accounting
+reports page."* Refuted in three lines:
+
+```
+inside the parent body:                  alpha
+child called after the parent returned:  null
+child called inside a scope:             beta
+```
+
+**An `AsyncLocalStorage` scope does not survive the function that opened it
+returning.** The reports page calls `requireActor()` and returns an element tree
+holding nine async child server components, which React invokes *afterwards* — so
+a scope opened in the page body covers the construction of the tree and none of
+the fetching inside it, with the transaction already committed. The denominator
+was wrong too: 97 async server components and 300 server actions, ~397 data
+boundaries, not "one page". That is the second nomination in a row measurement
+has had to put right, and both were guesses about behaviour written into an ADR
+as plans.
+
+**The worker is the one surface with a single boundary.** `runJob` dispatches
+every background job from one function, already holding the company, so one line
+covers all 24 registered handlers and none of them changed. It is also the first
+production caller of `withTenant` — Phase 160 shipped it with nothing able to
+call it, Phase 161 made the tenant travel on the connection, and this is the
+line that uses both.
+
+**Wiring it exposed that Phase 160 had taken the queue out.** `claimJobs` is raw
+SQL with a `LIMIT` and no company filter, because a poller claims whatever work
+is oldest across every tenant; `relayPendingEvents` reads `where relayed_at is
+null` with no company filter, because an outbox drain is global. Policed, the
+queue never drains, events are never fanned out, and `failJob` affects zero rows
+so a claimed job retries until it dies. Nothing errors, because an empty result
+is a valid result — *"the queue is empty"* and *"nothing can see the queue"*
+render identically, which is the failure `runner.ts`'s own heartbeat comment
+already warned about in those words, many phases before row level security
+existed.
+
+So a second exemption ground: **`crosses-tenants-by-design`**, argued as its own
+value rather than bent onto `establishes-the-tenant` (Phase 130), because
+nothing reads the job queue to find out who the caller is and the two grounds
+imply different remedies. Six exempt tables now, under two grounds.
+
+**Why un-policing rather than widening.** The tempting fix —
+`USING (company_id = … OR current_setting(…) IS NULL)` — is a fail-open control
+dressed as a fail-closed one: every forgotten scope anywhere in the application
+would see every tenant's rows. That is Phase 160's `coalesce` trap with extra
+steps, and it is written into the ground's prose so the next person reaches it
+already refused. The right answer is a second principal — an `accountrix_worker`
+role with its own `USING (true)` on those two tables — which is a second role
+and a second `DATABASE_URL`, so the exemption is explicitly provisional and
+nominated rather than slipped in. It is safe meanwhile because the first layer
+is untouched: `listEvents(companyId)` and `eventsFor(companyId)` are
+`explicit-company`, and the drain paths were deliberately global before any of
+this existed.
+
+**The honest half.** Five of the 24 handlers are `global`: no company, so no
+scope, so they run on the pooled handle and would see nothing on a restricted
+role — recorded in `RLS_ROLLOUT` and asserted, not papered over.
+`completeJob` and `failJob` sit deliberately outside the scope, because inside
+it the bookkeeping would depend on a scope the global jobs do not have. And a
+tripwire counts `definition.handler(` in the source, because a second dispatch
+site added later would bypass the scope silently.
+
+
 ### The executor nobody could pass (Phase 161)
 
 ADR 0160 nominated session-keyed policies for the four tables it left exempt.
@@ -7849,6 +7915,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/a-job-through-the-policies.test.ts` | **The queue that could not see itself** (Phase 162): opens with the three-line probe that refuted ADR 0161's nomination — an `AsyncLocalStorage` scope does not survive the function that opened it returning, so a page cannot open one for the async children React invokes afterwards. Then the worker, which can: a real job handler calling a real service runs inside a tenant scope and sees its own company, two companies' jobs in one tick each get their own scope, the scope is unbound between them, a global handler runs with none and says so, a failure is still recorded because the bookkeeping sits outside the scope, and one tick still claims across both tenants — which is why the two queue tables had to be exempted. Plus the tripwire counting `definition.handler(` in the source, so a second dispatch site cannot bypass the scope silently |
 | `tests/a-report-through-the-policies.test.ts` | **The executor nobody could pass** (Phase 161): real service functions running behind row level security without having been modified for it. `trialBalance`, `accountBalances`, `arAging` and `listAccounts` — none of which takes an executor, all of which read the module-level `db` — run on a connection as `accountrix_app` inside a tenant scope and return the same figures as the owner connection, with Alpha footing to $4,000 and Beta to $11. Outside a scope the same connection sees nothing. Also the scope itself: bound by `withTenant` and visible three levels down, re-entrant for the same company so two services opening one are a single transaction, refused outright for a different company, unbound when the body throws, and absent until something opens it — which is why applying Phase 161 changes nothing for the 903 call sites that did not change |
 | `tests/rls-bites.test.ts` | **The policies that would have done nothing** (Phase 160): row level security proved rather than declared. Opens its own connection as `accountrix_app` — not a superuser, owns nothing — and makes the policies bite: two companies see only their own rows, a write aimed at another tenant is refused by `WITH CHECK`, an update or delete across tenants affects zero rows, and a query with no tenant set sees nothing at all. Asserts coverage against the schema source rather than the catalogue the migration looped over, so a table added later fails here instead of going unprotected. Then the honest half: `rlsStands` refuses to call *this* application's connection isolated because it is a superuser, agrees about the restricted one — seen to agree and to disagree on two real connections in one file — and every one of the five declared bypasses is exercised on a fixture. Also the four exempt tables, and that a restricted connection can still read `memberships`, which is what sign-in needs |
 | `tests/export-worksheets.test.ts` | **Fourteen worksheets, and what they found** (Phase 159): the §13 integration worksheets, and mostly a test about holding a line. Asserts the registry covers exactly the Priority 1 destinations — derived from the destination registry's own `priority` column, so a new Priority 1 target fails here until it has a worksheet — that every page exists on disk, that each answers all twelve of §13's questions, and that each cites at least three sources and states its own status. Then the line itself: `verifiedWorksheets()` is empty, so nothing authorises an adapter, and promoting one means changing an assertion on purpose. Also that the four refusals stay distinct (a competitor, no worksheet, a draft worksheet, no third-party route), that `integration` is gone from `ExportDestination`, and that the findings count ten file imports, two programmatic and two with no route |

@@ -291,6 +291,10 @@ describe('how far this got', () => {
     expect(live).toContain('tests/rls-bites.test.ts')
     expect(live).toContain('tests/a-report-through-the-policies.test.ts')
 
+    // Phase 162 added the background worker, which is the first live surface
+    // that is not a test.
+    expect(live).toContain('the background worker (modules/worker/runner.ts)')
+
     const bypassed = RLS_ROLLOUT.filter((entry) => entry.state === 'bypassed')
     expect(bypassed).toHaveLength(1)
     expect(bypassed[0].because).toContain('superuser')

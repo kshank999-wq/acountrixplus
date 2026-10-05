@@ -157,6 +157,34 @@ export type ExemptionGround =
    * sequencing problem.
    */
   | 'establishes-the-tenant'
+  /**
+   * The table is read **across** tenants on purpose (Phase 162).
+   *
+   * Not the ground above, and the distinction is the reason this is its own
+   * value rather than bent onto the nearest (Phase 130): nothing reads these to
+   * find out who the caller is. A queue poller reads every company's jobs
+   * because that is what a queue poller is, and an outbox drain reads every
+   * company's unrelayed events for the same reason.
+   *
+   * **Provisional, and the entries say what the right answer is.** A tenant
+   * policy cannot express "this principal sees everything"; a *second principal*
+   * can — `accountrix_worker` with its own `FOR ALL TO accountrix_worker USING
+   * (true)`, keeping the tenant policy for the web role, because the worker
+   * genuinely is a different principal from a web request.
+   *
+   * What it must never become is a policy that opens up when no tenant is set:
+   *
+   * ```sql
+   * -- Never this.
+   * USING (company_id = nullif(current_setting('app.company_id', true), '')::uuid
+   *        OR current_setting('app.company_id', true) IS NULL)
+   * ```
+   *
+   * That is the `coalesce` trap named at the top of this file with extra steps —
+   * every forgotten scope anywhere in the application would see every tenant's
+   * rows, which is a fail-open control dressed as a fail-closed one.
+   */
+  | 'crosses-tenants-by-design'
 
 export type Exemption = {
   table: string
@@ -224,6 +252,28 @@ export const RLS_EXEMPT: readonly Exemption[] = [
       '— left-joined in the same session query, so it degrades to NULL rather than failing. The ' +
       'audit log then records the acting person without recording that they work for the client’s ' +
       'accountants, which is exactly the distinction `recordAudit` was given that field for.',
+  },
+  {
+    table: 'background_jobs',
+    ground: 'crosses-tenants-by-design',
+    consequence:
+      '**The queue never drains.** `claimJobs` is raw SQL with a `LIMIT` and no company filter, ' +
+      'because a poller claims whatever work is oldest across every tenant. Policed, it claims ' +
+      'nothing. And `failJob`/`completeJob` would affect zero rows, so a job that did get claimed ' +
+      'would retry forever. Worst of all it is silent — "the queue is empty" and "nothing can see ' +
+      'the queue" render identically, which is the failure `runner.ts`’s own heartbeat comment ' +
+      'calls an outage that looks like calm.',
+  },
+  {
+    table: 'domain_events',
+    ground: 'crosses-tenants-by-design',
+    consequence:
+      '**Events are never fanned out.** `relayPendingEvents` reads `where relayed_at is null` with ' +
+      'no company filter, for the same reason: an outbox drain is global. Policed, it relays ' +
+      'nothing, so every notification, every deposit-on-acceptance and every downstream job stops ' +
+      'being queued — and the events themselves keep accumulating, so the first symptom is a ' +
+      'growing table rather than an error. The per-company readers, `listEvents(companyId)` and ' +
+      '`eventsFor(companyId)`, are `explicit-company` and unaffected either way.',
   },
 ]
 
@@ -521,6 +571,16 @@ export const RLS_ROLLOUT: readonly RolloutEntry[] = [
       'because 903 call sites reach `db` directly and 802 service entry points have no executor ' +
       'parameter to pass. The tenant is now carried by the connection `db` resolves to, so none of ' +
       'those 903 changed.',
+  },
+  {
+    surface: 'the background worker (modules/worker/runner.ts)',
+    state: 'live',
+    because:
+      'Phase 162, and the first production caller of `withTenant`. `runJob` dispatches every ' +
+      'background job from one function and already holds the company, so one line covers all 24 ' +
+      'registered handlers without any of them changing. The five `global` handlers get no scope ' +
+      'because they have no company to set — they run on the pooled handle and would see nothing ' +
+      'on a restricted role, which is the part of this surface the phase does not finish.',
   },
   {
     surface: 'the application’s own connection',
