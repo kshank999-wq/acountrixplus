@@ -6189,6 +6189,71 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The executor nobody could pass (Phase 161)
+
+ADR 0160 nominated session-keyed policies for the four tables it left exempt.
+Checked and deferred: the application still bypasses every policy that exists
+and **`withTenant` had no caller** — three references in the repository, all
+three prose about it — so four more policies would have been a second
+consecutive phase of mechanism nothing uses, which is Phase 49's defect at the
+scale of a subsystem.
+
+Measuring why it had no caller found something worse than an oversight:
+
+| measured | count |
+| --- | --- |
+| sites reaching the module-level `db` directly | 903 |
+| service entry points taking an `ActorContext` | 802 |
+| functions accepting an `Executor` | 149 |
+
+`withTenant(ctx, (tx) => trialBalance(ctx, range))` does nothing useful, because
+`trialBalance` has no executor parameter and reads `db`, and neither does
+`accountBalances` below it. The 149 that do accept one are write paths, threaded
+for transactions many phases ago; the read surface was never threaded and was
+never meant to be, because Phase 149 made read isolation structural with
+`scoped()` instead. So `withTenant` was not waiting for somebody to call it —
+**it could not be called**, short of adding a parameter to 802 functions and
+then remembering to pass it at 903 sites. ADR 0160 had written that work down as
+*"883 reads have to go through `withTenant`"*, which read as mechanical and was
+802 signature changes first.
+
+**So the connection carries the tenant, not a parameter.** A tenant threaded
+through 802 signatures is a check at every one of them and the one that forgets
+is a cross-tenant query; a tenant bound to the connection the query lands on is
+a constraint at one place (Phase 116). Phase 149 made the same move one level
+down. `db` is now a proxy that resolves to the open tenant transaction when a
+scope is bound and to the pooled handle otherwise, and `withTenant` binds the
+scope through `AsyncLocalStorage` after setting the GUC — so every read below it,
+at any depth, in modules that have never heard of row level security, lands on
+the connection the policy can see a tenant on. **No call site changed.**
+
+The proof runs `trialBalance`, `accountBalances`, `arAging` and `listAccounts`
+on a connection as `accountrix_app` inside a scope and gets the same figures as
+the owner connection — Alpha footing to $4,000 and Beta to $11, far enough apart
+that a leak could not pass as a rounding difference. Outside a scope the same
+connection sees nothing: fails closed, which is the right direction and is still
+an outage.
+
+**Two guards.** The scope is re-entrant for the same company, so a report
+calling two services that each open one is a single transaction rather than
+three savepoints. A scope for a *different* company inside an open one is refused
+outright — the inner `set_config` would succeed, every query in the outer scope
+after it would silently run as the inner company, and both would be filtering
+correctly on the value they were given.
+
+`AsyncLocalStorage` is module-private with `run` as the only exported form.
+`enterWith` would have let `requireActor` bind a scope and have the rest of the
+request inherit it, which is tempting and wrong: it has no boundary, so nothing
+releases the transaction, and a leaked connection fails as timeouts a long way
+from the cause.
+
+**What moved and what did not.** Before this phase the remaining work was 802
+signature changes, then 903 call sites, then a deployment change. After it:
+open a scope per surface, then a deployment change — because the App Router has
+no single place that wraps a render. The mechanism is complete and it is not
+switched on, which `RLS_ROLLOUT` records and the test asserts.
+
+
 ### The policies that would have done nothing (Phase 160)
 
 Spec §19's database-layer tenant isolation, nominated by ADRs 0157, 0158 and
@@ -7784,6 +7849,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/a-report-through-the-policies.test.ts` | **The executor nobody could pass** (Phase 161): real service functions running behind row level security without having been modified for it. `trialBalance`, `accountBalances`, `arAging` and `listAccounts` — none of which takes an executor, all of which read the module-level `db` — run on a connection as `accountrix_app` inside a tenant scope and return the same figures as the owner connection, with Alpha footing to $4,000 and Beta to $11. Outside a scope the same connection sees nothing. Also the scope itself: bound by `withTenant` and visible three levels down, re-entrant for the same company so two services opening one are a single transaction, refused outright for a different company, unbound when the body throws, and absent until something opens it — which is why applying Phase 161 changes nothing for the 903 call sites that did not change |
 | `tests/rls-bites.test.ts` | **The policies that would have done nothing** (Phase 160): row level security proved rather than declared. Opens its own connection as `accountrix_app` — not a superuser, owns nothing — and makes the policies bite: two companies see only their own rows, a write aimed at another tenant is refused by `WITH CHECK`, an update or delete across tenants affects zero rows, and a query with no tenant set sees nothing at all. Asserts coverage against the schema source rather than the catalogue the migration looped over, so a table added later fails here instead of going unprotected. Then the honest half: `rlsStands` refuses to call *this* application's connection isolated because it is a superuser, agrees about the restricted one — seen to agree and to disagree on two real connections in one file — and every one of the five declared bypasses is exercised on a fixture. Also the four exempt tables, and that a restricted connection can still read `memberships`, which is what sign-in needs |
 | `tests/export-worksheets.test.ts` | **Fourteen worksheets, and what they found** (Phase 159): the §13 integration worksheets, and mostly a test about holding a line. Asserts the registry covers exactly the Priority 1 destinations — derived from the destination registry's own `priority` column, so a new Priority 1 target fails here until it has a worksheet — that every page exists on disk, that each answers all twelve of §13's questions, and that each cites at least three sources and states its own status. Then the line itself: `verifiedWorksheets()` is empty, so nothing authorises an adapter, and promoting one means changing an assertion on purpose. Also that the four refusals stay distinct (a competitor, no worksheet, a draft worksheet, no third-party route), that `integration` is gone from `ExportDestination`, and that the findings count ten file imports, two programmatic and two with no route |
 | `tests/export-engine.test.ts` | **Exporting to the accountant's software** (Phase 158): the export engine's registries and its §11 validation, with no database and no clock — the only way to see each check *disagree*, since real books are hard to get into most of these states and impossible to get into some. Asserts §15's first acceptance criterion structurally (no destination appears among the excluded competitors), that `mayExportTo` refuses a competitor with the decision and a planned target with the absence, that `adapterMayBeBuilt` refuses all twenty of §3's targets, and that every §11 clause has a check and every check has been seen to fire. Also measures the §5 registry's own claims: each `produces` read out of the file it names, each `permission` out of that function's `requirePermission` call, following one level of same-file delegation because `trialBalance` takes none of its own |
