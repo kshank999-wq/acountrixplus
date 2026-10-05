@@ -471,10 +471,17 @@ describe('how far this got, stated rather than implied', () => {
      * DATABASE_URL this session cannot change. The register is what makes the
      * third option honest.
      */
-    expect(RLS_ROLLOUT).toHaveLength(2)
+    // Three since Phase 161 added a second live surface: real service functions,
+    // which `withTenant` could not reach when this test was written because 903
+    // call sites read the module-level `db` and 802 entry points had no executor
+    // parameter to pass one through.
+    expect(RLS_ROLLOUT).toHaveLength(3)
 
     const live = RLS_ROLLOUT.filter((entry) => entry.state === 'live')
-    expect(live.map((entry) => entry.surface)).toEqual(['tests/rls-bites.test.ts'])
+    expect(live.map((entry) => entry.surface)).toEqual([
+      'tests/rls-bites.test.ts',
+      'tests/a-report-through-the-policies.test.ts',
+    ])
 
     const bypassed = RLS_ROLLOUT.filter((entry) => entry.state === 'bypassed')
     expect(bypassed[0].because).toContain('superuser')

@@ -1,6 +1,7 @@
 import { drizzle } from 'drizzle-orm/postgres-js'
 import postgres from 'postgres'
 import * as schema from './schema'
+import { currentTenantScope } from './tenant-scope'
 
 export * as schema from './schema'
 
@@ -99,15 +100,62 @@ function client() {
 }
 
 /**
+ * The pooled handle, with no tenant bound to it.
+ *
+ * Not exported. `db` below is what callers get, and the difference is the whole
+ * of Phase 161: outside a tenant scope the two are the same object, and inside
+ * one `db` resolves to the scope's transaction instead.
+ */
+const pooled = drizzle(client(), { schema })
+
+export type Database = typeof pooled
+
+/**
  * Application database handle.
  *
  * Prefer the tenant-scoped helpers in `modules/tenancy` over reaching for this
  * directly — every business-domain query must be filtered by company id
  * (spec §19), and those helpers make that structural rather than a thing each
  * call site has to remember.
+ *
+ * ## Why this is a proxy (Phase 161)
+ *
+ * Inside `withTenant` it resolves to the open transaction that has
+ * `app.company_id` set, so every read below that call — at any depth, in modules
+ * that have never heard of row level security — lands on the connection the
+ * policy can see a tenant on.
+ *
+ * The alternative was threading an `Executor` through 802 service entry points
+ * and remembering to pass it at 903 call sites, which is a check at every one of
+ * them; this is a constraint at one (Phase 116). Phase 149 made the same move at
+ * the query level with `scoped()`.
+ *
+ * Outside a scope it is the pooled handle and behaves exactly as it did before,
+ * which is why this changes nothing until something opens a scope.
+ *
+ * `Reflect.get` with the resolved source as receiver, so drizzle's own getters
+ * see the object they belong to; functions are bound for the same reason. A
+ * method pulled off this proxy and called later still goes to whichever source
+ * was current **when it was read**, which is the correct reading of
+ * `const select = db.select` and also the reason nobody should write that.
  */
-export const db = drizzle(client(), { schema })
-
-export type Database = typeof db
+export const db: Database = new Proxy(pooled, {
+  get(target, property, receiver) {
+    const scoped = currentTenantScope()?.executor as Database | undefined
+    const source = scoped ?? target
+    const value = Reflect.get(source, property, source)
+    return typeof value === 'function' ? value.bind(source) : value
+  },
+  // Kept honest for `in`, `Object.keys` and anything that reflects over the
+  // handle: those should describe whatever this proxy would actually delegate to.
+  has(target, property) {
+    const scoped = currentTenantScope()?.executor as Database | undefined
+    return Reflect.has(scoped ?? target, property)
+  },
+  getPrototypeOf(target) {
+    const scoped = currentTenantScope()?.executor as Database | undefined
+    return Reflect.getPrototypeOf(scoped ?? target)
+  },
+})
 /** A `db` handle or an open transaction — services accept either. */
 export type Executor = Database | Parameters<Parameters<Database['transaction']>[0]>[0]

@@ -511,14 +511,29 @@ export const RLS_ROLLOUT: readonly RolloutEntry[] = [
       'mechanism a fact rather than a claim.',
   },
   {
+    surface: 'tests/a-report-through-the-policies.test.ts',
+    state: 'live',
+    because:
+      'Phase 161. Runs `trialBalance`, `accountBalances`, `arAging` and `listAccounts` — real ' +
+      'service functions that take no executor and read the module-level `db` — on the restricted ' +
+      'connection inside a tenant scope, and gets the same figures as the owner connection. That ' +
+      'is what the scope was for: Phase 160’s `withTenant` had no caller and could not have one, ' +
+      'because 903 call sites reach `db` directly and 802 service entry points have no executor ' +
+      'parameter to pass. The tenant is now carried by the connection `db` resolves to, so none of ' +
+      'those 903 changed.',
+  },
+  {
     surface: 'the application’s own connection',
     state: 'bypassed',
     because:
       'It connects as `postgres`, a superuser that owns every table, so the policies are skipped ' +
       'before they are consulted. Changing that is a deployment change — a new DATABASE_URL using ' +
-      '`accountrix_app` — and every query would then have to go through `withTenant`, which 883 ' +
-      'reads do not yet. Until both are done the first layer is the only layer, which is what it ' +
-      'was before this phase. `rlsStands` is what refuses to call it otherwise.',
+      '`accountrix_app`. Phase 161 removed the other half of the obstacle: a query no longer needs ' +
+      'to be rewritten to carry the tenant, because `db` resolves to the scope’s connection. What ' +
+      'remains is that **something has to open a scope once per request**, and Next.js’s App Router ' +
+      'has no single place that wraps a render — so that is a per-surface change rather than a ' +
+      'line. Until it is done the first layer is the only layer, and `rlsStands` is what refuses ' +
+      'to call it otherwise.',
   },
 ]
 
@@ -526,9 +541,10 @@ export const RLS_ROLLOUT: readonly RolloutEntry[] = [
 export function rolloutSummary(): string {
   const live = RLS_ROLLOUT.filter((entry) => entry.state === 'live').length
   return (
-    `Row level security is installed and forced on every tenant-scoped table, and applies on ` +
-    `${live} of ${RLS_ROLLOUT.length} surfaces. It does not yet apply to the application’s own ` +
-    'connection, which is a superuser that owns the tables — so the database layer is proven to ' +
-    'work and is not yet carrying production traffic.'
+    `Row level security is installed and forced on every policed table, and applies on ${live} of ` +
+    `${RLS_ROLLOUT.length} surfaces — including real service functions that were never modified ` +
+    'for it. It does not yet apply to the application’s own connection, which is a superuser that ' +
+    'owns the tables, and nothing opens a tenant scope per request yet. So the database layer is ' +
+    'proven to work on real reports and is not yet carrying production traffic.'
   )
 }

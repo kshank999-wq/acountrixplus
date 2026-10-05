@@ -27,26 +27,33 @@
  * five that does not fail open or closed but *sideways*: it silently applies the
  * wrong tenant.
  *
- * ## Use the executor it hands you
+ * ## Both forms work, which is Phase 161's change
  *
  * ```ts
- * // Right.
+ * // Both of these run on the same connection, with the tenant set.
  * await withTenant(ctx, (tx) => tx.select().from(invoices))
- *
- * // Wrong, and it will return nothing once the app connects as a restricted
- * // role: the setting is on the transaction's connection and this query is on
- * // whichever one the pool hands out next.
  * await withTenant(ctx, () => db.select().from(invoices))
+ *
+ * // And so does this, which is the point: `trialBalance` reads `db` and has
+ * // never heard of row level security.
+ * await withTenant(ctx, () => trialBalance(ctx, range))
  * ```
  *
- * The second form fails closed rather than leaking, which is the one mercy in
- * the design: a query that misses the setting sees no rows rather than all of
- * them. It is still a bug, and it is why `set_config` is called inside the
- * transaction rather than before it.
+ * Phase 160 shipped only the first form, and measuring found it had no caller
+ * and could not have one: 903 sites reach the module-level `db` directly and 802
+ * service entry points take no executor at all. Threading one through them would
+ * have been a check at 903 call sites. Binding the tenant to the connection
+ * `db` resolves to is a constraint at one (Phase 116), so the second and third
+ * forms work without a single signature changing.
+ *
+ * The executor is still handed to the callback, because 149 functions already
+ * accept one for transaction reasons and should keep being passed it rather than
+ * opening a nested savepoint of their own.
  */
 
 import { sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
+import { currentTenantScope, runInTenantScope } from '@/db/tenant-scope'
 import { RLS_GUC, type RlsObservation } from './rls'
 
 /**
@@ -61,11 +68,52 @@ export async function withTenant<T>(
   ctx: { companyId: string },
   fn: (tx: Executor) => Promise<T>,
 ): Promise<T> {
+  const open = currentTenantScope()
+
+  if (open) {
+    /*
+      Already inside a scope. Two cases, and they are not the same.
+
+      Same company: re-entrant, and the right answer is to run `fn` on the scope
+      that is already open rather than nest a savepoint. A report that calls two
+      services which each open a scope should be one transaction, not three.
+
+      Different company: refused, loudly. There is no legitimate reason for one
+      request to open a tenant scope inside another tenant's — and the failure it
+      would otherwise cause is the worst kind, because the inner `set_config`
+      would succeed, the outer scope's queries after it would silently run as the
+      inner company, and both would be filtering correctly on the value they were
+      given. A nested scope for a different tenant is a cross-tenant bug by
+      construction, so it is an error rather than a thing to handle.
+    */
+    if (open.companyId !== ctx.companyId) {
+      throw new Error(
+        `Refusing to open a tenant scope for ${ctx.companyId} inside one for ${open.companyId}. ` +
+          'Nesting tenants would leave the outer scope running as the inner company with nothing ' +
+          'to say so.',
+      )
+    }
+    return fn(open.executor as Executor)
+  }
+
+  /*
+    No scope is open, so `db` is the pooled handle here — the proxy resolves to
+    it precisely because `currentTenantScope()` returned nothing a line ago. The
+    re-entrant branch above is what keeps that true: without it this would open a
+    savepoint on a transaction it was already inside, which works and is not what
+    anybody means.
+  */
   return db.transaction(async (tx) => {
     // `true` is the is_local argument, and it is the difference between this
     // function and a cross-tenant read.
     await tx.execute(sql`select set_config(${RLS_GUC}, ${ctx.companyId}, true)`)
-    return fn(tx)
+
+    /*
+      The scope, which is what makes the 903 unchanged call sites land here. Bound
+      *after* the setting, so nothing inside can observe a scope whose connection
+      does not yet carry a tenant.
+    */
+    return runInTenantScope({ executor: tx, companyId: ctx.companyId }, () => fn(tx))
   })
 }
 
