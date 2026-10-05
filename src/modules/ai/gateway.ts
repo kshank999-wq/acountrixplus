@@ -41,6 +41,14 @@ export type AiFeature =
   | 'business_insights'
   /** The Design Assistant (Phase 166, spec §11). Advisory: it suggests, a person applies. */
   | 'design'
+  /**
+   * The Strategic Account Assistant (Phase 167, spec §11).
+   *
+   * Only the advisory half is metered here. Identifying a neglected account is
+   * arithmetic and happens in `crm/attention.ts` with no gateway involved, so
+   * a company with AI switched off still gets the list.
+   */
+  | 'strategic_account'
 
 export type AskInput<T> = {
   feature: AiFeature

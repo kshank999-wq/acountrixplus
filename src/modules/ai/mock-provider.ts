@@ -119,6 +119,8 @@ function answerFor(request: CompletionRequest): unknown {
       return businessInsights(request.input)
     case 'design':
       return layoutOrdering(request.input)
+    case 'strategic_account':
+      return accountStrategy(request.input)
     default:
       return null
   }
@@ -526,6 +528,111 @@ function layoutOrdering(input: Record<string, unknown>): unknown {
     // Lower than a categorization: this is a convention, not a measurement,
     // and a person may well have had a reason for the order they chose.
     confidence: moved === 0 ? 4000 : 6500,
+  }
+}
+
+/**
+ * What to do about one neglected account (spec §11).
+ *
+ * The heuristic is a reading of the findings the platform already measured,
+ * which is also what the prompt tells a real model to do: the identification
+ * is arithmetic and arrives done, so neither the mock nor a model has to guess
+ * at it. That is why this heuristic is short — the hard half of this capability
+ * is not the provider's.
+ *
+ * One action per finding, in the order the findings arrived (worst first), so
+ * the answer is as well-ordered as the input and no better.
+ */
+const ACCOUNT_ACTIONS: Record<string, { action: string; urgency: string }> = {
+  'never-contacted': {
+    action: 'Call them. Nobody here ever has, so there is no thread to pick up and no risk of repeating somebody.',
+    urgency: 'this_week',
+  },
+  'gone-quiet': {
+    action: 'Make contact with something worth their time — a question about their year, not a check-in.',
+    urgency: 'this_week',
+  },
+  'proposal-unanswered': {
+    action: 'Chase the outstanding proposal by phone rather than email, and ask what is holding the decision.',
+    urgency: 'this_week',
+  },
+  'pipeline-unattended': {
+    action: 'Either advance the open deal or move it to dormant. A stage with no conversation behind it overstates the pipeline.',
+    urgency: 'this_week',
+  },
+  unowned: {
+    action: 'Assign an owner before anything else here. Every other action needs somebody it belongs to.',
+    urgency: 'this_week',
+  },
+  'overdue-follow-up': {
+    action: 'Clear the overdue follow-up, or close it if it no longer matters.',
+    urgency: 'this_month',
+  },
+}
+
+type Finding = { ground: string; label: string; severity: string; detail: string }
+
+function accountStrategy(input: Record<string, unknown>): unknown {
+  const name = String(input.accountName ?? 'this account')
+  const findings = (input.findings as Finding[] | undefined) ?? []
+  const silentDays = input.silentDays === null ? null : Number(input.silentDays ?? 0)
+  const stakeCents = Number(input.stakeCents ?? 0)
+  const openOpportunities = Number(input.openOpportunities ?? 0)
+  const timelineEntries = Number(input.timelineEntries ?? 0)
+
+  if (findings.length === 0) return null
+
+  const silence =
+    silentDays === null
+      ? 'Nobody here has ever spoken to them'
+      : `It has been ${silentDays} day${silentDays === 1 ? '' : 's'} since anybody spoke to them`
+
+  const stake =
+    stakeCents > 0
+      ? ` At stake is around ${formatCentsPlain(stakeCents)}, counting the larger of what they have been invoiced and what is weighted in the pipeline.`
+      : ' Nothing has been invoiced and nothing is weighted in the pipeline, so the case for the time is the relationship rather than the number.'
+
+  const record =
+    timelineEntries === 0
+      ? ' There is nothing on the timeline at all, so anything beyond these measured facts would be invention.'
+      : timelineEntries < 3
+        ? ' The timeline is thin — three entries or fewer — so treat any narrative about this relationship with suspicion.'
+        : ''
+
+  const nextActions = findings.slice(0, 5).map((finding) => {
+    const mapped = ACCOUNT_ACTIONS[finding.ground]
+    return {
+      action: mapped?.action ?? `Address the "${finding.label}" finding.`,
+      because: finding.detail,
+      urgency: mapped?.urgency ?? 'this_month',
+    }
+  })
+
+  const lead = findings[0]
+
+  return {
+    summary:
+      `${name} is flagged for ${findings.length} reason${findings.length === 1 ? '' : 's'}, the most serious being ` +
+      `${lead.label.toLowerCase()}: ${lead.detail} ${silence}.${stake}${record}`,
+    nextActions,
+    outreach: {
+      subject:
+        lead.ground === 'proposal-unanswered'
+          ? 'Following up on our proposal'
+          : `Checking in from our side`,
+      body:
+        `Hello,\n\n` +
+        (lead.ground === 'proposal-unanswered'
+          ? `I wanted to follow up on the proposal we sent over. No pressure either way — if the timing or the scope is wrong, it is more useful to me to know that than to wait.\n\n` +
+            `If it would help to talk through any part of it, I have time this week.`
+          : `It has been a while since we spoke, and I would rather ask than assume. How has your year been going${openOpportunities > 0 ? ', and is the work we discussed still on your list' : ''}?\n\n` +
+            `If there is nothing to discuss, say so and I will leave it — but if there is, I would rather hear it early.`) +
+        `\n\nBest regards`,
+    },
+    // Deliberately moderate. These are the right actions given the findings and
+    // the findings are measured, but the ordering is a convention and the
+    // outreach is written without having read a word of the relationship.
+    confidence: 6000,
   }
 }
 

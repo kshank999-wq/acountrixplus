@@ -90,9 +90,10 @@ dimensions that exist. Worth noting that *"average time to decision"* is the onl
 one needing a fact nothing currently records per proposal — the others are
 re-groupings of data already there.
 
-### §11 — five of seven AI capabilities
+### §11 — seven of seven AI capabilities (was five)
 
-`BUILT_IN_PROMPTS` holds eight prompts covering five of §11's seven rows:
+`BUILT_IN_PROMPTS` holds ten prompts covering all seven of §11's rows. It held eight
+covering five when this audit was written:
 
 | §11 capability | prompt |
 | --- | --- |
@@ -101,19 +102,39 @@ re-groupings of data already there.
 | AI Proposal Writer | `proposal.draft` |
 | AI Marketing Assistant | `marketing.draft` |
 | AI Business Insights | `insights.business` |
-| **AI Design Assistant** | **none** |
-| **AI Strategic Account Assistant** | **none** |
+| AI Design Assistant | `design.layout` — **built in Phase 166** |
+| AI Strategic Account Assistant | `account.strategy` — **built in Phase 167** |
 
-`designAssistant`, `strategicAccount` and `layoutSuggest` appear nowhere in
-`src/modules`. Both missing capabilities have the infrastructure they need —
-the gateway, metering, the prompt registry with versioning, and the modules they
-would read from (`modules/design`, `modules/marketing/segments`, which already
-has strategic-account segmentation).
+> **Closed by Phases 166 and 167.** §11 is complete: seven capabilities, seven
+> prompts. The two sentences below were what this audit said while both were
+> outstanding, and both were corrected by building them.
+>
+> `modules/marketing/segments` does **not** have strategic-account
+> segmentation in the sense this claimed. It has `isStrategicAccount` as a
+> segment *field* — a boolean a marketing audience can be filtered on — and no
+> relationship data at all. The Strategic Account Assistant reads
+> `engagement/communications.ts`, `engagement/timeline.ts`,
+> `opportunity_activities`, `proposals`, and invoices through
+> `customers.organization_id`. The claim was repeated by ADRs 0165 and 0166,
+> each inheriting the nomination without re-measuring — the pattern Phase 164
+> named.
+>
+> And §11's Design Assistant is **not** the larger of the two, because it does
+> not ask for an image model: every capability in that row is advisory and the
+> bullet that sounds like pixels, *"image prompts"*, is explicitly text. The
+> Strategic Account Assistant turned out to be the larger, because half of its
+> row — *"identify neglected high-value prospects"* — is arithmetic that must
+> work with the AI module switched off, and so needed a pure core
+> (`crm/attention.ts`) and a measured service (`crm/accounts.ts`) of its own.
 
-Of the two, **AI Design Assistant** is the larger: §11 asks it to *"generate
-layout suggestions, brand-consistent variations, background/graphic concepts,
-image prompts, and logo ideation; preserve user control and provenance"*, and
-provenance in particular is a data requirement rather than a prompt.
+Both capabilities had the infrastructure they needed — the gateway, metering,
+and the prompt registry with versioning.
+
+Of the two, **AI Design Assistant** was nominated first because provenance is a
+data requirement rather than a prompt — which held: Phase 165 settled
+`assets.provenance_origin` before a prompt was written, and Phase 166 found that
+rule had been applied one level short of where an accepted layout suggestion
+actually writes.
 
 ### §19 — one partial
 
@@ -149,9 +170,11 @@ would be a phase of its own.
 Grounded in measurement rather than in reasoning about behaviour, which is the
 point of having done it:
 
-1. **The two missing AI capabilities** (§11), Design Assistant first, because it
+1. ~~**The two missing AI capabilities** (§11), Design Assistant first, because it
    is the larger and because its provenance requirement is a data decision that
-   should be made before the prompt.
+   should be made before the prompt.~~ **Done: Phases 165–167.** The ordering was
+   right for the stated reason and wrong about which was larger — see the note
+   under §11.
 2. **§9's four analytics gaps**, which are one small phase: two derived figures,
    one new recorded fact (sent→decided), and two more `breakdownBy` dimensions.
 3. **A bullet-level pass** over the sections this audit verified only at module

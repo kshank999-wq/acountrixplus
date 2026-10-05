@@ -189,6 +189,18 @@ decision log that records only acceptances is not a decision log.
 needs `'strategic_account'` in `ai_feature` and in `AiFeature`, which Phase 165
 deliberately left out on Phase 157's rule.
 
+> **Corrected by Phase 167.** `segments.ts` has `isStrategicAccount` only as a
+> *segment field* — a boolean a marketing audience can be filtered on. There is
+> no relationship data in it and nothing to summarize. The data this capability
+> needs is in `engagement/communications.ts`, `engagement/timeline.ts`,
+> `opportunity_activities`, `proposals`, and invoices reached through
+> `customers.organization_id` — none of which ADR 0165 or this ADR mentioned.
+> Reading §11's sentence also moved half the capability out of the module
+> entirely: identifying a neglected account is arithmetic, so it belongs in a
+> pure core that works with AI switched off. Same shape of error as the
+> nominations Phase 164 corrected — a claim about what the code contains,
+> written while reasoning about what the feature would need.
+
 Then **§9's four analytics gaps** from ADR 0164's measured audit: average
 proposal size, average time to decision, and `breakdownBy` over the
 service/product and time-period dimensions.

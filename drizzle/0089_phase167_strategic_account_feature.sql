@@ -1,0 +1,38 @@
+-- Phase 167: the accounts nobody had called.
+--
+-- §11's last unimplemented capability:
+--
+--   AI Strategic Account Assistant | Summarize relationship history, identify
+--   neglected high-value prospects, recommend next actions, and draft
+--   personalized outreach.
+--
+-- ## Why this value arrives now and not in Phase 165
+--
+-- Phase 165 added `'design'` alone and said why: Phase 157's rule is that an
+-- unused declaration is kept when it accuses and deleted when it excuses, and
+-- `'strategic_account'` would have done neither. It would have been a value in
+-- an enum with nothing able to write it -- not a false claim, just an empty one.
+--
+-- It arrives with the assistant that writes it, which is the only moment at
+-- which the ledger row it allows is a fact rather than a plan.
+--
+-- ## And the enum is the whole migration
+--
+-- Worth saying, because the obvious shape for this phase would have been a
+-- table: an `account_attention` or `account_scores` row per organization,
+-- refreshed on a schedule.
+--
+-- Measured against what the finding actually is, that would be wrong. Every
+-- figure the attention list needs already exists and is already authoritative
+-- somewhere -- `max(communications.occurred_at)`, `sum(invoices.
+-- functional_total_cents)`, `opportunities.expected_value_cents`,
+-- `proposals.sent_at`, `tasks.due_on`. A stored score would be a second answer
+-- to a question six tables already answer, stale the moment somebody logs a
+-- call, and two answers to one question is the defect this codebase has found
+-- most often.
+--
+-- So the list is computed, the pure core that judges it has no database in it
+-- at all, and nothing is persisted except the usage ledger row for the
+-- assistant's call.
+
+ALTER TYPE ai_feature ADD VALUE IF NOT EXISTS 'strategic_account';

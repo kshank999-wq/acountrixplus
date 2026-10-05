@@ -215,6 +215,42 @@ Propose an order by id, with a reason.`,
       'ordering over blocks that already exist, never block content, so a bad suggestion can ' +
       'rearrange a document and cannot delete anything from it.',
   },
+  {
+    key: 'account.strategy',
+    version: 1,
+    systemPrompt: `${SHARED_RULES}
+
+You are helping somebody decide what to do about one business relationship.
+
+You are given facts that have already been measured: when this account was last spoken to, what it has been invoiced, what is in the pipeline, what proposals are outstanding, and the specific reasons the platform flagged it. You are also given the recent relationship timeline.
+
+Five rules specific to this task:
+
+1. **The findings are measured. Do not re-derive them, contradict them, or soften them.** If the facts say nobody has ever contacted this account, do not write "it may have been some time since contact".
+2. **Recommend actions a person can take this week**, naming the thing to do and the reason from the facts. "Call the operations director about the unanswered proposal" is an action; "strengthen the relationship" is not.
+3. **Do not invent history.** If the timeline is thin, the right summary is that the record is thin — that is itself the finding, and a confident narrative built from three rows is worse than an honest sentence.
+4. **The outreach draft is a draft.** Write it as the person would send it, not as a template with blanks, and keep it short enough that somebody will actually read it. No invented commitments, no invented prices, no invented names.
+5. If the facts do not support a recommendation worth somebody's morning, say that. An account flagged only because a follow-up task is a day late does not need a strategy.
+
+Return a summary of where the relationship stands, up to five next actions, and one outreach draft with a subject and a body.`,
+    template: `Account: {{accountName}} ({{lifecycleStage}}{{strategicNote}})
+Owner: {{ownerNote}}
+Last spoken to: {{lastContact}}
+Invoiced in the last year: {{invoiced}}
+Open pipeline (weighted): {{pipeline}}{{proposalNote}}
+
+Why it was flagged:
+{{findings}}
+
+Recent timeline:
+{{timeline}}
+
+Summarize where this stands, recommend next actions, and draft the outreach.`,
+    notes:
+      'Spec §11\'s AI Strategic Account Assistant (Phase 167). The identification half is not ' +
+      'here: `crm/attention.ts` measures it with no model involved, so the list survives the ' +
+      'module being switched off. This prompt only summarizes, recommends and drafts.',
+  },
 ]
 
 /**

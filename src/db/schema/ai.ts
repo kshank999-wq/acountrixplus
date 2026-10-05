@@ -50,6 +50,16 @@ export const aiFeatureEnum = pgEnum('ai_feature', [
    * saying what produced it, and there was no value to write.
    */
   'design',
+  /**
+   * A strategic-account summary, recommendation or outreach draft (Phase 167).
+   *
+   * Only the advisory half of §11's Strategic Account Assistant. *Identifying*
+   * a neglected high-value account is arithmetic over six tables that already
+   * hold the answer, so it is computed in `crm/attention.ts` with no gateway
+   * and no ledger row — a company with the module switched off still gets the
+   * list.
+   */
+  'strategic_account',
 ])
 
 /**

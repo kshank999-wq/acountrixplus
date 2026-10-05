@@ -6189,6 +6189,67 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The accounts nobody had called (Phase 167)
+
+ADR 0166 nominated §11's last unimplemented capability, the **AI Strategic
+Account Assistant**, and said it had `modules/marketing/segments`'
+strategic-account segmentation to read from. Measured: `segments.ts` has
+`isStrategicAccount` as a *segment field* — a boolean you filter an audience on
+— and there is nothing in it to summarize. The relationship data is somewhere
+neither ADR 0165 nor 0166 mentioned: `engagement/communications.ts`,
+`engagement/timeline.ts`, `opportunity_activities`, `proposals`, and invoices
+reached through `customers.organization_id`. Sixth phase running in which the
+inherited nomination needed correcting.
+
+Reading §11's sentence — *"summarize relationship history, identify neglected
+high-value prospects, recommend next actions, and draft personalized
+outreach"* — found that **three of those four want a model and one does not**.
+Identifying a neglected account is `max(occurred_at)` against a cadence, a sum
+of invoices and a probability-weighted pipeline: arithmetic. Handing it to a
+model would have made the one checkable part of this capability the part that is
+not, and would have put it behind the module §11 opens by saying the core
+product must work without. So `crm/attention.ts` is pure — no database, no
+clock, no gateway — `crm/accounts.ts` measures its inputs, and `ai/accounts.ts`
+is the other three verbs. With AI off the list is still there and the button is
+simply absent.
+
+**A ground that fires on every row is not a finding.** A lead nobody has phoned
+is not neglected; that is what a lead *is*. So every ground declares which
+accounts it applies to, `appliesTo` is held to a floor by the same test that
+holds `because`, and `lead` and `vendor` have no cadence at all — a null rather
+than a large number, because a large number would claim we expect to contact
+vendors eventually.
+
+Two numbers needed arguing rather than choosing. The strategic override
+**tightens** a cadence and never invents one, so a strategic active client takes
+the tighter of the two and a strategic *vendor* still takes none — marking a
+supplier strategic is a statement about the supply, not a commitment to court
+them. And what is at stake is a **`max`, never a sum**: adding realised revenue
+to the weighted pipeline double-counts the commonest open opportunity there is,
+a renewal of the revenue already counted. The ranking then puts severity before
+money, because §11 asks for the *neglected* accounts and the money is the
+tie-break.
+
+The sharpest finding came from a ground that looked impossible. `unowned` never
+fired, because `createOrganization` defaults the owner to whoever created the
+record — and a ground that cannot fire is a declaration with no fact behind it.
+`intake.ts` is the path: a website lead has **no acting user**, so the
+organization is inserted with no owner, an opportunity opens at `new_inquiry`,
+and the arrival is logged as an opportunity *activity* rather than a
+communication, so nobody has spoken to them either. The accounts most likely to
+be both unowned and uncontacted are the ones that arrived by themselves and
+asked to be sold to — §11's "neglected high-value prospect" almost exactly, and
+the case nothing in the product surfaced before. The test goes through
+`submitLead` rather than a fixture that could not have found it.
+
+The migration is **one enum value**, and that is the decision. The obvious shape
+would have been an `account_attention` table refreshed on a schedule; every
+figure it would hold is already authoritative in one of six tables, so a stored
+score would be a second answer stale the moment somebody logs a call. `asOf` is
+a parameter all the way down, so the list can be asked what it looked like last
+Tuesday and the cadence tests do not have to wait.
+
+
 ### The document a machine laid out (Phase 166)
 
 ADR 0165 nominated the AI Design Assistant itself, and named three things to
@@ -8151,6 +8212,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/the-accounts-nobody-had-called.test.ts` | **The accounts nobody had called** (Phase 167): §11's Strategic Account Assistant, and the half of it that is arithmetic. Identifying a neglected high-value account is `max(occurred_at)` against a cadence, a sum of invoices and a weighted pipeline, so it lives in a pure core with no database, no clock and no gateway — and the list answers with the AI module switched off, which §11 requires of the core product. A ground that fires on every row is not a finding, so a lead and a vendor have no cadence at all; the strategic override tightens one and never invents one; and what is at stake is a `max` and never a sum, because adding realised revenue to the weighted pipeline double-counts a renewal. `asOf` is a parameter all the way down, so the list can be asked what it looked like before the cadence elapsed. Writing it found `unowned` firing on nothing — `createOrganization` defaults the owner to its creator — and `intake.ts` as the path that produces one: a website lead has no acting user, so the accounts most likely to be unowned and uncontacted are the ones that arrived by themselves |
 | `tests/a-layout-a-machine-proposed.test.ts` | **A layout a machine proposed** (Phase 166): the AI Design Assistant, and the gap in Phase 165 that reading §11 closely found. What this assistant generates is the layout, which is the document, and provenance was on `assets` — so a document laid out entirely by an accepted suggestion and illustrated with the client's own photographs disclosed nothing. The schema permits an ordering over ids the model was given, never a block list, so ids it invents are dropped and blocks it omits are appended: the worst a bad suggestion can do is rearrange. A suggestion with no ledger row is refused with a sentence rather than left to the CHECK, and `markAccepted` runs last. `duplicateDocument` is where `derivedProvenance` earned the caller ADR 0165 said it lacked — a person authored the act, the copy contains the machine-laid-out artifact. Writing it found the mock provider had no `design` heuristic, found that `suggestLayout` asked for `proposals:manage` on documents that are all marketing documents, and found five of its own tests passing vacuously behind `if (!ok) return` while the module sat off by default |
 | `tests/what-the-client-is-told.test.ts` | **What the client is told** (Phase 165): the provenance decision §11 requires before a Design Assistant can exist. The lattice ranks disclosure rather than credit — a crop of an AI-generated image still contains AI-generated material, so `strongerOf` takes the join and a parent's disclosure survives the child's edit. The database refuses both incoherent shapes, and the dangerous direction is the second: a human origin carrying an AI request would let generated material be disclosed as human-made. An unknown origin trips both constraints, asserted as *one of the two* because pinning the name would assert an evaluation order nothing promises. Then the chain to the client: one generated background in an otherwise hand-made document still discloses, and the disclosure is its own render field rather than appended to the author's footer — because a disclosure the author can edit out is not a disclosure |
 | `tests/a-blinded-sweep.test.ts` | **The sweep that deleted nothing and said it worked** (Phase 163): the distinction a row count cannot make, proved on two real connections. `proposal_views` is empty *and* policed, so a count returns 0 as the owner and as `accountrix_app` — identical and meaningless — while `crossTenantSight` returns `[]` for one and `['proposal_views']` for the other. Then the register: six cross-tenant paths under three authorities, the swept tables derived from `RETENTION_POLICIES` rather than copied, every declared function checked to exist, and the one positive grant (`a-practice-engagement`) told apart from the two absences. And the refusal: a blinded retention sweep throws with the authority it was relying on, rather than returning `{ removed: 0 }` and being recorded as succeeded — asserted as wired *before* `sweepAll`, not after |

@@ -6,6 +6,9 @@ import { listContacts, listOrganizations } from '@/modules/crm/opportunities'
 import { listProjects } from '@/modules/crm/conversion'
 import { CRM_NAV } from '../nav'
 import { lastContactedAt } from '@/modules/engagement/communications'
+import { accountsNeedingAttention } from '@/modules/crm/accounts'
+import { aiAvailable } from '@/modules/ai/settings'
+import { AttentionPanel } from './attention-panel'
 import { EditOrganization, NewOrganization } from './new-organization'
 import { ClientTimeline } from './client-timeline'
 
@@ -44,10 +47,14 @@ export default async function OrganizationsPage() {
     )
   }
 
-  const [organizations, contacts, projects] = await Promise.all([
+  const [organizations, contacts, projects, attention, aiEnabled] = await Promise.all([
     listOrganizations(actor, { limit: 500 }),
     listContacts(actor),
     listProjects(actor),
+    // Ten, because this is a list somebody works down rather than reads. A
+    // longer one is the same information arranged so nobody starts.
+    accountsNeedingAttention(actor, { limit: 10 }),
+    aiAvailable(actor),
   ])
 
   // One query for the whole page. "When did we last speak to these people" is
@@ -75,6 +82,19 @@ export default async function OrganizationsPage() {
       <SubNav items={CRM_NAV} active="/crm/organizations" />
 
       {can(actor, 'crm:manage') && <NewOrganization />}
+
+      <AttentionPanel
+        accounts={attention.map((account) => ({
+          organizationId: account.organizationId,
+          name: account.name,
+          severity: account.severity,
+          stakeCents: account.stakeCents,
+          silentDays: account.silentDays,
+          findings: account.findings,
+        }))}
+        aiEnabled={aiEnabled}
+        canAdvise={can(actor, 'crm:manage')}
+      />
 
       <section className="card mt-4 overflow-hidden">
         <header className="border-b border-line px-4 py-3">

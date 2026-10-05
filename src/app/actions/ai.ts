@@ -17,6 +17,7 @@ import {
   draftProposalSections,
   explainReconciliation,
 } from '@/modules/ai/assistants'
+import { adviseOnAccount } from '@/modules/ai/accounts'
 import { applyLayoutSuggestion, suggestLayout } from '@/modules/ai/design'
 import { rejectSuggestion } from '@/modules/ai/suggestions'
 import { updateSettings } from '@/modules/ai/settings'
@@ -103,6 +104,51 @@ export async function rejectSuggestionAction(suggestionId: string): Promise<Acti
     await rejectSuggestion(actor, suggestionId)
     return 'Dismissed.'
   })
+}
+
+// --- Strategic account assistant (spec §11) --------------------------------
+
+export type AccountAdviceResult =
+  | {
+      ok: true
+      suggestionId: string
+      summary: string
+      nextActions: Array<{ action: string; because: string; urgency: string }>
+      outreach: { subject: string; body: string }
+      confidenceBp: number
+      /** The measured findings the advice was given, so the panel can show both. */
+      findings: Array<{ label: string; severity: string; detail: string }>
+    }
+  | { ok: false; error: string }
+
+export async function adviseOnAccountAction(
+  organizationId: string,
+): Promise<AccountAdviceResult> {
+  try {
+    const actor = await requireActor()
+    const result = await adviseOnAccount(actor, organizationId)
+
+    if (!result.ok) return { ok: false, error: result.message }
+
+    return {
+      ok: true,
+      suggestionId: result.suggestion.id,
+      summary: result.strategy.summary,
+      nextActions: result.strategy.nextActions,
+      outreach: result.strategy.outreach,
+      confidenceBp: result.strategy.confidence,
+      findings: result.attention.findings.map((finding) => ({
+        label: finding.label,
+        severity: finding.severity,
+        detail: finding.detail,
+      })),
+    }
+  } catch (error) {
+    return {
+      ok: false,
+      error: messageFor(error, 'The account assistant is unavailable.'),
+    }
+  }
 }
 
 // --- Design assistant (spec §11) -------------------------------------------
