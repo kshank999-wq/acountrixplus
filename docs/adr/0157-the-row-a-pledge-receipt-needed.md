@@ -155,3 +155,10 @@ RLS is a *second* layer and a migration, not a substitute for the first.
 
 It is the only remaining item with a spec section behind it, now that
 `PENDING_WIRING` is empty and the money registers hold nothing known-wrong.
+
+> **Corrected by Phase 164.** This ADR also listed "§9 geography analytics" as
+> outstanding, and ADR 0158 repeated it. It was false: `breakdownBy` has taken a
+> `'region'` dimension, joined from `organizations.region`, for longer than
+> either claim. The mistake was grepping the specification's vocabulary —
+> nothing matches `geograph` because the code says `region`. See
+> `docs/SPEC-AUDIT.md`.

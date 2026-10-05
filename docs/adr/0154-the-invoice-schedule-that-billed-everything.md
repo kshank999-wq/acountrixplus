@@ -232,3 +232,10 @@ exists to answer.
 After that, §9's geography analytics and §19's row-level security. §7's vector
 canvas remains declined on ADR 0004's reasoning, and should be argued against that
 ADR rather than nominated as a gap.
+
+> **Corrected by Phase 164.** §9's geography analytics was never outstanding:
+> `breakdownBy` has taken a `'region'` dimension, joined from
+> `organizations.region`, for longer than this claim. It was grepped for as
+> "geograph" and the code says "region". The claim was repeated by ADRs 0152,
+> 0153, 0154 and 0157 — each inheriting the previous nomination list without
+> re-measuring. See `docs/SPEC-AUDIT.md`.

@@ -6189,6 +6189,50 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### A nomination inherited is a nomination unmeasured (Phase 164)
+
+ADR 0163 recorded that **three consecutive nominations had been wrong** — 0161
+guessed an `AsyncLocalStorage` scope would survive a React render, 0162 guessed a
+role would map onto the worker, 0163 guessed the queue was the whole cross-tenant
+problem. The corrective to a run of bad hypotheses is not a better hypothesis,
+so this phase built no mechanism: it measured `docs/SPEC.md` against the code and
+wrote [`docs/SPEC-AUDIT.md`](docs/SPEC-AUDIT.md). First phase since 104 whose
+deliverable is a document, and that is a choice rather than a slow week.
+
+**The audit's own first mistake is kept in it.** The first pass grepped the
+spec's vocabulary and reported §9's *"performance by … geography"* unimplemented:
+nothing matches `geograph`. But `breakdownBy` takes
+`'owner' | 'source' | 'industry' | 'region'`, and `region` *is* geography, joined
+from `organizations.region`. `source` is likewise §9's "lead source". Two of five
+apparent gaps were false negatives from one naive pass — because **grepping a
+specification's words finds the specification's words, not the
+implementation.**
+
+**And the geography claim was not new.** It appears in ADRs **0152, 0153, 0154
+and 0157** — four consecutive nomination lists, each inheriting the previous one.
+That is how a false sentence survives four phases of otherwise careful work:
+nobody asserted it carelessly the first time, and nobody asked again. Hence the
+rule, which is Phase 121's sibling for prose — *a check only ever seen to agree
+is not a check; a claim only ever copied is not a claim.* All four ADRs now carry
+a correction pointing at the audit rather than being left to be inherited by a
+fifth.
+
+**What the audit found**, by reading: §9 has four real gaps once the two false
+ones are withdrawn (average proposal size, average time to decision, and
+breakdowns by service/product and time period — only *time to decision* needs a
+fact nothing records). §11 has **five of seven** AI capabilities: Design
+Assistant and Strategic Account Assistant appear nowhere, and both already have
+the gateway, metering, the versioned prompt registry and the modules they would
+read from. §19 is nine of ten, with tenant isolation partial in a precise way.
+§13 — the accounting core — is complete bullet by bullet, which is the part a
+bookkeeping product is judged on.
+
+**It is a floor, not a ceiling**, and says so: §3–§8, §10 and §12–§18 were
+verified at module level, which would not notice a missing bullet inside a built
+section — exactly the gap the geography claim shows this project can carry for
+four phases.
+
+
 ### The sweep that deleted nothing and said it worked (Phase 163)
 
 ADR 0162 nominated an `accountrix_worker` principal to close both halves it left

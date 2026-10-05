@@ -175,3 +175,10 @@ them: `BLIND_FACE_SUMS` at zero, `COMPARED_PAIRS` at zero blind, `PENDING_WIRING
 at the one above. What remains from the spec audit is **§7's vector and layout
 design engine**, the largest unbuilt piece, then §9's geography analytics and
 §19's row-level security.
+
+> **Corrected by Phase 164.** §9's geography analytics was never outstanding:
+> `breakdownBy` has taken a `'region'` dimension, joined from
+> `organizations.region`, for longer than this claim. It was grepped for as
+> "geograph" and the code says "region". The claim was repeated by ADRs 0152,
+> 0153, 0154 and 0157 — each inheriting the previous nomination list without
+> re-measuring. See `docs/SPEC-AUDIT.md`.

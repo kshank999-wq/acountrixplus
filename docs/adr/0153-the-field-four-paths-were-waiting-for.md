@@ -227,6 +227,13 @@ the jurisdiction the company files in.
 the first thing in a long while that is neither a measurement nor a repair. After
 it, §9's geography analytics and §19's row-level security.
 
+> **Corrected by Phase 164.** §9's geography analytics was never outstanding:
+> `breakdownBy` has taken a `'region'` dimension, joined from
+> `organizations.region`, for longer than this claim. It was grepped for as
+> "geograph" and the code says "region". The claim was repeated by ADRs 0152,
+> 0153, 0154 and 0157 — each inheriting the previous nomination list without
+> re-measuring. See `docs/SPEC-AUDIT.md`.
+
 > **Correction (Phase 154).** This nomination was wrong, and ADR 0154 records why
 > rather than quietly nominating something else. §7 is substantially built — 16
 > block types, a versioned clause library, optional items, expiry, view tracking,
