@@ -12,6 +12,7 @@ import {
 } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { basisPoints } from '@/lib/ratio'
+import { splitExactly } from '@/modules/money/splitting'
 import { OPEN_STAGES, weightedValueCents } from './pipeline'
 
 /**
@@ -642,9 +643,14 @@ export type ServiceRevenueRow = {
  *
  * A line's `amount_cents` is in whatever the customer was billed in, so adding
  * those across invoices in three currencies produces a number that is not money
- * (Phase 129). The share is taken of `functional_total_cents` apportioned by
- * line, which is the invoice's own rate applied to its own lines — never a
- * today-rate on an old invoice.
+ * (Phase 129). Each invoice's `functional_total_cents` is split across its own
+ * lines by `splitExactly`, so the figure is at the rate that invoice was raised
+ * at — never a today-rate on an old invoice — and the parts add back to the
+ * whole.
+ *
+ * The first draft rounded each line's share independently and summed, which is
+ * the Phase 145 defect this paragraph had claimed to be avoiding.
+ * `tests/money-division.test.ts` matched the proportional form and found it.
  */
 export async function serviceRevenue(
   ctx: ActorContext,
@@ -659,16 +665,16 @@ export async function serviceRevenue(
 
   const rows = await db
     .select({
+      invoiceId: invoiceLines.invoiceId,
       itemId: invoiceLines.itemId,
       serviceName: serviceItems.name,
       serviceCode: serviceItems.code,
       amountCents: invoiceLines.amountCents,
       /*
-        The invoice's own total in both currencies, so a line can be converted
-        at the rate that invoice was raised at rather than at today's. Carried
-        per line rather than looked up, because one query is the point.
+        The invoice's own functional total, so its lines are split at the rate
+        that invoice was raised at rather than at today's. Carried per line
+        rather than looked up, because one query is the point.
       */
-      invoiceTotalCents: invoices.totalCents,
       invoiceFunctionalCents: invoices.functionalTotalCents,
     })
     .from(invoiceLines)
@@ -681,44 +687,84 @@ export async function serviceRevenue(
     )
     .where(scoped(ctx, invoiceLines, ne(invoices.status, 'void'), ...conditions))
 
+  /*
+    Grouped by invoice first, because the split is per document.
+
+    The first draft of this function computed each line as
+    `round(amount * functionalTotal / total)` and summed — which rounds per line
+    and need not add back to the invoice's own functional total. That is Phase
+    145's defect exactly, in the function whose own comment claimed to be
+    avoiding it, and `tests/money-division.test.ts` found it by matching the
+    proportional form the day it was written.
+
+    `splitExactly` is the answer the codebase already had: it places the residue
+    deterministically on the largest remainder, so the parts add to the whole
+    and a report of revenue by product foots to the ledger.
+  */
+  const byInvoice = new Map<
+    string,
+    {
+      functionalCents: number
+      lines: Array<{ itemId: string | null; name: string | null; code: string | null; amountCents: number }>
+    }
+  >()
+
+  for (const row of rows) {
+    const entry = byInvoice.get(row.invoiceId) ?? {
+      functionalCents: row.invoiceFunctionalCents,
+      lines: [],
+    }
+    entry.lines.push({
+      itemId: row.itemId,
+      name: row.serviceName,
+      code: row.serviceCode,
+      amountCents: row.amountCents,
+    })
+    byInvoice.set(row.invoiceId, entry)
+  }
+
   const groups = new Map<string, ServiceRevenueRow>()
   let total = 0
 
-  for (const row of rows) {
+  for (const invoice of byInvoice.values()) {
     /*
-      The line in functional terms: its share of the document, times the
-      document's functional total. An invoice already in the functional currency
-      has the two totals equal, so this is the identity and costs nothing.
-
-      Apportioning rather than converting is deliberate. Converting each line at
-      the invoice's rate and summing would round per line and could miss the
-      invoice's own functional total by a cent or two — which is Phase 145's
-      defect, a whole that existed before its parts.
+      Weights are the lines' own amounts, so a document already in the
+      functional currency splits its total back into exactly those amounts and
+      the conversion is the identity. `splitExactly` requires non-negative
+      weights; a credit line on an invoice would break that, so negatives are
+      carried at face value and excluded from the weighting rather than
+      silently flipped.
     */
-    const functionalCents =
-      row.invoiceTotalCents === 0
-        ? 0
-        : Math.round((row.amountCents * row.invoiceFunctionalCents) / row.invoiceTotalCents)
+    const weights = invoice.lines.map((line) => Math.max(0, line.amountCents))
+    const shares = splitExactly(invoice.functionalCents, weights)
 
-    const key = row.itemId ?? 'uncatalogued'
-    let group = groups.get(key)
-    if (!group) {
-      group = {
-        key,
-        label: row.itemId
-          ? (row.serviceName ?? 'Not in this company’s catalogue')
-          : 'Not from the catalogue',
-        code: row.serviceCode ?? null,
-        lineCount: 0,
-        invoicedCents: 0,
-        shareBp: 0,
+    invoice.lines.forEach((line, index) => {
+      const functionalCents = shares[index] ?? 0
+      const key = line.itemId ?? 'uncatalogued'
+
+      let group = groups.get(key)
+      if (!group) {
+        group = {
+          key,
+          label: line.itemId
+            ? // Non-null and not joined. With the Phase 169 foreign key in
+              // place a deleted item nulls the column, so this can now only be
+              // an id belonging to another company — which is a defect, and the
+              // label says so rather than calling it deleted.
+              (line.name ?? 'Not in this company’s catalogue')
+            : 'Not from the catalogue',
+          code: line.code ?? null,
+          lineCount: 0,
+          invoicedCents: 0,
+          shareBp: 0,
+        }
+        groups.set(key, group)
       }
-      groups.set(key, group)
-    }
 
-    group.lineCount++
-    group.invoicedCents += functionalCents
-    total += functionalCents
+      group.lineCount++
+      group.invoicedCents += functionalCents
+      total += functionalCents
+    })
   }
 
   for (const group of groups.values()) {

@@ -287,6 +287,27 @@ export async function applyLayoutSuggestion(
       }
     }
 
+    /*
+      The company predicate is on the write as well as the read (Phase 169).
+
+      Phase 166 wrote this `where` as `eq(id, documentId)` alone. That was
+      **guarded** — the scoped select a few lines up refuses a document of
+      another tenant, and `isolation-guards` classified it `explicit-company` on
+      the strength of that `companyId` in the enclosing function. What was stale
+      was only the register's count, which had said 110 since Phase 155 and
+      found 111.
+
+      It is repeated here anyway, because a guard inferred from the enclosing
+      function holds while the read and the write stay next to each other and a
+      guard in the statement holds whatever is inserted between them. The scan
+      cannot tell those apart; a reader can.
+
+      Worth recording where it was found: `tests/isolation-guards.test.ts` had
+      been failing since Phase 166 and nothing caught it for three phases,
+      because no full suite completed and no targeted run named that file.
+      Second tripwire found red by the same cause, after `refusal-audience` in
+      Phase 167.
+    */
     await tx
       .update(designDocuments)
       .set({
@@ -295,7 +316,9 @@ export async function applyLayoutSuggestion(
         aiRequestId: suggestion.requestId,
         updatedAt: new Date(),
       })
-      .where(eq(designDocuments.id, documentId))
+      .where(
+        and(eq(designDocuments.id, documentId), eq(designDocuments.companyId, ctx.companyId)),
+      )
 
     await recordAudit(
       ctx,

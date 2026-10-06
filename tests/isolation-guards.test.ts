@@ -179,9 +179,21 @@ describe('every write that can be aimed at a row', () => {
     // billed. `scoped-write` at 28 — the update is keyed by proposal and sort
     // order *and* scoped to the company, which is what makes the id a caller
     // hands in unable to reach another tenant's contract.
-    expect(WRITES.length).toBe(110)
+    //
+    // **A hundred and eleven since Phase 166**, which added
+    // `applyLayoutSuggestion` — an accepted layout suggestion moving a
+    // document's blocks. It was guarded from the start, on the `companyId` in
+    // the scoped select above it, so the distribution moved by one and the
+    // conclusion did not. What was wrong for three phases was this number.
+    //
+    // Found in Phase 169, which is the point worth keeping: no full suite
+    // completed between Phase 160 and Phase 169, and no targeted run named this
+    // file. A scan that counts the whole tree cannot be checked by running the
+    // tests near the code that changed — the second tripwire to go red for
+    // exactly that reason, after `refusal-audience` in Phase 167.
+    expect(WRITES.length).toBe(111)
     expect(by).toEqual({
-      'explicit-company': 61,
+      'explicit-company': 62,
       'scoped-write': 28,
       'read-then-refuse': 9,
       'owner-helper': 4,
