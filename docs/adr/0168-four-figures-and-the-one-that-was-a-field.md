@@ -162,6 +162,30 @@ Active items only, from `listServiceItems({ activeOnly: true })`: a deactivated
 service should not be quotable, while the existing lines that point at one keep
 their reference.
 
+## A register noticed the new division the day it was written
+
+`averageValueCents` is `totalValueCents / rows.length`, which the Phase 147
+money-division scan reaches through its `equal` form — and
+`tests/money-division.test.ts` failed on it immediately, naming
+`proposalStats` as a site nobody had classified.
+
+It is not a split: nothing is paid the average, nothing reconciles to it, and
+the residue a split would have to place has nowhere to go because there are no
+parts. So it joins `EXCLUDED` beside `winLossSummary`, which is the same case in
+the same file for the same reason.
+
+Worth recording because this is the register behaving as designed rather than
+being appeased. ADR 0134's rule is that a declaration which *excuses* a site is
+worse than one that misses it, and the thing that makes an exclusion honest is
+that it was written in response to a scan that found the site, not in
+anticipation of one. The sentence had to be earned at the moment the division
+appeared.
+
+It also found this phase's test file one file short: the run named
+`tests/studio.test.ts`, which does not exist — the same slip Phase 165 made —
+and missed `tests/money-division.test.ts` entirely, which is the file that
+caught this. Both are now run.
+
 ## What this does not do
 
 **It does not add `service_item_id` to `invoice_lines`.** The same gap exists

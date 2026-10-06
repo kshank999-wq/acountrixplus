@@ -295,6 +295,17 @@ const EXCLUDED: readonly { file: string; symbol: string; why: string }[] = [
     why: 'An average. Nothing is paid it and nothing is reconciled to it.',
   },
   {
+    file: 'src/modules/crm/analytics.ts',
+    symbol: 'proposalStats',
+    why:
+      'The second average in this file, added by Phase 168 for §9’s "average proposal size" — ' +
+      'and reached by the `equal` form for the same reason `winLossSummary` above is: a total ' +
+      'over a count. Nothing is paid it, nothing reconciles to it, and the residue a split would ' +
+      'have to place has nowhere to go because there are no parts. This scan is what noticed the ' +
+      'new division the day it was written, which is the register working rather than the ' +
+      'register being appeased.',
+  },
+  {
     file: 'src/modules/dimensions/reporting.ts',
     symbol: 'coverageFrom',
     why: 'A ratio reported in basis points. No money comes out of it, so nothing has to add back.',

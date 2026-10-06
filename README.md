@@ -6243,6 +6243,17 @@ count. A line is attributed to its *proposal's* outcome, and `expired` and
 `winLossSummary` excluding dormant deals, because a dormant deal may still be
 alive while an expired proposal is an offer that ran out.
 
+And a register caught the new arithmetic the day it was written.
+`averageValueCents` is a total over a count, which the Phase 147 money-division
+scan reaches through its `equal` form — so `money-division.test.ts` failed
+immediately, naming `proposalStats` as a site nobody had classified. It is not a
+split (nothing is paid the average and the residue has nowhere to go, because
+there are no parts), so it joins `EXCLUDED` beside `winLossSummary`, the same
+case in the same file. That is the register working rather than being appeased:
+ADR 0134's rule is that an exclusion which *excuses* a site is worse than one
+that misses it, and what makes this one honest is that the sentence was earned in
+response to a scan that found the site.
+
 The column is nullable, because a line typed by hand is a real line — which
 forces the report to show the uncatalogued group rather than drop it, or its
 total would silently disagree with `proposalStats.totalValueCents`. And there is
