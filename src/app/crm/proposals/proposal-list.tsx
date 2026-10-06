@@ -38,7 +38,24 @@ const STATUS_STYLES: Record<string, string> = {
   no_decision: 'bg-raised text-faint',
 }
 
-type Line = { description: string; quantity: string; unitPrice: string; isOptional: boolean; chartAccountId: string }
+type Line = {
+  description: string
+  quantity: string
+  unitPrice: string
+  isOptional: boolean
+  chartAccountId: string
+  /** Which catalogue item this line is, when it is one (Phase 168). */
+  serviceItemId: string
+}
+
+type Service = {
+  id: string
+  code: string | null
+  name: string
+  unitPriceCents: number
+  chartAccountId: string | null
+  defaultProposalCopy: string | null
+}
 
 const BLANK: Line = {
   description: '',
@@ -46,17 +63,20 @@ const BLANK: Line = {
   unitPrice: '',
   isOptional: false,
   chartAccountId: '',
+  serviceItemId: '',
 }
 
 export function ProposalList({
   proposals,
   opportunities,
   revenueAccounts,
+  services,
   canManage,
 }: {
   proposals: Proposal[]
   opportunities: Array<{ id: string; title: string; organizationName: string }>
   revenueAccounts: Array<{ id: string; number: string; name: string }>
+  services: Service[]
   canManage: boolean
 }) {
   const router = useRouter()
@@ -93,6 +113,7 @@ export function ProposalList({
         <NewProposalForm
           opportunities={opportunities}
           revenueAccounts={revenueAccounts}
+          services={services}
           onDone={(result) => {
             notify(result)
             if (result.ok) {
@@ -291,10 +312,12 @@ export function ProposalList({
 function NewProposalForm({
   opportunities,
   revenueAccounts,
+  services,
   onDone,
 }: {
   opportunities: Array<{ id: string; title: string; organizationName: string }>
   revenueAccounts: Array<{ id: string; number: string; name: string }>
+  services: Service[]
   onDone: (result: { ok: boolean; message?: string; error?: string }) => void
 }) {
   const [pending, startTransition] = useTransition()
@@ -380,6 +403,52 @@ function NewProposalForm({
       <div className="mt-3 space-y-2">
         {lines.map((line, index) => (
           <div key={index} className="flex flex-wrap gap-2">
+            {services.length > 0 && (
+              /*
+                §9 asks for performance by service/product, and until Phase 168
+                a proposal line had no way to say which product it was — so the
+                only thing to group by was the prose below. This records it.
+
+                Choosing an item fills the description, the price and the
+                revenue account, and all three stay editable: a quote for a
+                catalogue service at a negotiated price is still that service,
+                and losing the link because the number moved would defeat the
+                point. Clearing the choice clears only the link, not the text,
+                because somebody who has edited a description into something
+                else should not lose their words.
+              */
+              <select
+                value={line.serviceItemId}
+                onChange={(event) => {
+                  const chosen = services.find((item) => item.id === event.target.value)
+                  if (!chosen) {
+                    update(index, { serviceItemId: '' })
+                    return
+                  }
+                  update(index, {
+                    serviceItemId: chosen.id,
+                    description:
+                      line.description.trim() === ''
+                        ? (chosen.defaultProposalCopy ?? chosen.name)
+                        : line.description,
+                    unitPrice:
+                      line.unitPrice.trim() === ''
+                        ? (chosen.unitPriceCents / 100).toFixed(2)
+                        : line.unitPrice,
+                    chartAccountId: line.chartAccountId || (chosen.chartAccountId ?? ''),
+                  })
+                }}
+                className="field w-40 py-1.5 text-xs"
+                aria-label={`Line ${index + 1} service`}
+              >
+                <option value="">Not from catalogue</option>
+                {services.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.code ? `${item.code} · ${item.name}` : item.name}
+                  </option>
+                ))}
+              </select>
+            )}
             <input
               value={line.description}
               onChange={(event) => update(index, { description: event.target.value })}
@@ -451,6 +520,7 @@ function NewProposalForm({
                     unitPrice: line.unitPrice,
                     isOptional: line.isOptional,
                     chartAccountId: line.chartAccountId || undefined,
+                    serviceItemId: line.serviceItemId || undefined,
                   })),
                 }),
               )

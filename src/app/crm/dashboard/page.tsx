@@ -8,6 +8,7 @@ import {
   lossReasons,
   pipelineValue,
   proposalStats,
+  serviceBreakdown,
   winLossSummary,
 } from '@/modules/crm/analytics'
 import { stageLabel, type Stage } from '@/modules/crm/pipeline'
@@ -43,14 +44,19 @@ export default async function DashboardPage() {
 
   const canSeeProposals = can(actor, 'proposals:view')
 
-  const [summary, pipeline, sources, owners, losses, proposals] = await Promise.all([
-    winLossSummary(actor),
-    pipelineValue(actor),
-    breakdownBy(actor, 'source'),
-    breakdownBy(actor, 'owner'),
-    lossReasons(actor),
-    canSeeProposals ? proposalStats(actor) : Promise.resolve(null),
-  ])
+  const [summary, pipeline, sources, owners, months, losses, proposals, services] =
+    await Promise.all([
+      winLossSummary(actor),
+      pipelineValue(actor),
+      breakdownBy(actor, 'source'),
+      breakdownBy(actor, 'owner'),
+      // §9's "performance by time period". A cohort by arrival month — see
+      // `BreakdownDimension` for why not by close date.
+      breakdownBy(actor, 'month'),
+      lossReasons(actor),
+      canSeeProposals ? proposalStats(actor) : Promise.resolve(null),
+      canSeeProposals ? serviceBreakdown(actor) : Promise.resolve(null),
+    ])
 
   return (
     <AppShell
@@ -67,9 +73,37 @@ export default async function DashboardPage() {
         <Stat label="Weighted forecast" value={formatCents(summary.forecastValueCents)} accent />
         <Stat label="Open deals" value={String(summary.openCount)} />
         <Stat label="Average won deal" value={formatCents(summary.averageWonValueCents)} />
-        <Stat label="Days to decision" value={String(summary.averageDaysToDecision)} />
+        {/*
+          Was labelled "Days to decision" and measured creation to close, which
+          reads as how long the client took and is how long the whole deal took.
+          §9's time to decision is the proposal figure below.
+        */}
+        <Stat label="Days to close" value={String(summary.averageDaysToClose)} />
         <Stat label="Went dormant" value={String(summary.dormantCount)} />
       </div>
+
+      {proposals && (
+        <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Stat
+            label="Average proposal"
+            value={formatCents(proposals.averageValueCents)}
+            accent
+          />
+          <Stat
+            label="Days to decision"
+            value={
+              proposals.decidedCount === 0 ? '—' : String(proposals.averageDaysToDecision)
+            }
+          />
+          {/*
+            The denominator, shown rather than implied: a mean over three
+            proposals and a mean over three hundred are different claims, and
+            the figure alone cannot tell them apart.
+          */}
+          <Stat label="Decided proposals" value={String(proposals.decidedCount)} />
+          <Stat label="Opened" value={formatBasisPoints(proposals.viewRateBp)} />
+        </div>
+      )}
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         <Card
@@ -147,6 +181,54 @@ export default async function DashboardPage() {
             />
           )}
         </Card>
+
+        <Card
+          title="Performance by month"
+          subtitle="Grouped by the month a deal arrived, so the open column belongs in the row."
+        >
+          {months.length === 0 ? (
+            <Empty>No opportunities yet.</Empty>
+          ) : (
+            <Table
+              head={['Month', 'Won', 'Lost', 'Open', 'Win rate', 'Won value']}
+              rows={[...months]
+                // Chronological, which the zero-padded key sorts correctly and
+                // the readable label would not.
+                .sort((a, b) => b.key.localeCompare(a.key))
+                .map((row) => [
+                  row.label,
+                  String(row.wonCount),
+                  String(row.lostCount),
+                  String(row.openCount),
+                  formatBasisPoints(row.winRateBp),
+                  formatCents(row.wonValueCents),
+                ])}
+            />
+          )}
+        </Card>
+
+        {services && (
+          <Card
+            title="Performance by service"
+            subtitle="Proposal lines, not deals — one proposal can carry several products."
+          >
+            {services.length === 0 ? (
+              <Empty>No proposal lines yet.</Empty>
+            ) : (
+              <Table
+                head={['Service', 'Lines', 'Won', 'Lost', 'Win rate', 'Won value']}
+                rows={services.map((row) => [
+                  row.code ? `${row.code} — ${row.label}` : row.label,
+                  String(row.lineCount),
+                  String(row.wonLineCount),
+                  String(row.lostLineCount),
+                  formatBasisPoints(row.winRateByValueBp),
+                  formatCents(row.wonValueCents),
+                ])}
+              />
+            )}
+          </Card>
+        )}
 
         {proposals && (
           <Card

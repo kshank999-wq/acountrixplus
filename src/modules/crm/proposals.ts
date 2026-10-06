@@ -47,6 +47,15 @@ export type ProposalItemInput = {
   isOptional?: boolean
   isSelected?: boolean
   chartAccountId?: string | null
+  /**
+   * The catalogue item this line was priced from (Phase 168, spec §9).
+   *
+   * Optional, because a line typed by hand is a real line — a business quoting
+   * something new should not have to add a catalogue entry first. Null means
+   * nobody recorded which product it was, and `serviceBreakdown` reports those
+   * lines under their own heading rather than dropping them.
+   */
+  serviceItemId?: string | null
 }
 
 /** Extended amount for a line, rounded half-up to the nearest cent. */
@@ -132,6 +141,7 @@ export async function createProposal(
       isOptional: item.isOptional ?? false,
       isSelected: item.isSelected ?? true,
       chartAccountId: item.chartAccountId ?? null,
+      serviceItemId: item.serviceItemId ?? null,
       sortOrder: index,
     }
   })
@@ -461,6 +471,7 @@ export async function updateProposalItems(
       isOptional: item.isOptional ?? false,
       isSelected: item.isSelected ?? true,
       chartAccountId: item.chartAccountId ?? null,
+      serviceItemId: item.serviceItemId ?? null,
       sortOrder: index,
     }
   })

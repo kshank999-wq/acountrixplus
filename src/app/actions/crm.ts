@@ -216,6 +216,8 @@ const proposalSchema = z.object({
         unitPrice: z.string(),
         isOptional: z.boolean().optional(),
         chartAccountId: z.string().uuid().optional(),
+        /** §9's service/product dimension, recorded where it is known. */
+        serviceItemId: z.string().uuid().optional(),
       }),
     )
     .min(1),
@@ -241,6 +243,7 @@ export async function createProposalAction(
         unitPriceCents: parseAmountToCents(item.unitPrice),
         isOptional: item.isOptional ?? false,
         chartAccountId: item.chartAccountId ?? null,
+        serviceItemId: item.serviceItemId ?? null,
       })),
     })
 

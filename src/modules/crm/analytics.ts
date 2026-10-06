@@ -1,6 +1,13 @@
 import { and, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/db'
-import { opportunities, organizations, proposals, users } from '@/db/schema'
+import {
+  opportunities,
+  organizations,
+  proposalItems,
+  proposals,
+  serviceItems,
+  users,
+} from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { basisPoints } from '@/lib/ratio'
 import { OPEN_STAGES, weightedValueCents } from './pipeline'
@@ -38,8 +45,22 @@ export type WinLossSummary = {
   winRateByValueBp: number
 
   averageWonValueCents: number
-  /** Mean days from creation to close, across decided opportunities. */
-  averageDaysToDecision: number
+  /**
+   * Mean days from an opportunity being created to it being closed.
+   *
+   * **Renamed in Phase 168, and the old name was the defect.** This was
+   * `averageDaysToDecision` and the dashboard labelled it *"Days to
+   * decision"* — which reads as how long the client took to answer, and is in
+   * fact how long the whole deal took from first inquiry. A deal that sat as a
+   * lead for three months and was answered in a day counted as ninety-odd days
+   * of "decision".
+   *
+   * §9's *"average time to decision"* is the other interval, and it is
+   * `ProposalStats.averageDaysToDecision` — proposal sent to proposal decided.
+   * Both are worth having and they are not the same question, so neither may
+   * carry a name that could mean the other.
+   */
+  averageDaysToClose: number
 }
 
 /**
@@ -99,7 +120,7 @@ export async function winLossSummary(
     winRateByValueBp: basisPoints(wonValueCents, wonValueCents + lostValueCents),
 
     averageWonValueCents: won.length === 0 ? 0 : Math.round(wonValueCents / won.length),
-    averageDaysToDecision:
+    averageDaysToClose:
       decidedDays.length === 0 ? 0 : Math.round(sum(decidedDays) / decidedDays.length),
   }
 }
@@ -122,9 +143,30 @@ export type BreakdownRow = {
  * comes from a different table per dimension, and the row counts here are
  * small enough that a second pass costs nothing.
  */
+/**
+ * The dimensions a breakdown can group by (spec §9).
+ *
+ * `month` and `quarter` are Phase 168's answer to §9's *"performance by time
+ * period"*, and they group on **`created_at`** like every other dimension here
+ * — a cohort, not a calendar of outcomes.
+ *
+ * That choice needs stating because the other reading is tempting and wrong.
+ * Keyed on the close date, a period's win rate would mix deals that arrived
+ * years apart, and an open deal would have no period at all — so the open
+ * column would be empty and the rate would look like a complete picture of a
+ * period while describing only its decided half. Keyed on creation, a row says
+ * *"of the deals that arrived in this period, this is how they have turned
+ * out"*, which is a claim the open column belongs in.
+ *
+ * It also matches `rangeConditions`, which already filters on `created_at`. A
+ * filter and a grouping that disagreed about which date they meant would be two
+ * answers to one question inside one function.
+ */
+export type BreakdownDimension = 'owner' | 'source' | 'industry' | 'region' | 'month' | 'quarter'
+
 export async function breakdownBy(
   ctx: ActorContext,
-  dimension: 'owner' | 'source' | 'industry' | 'region',
+  dimension: BreakdownDimension,
   range: DateRange = {},
 ): Promise<BreakdownRow[]> {
   requirePermission(ctx, 'crm:view')
@@ -138,6 +180,7 @@ export async function breakdownBy(
       source: opportunities.source,
       industry: organizations.industry,
       region: organizations.region,
+      createdAt: opportunities.createdAt,
     })
     .from(opportunities)
     .innerJoin(organizations, eq(organizations.id, opportunities.organizationId))
@@ -181,14 +224,54 @@ export async function breakdownBy(
   return result.sort((a, b) => b.wonValueCents - a.wonValueCents)
 }
 
+const MONTH_NAMES = [
+  'January',
+  'February',
+  'March',
+  'April',
+  'May',
+  'June',
+  'July',
+  'August',
+  'September',
+  'October',
+  'November',
+  'December',
+]
+
+/**
+ * The key is sortable and the label is readable, which is why they differ.
+ *
+ * `2026-04` sorts; *"April 2026"* reads. A single string cannot do both, and
+ * the breakdown is sorted by won value rather than by key — so a caller that
+ * wants chronological order sorts on `key`, and it works because the key is
+ * zero-padded. UTC throughout, for the reason every other date in this
+ * codebase is: a company's month boundary is not the server's.
+ */
+function periodKey(dimension: 'month' | 'quarter', at: Date): { key: string; label: string } {
+  const year = at.getUTCFullYear()
+  const month = at.getUTCMonth()
+
+  if (dimension === 'quarter') {
+    const quarter = Math.floor(month / 3) + 1
+    return { key: `${year}-Q${quarter}`, label: `Q${quarter} ${year}` }
+  }
+
+  return {
+    key: `${year}-${String(month + 1).padStart(2, '0')}`,
+    label: `${MONTH_NAMES[month]} ${year}`,
+  }
+}
+
 function groupKey(
-  dimension: 'owner' | 'source' | 'industry' | 'region',
+  dimension: BreakdownDimension,
   row: {
     ownerId: string | null
     ownerName: string | null
     source: string | null
     industry: string | null
     region: string | null
+    createdAt: Date
   },
 ): { key: string; label: string } {
   switch (dimension) {
@@ -200,6 +283,9 @@ function groupKey(
       return { key: row.industry ?? 'unknown', label: row.industry ?? 'Unspecified industry' }
     case 'region':
       return { key: row.region ?? 'unknown', label: row.region ?? 'Unspecified region' }
+    case 'month':
+    case 'quarter':
+      return periodKey(dimension, row.createdAt)
   }
 }
 
@@ -265,6 +351,38 @@ export type ProposalStats = {
   totalValueCents: number
   /** Sent proposals that were opened at least once, in basis points. */
   viewRateBp: number
+
+  /**
+   * §9's **average proposal size**.
+   *
+   * Distinct from `WinLossSummary.averageWonValueCents`, which is the mean
+   * `expected_value_cents` of a won *opportunity* — a figure somebody guessed
+   * when the deal was created. This is the mean total of a priced document with
+   * line items behind it. The two can differ by a lot, and the gap between them
+   * is itself informative: it says how well the business estimates.
+   *
+   * Drafts are included, because a draft is a proposal somebody has priced. The
+   * `byStatus` map is there for anybody who wants it narrower.
+   */
+  averageValueCents: number
+
+  /**
+   * §9's **average time to decision**: proposal sent to proposal decided.
+   *
+   * The audit said this needed *"a fact nothing currently records per
+   * proposal"*. Measured, both ends have been recorded since Phase 3 —
+   * `sent_at` by `sendProposal`, `decided_at` by `decideProposal` and by the
+   * public acceptance path. Nothing computed it, which is a different problem
+   * from nothing recording it.
+   *
+   * Counted only over proposals with **both** timestamps, so the denominator is
+   * proposals that actually went out and came back. `decidedCount` is returned
+   * beside it rather than left implicit, because a mean over three proposals
+   * and a mean over three hundred are different claims and the figure alone
+   * cannot tell them apart.
+   */
+  averageDaysToDecision: number
+  decidedCount: number
 }
 
 /** Proposal counts and value by status (spec §9). */
@@ -284,6 +402,8 @@ export async function proposalStats(
       status: proposals.status,
       totalCents: proposals.totalCents,
       viewCount: proposals.viewCount,
+      sentAt: proposals.sentAt,
+      decidedAt: proposals.decidedAt,
     })
     .from(proposals)
     .where(scoped(ctx, proposals, ...conditions))
@@ -300,12 +420,172 @@ export async function proposalStats(
   const reachedClient = rows.filter((r) => r.status !== 'draft')
   const opened = reachedClient.filter((r) => r.viewCount > 0)
 
+  /*
+    Both ends required. A proposal with a decision and no `sent_at` would be one
+    somebody marked won without sending — possible, and not an interval.
+  */
+  const decidedDays = rows
+    .filter((r) => r.sentAt !== null && r.decidedAt !== null)
+    .map((r) => daysBetween(r.sentAt!, r.decidedAt!))
+
+  const totalValueCents = sum(rows.map((r) => r.totalCents))
+
   return {
     byStatus,
     totalCount: rows.length,
-    totalValueCents: sum(rows.map((r) => r.totalCents)),
+    totalValueCents,
     viewRateBp: basisPoints(opened.length, reachedClient.length),
+    averageValueCents: rows.length === 0 ? 0 : Math.round(totalValueCents / rows.length),
+    averageDaysToDecision:
+      decidedDays.length === 0 ? 0 : Math.round(sum(decidedDays) / decidedDays.length),
+    decidedCount: decidedDays.length,
   }
+}
+
+export type ServiceBreakdownRow = {
+  /** The service item's id, or `'uncatalogued'`. */
+  key: string
+  label: string
+  /** The catalogue code, when there is one. */
+  code: string | null
+  /** Proposal **lines**, not deals. */
+  lineCount: number
+  wonLineCount: number
+  lostLineCount: number
+  openLineCount: number
+  wonValueCents: number
+  lostValueCents: number
+  openValueCents: number
+  /** Won line value ÷ decided line value, in basis points. */
+  winRateByValueBp: number
+}
+
+/**
+ * Performance by service or product (spec §9), and **not** a `breakdownBy`
+ * dimension.
+ *
+ * `breakdownBy` groups *opportunities*: its `wonCount` is a number of deals.
+ * A service lives on a proposal **line**, and one proposal can carry six
+ * products, so grouping by service changes the grain. Returning a `BreakdownRow`
+ * from it would put line counts in a field every other caller reads as deals —
+ * a false declaration of the kind Phases 110 and 125 found, and the reason this
+ * has its own row type with `lineCount` in the name of every count.
+ *
+ * ## The uncatalogued group is reported, never dropped
+ *
+ * `service_item_id` is nullable because a line typed by hand is a real line.
+ * Those lines are grouped under `'uncatalogued'` and shown, because a breakdown
+ * that quietly omitted them would have a total that disagrees with
+ * `proposalStats.totalValueCents` — and the person reading it would have no way
+ * to know which figure to trust.
+ *
+ * Expect that group to hold everything at first. Nothing recorded the catalogue
+ * item before Phase 168 and there was no honest way to backfill it, so the row
+ * labelled *"Not from the catalogue"* is the measurement, not a gap in the
+ * report.
+ *
+ * ## A line is attributed to its proposal's outcome
+ *
+ * Won and lost follow the proposal's status, not the opportunity's. A proposal
+ * is the offer that named the product; if the deal was later won on a second,
+ * different proposal, this product was in the one that lost. Optional lines the
+ * client declined are excluded from value, because an unselected line was
+ * offered and not bought.
+ */
+export async function serviceBreakdown(
+  ctx: ActorContext,
+  range: DateRange = {},
+): Promise<ServiceBreakdownRow[]> {
+  requirePermission(ctx, 'proposals:view')
+
+  const conditions: (SQL | undefined)[] = [
+    range.startDate ? gte(proposals.createdAt, new Date(range.startDate)) : undefined,
+    range.endDate ? lte(proposals.createdAt, new Date(`${range.endDate}T23:59:59Z`)) : undefined,
+  ]
+
+  const rows = await db
+    .select({
+      serviceItemId: proposalItems.serviceItemId,
+      serviceName: serviceItems.name,
+      serviceCode: serviceItems.code,
+      lineDescription: proposalItems.description,
+      amountCents: proposalItems.amountCents,
+      isOptional: proposalItems.isOptional,
+      isSelected: proposalItems.isSelected,
+      status: proposals.status,
+    })
+    .from(proposalItems)
+    .innerJoin(proposals, eq(proposals.id, proposalItems.proposalId))
+    .leftJoin(serviceItems, eq(serviceItems.id, proposalItems.serviceItemId))
+    .where(scoped(ctx, proposalItems, ...conditions))
+
+  const groups = new Map<string, ServiceBreakdownRow>()
+
+  for (const row of rows) {
+    // A declined optional line was offered and not bought, so it is neither won
+    // nor open. Counted in `lineCount` so the offer is still visible.
+    const counted = !(row.isOptional && !row.isSelected)
+    const key = row.serviceItemId ?? 'uncatalogued'
+
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        label: row.serviceItemId
+          ? (row.serviceName ?? 'Deleted catalogue item')
+          : 'Not from the catalogue',
+        code: row.serviceCode ?? null,
+        lineCount: 0,
+        wonLineCount: 0,
+        lostLineCount: 0,
+        openLineCount: 0,
+        wonValueCents: 0,
+        lostValueCents: 0,
+        openValueCents: 0,
+        winRateByValueBp: 0,
+      }
+      groups.set(key, group)
+    }
+
+    group.lineCount++
+    if (!counted) continue
+
+    if (row.status === 'won') {
+      group.wonLineCount++
+      group.wonValueCents += row.amountCents
+    } else if (row.status === 'lost' || row.status === 'expired' || row.status === 'no_decision') {
+      /*
+        Three statuses, one column. `expired` and `no_decision` are decisions
+        the client never gave, and leaving them out of the denominator would
+        report the win rate against only the proposals somebody chased to an
+        answer — which flatters it exactly where a business is weakest.
+
+        This is deliberately the opposite call from `winLossSummary`, which
+        excludes `dormant` opportunities. The reason differs with the grain: a
+        dormant *deal* may still be alive, while an expired *proposal* is an
+        offer that ran out. Said here rather than left as an inconsistency for
+        somebody to find.
+      */
+      group.lostLineCount++
+      group.lostValueCents += row.amountCents
+    } else {
+      group.openLineCount++
+      group.openValueCents += row.amountCents
+    }
+  }
+
+  // Lines whose catalogue item was deleted lose their name on the join; the
+  // first row to arrive names the group, so a later null must not overwrite it.
+  for (const group of groups.values()) {
+    group.winRateByValueBp = basisPoints(
+      group.wonValueCents,
+      group.wonValueCents + group.lostValueCents,
+    )
+  }
+
+  return [...groups.values()].sort(
+    (a, b) => b.wonValueCents - a.wonValueCents || a.label.localeCompare(b.label),
+  )
 }
 
 /** Open pipeline by stage, with weighted forecast (spec §9). */

@@ -4,6 +4,7 @@ import { AppShell, SubNav } from '@/components/app-shell'
 import { listProposals, schedulesFor } from '@/modules/crm/proposals'
 import { listOpportunities } from '@/modules/crm/opportunities'
 import { categorizableAccounts } from '@/modules/coa/service'
+import { listServiceItems } from '@/modules/studio/service'
 import { CRM_NAV } from '../nav'
 import { sentVersions } from '@/modules/pdf/service'
 import { ProposalList } from './proposal-list'
@@ -27,13 +28,20 @@ export default async function ProposalsPage() {
 
   const canManage = can(actor, 'proposals:manage')
 
-  const [proposals, opportunities, accounts] = await Promise.all([
+  const [proposals, opportunities, accounts, services] = await Promise.all([
     listProposals(actor),
     listOpportunities(actor, {
       stages: ['new_inquiry', 'qualified', 'proposal_draft', 'proposal_sent', 'viewed', 'follow_up', 'negotiation'],
     }),
     // Revenue accounts, so a won proposal can become an invoice without re-entry.
     can(actor, 'bookkeeping:view') ? categorizableAccounts(actor) : Promise.resolve([]),
+    /*
+      The service catalogue, so a proposal line can say which product it is
+      (Phase 168, §9's performance-by-service dimension). Active items only —
+      a deactivated service should not be quotable, and the existing lines that
+      point at one keep their reference.
+    */
+    listServiceItems(actor, { activeOnly: true }),
   ])
 
   // One query for every sent version across the page, rather than one per
@@ -80,6 +88,14 @@ export default async function ProposalsPage() {
         revenueAccounts={accounts
           .filter((a) => a.type === 'revenue')
           .map((a) => ({ id: a.id, number: a.number, name: a.name }))}
+        services={services.map((item) => ({
+          id: item.id,
+          code: item.code,
+          name: item.name,
+          unitPriceCents: item.unitPriceCents,
+          chartAccountId: item.chartAccountId,
+          defaultProposalCopy: item.defaultProposalCopy,
+        }))}
         canManage={canManage}
       />
     </AppShell>

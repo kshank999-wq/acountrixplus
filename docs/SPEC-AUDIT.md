@@ -67,7 +67,7 @@ same failure to re-measure, and ADR 0164 states it as a rule.
 | 20 | Development Phases | Phases 0–8 all have shipped work |
 | 21–24 | Assignments, DoD, rules, next steps | — process |
 
-### §9 — the four real gaps
+### §9 — the four real gaps (all four built in Phase 168)
 
 `modules/crm/analytics.ts` provides `winLossSummary`, `breakdownBy`,
 `lossReasons`, `proposalStats` and `pipelineValue`. Against §9's own list:
@@ -80,10 +80,32 @@ same failure to re-measure, and ADR 0164 states it as a rule.
 | by salesperson, lead source, industry, geography | ✓ `breakdownBy` — `owner`, `source`, `industry`, `region` |
 | opens/views | ✓ `viewRateBp`, `proposal_views` |
 | lost-opportunity dashboard, loss reasons, re-engagement | ✓ `lossReasons`, nurture handoff |
-| **average proposal size** | **missing** — derivable from `totalValueCents / totalCount`, not computed |
-| **average time to decision** | **missing** — nothing measures sent→decided |
-| **performance by service/product** | **missing** — not a `breakdownBy` dimension |
-| **performance by time period** | **missing** — not a `breakdownBy` dimension |
+| average proposal size | ✓ `proposalStats.averageValueCents` — **built in Phase 168** |
+| average time to decision | ✓ `proposalStats.averageDaysToDecision` — **built in Phase 168** |
+| performance by service/product | ✓ `serviceBreakdown` — **built in Phase 168** |
+| performance by time period | ✓ `breakdownBy('month' \| 'quarter')` — **built in Phase 168** |
+
+> **Closed by Phase 168, and the paragraph below was backwards on both halves.**
+>
+> *Average time to decision* needed **no** new fact. `proposals.sent_at` is
+> written by `sendProposal` and `proposals.decided_at` by `decideProposal` and
+> by the public acceptance path — both since Phase 3. Nothing computed the
+> interval, which is a different problem from nothing recording it.
+>
+> *Performance by service/product* needed one, **and a screen**.
+> `proposal_items` had no reference to the service catalogue at all, so the only
+> thing to group a line by was the prose somebody typed. That is Phase 136's
+> `a field` blocker, not a re-grouping.
+>
+> And §9's *average time to decision* was not merely missing: a different
+> interval was already on the dashboard under that name —
+> `WinLossSummary.averageDaysToDecision`, measuring `closed_at - created_at`.
+> Renamed to `averageDaysToClose` in Phase 168.
+>
+> Third false *reason* in this audit's lineage, after §9's "geography analytics"
+> (ADR 0164) and §11's "segments has strategic-account segmentation" (ADR 0167).
+> The audit's claims about what is missing have held; its explanations of why
+> have not.
 
 The first two are small and the second two are the same shape as the four
 dimensions that exist. Worth noting that *"average time to decision"* is the only
@@ -175,8 +197,11 @@ point of having done it:
    should be made before the prompt.~~ **Done: Phases 165–167.** The ordering was
    right for the stated reason and wrong about which was larger — see the note
    under §11.
-2. **§9's four analytics gaps**, which are one small phase: two derived figures,
-   one new recorded fact (sent→decided), and two more `breakdownBy` dimensions.
+2. ~~**§9's four analytics gaps**, which are one small phase: two derived figures,
+   one new recorded fact (sent→decided), and two more `breakdownBy` dimensions.~~
+   **Done: Phase 168.** Not one small phase, and not that shape: the "new
+   recorded fact" already existed, and one of the "re-groupings" needed a column
+   and a screen. See the note under §9.
 3. **A bullet-level pass** over the sections this audit verified only at module
    level, which is where the honest unknowns are.
 

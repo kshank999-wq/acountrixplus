@@ -1,0 +1,63 @@
+-- Phase 168: four analytics gaps, and the one that was a field.
+--
+-- ADR 0167 nominated §9's four remaining gaps from `docs/SPEC-AUDIT.md`, which
+-- said of them:
+--
+--   The first two are small and the second two are the same shape as the four
+--   dimensions that exist. Worth noting that "average time to decision" is the
+--   only one needing a fact nothing currently records per proposal -- the
+--   others are re-groupings of data already there.
+--
+-- Measured, that is **backwards on both halves**.
+--
+-- ## "Average time to decision" needs no new fact
+--
+-- `proposals.sent_at` is written by `sendProposal`, and `proposals.decided_at`
+-- is written by both decision paths -- `decideProposal` when somebody records
+-- the outcome, and `crm/acceptance.ts` when a client accepts through the public
+-- link. The interval has been recorded since Phase 3. Nothing computes it,
+-- which is a different problem from nothing recording it.
+--
+-- ## "Performance by service/product" needs one, and a screen
+--
+-- `proposal_items` carries `description`, a price, and an optional
+-- `chart_account_id`. There is **no reference to the service catalogue at all**,
+-- so the only thing to group by is the prose somebody typed -- and "Kitchen
+-- fit-out" and "Kitchen fit out" are two products.
+--
+-- `invoice_lines` is the same, so the question cannot be answered from realised
+-- revenue either.
+--
+-- This is Phase 136's `a field` blocker exactly: a column and the screen that
+-- fills it, because the path cannot ask the question. The proposal line form
+-- takes free text and never offers the catalogue, so the id is not discarded --
+-- it is never known. Both halves are built in this phase.
+--
+-- The pattern is already here twice: `time_entries.service_item_id` and
+-- `appointments.service_item_id`, and `timebilling/billing.ts` already groups
+-- by it. Proposals were the gap.
+
+ALTER TABLE proposal_items
+  -- Nullable, and `set null` on delete, matching `time_entries`.
+  --
+  -- A line typed by hand is a real line and must stay expressible: a business
+  -- quoting something it has never quoted before should not have to add a
+  -- catalogue entry first. So the breakdown reports an explicit "not from the
+  -- catalogue" group rather than dropping those lines -- otherwise its total
+  -- would silently disagree with `proposalStats.totalValueCents`, which is two
+  -- answers to one question.
+  ADD COLUMN service_item_id uuid REFERENCES service_items(id) ON DELETE SET NULL;
+
+CREATE INDEX proposal_items_service_idx ON proposal_items (company_id, service_item_id);
+
+--------------------------------------------------------------------------------
+-- No backfill, and the default stays null.
+--
+-- Phase 165 backfilled `assets.provenance_origin` because every existing row
+-- genuinely was uploaded by a person -- a measured fact. Phase 157 declined to
+-- backfill because what it would have asserted was never recorded.
+--
+-- This is Phase 157's case. Matching an existing line to a catalogue entry by
+-- comparing its description would be a guess asserted as a fact, and the rows
+-- it got wrong would be indistinguishable from the rows it got right. A null
+-- here says "nobody recorded which product this was", which is true.

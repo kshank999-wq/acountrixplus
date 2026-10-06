@@ -26,6 +26,8 @@ import { companies, users } from './tenancy'
  */
 import { invoices } from './receivables'
 import { journalEntries } from './ledger'
+/** `service_items` for `proposal_items.service_item_id` (Phase 168). */
+import { serviceItems } from './studio'
 
 
 /**
@@ -394,10 +396,32 @@ export const proposalItems = pgTable(
 
     /** Revenue account used when a won proposal becomes an invoice. */
     chartAccountId: uuid('chart_account_id'),
+
+    /**
+     * The catalogue item this line was priced from (Phase 168, spec §9).
+     *
+     * §9 asks for *"performance by service/product"*, and until this column
+     * existed the only thing to group a proposal line by was the prose somebody
+     * typed — so "Kitchen fit-out" and "Kitchen fit out" were two products.
+     * `time_entries` and `appointments` have carried the same reference for
+     * longer; proposals were the gap.
+     *
+     * Nullable on purpose. A line typed by hand is a real line: a business
+     * quoting something it has never quoted before should not have to add a
+     * catalogue entry first. So `breakdownBy('service')` reports an explicit
+     * "not from the catalogue" group rather than dropping those lines, because
+     * a breakdown whose total disagrees with `proposalStats.totalValueCents`
+     * would be two answers to one question.
+     */
+    serviceItemId: uuid('service_item_id').references(() => serviceItems.id, {
+      onDelete: 'set null',
+    }),
+
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => ({
     proposalIdx: index('proposal_items_proposal_idx').on(t.proposalId),
+    serviceIdx: index('proposal_items_service_idx').on(t.companyId, t.serviceItemId),
   }),
 )
 

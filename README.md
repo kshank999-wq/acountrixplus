@@ -6189,6 +6189,69 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### Four figures, and the one that was a field (Phase 168)
+
+ADR 0167 nominated §9's four remaining gaps, and `docs/SPEC-AUDIT.md` said
+*"average time to decision is the only one needing a fact nothing currently
+records per proposal — the others are re-groupings of data already there."*
+Measured, that is **backwards on both halves**. `proposals.sent_at` and
+`proposals.decided_at` have both been written since Phase 3, by `sendProposal`
+and by both decision paths — nothing computed the interval, which is a different
+problem from nothing recording it. Meanwhile `proposal_items` had no reference to
+the service catalogue at all, so the only thing to group a line by was the prose
+somebody typed, and "Kitchen fit-out" and "Kitchen fit out" are two products.
+That is Phase 136's `a field` blocker: a column *and* the screen that fills it.
+
+Third instance of this error in the audit's lineage, after ADR 0164's "geography
+analytics" and ADR 0166's "segments has strategic-account segmentation". The
+pattern is specific enough to name now: **the audit's claims have been reliable
+and its reasons have not.**
+
+The sharpest finding was live on a screen. `WinLossSummary.averageDaysToDecision`
+measured `closed_at - created_at` — the whole deal, from first inquiry — and the
+dashboard labelled it **"Days to decision"**, which reads as how long the client
+took. A deal that sat as a lead for three months and was answered in a day read
+as ninety-odd days of "decision". So §9's figure was not merely missing: a
+different interval was reported under its name, which is worse than absence,
+because a missing figure prompts somebody to ask for it and a wrong one is acted
+on. The field's own docstring said "creation to close" the whole time; nobody
+compared it to the label. Renamed to `averageDaysToClose`, with the §9 figure
+taking the name on `ProposalStats` — renamed rather than added beside it, because
+two fields whose names could each mean the other is the defect and not the
+remedy.
+
+Average proposal size is likewise not `averageWonValueCents`: that averages a
+number somebody *guessed* when the deal was created, and this averages a priced
+document with line items behind it. The gap between them says how well the
+business estimates. `decidedCount` is returned beside the decision interval
+rather than left implicit, because a mean over three proposals and a mean over
+three hundred are different claims.
+
+The period dimension groups on **arrival**, not outcome. Keyed on the close date
+a period's win rate mixes deals that arrived years apart and an open deal has no
+period at all — so the open column would be empty while the rate looked like a
+complete picture. Keyed on creation a row says *"of the deals that arrived in
+this period, this is how they have turned out"*, which is a claim the open column
+belongs in, and it matches the filter `rangeConditions` already applies.
+
+Service is **not** a `breakdownBy` dimension, because the grain changes:
+`breakdownBy` groups opportunities and its `wonCount` is deals, while a service
+lives on a proposal line and one proposal can carry six products. So
+`serviceBreakdown` has its own row type with `lineCount` in the name of every
+count. A line is attributed to its *proposal's* outcome, and `expired` and
+`no_decision` count against the win rate — deliberately the opposite call from
+`winLossSummary` excluding dormant deals, because a dormant deal may still be
+alive while an expired proposal is an offer that ran out.
+
+The column is nullable, because a line typed by hand is a real line — which
+forces the report to show the uncatalogued group rather than drop it, or its
+total would silently disagree with `proposalStats.totalValueCents`. And there is
+**no backfill**: matching a line to a catalogue entry by comparing descriptions
+would be a guess asserted as a fact, so a null says "nobody recorded which
+product this was", which is true (Phase 157's rule, where Phase 165's backfill
+was the opposite case).
+
+
 ### The accounts nobody had called (Phase 167)
 
 ADR 0166 nominated §11's last unimplemented capability, the **AI Strategic
@@ -8224,6 +8287,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/four-figures-and-the-one-that-was-a-field.test.ts` | **Four figures, and the one that was a field** (Phase 168): §9's last four gaps, and the audit sentence under them that was backwards on both halves. *Average time to decision* needed no new fact — `sent_at` and `decided_at` have been written since Phase 3 — while *performance by service/product* needed a column and the screen that fills it, because a proposal line had no reference to the catalogue and the only thing to group by was typed prose. A figure was already on the dashboard labelled "Days to decision" measuring creation to close, so the test asserts the old name is gone rather than coexisting. Average proposal size is a priced document and not the guess on the opportunity; the period dimension groups on arrival, so an open deal has a period at all; `serviceBreakdown` reports lines and not deals, counts an expired proposal against the win rate, shows the uncatalogued group so its total reconciles, and records nothing where nothing was chosen rather than matching by description |
 | `tests/the-accounts-nobody-had-called.test.ts` | **The accounts nobody had called** (Phase 167): §11's Strategic Account Assistant, and the half of it that is arithmetic. Identifying a neglected high-value account is `max(occurred_at)` against a cadence, a sum of invoices and a weighted pipeline, so it lives in a pure core with no database, no clock and no gateway — and the list answers with the AI module switched off, which §11 requires of the core product. A ground that fires on every row is not a finding, so a lead and a vendor have no cadence at all; the strategic override tightens one and never invents one; and what is at stake is a `max` and never a sum, because adding realised revenue to the weighted pipeline double-counts a renewal. `asOf` is a parameter all the way down, so the list can be asked what it looked like before the cadence elapsed. Writing it found `unowned` firing on nothing — `createOrganization` defaults the owner to its creator — and `intake.ts` as the path that produces one: a website lead has no acting user, so the accounts most likely to be unowned and uncontacted are the ones that arrived by themselves |
 | `tests/a-layout-a-machine-proposed.test.ts` | **A layout a machine proposed** (Phase 166): the AI Design Assistant, and the gap in Phase 165 that reading §11 closely found. What this assistant generates is the layout, which is the document, and provenance was on `assets` — so a document laid out entirely by an accepted suggestion and illustrated with the client's own photographs disclosed nothing. The schema permits an ordering over ids the model was given, never a block list, so ids it invents are dropped and blocks it omits are appended: the worst a bad suggestion can do is rearrange. A suggestion with no ledger row is refused with a sentence rather than left to the CHECK, and `markAccepted` runs last. `duplicateDocument` is where `derivedProvenance` earned the caller ADR 0165 said it lacked — a person authored the act, the copy contains the machine-laid-out artifact. Writing it found the mock provider had no `design` heuristic, found that `suggestLayout` asked for `proposals:manage` on documents that are all marketing documents, and found five of its own tests passing vacuously behind `if (!ok) return` while the module sat off by default |
 | `tests/what-the-client-is-told.test.ts` | **What the client is told** (Phase 165): the provenance decision §11 requires before a Design Assistant can exist. The lattice ranks disclosure rather than credit — a crop of an AI-generated image still contains AI-generated material, so `strongerOf` takes the join and a parent's disclosure survives the child's edit. The database refuses both incoherent shapes, and the dangerous direction is the second: a human origin carrying an AI request would let generated material be disclosed as human-made. An unknown origin trips both constraints, asserted as *one of the two* because pinning the name would assert an evaluation order nothing promises. Then the chain to the client: one generated background in an otherwise hand-made document still discloses, and the disclosure is its own render field rather than appended to the author's footer — because a disclosure the author can edit out is not a disclosure |

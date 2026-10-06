@@ -631,6 +631,13 @@
       "when": 1792000000000,
       "tag": "0089_phase167_strategic_account_feature",
       "breakpoints": true
+    },
+    {
+      "idx": 90,
+      "version": "7",
+      "when": 1792100000000,
+      "tag": "0090_phase168_proposal_line_service_item",
+      "breakpoints": true
     }
   ]
 }
