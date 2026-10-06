@@ -6189,6 +6189,52 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### Reading every bullet (Phase 173)
+
+`docs/SPEC-AUDIT.md` said of itself that *"a bullet-level pass over §3–§8, §10
+and §12–§18 would likely find more"*. It found **eight capabilities with nothing
+behind them**, plus two adjacent findings — measured against the source rather
+than reasoned about.
+
+**Eight of the nine rows are in §7 and §8**, the design engine, and that is the
+finding under the findings. ADR 0152 and the audit both called §7 *"the largest
+unbuilt piece"* without saying **which** parts, which made it a label rather than
+a measurement: a sentence nobody can act on, check, or shrink. It is now nine
+specific things — comments/questions on the client link, a generic `table` block
+distinct from `pricingTable`, crop/mask, SVG import/export, the artboard
+affordances, the vector primitives, two of §7's twelve named components
+(`deliverables` and `assumptions`), asset association to campaigns and contacts
+(§8), and team bios (§15).
+
+The other sections hold up, and in two places better than the bullet asks: §3's
+rule engine tests five fields and **combines** them through `matchType: 'all' |
+'any'` over a conditions array, where the bullet only says "or combinations";
+§4's controlled reopen sits behind its own `reconciliation:reopen` permission
+rather than being bundled with completion. §3's seven review states exist in the
+spec's own order, §10's segmentation covers every dimension named, and 33 of
+§16's 35 entities are tables.
+
+Three things measured as absent are **not** called gaps, recorded so a later pass
+does not count them: §16's `Role` and `Permission` are code constants and
+`AIUsage` is served by `ai_requests`, which §12 itself calls the usage ledger;
+§3's "bulk rule creation" is satisfied on one reading (`applyToExisting`) and not
+the other, left as an ambiguity rather than decided, because deciding it in an
+audit would be the audit inventing a requirement.
+
+And §7's own deferral is narrower than it is convenient to read. *"Advanced
+Illustrator-class path editing can be phased in"* defers **path editing** and
+nothing else — guides, rulers, snapping, layers, zoom and undo/redo are layout
+affordances, not vector authoring. The audit now records both parts and names
+which one the spec defers.
+
+The one finding that is not a missing bullet: `bank_transactions.provider_category`
+is imported and **not** in `RULE_FIELDS`. By the letter §3 is satisfied — it
+names five fields and all five exist — but the bank supplies its own category on
+every transaction, it is stored, and a rule cannot test it. Recorded as adjacent
+rather than as a §3 failure, because stretching a bullet to cover something it
+does not say is what Phase 164 was written to stop.
+
+
 ### The key that would have done nothing (Phase 172)
 
 ADR 0171 nominated measuring the ceiling and guessed the blocker would be

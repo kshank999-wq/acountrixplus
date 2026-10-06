@@ -175,17 +175,83 @@ switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.
 
+## The bullet-level pass (Phase 173)
+
+> The section below predicted that a bullet-level pass "would likely find more".
+> It did: **eight capabilities with nothing behind them, and two adjacent
+> findings**, all but one of them in §7 and §8 — the design engine, which this
+> audit had marked as the largest unbuilt piece without saying which parts.
+
+### Verified complete, bullet by bullet
+
+- **§3 Daily Bookkeeping** — all 13. The seven review states exist in the
+  spec's own order (`new, suggested, needs_review, categorized, matched,
+  excluded, reconciled`); rules test five fields and **combine** them through
+  `matchType: 'all' | 'any'` over a `conditions[]` array, which is more than the
+  bullet asks; `undoLast`, `bulkCategorize`, splits, transfers, invoice
+  matching and attachments all exist.
+- **§4 Reconciliation** — all 6, including the controlled reopen, which is
+  behind its own `reconciliation:reopen` permission rather than bundled with
+  completion.
+- **§10 Marketing & Prospecting** — all 6. `SEGMENT_FIELDS` covers every
+  dimension the first bullet names, with a `segments` row serving as the "saved
+  filter".
+- **§16 Core Data Model** — 33 of the 35 named entities are tables. `Role` and
+  `Permission` are code constants in `modules/permissions`, and `AIUsage` is
+  served by `ai_requests`, which §12 calls the usage ledger. Those are modelling
+  choices rather than gaps, and are recorded so nobody counts them twice.
+- **§17 Service Boundaries** — all 12 have a module.
+
+### Eight capabilities with nothing behind them
+
+| § | capability | measured |
+| --- | --- | --- |
+| 7 | **Comments/questions on the client link** | No table, column or module. The link tracks views and takes an acceptance; a client cannot ask a question through it. |
+| 7 | **Generic `table` block** | §7 names *"tables, pricing tables"* as two things. `pricingTable` exists; a plain table does not, so a specification table in a proposal has to be built from `keyValue` rows. |
+| 7 | **Crop/mask on images** | Nothing. An image block places a whole asset. |
+| 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
+| 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
+| 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 16 block types. |
+| 7 | **`deliverables` and `assumptions`** | 10 of the 12 components §7 names have a dedicated block or column; these two have neither and would be typed into a `text` or `list` block. |
+| 8 | **Asset association** | §8: *"Assets can be associated with campaigns, contacts, companies, opportunities, or client records."* `assets` carries none of those columns. |
+| 15 | **Team bios** | Nothing. `company_profiles.credentials` covers licences, certifications and insurance; bios have no home. |
+
+That is nine rows for eight capabilities plus one, because the two §7 vector
+rows are one piece of work.
+
+**On §7's own deferral.** The section ends: *"advanced Illustrator-class path
+editing can be phased in after the core proposal workflow is stable."* That
+sentence defers **path editing** and nothing else — it does not defer guides,
+rulers, snapping, layers, zoom or undo/redo, which are layout affordances rather
+than vector authoring. Reading it as deferring the whole of bullets 1 and 2 is
+the generous reading and is not what it says.
+
+### Two adjacent findings
+
+- **§3: `bank_transactions.provider_category` is imported and not rule-testable.**
+  The feed records the bank's own category and `RULE_FIELDS` omits it, so the
+  single most useful field for a rule after the merchant name cannot be tested.
+  Not strictly a §3 gap — the bullet names five fields and all five exist — but
+  it is the gap a user would hit first.
+- **§3: "bulk rule creation" is satisfied on one reading only.**
+  `createRule({ applyToExisting: true })` creates a rule and applies it to the
+  existing inbox in bulk, which is the useful capability. Creating *several
+  rules* in one action does not exist. The bullet's parallel with "bulk
+  categorization" suggests the second reading; the first is what anybody wants.
+
 ## What this audit is not
 
 It is not bullet-level for every section. §13 was checked bullet by bullet
 because it is the accounting core; §9, §11 and §19 because they contain
-enumerable lists. The sections marked **done** were verified at module level —
-the module exists, is exported, and has test files behind it — which is weaker
-than reading every bullet, and is said here rather than implied.
+enumerable lists; **§3–§8, §10 and §15–§17 by Phase 173.** §12, §14 and §18
+remain module-level, as do §1, §2 and §19–§24.
 
-The four gaps in §9 and two in §11 are therefore a floor, not a ceiling. A
-bullet-level pass over §3–§8, §10 and §12–§18 would likely find more, and it
-would be a phase of its own.
+The sections marked **done** were verified at module level — the module exists,
+is exported, and has test files behind it — which is weaker than reading every
+bullet, and is said here rather than implied.
+
+The four gaps in §9 and two in §11 were therefore a floor, not a ceiling, and
+Phase 173 found eight more.
 
 ## Nominations this produces
 
