@@ -6189,6 +6189,48 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The key that would have done nothing (Phase 172)
+
+ADR 0171 nominated measuring the ceiling and guessed the blocker would be
+references from unscoped tables. **None of them.** The 271 was defined in Phase
+170 as `src IN scoped AND tgt IN scoped`, so every one already has a `company_id`
+to put in the key — the predicate in my own query had excluded the case the
+nomination then worried about. Seventh correction in this lineage and a new
+variety: not an unchecked claim about the codebase, nor about PostgreSQL, but
+about **a number I had defined myself one phase earlier**.
+
+The question was still worth asking, because it had an answer. The real ceiling
+is a **nullable `company_id`** — nine scoped tables permit it, and three
+references touch one. **268 of 271 are cleanly convertible**, which turns an
+open-ended programme into a bounded one. And the three are not blocked by
+anything about tenancy: they are blocked by rows that genuinely belong to no
+company, like a password-reset email sent before anybody has logged in.
+
+The sharp part is a property of SQL. A foreign key's default matching rule is
+**`MATCH SIMPLE`**, under which a multi-column key **is not checked at all when
+any of its columns is NULL**. So a composite tenant key on a table whose
+`company_id` is nullable is enforced for the rows that have one and silently
+skipped for the rows that do not — while appearing in `pg_constraint` and
+counting toward the conversion total. That is Phase 160's *"policies that would
+have done nothing"* in a new place, and it is the specific way this programme
+could fail unnoticed: **a number that goes up while the guarantee does not.**
+
+A nullable *target* is a different problem and not a dangerous one — a row with
+no `company_id` cannot be referenced at all, so the key refuses rows that are
+currently legal, loudly, at the moment somebody tries. Loud and wrong is
+recoverable; quiet and absent is not.
+
+So the rule is: convert only where the **source's** `company_id` is `NOT NULL`,
+and a test asserts no converted key has a nullable source. Zero today — verified
+rather than assumed, which mattered because the sixteen already converted were
+done before the hazard was understood. The assertion is for the slice somebody
+takes next: nothing else in the repository would notice a composite key being
+added to `notification_log`, and the count would go up.
+
+No migration, and that is the finding doing its job — the next slice would have
+been chosen by target table, and `transactional_messages` is a target.
+
+
 ### Every reference into the catalogue (Phase 171)
 
 ADR 0170 nominated the next slice *"by referenced table rather than by
@@ -8449,7 +8491,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
-| `tests/the-id-a-caller-hands-in.test.ts` | **The id a caller hands in** (Phase 170): the question Phases 149 and 150 did not cover — a write can be perfectly guarded, landing on the caller's own row, and still store a reference to somebody else's. Measured from `pg_constraint` rather than declared: 271 references between tenant-scoped tables, two now carrying the tenant, both numbers asserted so either direction fails the test and sends somebody to `REFERENCE_ROLLOUT`. The composite key is seen to refuse another company's item *and* to accept the company's own, because a key that refused everything would pass the first assertion. Deleting a catalogue item leaves the line with a null rather than failing — the column-list delete rule, which is the one part of a composite tenant key that is not a mechanical substitution. And exactly one of the four proofs is enforced by the database, asserted rather than left in the prose. **Phase 171** took every reference into the catalogue and asserts zero single-column ones remain — a claim about the data rather than the backlog — proves a cross-tenant reference refused on a `time_entries` row nobody had examined, deletes an item out from under one to prove the column-list delete rule, and checks no constraint anywhere still says `service_item_id` |
+| `tests/the-id-a-caller-hands-in.test.ts` | **The id a caller hands in** (Phase 170): the question Phases 149 and 150 did not cover — a write can be perfectly guarded, landing on the caller's own row, and still store a reference to somebody else's. Measured from `pg_constraint` rather than declared: 271 references between tenant-scoped tables, two now carrying the tenant, both numbers asserted so either direction fails the test and sends somebody to `REFERENCE_ROLLOUT`. The composite key is seen to refuse another company's item *and* to accept the company's own, because a key that refused everything would pass the first assertion. Deleting a catalogue item leaves the line with a null rather than failing — the column-list delete rule, which is the one part of a composite tenant key that is not a mechanical substitution. And exactly one of the four proofs is enforced by the database, asserted rather than left in the prose. **Phase 171** took every reference into the catalogue and asserts zero single-column ones remain — a claim about the data rather than the backlog — proves a cross-tenant reference refused on a `time_entries` row nobody had examined, deletes an item out from under one to prove the column-list delete rule, and checks no constraint anywhere still says `service_item_id`. **Phase 172** adds the assertion the programme needed: no converted key may have a nullable source `company_id`, because under `MATCH SIMPLE` such a key is not checked at all — it would count toward the total and enforce nothing. It also measures the ceiling (two references from unscoped tables, three with a nullable end, so 268 of 271 convertible) rather than leaving it a worry |
 | `tests/one-name-and-two-references.test.ts` | **One name, and two references that were not** (Phase 169): ADR 0168's own nomination, measured and found false — `invoice_lines.item_id` has referenced the catalogue since Phase 14. The test reads the schema directory rather than naming three tables, so a fourth cannot reintroduce the naming split quietly; asserts both `item_id` columns are now foreign keys, that a line naming a nonexistent item is refused by name, and that deleting a catalogue entry nulls the column rather than taking the line with it. `groupTimeIntoLines` carries the item only when every entry in a group agrees, and still sums to the same total however it is grouped. Its cross-tenant case caught the real defect: both `serviceRevenue` and Phase 168's `serviceBreakdown` joined the catalogue on `id` alone, putting another tenant's product name on this company's dashboard |
 | `tests/four-figures-and-the-one-that-was-a-field.test.ts` | **Four figures, and the one that was a field** (Phase 168): §9's last four gaps, and the audit sentence under them that was backwards on both halves. *Average time to decision* needed no new fact — `sent_at` and `decided_at` have been written since Phase 3 — while *performance by service/product* needed a column and the screen that fills it, because a proposal line had no reference to the catalogue and the only thing to group by was typed prose. A figure was already on the dashboard labelled "Days to decision" measuring creation to close, so the test asserts the old name is gone rather than coexisting. Average proposal size is a priced document and not the guess on the opportunity; the period dimension groups on arrival, so an open deal has a period at all; `serviceBreakdown` reports lines and not deals, counts an expired proposal against the win rate, shows the uncatalogued group so its total reconciles, and records nothing where nothing was chosen rather than matching by description |
 | `tests/the-accounts-nobody-had-called.test.ts` | **The accounts nobody had called** (Phase 167): §11's Strategic Account Assistant, and the half of it that is arithmetic. Identifying a neglected high-value account is `max(occurred_at)` against a cadence, a sum of invoices and a weighted pipeline, so it lives in a pure core with no database, no clock and no gateway — and the list answers with the AI module switched off, which §11 requires of the core product. A ground that fires on every row is not a finding, so a lead and a vendor have no cadence at all; the strategic override tightens one and never invents one; and what is at stake is a `max` and never a sum, because adding realised revenue to the weighted pipeline double-counts a renewal. `asOf` is a parameter all the way down, so the list can be asked what it looked like before the cadence elapsed. Writing it found `unowned` firing on nothing — `createOrganization` defaults the owner to its creator — and `intake.ts` as the path that produces one: a website lead has no acting user, so the accounts most likely to be unowned and uncontacted are the ones that arrived by themselves |

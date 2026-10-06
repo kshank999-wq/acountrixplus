@@ -240,6 +240,101 @@ export function referenceStands(input: {
 }
 
 /**
+ * Why a composite tenant key can be present and do nothing (Phase 172).
+ *
+ * ## The hazard
+ *
+ * A foreign key's default matching rule is `MATCH SIMPLE`, and under it **a
+ * multi-column key is not checked at all when any of its columns is NULL.**
+ *
+ * So a composite tenant key on a table whose `company_id` is nullable is
+ * enforced for every row that has one and silently skipped for every row that
+ * does not. It would appear in `pg_constraint`, satisfy the count this
+ * programme tracks, and guarantee nothing for exactly the rows least likely to
+ * have been thought about.
+ *
+ * That is Phase 160's finding in a new place — *"the policies that would have
+ * done nothing"* — and Phase 121's rule about a check only ever seen to agree.
+ * A conversion count is a number that can go up while the guarantee does not,
+ * which is the specific way this programme could fail without anybody noticing.
+ *
+ * ## Measured, so the ceiling is a fact rather than a worry
+ *
+ * ADR 0171 nominated measuring how many references *cannot* carry the tenant
+ * and guessed the blocker would be references from unscoped tables. It is not:
+ * all 271 run between scoped tables, so every one has a `company_id` to put in
+ * the key, and only two references anywhere come from an unscoped table.
+ *
+ * The real blocker is **nullable `company_id`**, on nine tables, affecting
+ * three references:
+ *
+ * ```
+ * notification_log.message_id          -> transactional_messages   both ends nullable
+ * communications.transactional_message_id -> transactional_messages   target nullable
+ * push_subscriptions.device_id         -> devices                  target nullable
+ * ```
+ *
+ * A nullable *source* is the dangerous one, for the reason above. A nullable
+ * *target* is a different problem and not a dangerous one: a row with no
+ * `company_id` has no `(company_id, id)` pair, so it cannot be referenced at
+ * all and the key refuses rows that are currently legal.
+ *
+ * Those three are the ceiling. **268 of 271 are cleanly convertible**, and the
+ * three are not blocked by anything about tenancy — they are blocked by rows
+ * that genuinely belong to no company: a password-reset email before anybody
+ * has logged in, a device not yet claimed.
+ *
+ * ## The rule this produces
+ *
+ * Convert a reference only when the **source's** `company_id` is `NOT NULL`.
+ * `tests/the-id-a-caller-hands-in.test.ts` asserts that no converted key has a
+ * nullable source — zero today, verified rather than assumed, and the assertion
+ * is what stops a later slice shipping a key that does nothing.
+ */
+export type NullableHazard = {
+  reference: string
+  end: 'source' | 'target' | 'both'
+  /** What goes wrong, which differs by end. */
+  consequence: string
+  because: string
+}
+
+export const NULLABLE_TENANT_REFERENCES: readonly NullableHazard[] = [
+  {
+    reference: 'notification_log.message_id -> transactional_messages',
+    end: 'both',
+    consequence:
+      'Unenforced for rows with no company, and unable to reference a message with no company.',
+    because:
+      'A notification log row records what was sent, and a transactional message can be a ' +
+      'password reset sent before anybody has a company — so both ends are nullable for the same ' +
+      'honest reason. Converting this would produce a key that is skipped on exactly the rows ' +
+      'that have no tenant to check, which is worse than the single-column key it replaced ' +
+      'because the count would say it was done.',
+  },
+  {
+    reference: 'communications.transactional_message_id -> transactional_messages',
+    end: 'target',
+    consequence: 'Would refuse a letter that currently files correctly.',
+    because:
+      'The source is `NOT NULL`, so the key would be enforced — and it would refuse any ' +
+      'communication pointing at a message with no company, which `transactional_messages` ' +
+      'permits on purpose. The fix is on the target and is a data question nobody has asked: ' +
+      'whether a message with no company should exist once the system has companies.',
+  },
+  {
+    reference: 'push_subscriptions.device_id -> devices',
+    end: 'target',
+    consequence: 'Would refuse a subscription on a device not yet claimed by a company.',
+    because:
+      '`devices` is one of Phase 160\'s six RLS exemptions, and that phase recorded why it is the ' +
+      'dangerous one: a revoked device reads as live when the policy blinds it. A nullable ' +
+      '`company_id` is the same looseness at the column level, and tightening it is a decision ' +
+      'about device enrolment rather than about references.',
+  },
+]
+
+/**
  * The shapes a conversion comes in (Phase 171).
  *
  * ADR 0170 declined to convert all 271 mechanically and predicted that they
@@ -349,6 +444,15 @@ export const REFERENCE_ROLLOUT: readonly RolloutStage[] = [
       'follows. It also gives the completeness this programme otherwise lacks — "no reference ' +
       'into the catalogue can point across tenants" is a sentence about the data, where "fourteen ' +
       'more are done" is a sentence about the backlog.',
+  },
+  {
+    stage: 'ceiling measured',
+    what: '268 of 271 cleanly convertible; three blocked by a nullable `company_id`.',
+    because:
+      'Phase 172 measured what ADR 0171 had guessed at, and the guess was wrong: the blocker is ' +
+      'not references from unscoped tables — all 271 run between scoped tables — but nullable ' +
+      '`company_id`, which under `MATCH SIMPLE` makes a composite key silently unenforced on the ' +
+      'source side. `NULLABLE_TENANT_REFERENCES` names the three and what each would break.',
   },
   {
     stage: 'the rest',

@@ -5,6 +5,7 @@ import { invoiceLines, serviceItems } from '@/db/schema'
 import { RegistryError } from '@/modules/errors/registry'
 import {
   CONVERSION_SHAPES,
+  NULLABLE_TENANT_REFERENCES,
   REFERENCE_PROOFS,
   REFERENCE_ROLLOUT,
   proofFor,
@@ -152,6 +153,7 @@ describe('how many references could point at another tenant', () => {
       'measured',
       'proved where it was found',
       'one referenced table finished',
+      'ceiling measured',
       'the rest',
     ])
 
@@ -357,6 +359,113 @@ describe('the slice taken by referenced table (Phase 171)', () => {
 
     const [measured] = rows as unknown as Array<{ stale: number }>
     expect(measured.stale).toBe(0)
+  })
+})
+
+describe('the composite key that would do nothing (Phase 172)', () => {
+  it('has no converted key whose source company_id is nullable', async () => {
+    /**
+     * The assertion this phase exists for.
+     *
+     * A foreign key's default matching rule is `MATCH SIMPLE`, and under it a
+     * **multi-column key is not checked at all when any of its columns is
+     * NULL.** So a composite tenant key on a table whose `company_id` is
+     * nullable is enforced for the rows that have one and silently skipped for
+     * the rows that do not — while appearing in `pg_constraint` and counting
+     * toward the conversion total.
+     *
+     * That is Phase 160's "policies that would have done nothing" in a new
+     * place: a number that can go up while the guarantee does not. Zero today,
+     * measured rather than assumed, and the point of asserting it is the slice
+     * somebody takes next.
+     */
+    const rows = await db.execute(sql`
+      with scoped as (
+        select c.relname as t, a.attnotnull as cid_notnull
+          from pg_class c
+          join pg_attribute a on a.attrelid = c.oid
+         where c.relkind = 'r'
+           and a.attname = 'company_id'
+           and a.attnum > 0
+           and not a.attisdropped
+      )
+      select count(*)::int as void_keys
+        from pg_constraint k
+        join pg_class s on s.oid = k.conrelid
+        join scoped ss on ss.t = s.relname
+       where k.contype = 'f'
+         and array_length(k.conkey, 1) > 1
+         and not ss.cid_notnull
+    `)
+
+    const [measured] = rows as unknown as Array<{ void_keys: number }>
+    expect(measured.void_keys).toBe(0)
+  })
+
+  it('measures the ceiling rather than leaving it a worry', async () => {
+    /**
+     * ADR 0171 nominated measuring how many references cannot carry the tenant
+     * and guessed the blocker would be references from unscoped tables. Wrong:
+     * **all 271 run between scoped tables**, so every one has a `company_id` to
+     * put in the key, and only two references anywhere come from an unscoped
+     * table.
+     *
+     * The real blocker is a nullable `company_id` — nine tables, three
+     * references. 268 of 271 are cleanly convertible, which turns an
+     * open-ended programme into a bounded one.
+     */
+    const rows = await db.execute(sql`
+      with scoped as (
+        select c.relname as t, a.attnotnull as cid_notnull
+          from pg_class c
+          join pg_attribute a on a.attrelid = c.oid
+         where c.relkind = 'r'
+           and a.attname = 'company_id'
+           and a.attnum > 0
+           and not a.attisdropped
+      )
+      select
+        count(*) filter (
+          where s.relname not in (select t from scoped)
+        )::int as from_unscoped,
+        count(*) filter (
+          where s.relname in (select t from scoped)
+            and (not ss.cid_notnull or not tt.cid_notnull)
+        )::int as nullable_either_end
+        from pg_constraint k
+        join pg_class s on s.oid = k.conrelid
+        join pg_class t on t.oid = k.confrelid
+        left join scoped ss on ss.t = s.relname
+        left join scoped tt on tt.t = t.relname
+       where k.contype = 'f'
+         and t.relname in (select t from scoped)
+    `)
+
+    const [measured] = rows as unknown as Array<{
+      from_unscoped: number
+      nullable_either_end: number
+    }>
+
+    expect(measured.from_unscoped).toBe(2)
+    expect(measured.nullable_either_end).toBe(3)
+    expect(NULLABLE_TENANT_REFERENCES).toHaveLength(3)
+  })
+
+  it('argues each blocked reference and says what converting it would break', () => {
+    // The consequence differs by end, which is the reason this is three entries
+    // rather than a count: a nullable source makes the key do nothing, and a
+    // nullable target makes it refuse rows that are currently legal.
+    for (const hazard of NULLABLE_TENANT_REFERENCES) {
+      expect(hazard.because.length, hazard.reference).toBeGreaterThan(180)
+      expect(hazard.consequence.length, hazard.reference).toBeGreaterThan(40)
+    }
+
+    expect(NULLABLE_TENANT_REFERENCES.filter((h) => h.end === 'source' || h.end === 'both'))
+      .toHaveLength(1)
+  })
+
+  it('names the ceiling in the rollout, so it is not only in a test', () => {
+    expect(REFERENCE_ROLLOUT.map((stage) => stage.stage)).toContain('ceiling measured')
   })
 })
 

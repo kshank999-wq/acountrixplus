@@ -140,6 +140,19 @@ turns "271 to convert" into "N convertible and M that need something else", and
 the something else is worth knowing before another slice is taken on the
 assumption it is all mechanical.
 
+> **Corrected by Phase 172.** **None of them.** The 271 was defined in Phase 170
+> as `src IN scoped AND tgt IN scoped`, so every one already has a `company_id`
+> to put in the key — the predicate in my own query had excluded the case this
+> nomination then worried about. Only two references anywhere come from an
+> unscoped table, and neither is in the 271.
+>
+> The question was still worth asking, and it had an answer: the ceiling is a
+> **nullable `company_id`**, on nine tables and three references, so 268 of 271
+> are cleanly convertible. The sharp part is why — under `MATCH SIMPLE` a
+> multi-column key is not checked at all when any column is NULL, so converting
+> a reference whose source `company_id` is nullable produces a key that counts
+> toward the total and enforces nothing.
+
 Then **a full suite**, still nominated and now overdue by eleven phases — the
 reference count added in Phase 170 is a third tree-wide scan of the kind that
 has twice gone red undetected.
