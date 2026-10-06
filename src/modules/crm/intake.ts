@@ -16,8 +16,11 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 /**
  * Website lead intake (spec §6).
  *
- * This is the only unauthenticated write path in the system, so it is built
- * defensively:
+ * This was the only unauthenticated write path in the system when it was
+ * written, so it is built defensively. **It is one of five** — see
+ * `modules/tenancy/public-writes`, which exists because this count was kept in
+ * prose here, in this module's test, and in the acceptance route, and all three
+ * went stale without anything being able to notice:
  *
  *  - The public key identifies a tenant and grants *creation of a lead only*.
  *    It cannot read, update, or delete anything, and it is scoped to one

@@ -6189,6 +6189,63 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### A question from the client (Phase 174)
+
+ADR 0173 nominated comments/questions on the client link as one of two findings
+that are *"a table and a screen rather than an engine"*. §7 asks the link for
+view tracking, acceptance, **comments/questions**, version history and a PDF —
+four of the five existed, and a client reading a proposal could accept it or find
+somebody's email address. The second option loses the question, because an email
+reply lands on neither the proposal nor the client's timeline.
+
+**A question is a communication, not a comment**, and the two costs of getting
+that wrong are both things earlier phases built on purpose.
+`organizationTimeline` merges communications, tasks and opportunity activity, so
+a separate table would be invisible in the one view that answers "what has
+happened with these people". And `lastContactedAt` drives Phase 167's
+`gone-quiet` ground — so a client who asked nine days ago and got no answer would
+read as **quiet** on the attention list, which is the worst direction for that
+list to be wrong in. There is a test asserting that asking makes `gone-quiet`
+stop firing.
+
+So two columns on `communications`, both created as **composite tenant keys from
+the start** — Phase 172's rule applied forward rather than retrofitted, so the
+count went 271 → 273 with the composite count going 16 → 18 and the backlog did
+not grow. `parent_id` is a reply pointer rather than a tree, and answering an
+answer is refused because a third message would claim a depth the column cannot
+express.
+
+The client's typed name goes in `actor_name`, whose own comment is *"Frozen, so
+an exchange keeps its author after they leave."* The fallback is *"The client"*
+rather than the contact's name: writing the contact's name would assert that
+this particular person typed it, and a forwarded link cannot establish that.
+
+**Then the phase found something it was not looking for.** `intake.ts` said *"this
+is the only unauthenticated write path in the system"*; its test said the same;
+the acceptance route said *"the second"*; this phase's route said *"the third"*.
+So `modules/tenancy/public-writes.ts` exists to stop keeping the count in prose —
+and the scan written alongside it **immediately found two more nobody had written
+down**: the per-recipient unsubscribe link and the email delivery webhook. The
+answer is five. Four stale sentences across four files, none wrong in a way
+anything could detect.
+
+The scan got it wrong too, in the right direction: its first version looked for
+`requireActor|requireSession` and flagged both mobile routes, which read a
+session through the non-throwing `currentActor`/`currentSession`. Two false
+positives out of four — and over-reporting is how a detector like that should
+fail, because a person resolves a false positive and nobody ever learns of a
+false negative.
+
+What stands between a stranger and this write is stated per entry in the
+register. For this one: the token is the credential; a draft takes no questions
+and nothing is recorded when one is attempted; every refusal shares one sentence
+so the endpoint cannot distinguish a real token from a guess; the limit is per
+proposal rather than per address, because a client behind a corporate gateway
+shares an address with their colleagues. And deliberately **no honeypot** — a
+proposal link is not published or discoverable, so it would be a control with
+nothing to catch, which Phase 160 established is worse than none.
+
+
 ### Reading every bullet (Phase 173)
 
 `docs/SPEC-AUDIT.md` said of itself that *"a bullet-level pass over §3–§8, §10
@@ -8537,6 +8594,8 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/a-question-from-the-client.test.ts` | **A question from the client** (Phase 174): §7's comments/questions on the client link, built as a *communication* rather than a comment — so the two tests that matter assert it reaches `organizationTimeline` and makes Phase 167's `gone-quiet` ground stop firing, which is the whole reason for the design. The unauthenticated path gets the attacker-first treatment `intake.ts` set: an unknown token and a draft return the same sentence so the endpoint is not an oracle, a draft records nothing at all, the limit is per proposal rather than per address, and the length bound is checked at its boundary. `clientThread` is proved never to show an internal note — including one filed against the proposal itself, the case a direction filter catches and a proposal filter does not |
+| `tests/public-writes.test.ts` | **Every write a stranger can reach** (Phase 174): the register that exists because four files each kept the count in prose and all four went stale — "the only", "the only", "the second", "the third", and the answer is five. The scan found the two nobody had written down (the unsubscribe link and the email webhook) on the day the register was written, and holds it to the source in both directions: an entry whose module has moved is stale, and an unauthenticated write route that does not delegate to a declared module is the case it exists to catch |
 | `tests/the-id-a-caller-hands-in.test.ts` | **The id a caller hands in** (Phase 170): the question Phases 149 and 150 did not cover — a write can be perfectly guarded, landing on the caller's own row, and still store a reference to somebody else's. Measured from `pg_constraint` rather than declared: 271 references between tenant-scoped tables, two now carrying the tenant, both numbers asserted so either direction fails the test and sends somebody to `REFERENCE_ROLLOUT`. The composite key is seen to refuse another company's item *and* to accept the company's own, because a key that refused everything would pass the first assertion. Deleting a catalogue item leaves the line with a null rather than failing — the column-list delete rule, which is the one part of a composite tenant key that is not a mechanical substitution. And exactly one of the four proofs is enforced by the database, asserted rather than left in the prose. **Phase 171** took every reference into the catalogue and asserts zero single-column ones remain — a claim about the data rather than the backlog — proves a cross-tenant reference refused on a `time_entries` row nobody had examined, deletes an item out from under one to prove the column-list delete rule, and checks no constraint anywhere still says `service_item_id`. **Phase 172** adds the assertion the programme needed: no converted key may have a nullable source `company_id`, because under `MATCH SIMPLE` such a key is not checked at all — it would count toward the total and enforce nothing. It also measures the ceiling (two references from unscoped tables, three with a nullable end, so 268 of 271 convertible) rather than leaving it a worry |
 | `tests/one-name-and-two-references.test.ts` | **One name, and two references that were not** (Phase 169): ADR 0168's own nomination, measured and found false — `invoice_lines.item_id` has referenced the catalogue since Phase 14. The test reads the schema directory rather than naming three tables, so a fourth cannot reintroduce the naming split quietly; asserts both `item_id` columns are now foreign keys, that a line naming a nonexistent item is refused by name, and that deleting a catalogue entry nulls the column rather than taking the line with it. `groupTimeIntoLines` carries the item only when every entry in a group agrees, and still sums to the same total however it is grouped. Its cross-tenant case caught the real defect: both `serviceRevenue` and Phase 168's `serviceBreakdown` joined the catalogue on `id` alone, putting another tenant's product name on this company's dashboard |
 | `tests/four-figures-and-the-one-that-was-a-field.test.ts` | **Four figures, and the one that was a field** (Phase 168): §9's last four gaps, and the audit sentence under them that was backwards on both halves. *Average time to decision* needed no new fact — `sent_at` and `decided_at` have been written since Phase 3 — while *performance by service/product* needed a column and the screen that fills it, because a proposal line had no reference to the catalogue and the only thing to group by was typed prose. A figure was already on the dashboard labelled "Days to decision" measuring creation to close, so the test asserts the old name is gone rather than coexisting. Average proposal size is a priced document and not the guess on the opportunity; the period dimension groups on arrival, so an open deal has a period at all; `serviceBreakdown` reports lines and not deals, counts an expired proposal against the win rate, shows the uncatalogued group so its total reconciles, and records nothing where nothing was chosen rather than matching by description |

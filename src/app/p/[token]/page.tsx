@@ -16,6 +16,8 @@ import { truncateIp } from '@/modules/crm/intake'
 import { DocumentPage, brandTokens } from '@/components/design/document-page'
 import { AcceptancePanel } from './acceptance-panel'
 import { PrintButton } from './print-button'
+import { QuestionPanel } from './question-panel'
+import { clientThread } from '@/modules/engagement/questions'
 import { latestSentPdf } from '@/modules/pdf/service'
 
 export const dynamic = 'force-dynamic'
@@ -115,6 +117,15 @@ export default async function PublicProposalPage({
   // before it had a design document, and the button is simply not offered.
   const hasIssuedPdf = Boolean(await latestSentPdf(proposal.companyId, proposal.id))
 
+  /*
+    The question thread (spec §7, Phase 174). Read by token rather than by
+    actor, and `clientThread` excludes internal notes — which is the whole
+    reason it is not `threadForProposal` with a different caller, since
+    `communications` keeps notes *about* a client on the same timeline as
+    exchanges *with* them.
+  */
+  const thread = await clientThread(token)
+
   return (
     <div className="min-h-screen bg-canvas py-6 print:bg-white print:py-0">
       <div className="doc-screen-only mx-auto mb-4 flex max-w-3xl flex-wrap items-center justify-between gap-2 px-4">
@@ -174,6 +185,23 @@ export default async function PublicProposalPage({
           }}
         />
       </div>
+
+      <QuestionPanel
+        token={token}
+        thread={thread.map((entry) => ({
+          id: entry.id,
+          direction: entry.direction,
+          body: entry.body,
+          summary: entry.summary,
+          occurredAt: entry.occurredAt.toISOString().slice(0, 10),
+        }))}
+        /*
+          A decided proposal keeps its thread and closes the box: a question
+          about a signed contract belongs in a conversation rather than on the
+          document. A draft never reaches this page at all.
+        */
+        askable={proposal.status === 'sent' || proposal.status === 'viewed'}
+      />
     </div>
   )
 }

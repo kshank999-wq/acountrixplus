@@ -8,6 +8,8 @@ import { listServiceItems } from '@/modules/studio/service'
 import { CRM_NAV } from '../nav'
 import { sentVersions } from '@/modules/pdf/service'
 import { ProposalList } from './proposal-list'
+import { UnansweredQuestions } from './questions'
+import { unansweredQuestions } from '@/modules/engagement/questions'
 
 export const dynamic = 'force-dynamic'
 
@@ -28,7 +30,7 @@ export default async function ProposalsPage() {
 
   const canManage = can(actor, 'proposals:manage')
 
-  const [proposals, opportunities, accounts, services] = await Promise.all([
+  const [proposals, opportunities, accounts, services, waiting] = await Promise.all([
     listProposals(actor),
     listOpportunities(actor, {
       stages: ['new_inquiry', 'qualified', 'proposal_draft', 'proposal_sent', 'viewed', 'follow_up', 'negotiation'],
@@ -42,6 +44,12 @@ export default async function ProposalsPage() {
       point at one keep their reference.
     */
     listServiceItems(actor, { activeOnly: true }),
+    /*
+      Questions a client asked through their link and nobody has answered
+      (Phase 174). On this screen rather than the dashboard because this is
+      where somebody goes when they are thinking about a proposal.
+    */
+    unansweredQuestions(actor),
   ])
 
   // One query for every sent version across the page, rather than one per
@@ -59,6 +67,21 @@ export default async function ProposalsPage() {
       active="crm"
     >
       <SubNav items={CRM_NAV} active="/crm/proposals" />
+
+      <UnansweredQuestions
+        waiting={waiting.map((question) => ({
+          id: question.id,
+          proposalNumber: question.proposalNumber,
+          summary: question.summary,
+          body: question.body,
+          occurredAt: question.occurredAt.toISOString().slice(0, 10),
+          // Computed here rather than in the browser: a day count from a clock
+          // the client sets is a figure that disagrees with the server's.
+          waitingDays: Math.floor(
+            (Date.now() - question.occurredAt.getTime()) / 86_400_000,
+          ),
+        }))}
+      />
 
       <ProposalList
         proposals={proposals.map((p) => ({

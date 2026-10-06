@@ -103,6 +103,28 @@ export const communications = pgTable(
     customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
     vendorId: uuid('vendor_id').references(() => vendors.id, { onDelete: 'set null' }),
 
+    /**
+     * The proposal being discussed (Phase 174, spec §7).
+     *
+     * §7 asks for *"comments/questions"* on the client-facing link, and a
+     * client's question is one exchange with somebody outside the company —
+     * which is this table. A `proposal_comments` table would have kept it off
+     * `organizationTimeline` and out of `lastContactedAt`, so an account with
+     * an unanswered question would have read as quiet on Phase 167's attention
+     * list. That is the worst direction for that list to be wrong in.
+     */
+    proposalId: uuid('proposal_id'),
+
+    /**
+     * The question this answers.
+     *
+     * A reply pointer, not a tree: §7 asks for questions and answers, and
+     * nothing here needs arbitrary nesting. `set null` so deleting a question
+     * does not delete the answer, which would leave the client answered and no
+     * record of it.
+     */
+    parentId: uuid('parent_id'),
+
     channel: communicationChannelEnum('channel').notNull(),
     direction: communicationDirectionEnum('direction').notNull(),
 

@@ -279,6 +279,8 @@ export type AuditAction =
   | 'proposal.send'
   | 'proposal.schedule'
   | 'proposal.stage_billed'
+  /** A question a client asked through the public link, answered (Phase 174). */
+  | 'proposal.question_answered'
   | 'proposal.decide'
   | 'lead.intake'
   | 'intake_key.create'

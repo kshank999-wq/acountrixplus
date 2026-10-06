@@ -22,6 +22,7 @@ import {
   updateProposalItems,
 } from '@/modules/crm/proposals'
 import { convertWonOpportunity } from '@/modules/crm/conversion'
+import { answerQuestion } from '@/modules/engagement/questions'
 import { billStage } from '@/modules/crm/stage-invoicing'
 import { formatCents } from '@/lib/money'
 import {
@@ -248,6 +249,24 @@ export async function createProposalAction(
     })
 
     return `Drafted ${proposal.number}.`
+  })
+}
+
+/**
+ * Answers a question a client asked through their proposal link (Phase 174).
+ *
+ * The asking side is an API route, because the client is not a user of the
+ * system and has no actor. The answering side is an ordinary action, because
+ * only the business may answer.
+ */
+export async function answerQuestionAction(
+  questionId: string,
+  body: string,
+): Promise<ActionResult> {
+  return run('/crm/proposals', async () => {
+    const actor = await requireActor()
+    await answerQuestion(actor, questionId, body)
+    return 'Answered. The client sees it on their proposal.'
   })
 }
 

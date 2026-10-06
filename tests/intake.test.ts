@@ -22,8 +22,11 @@ import { PermissionError } from '@/modules/permissions'
 /**
  * Public lead intake (spec §6).
  *
- * This is the only unauthenticated write path in the system, so the tests
- * lean on what an attacker would try rather than only the happy path.
+ * This was the only unauthenticated write path in the system when it was
+ * written, so the tests lean on what an attacker would try rather than only the
+ * happy path. It is one of five (Phase 174), and
+ * `tests/public-writes.test.ts` is what keeps that number honest — this comment
+ * said "the only" for 168 phases after it stopped being true.
  */
 
 const VALID = {
