@@ -240,12 +240,81 @@ export function referenceStands(input: {
 }
 
 /**
+ * The shapes a conversion comes in (Phase 171).
+ *
+ * ADR 0170 declined to convert all 271 mechanically and predicted that they
+ * would not be uniform. Phase 171 converted every reference into one table and
+ * measured the prediction: **sixteen references, three shapes.** Written down
+ * because the next slice will meet them again, and because the prediction being
+ * right is only useful if the shapes are named rather than remembered.
+ */
+export type ConversionShape = {
+  key: string
+  /**
+   * How many of the sixteen references into `service_items` are this shape.
+   *
+   * All sixteen, not the fourteen Phase 171 converted: the two Phase 170 did
+   * are references into the same table and have the same shape as four of
+   * these, and counting only the new ones would make the field mean "work done
+   * in one phase" while being named after the slice.
+   */
+  foundInCatalogueSlice: number
+  /** The delete rule the composite key needs. */
+  deleteRule: string
+  because: string
+}
+
+export const CONVERSION_SHAPES: readonly ConversionShape[] = [
+  {
+    key: 'set-null-nullable',
+    // Six: `appointments`, `proposal_items`, `repair_order_lines` and
+    // `time_entries` in Phase 171, and `invoice_lines` and `bill_lines` in
+    // Phase 170 — which is where the column-list delete rule was first needed
+    // and is why this shape was already understood when the slice met four more.
+    foundInCatalogueSlice: 6,
+    deleteRule: 'ON DELETE SET NULL (col)',
+    because:
+      'The column list is required and this is the shape that proves a mechanical sweep would ' +
+      'have broken things. A bare `ON DELETE SET NULL` nulls every column of the reference, ' +
+      '`company_id` is `NOT NULL`, and the delete fails — so deleting a catalogue entry would be ' +
+      'blocked by an invoice raised three years ago, which is the outcome the `SET NULL` was ' +
+      'chosen to avoid in the first place.',
+  },
+  {
+    key: 'restrict-not-null',
+    foundInCatalogueSlice: 9,
+    deleteRule: 'ON DELETE RESTRICT',
+    because:
+      'The common case and the simplest: `RESTRICT` nulls nothing, so no column list and the ' +
+      '`NOT NULL` never comes up. The rule is right for reasons that have nothing to do with ' +
+      'tenancy — a stock movement or a bill of materials that lost the item it moved would be a ' +
+      'record of nothing — which is why these nine needed no decision beyond adding the tenant.',
+  },
+  {
+    key: 'restrict-nullable',
+    foundInCatalogueSlice: 1,
+    deleteRule: 'ON DELETE RESTRICT',
+    because:
+      'Its own shape because the pair is unusual rather than because the SQL differs: a column ' +
+      'that may be null, whose item may not be deleted while it is set. ' +
+      '`work_order_entries.item_id` is null for labour and set for a part consumed, and a ' +
+      'consumed part is not deletable — the same argument as the restrict case, arriving at it ' +
+      'from a nullable column.',
+  },
+]
+
+/**
  * How far the conversion has got, in the shape Phase 160 used for RLS.
  *
  * 271 references cannot be converted in one phase, and a phase that converted
  * two and said nothing about the other 269 would be the kind of partial work
  * this codebase keeps finding in its own history. So the count is measured by a
  * test, the stages are named here, and the number can only move one way.
+ *
+ * Phase 171 took the next slice by *referenced* table: all sixteen references
+ * into `service_items`, which is a claim about the data rather than about the
+ * backlog — no row anywhere can name a catalogue item belonging to another
+ * company.
  */
 export type RolloutStage = {
   stage: string
@@ -272,12 +341,23 @@ export const REFERENCE_ROLLOUT: readonly RolloutStage[] = [
       'also the two that drive inventory relief, so a foreign id there moves the wrong stock.',
   },
   {
+    stage: 'one referenced table finished',
+    what: 'All 16 references into `service_items` carry the tenant. 16 of 271.',
+    because:
+      'Taken by *referenced* table rather than by referencing one, which is what makes a slice ' +
+      'finishable: the unique index on the target is added once and every reference into it ' +
+      'follows. It also gives the completeness this programme otherwise lacks — "no reference ' +
+      'into the catalogue can point across tenants" is a sentence about the data, where "fourteen ' +
+      'more are done" is a sentence about the backlog.',
+  },
+  {
     stage: 'the rest',
-    what: '269 references still proved by nothing stronger than the writer that happens to set them.',
+    what: '255 references still proved by nothing stronger than the writer that happens to set them.',
     because:
       'Deliberately not done here. Each conversion needs a unique index on the target and a ' +
-      'migration that cannot be mechanical — a nullable reference, a self-reference and a ' +
-      'reference from an unscoped table all need different handling, and discovering that 60 ' +
-      'tables in is worse than saying so now. The count is the backlog.',
+      'migration that cannot be mechanical — `CONVERSION_SHAPES` holds the three the catalogue ' +
+      'slice met, and a self-reference and a reference from an unscoped table are both still ' +
+      'unmet. Discovering that sixty tables in is worse than saying so now; the count is the ' +
+      'backlog.',
   },
 ]

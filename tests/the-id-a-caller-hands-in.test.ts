@@ -4,6 +4,7 @@ import { db } from '@/db'
 import { invoiceLines, serviceItems } from '@/db/schema'
 import { RegistryError } from '@/modules/errors/registry'
 import {
+  CONVERSION_SHAPES,
   REFERENCE_PROOFS,
   REFERENCE_ROLLOUT,
   proofFor,
@@ -56,8 +57,9 @@ describe('how many references could point at another tenant', () => {
   it('counts every reference between tenant-scoped tables, and how many carry the tenant', async () => {
     /**
      * Measured from `pg_constraint`, not declared (Phase 126: the count, not a
-     * bound). 271 single-column references across 167 company-scoped tables
-     * when Phase 170 looked, and **two** now carrying the tenant.
+     * bound). 271 references across 167 company-scoped tables when Phase 170
+     * looked, none carrying the tenant; **sixteen** now, after Phase 171 took
+     * every reference into `service_items`.
      *
      * The number is asserted so that it moves and says so. Adding a reference
      * raises `total`; converting one raises `composite`. Either way this test
@@ -87,23 +89,59 @@ describe('how many references could point at another tenant', () => {
     const [measured] = rows as unknown as Array<{ total: number; composite: number }>
 
     expect(measured.total).toBe(271)
-    expect(measured.composite).toBe(2)
+    expect(measured.composite).toBe(16)
   })
 
-  it('names the two that carry it, so the pair is not a coincidence', async () => {
+  it('leaves no single-column reference into the catalogue at all', async () => {
+    /**
+     * The claim Phase 171 bought by taking a slice by *referenced* table rather
+     * than by referencing one: not "fourteen more are done", which is a
+     * sentence about the backlog, but **no row anywhere can name a catalogue
+     * item belonging to another company**, which is a sentence about the data.
+     *
+     * Asserted as zero rather than as a list of sixteen names, because the list
+     * would have to be edited every time a table gains a reference and the zero
+     * would not — and a reference added tomorrow without the tenant is exactly
+     * what this should catch.
+     */
     const rows = await db.execute(sql`
-      select conrelid::regclass::text as table_name
+      select count(*)::int as single
         from pg_constraint
        where contype = 'f'
-         and array_length(conkey, 1) > 1
+         and array_length(conkey, 1) = 1
          and confrelid = 'service_items'::regclass
     `)
 
-    const tables = (rows as unknown as Array<{ table_name: string }>)
-      .map((row) => row.table_name)
-      .sort()
+    const [measured] = rows as unknown as Array<{ single: number }>
+    expect(measured.single).toBe(0)
+  })
 
-    expect(tables).toEqual(['bill_lines', 'invoice_lines'])
+  it('counts the shapes the slice met, which is what made a sweep wrong', () => {
+    /*
+      ADR 0170 predicted the conversions would not be uniform and declined to
+      sweep. Sixteen references, three shapes — and the six `SET NULL` ones
+      would have been broken by the mechanical version.
+
+      Six and not four: the first draft of this counted only the fourteen Phase
+      171 converted and asserted a total of sixteen, which is the arithmetic
+      failing out loud. The two Phase 170 did are references into the same table
+      with the same shape, so they belong in the count; a field named after the
+      slice must count the slice.
+    */
+    expect(CONVERSION_SHAPES.map((shape) => shape.foundInCatalogueSlice)).toEqual([6, 9, 1])
+    expect(
+      CONVERSION_SHAPES.reduce((sum, shape) => sum + shape.foundInCatalogueSlice, 0),
+    ).toBe(16)
+
+    for (const shape of CONVERSION_SHAPES) {
+      expect(shape.because.length, shape.key).toBeGreaterThan(180)
+    }
+
+    // Exactly one needs the column-list delete rule, which is the whole reason
+    // the shapes had to be distinguished.
+    expect(
+      CONVERSION_SHAPES.filter((shape) => shape.deleteRule.includes('(col)')).map((s) => s.key),
+    ).toEqual(['set-null-nullable'])
   })
 
   it('states the rollout rather than leaving 269 implied', () => {
@@ -113,6 +151,7 @@ describe('how many references could point at another tenant', () => {
     expect(REFERENCE_ROLLOUT.map((stage) => stage.stage)).toEqual([
       'measured',
       'proved where it was found',
+      'one referenced table finished',
       'the rest',
     ])
 
@@ -220,6 +259,104 @@ describe('the composite key, which is prevention rather than containment', () =>
 
     expect(line.itemId).toBeNull()
     expect(line.description).toBe('Framing')
+  })
+})
+
+describe('the slice taken by referenced table (Phase 171)', () => {
+  it('refuses another company’s item on a reference nothing else guarded', async () => {
+    /**
+     * `time_entries.item_id` rather than an invoice line, deliberately. The two
+     * Phase 170 converted were the two somebody had already found; this one was
+     * converted because it points at the same table, and nothing about *it* had
+     * ever been examined.
+     *
+     * That is the argument for slicing by referenced table: the references
+     * nobody has looked at are the ones most likely to be unguarded, and taking
+     * a whole target catches them without having to guess which.
+     */
+    const other = await createCompanyFixture({ name: 'Somebody Else Ltd' })
+    const theirItem = await createServiceItem(other.ctx, {
+      name: 'Their framing',
+      unitPriceCents: 100_000,
+    })
+
+    const { timeEntries } = await import('@/db/schema')
+    const refused = await db
+      .insert(timeEntries)
+      .values({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        workedOn: '2026-06-01',
+        minutes: 60,
+        description: 'Site visit',
+        itemId: theirItem.id,
+      })
+      .then(
+        () => undefined,
+        (error: unknown) =>
+          (error as { cause?: { constraint_name?: string } }).cause?.constraint_name,
+      )
+
+    expect(refused).toBe('time_entries_item_tenant_fk')
+  })
+
+  it('still lets a catalogue item be deleted out from under a time entry', async () => {
+    /**
+     * Shape one, and the assertion that a mechanical sweep would have failed.
+     * `time_entries.item_id` is `SET NULL`, so the composite key needs
+     * `ON DELETE SET NULL (item_id)` — a bare `SET NULL` would try to null
+     * `company_id` too and the delete would be refused.
+     *
+     * A wrong delete rule is wrong only on the day somebody deletes something,
+     * which is why this is asserted and not reasoned about.
+     */
+    const mine = await createServiceItem(fixture.ctx, {
+      name: 'Framing',
+      unitPriceCents: 100_000,
+    })
+
+    const { timeEntries } = await import('@/db/schema')
+    const [entry] = await db
+      .insert(timeEntries)
+      .values({
+        companyId: fixture.companyId,
+        userId: fixture.userId,
+        workedOn: '2026-06-01',
+        minutes: 60,
+        description: 'Site visit',
+        itemId: mine.id,
+      })
+      .returning()
+
+    await db.delete(serviceItems).where(eq(serviceItems.id, mine.id))
+
+    const [after] = await db
+      .select({ itemId: timeEntries.itemId, minutes: timeEntries.minutes })
+      .from(timeEntries)
+      .where(eq(timeEntries.id, entry.id))
+
+    expect(after.itemId).toBeNull()
+    expect(after.minutes).toBe(60)
+  })
+
+  it('renamed the constraints Phase 169 left saying service_item_id', async () => {
+    /**
+     * A side effect rather than the point, and found by reading
+     * `pg_constraint` to get the DROPs right rather than by looking for it.
+     *
+     * Phase 169 renamed three columns to `item_id` and renamed the index it had
+     * created itself, leaving the constraints Postgres and Drizzle had named —
+     * the same small untruth in the catalogue it had just argued against, one
+     * object type over.
+     */
+    const rows = await db.execute(sql`
+      select count(*)::int as stale
+        from pg_constraint
+       where conname like '%service_item_id%'
+    `)
+
+    const [measured] = rows as unknown as Array<{ stale: number }>
+    expect(measured.stale).toBe(0)
   })
 })
 
