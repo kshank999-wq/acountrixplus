@@ -204,6 +204,24 @@ to force every line to be one.
 realised revenue rather than on offers — and realised revenue is the one a
 business acts on at year end.
 
+> **Corrected by Phase 169.** `invoice_lines.item_id` has referenced the
+> catalogue since **Phase 14**; its own docstring says so. The column this
+> nominated already existed under the other name — and this phase had added
+> `proposal_items.service_item_id` while believing the invoice side had nothing,
+> widening a naming split it had not noticed (nine tables said `item_id`, two
+> said `service_item_id`).
+>
+> Fourth false *reason* in this lineage and the first one written here, by the
+> phase that had just spent four paragraphs on the cost of a claim nobody
+> re-measured. The rule is not that audits go stale: a nomination is a claim, and
+> writing it down does not check it.
+>
+> Phase 169 also found that **nothing had ever written** that column — its only
+> caller was `tests/inventory.test.ts` — so the capability was missing for a
+> worse reason than a missing column, and that `serviceBreakdown` below joins
+> the catalogue on `id` alone, which put another tenant's product name on a
+> company's dashboard until Phase 169 scoped it.
+
 Then the **bullet-level pass** over the spec sections `docs/SPEC-AUDIT.md`
 verified only at module level: §3–§8, §10, §12–§18. §9 and §11 were its two
 enumerated sections and both have now been worked through; between them they

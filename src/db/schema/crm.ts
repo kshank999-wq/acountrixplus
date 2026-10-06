@@ -26,7 +26,7 @@ import { companies, users } from './tenancy'
  */
 import { invoices } from './receivables'
 import { journalEntries } from './ledger'
-/** `service_items` for `proposal_items.service_item_id` (Phase 168). */
+/** `service_items` for `proposal_items.item_id` (Phase 168, renamed Phase 169). */
 import { serviceItems } from './studio'
 
 
@@ -403,8 +403,13 @@ export const proposalItems = pgTable(
      * §9 asks for *"performance by service/product"*, and until this column
      * existed the only thing to group a proposal line by was the prose somebody
      * typed — so "Kitchen fit-out" and "Kitchen fit out" were two products.
-     * `time_entries` and `appointments` have carried the same reference for
-     * longer; proposals were the gap.
+     *
+     * Named `service_item_id` in Phase 168 and renamed in Phase 169, which
+     * measured the thing Phase 168 should have: **nine** tables already pointed
+     * at this catalogue as `item_id`, `invoice_lines` among them, and only
+     * `time_entries` and `appointments` used the longer name. Phase 168 widened
+     * a split it had not noticed. `item_id` is also the better name, because
+     * `service_items` is the one catalogue of both services and stocked goods.
      *
      * Nullable on purpose. A line typed by hand is a real line: a business
      * quoting something it has never quoted before should not have to add a
@@ -413,7 +418,7 @@ export const proposalItems = pgTable(
      * a breakdown whose total disagrees with `proposalStats.totalValueCents`
      * would be two answers to one question.
      */
-    serviceItemId: uuid('service_item_id').references(() => serviceItems.id, {
+    itemId: uuid('item_id').references(() => serviceItems.id, {
       onDelete: 'set null',
     }),
 
@@ -421,7 +426,7 @@ export const proposalItems = pgTable(
   },
   (t) => ({
     proposalIdx: index('proposal_items_proposal_idx').on(t.proposalId),
-    serviceIdx: index('proposal_items_service_idx').on(t.companyId, t.serviceItemId),
+    itemIdx: index('proposal_items_item_idx').on(t.companyId, t.itemId),
   }),
 )
 

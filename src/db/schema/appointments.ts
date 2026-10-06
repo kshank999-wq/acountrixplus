@@ -166,7 +166,7 @@ export const appointments = pgTable(
     /** Who it is for. Null for a slot held without a name against it yet. */
     customerId: uuid('customer_id').references(() => customers.id, { onDelete: 'set null' }),
     /** What is being done. Carries the revenue account when it posts. */
-    serviceItemId: uuid('service_item_id').references(() => serviceItems.id, {
+    itemId: uuid('item_id').references(() => serviceItems.id, {
       onDelete: 'set null',
     }),
 

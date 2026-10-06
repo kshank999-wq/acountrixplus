@@ -60,9 +60,40 @@ type Duplicate = {
   why: string
 }
 
-type Line = { description: string; quantity: string; unitPrice: string; chartAccountId: string }
+type Line = {
+  description: string
+  quantity: string
+  unitPrice: string
+  chartAccountId: string
+  /** The catalogue item sold, when it is one (Phase 169). */
+  itemId: string
+}
 
-const BLANK_LINE: Line = { description: '', quantity: '', unitPrice: '', chartAccountId: '' }
+const BLANK_LINE: Line = {
+  description: '',
+  quantity: '',
+  unitPrice: '',
+  chartAccountId: '',
+  itemId: '',
+}
+
+/**
+ * A sellable catalogue entry, for the line picker.
+ *
+ * Offered on an invoice only. A bill line buys something and
+ * `bill_lines.item_id` is the purchasing side's business — `inventory/purchasing`
+ * already sets it from a purchase order, and a second way to set the same column
+ * from a different screen would be two answers to one question.
+ */
+type SellableItem = {
+  id: string
+  code: string | null
+  name: string
+  unitPriceCents: number
+  chartAccountId: string | null
+  /** Whether selling it moves stock, which is what the warning is for. */
+  isInventoried: boolean
+}
 
 type Side = 'customer' | 'vendor'
 
@@ -81,6 +112,7 @@ export function InvoicesBoard({
   vendors,
   revenueAccounts,
   costAccounts,
+  sellableItems,
   owedByCustomers,
   owedToVendors,
   duplicates,
@@ -97,6 +129,8 @@ export function InvoicesBoard({
   vendors: Party[]
   revenueAccounts: Account[]
   costAccounts: Account[]
+  /** The sellable catalogue, for an invoice line. Empty hides the picker. */
+  sellableItems: SellableItem[]
   owedByCustomers: Owed[]
   owedToVendors: Owed[]
   duplicates: Duplicate[]
@@ -197,6 +231,9 @@ export function InvoicesBoard({
             side={side}
             parties={parties}
             accounts={accounts}
+            // Invoices only. A bill line's `item_id` is the purchasing side's,
+            // and `inventory/purchasing` already sets it from a purchase order.
+            items={isCustomer ? sellableItems : []}
             homeCurrency={homeCurrency}
             currencies={currencies}
             today={today}
@@ -296,6 +333,7 @@ function Composer({
   side,
   parties,
   accounts,
+  items,
   homeCurrency,
   currencies,
   today,
@@ -306,6 +344,7 @@ function Composer({
   side: Side
   parties: Party[]
   accounts: Account[]
+  items: SellableItem[]
   homeCurrency: string
   currencies: string[]
   today: string
@@ -472,6 +511,8 @@ function Composer({
           description: line.description,
           quantity: line.quantity,
           unitPrice: line.unitPrice,
+          // Only an invoice carries it; `createBillAction` ignores the field.
+          itemId: line.itemId || undefined,
         })),
     }
 
@@ -607,6 +648,7 @@ function Composer({
                 <table className="w-full text-sm">
                   <thead className="text-left text-xs uppercase tracking-wide text-muted">
                     <tr>
+                      {items.length > 0 && <th className="py-1 font-medium">Item</th>}
                       <th className="py-1 font-medium">Description</th>
                       <th className="py-1 font-medium">{isCustomer ? 'Income account' : 'Account'}</th>
                       <th className="py-1 text-right font-medium">Qty</th>
@@ -627,6 +669,58 @@ function Composer({
 
                       return (
                         <tr key={index} className="border-t border-line">
+                          {items.length > 0 && (
+                            /*
+                              The column `invoice_lines.item_id` has existed
+                              since Phase 14 and nothing in the application had
+                              ever set it — its only caller was a test. So
+                              selling a stocked item through this composer
+                              relieved no stock, and revenue by product had
+                              nothing to group on. This is the screen that
+                              fills it.
+
+                              Choosing an item fills the description, the price
+                              and the income account, and all three stay
+                              editable: a catalogue item sold at a negotiated
+                              price is still that item.
+                            */
+                            <td className="py-1.5 pr-2">
+                              <select
+                                value={line.itemId}
+                                onChange={(event) => {
+                                  const chosen = items.find(
+                                    (item) => item.id === event.target.value,
+                                  )
+                                  setLines((rows) =>
+                                    rows.map((row, i) => {
+                                      if (i !== index) return row
+                                      if (!chosen) return { ...row, itemId: '' }
+                                      return {
+                                        ...row,
+                                        itemId: chosen.id,
+                                        description: row.description.trim() || chosen.name,
+                                        unitPrice:
+                                          row.unitPrice.trim() ||
+                                          (chosen.unitPriceCents / 100).toFixed(2),
+                                        chartAccountId:
+                                          row.chartAccountId || (chosen.chartAccountId ?? ''),
+                                      }
+                                    }),
+                                  )
+                                }}
+                                className="field w-36 py-1 text-sm"
+                                aria-label={`Line ${index + 1} item`}
+                              >
+                                <option value="">Not an item</option>
+                                {items.map((item) => (
+                                  <option key={item.id} value={item.id}>
+                                    {item.code ? `${item.code} · ${item.name}` : item.name}
+                                    {item.isInventoried ? ' (stocked)' : ''}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
                           <td className="py-1.5 pr-2">
                             <input
                               value={line.description}

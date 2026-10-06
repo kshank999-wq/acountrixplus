@@ -90,7 +90,7 @@ export const timeEntries = pgTable(
 
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'restrict' }),
     /** What kind of work, which is also where the list rate comes from. */
-    serviceItemId: uuid('service_item_id').references(() => serviceItems.id, {
+    itemId: uuid('item_id').references(() => serviceItems.id, {
       onDelete: 'set null',
     }),
 

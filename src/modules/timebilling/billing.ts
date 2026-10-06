@@ -76,7 +76,7 @@ export type BillableTimeRow = {
   workedOn: string
   minutes: number
   description: string
-  serviceItemId: string | null
+  itemId: string | null
   rateCents: number
   amountCents: number
   rateSource: string
@@ -121,7 +121,7 @@ export async function previewBilling(
       workedOn: timeEntries.workedOn,
       minutes: timeEntries.minutes,
       description: timeEntries.description,
-      serviceItemId: timeEntries.serviceItemId,
+      itemId: timeEntries.itemId,
       rateCents: timeEntries.rateCents,
     })
     .from(timeEntries)
@@ -144,7 +144,7 @@ export async function previewBilling(
     const rate = await rateForEntry(ctx, {
       userId: row.userId,
       projectId: opts.projectId,
-      serviceItemId: row.serviceItemId,
+      itemId: row.itemId,
       rateCents: row.rateCents,
     })
 
@@ -155,7 +155,7 @@ export async function previewBilling(
       workedOn: row.workedOn,
       minutes: row.minutes,
       description: row.description,
-      serviceItemId: row.serviceItemId,
+      itemId: row.itemId,
       rateCents: rate.rateCents,
       amountCents: amountForMinutes(row.minutes, rate.rateCents),
       rateSource: rate.source,
@@ -268,6 +268,7 @@ export async function billWork(ctx: ActorContext, input: BillWorkInput) {
     unitPriceCents:
       line.quantityMilli === 0 ? 0 : Math.round((line.amountCents * 1000) / line.quantityMilli),
     projectId: input.projectId,
+    itemId: line.itemId,
   }))
 
   for (const expense of preview.expenses) {
@@ -390,7 +391,26 @@ export async function billWork(ctx: ActorContext, input: BillWorkInput) {
   })
 }
 
-type GroupedLine = { description: string; quantityMilli: number; amountCents: number }
+type GroupedLine = {
+  description: string
+  quantityMilli: number
+  amountCents: number
+  /**
+   * The catalogue item, when every entry in the group names the same one
+   * (Phase 169).
+   *
+   * A time entry has recorded `item_id` since the module was built and the
+   * invoice line it became dropped it, so time billed against a catalogue
+   * service was invisible to any report of revenue by product.
+   *
+   * Carried only when the group agrees. Grouped by person or by day, one line
+   * can hold two different services, and naming either would attribute the
+   * whole line's revenue to one of them — so the honest answer for a mixed
+   * group is null. Grouped by service it always agrees, which is the grouping
+   * somebody picks when they care about this.
+   */
+  itemId: string | null
+}
 
 /**
  * Collapses entries into invoice lines.
@@ -408,7 +428,7 @@ export function groupTimeIntoLines(
   const keyFor = (row: BillableTimeRow): string => {
     if (grouping === 'person') return row.personName
     if (grouping === 'day') return row.workedOn
-    if (grouping === 'service') return row.serviceItemId ?? 'other'
+    if (grouping === 'service') return row.itemId ?? 'other'
     return 'all'
   }
 
@@ -423,14 +443,21 @@ export function groupTimeIntoLines(
     groups.set(key, group)
   }
 
-  return [...groups.entries()].map(([key, group]) => ({
-    // The individual descriptions are kept in the line, because "Professional
-    // services — 14.5 hours" is the invoice line a client queries and the
-    // detail is what answers them.
-    description: describeGroup(key, group.rows, grouping),
-    quantityMilli: minutesToQuantityMilli(group.minutes),
-    amountCents: group.amountCents,
-  }))
+  return [...groups.entries()].map(([key, group]) => {
+    // Agreement, not the first row's value: a blended line that named one of
+    // its two services would attribute the whole amount to it.
+    const items = new Set(group.rows.map((row) => row.itemId ?? ''))
+
+    return {
+      // The individual descriptions are kept in the line, because "Professional
+      // services — 14.5 hours" is the invoice line a client queries and the
+      // detail is what answers them.
+      description: describeGroup(key, group.rows, grouping),
+      quantityMilli: minutesToQuantityMilli(group.minutes),
+      amountCents: group.amountCents,
+      itemId: items.size === 1 ? (group.rows[0].itemId ?? null) : null,
+    }
+  })
 }
 
 function describeGroup(

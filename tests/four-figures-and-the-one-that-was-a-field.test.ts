@@ -59,7 +59,7 @@ async function aProposal(opts: {
   items: Array<{
     description: string
     unitPriceCents: number
-    serviceItemId?: string | null
+    itemId?: string | null
     isOptional?: boolean
     isSelected?: boolean
   }>
@@ -287,8 +287,8 @@ describe('performance by service, which is a different grain', () => {
     await aProposal({
       title: 'Both services',
       items: [
-        { description: 'Framing', unitPriceCents: 200_000, serviceItemId: framing.id },
-        { description: 'Roofing', unitPriceCents: 400_000, serviceItemId: roofing.id },
+        { description: 'Framing', unitPriceCents: 200_000, itemId: framing.id },
+        { description: 'Roofing', unitPriceCents: 400_000, itemId: roofing.id },
       ],
       decide: 'won',
     })
@@ -318,7 +318,7 @@ describe('performance by service, which is a different grain', () => {
     await aProposal({
       title: 'Mixed',
       items: [
-        { description: 'Framing', unitPriceCents: 200_000, serviceItemId: framing.id },
+        { description: 'Framing', unitPriceCents: 200_000, itemId: framing.id },
         { description: 'Something nobody has quoted before', unitPriceCents: 150_000 },
       ],
       decide: 'won',
@@ -358,12 +358,12 @@ describe('performance by service, which is a different grain', () => {
 
     await aProposal({
       title: 'Won',
-      items: [{ description: 'Framing', unitPriceCents: 100_000, serviceItemId: framing.id }],
+      items: [{ description: 'Framing', unitPriceCents: 100_000, itemId: framing.id }],
       decide: 'won',
     })
     await aProposal({
       title: 'Expired',
-      items: [{ description: 'Framing', unitPriceCents: 100_000, serviceItemId: framing.id }],
+      items: [{ description: 'Framing', unitPriceCents: 100_000, itemId: framing.id }],
       decide: 'expired',
     })
 
@@ -384,11 +384,11 @@ describe('performance by service, which is a different grain', () => {
     await aProposal({
       title: 'With an option',
       items: [
-        { description: 'Framing', unitPriceCents: 100_000, serviceItemId: framing.id },
+        { description: 'Framing', unitPriceCents: 100_000, itemId: framing.id },
         {
           description: 'Framing — extra bay',
           unitPriceCents: 50_000,
-          serviceItemId: framing.id,
+          itemId: framing.id,
           isOptional: true,
           isSelected: false,
         },
@@ -427,11 +427,11 @@ describe('performance by service, which is a different grain', () => {
     })
 
     const [line] = await db
-      .select({ serviceItemId: proposalItems.serviceItemId })
+      .select({ itemId: proposalItems.itemId })
       .from(proposalItems)
       .where(eq(proposalItems.proposalId, proposal.id))
 
-    expect(line.serviceItemId).toBeNull()
+    expect(line.itemId).toBeNull()
     expect(service.id).toBeTruthy()
 
     const rows = await serviceBreakdown(fixture.ctx)
@@ -448,7 +448,7 @@ describe('performance by service, which is a different grain', () => {
     })
 
     await aProposal({
-      items: [{ description: 'Framing', unitPriceCents: 100_000, serviceItemId: framing.id }],
+      items: [{ description: 'Framing', unitPriceCents: 100_000, itemId: framing.id }],
       decide: 'won',
     })
 

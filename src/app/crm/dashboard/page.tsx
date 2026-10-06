@@ -9,6 +9,7 @@ import {
   pipelineValue,
   proposalStats,
   serviceBreakdown,
+  serviceRevenue,
   winLossSummary,
 } from '@/modules/crm/analytics'
 import { stageLabel, type Stage } from '@/modules/crm/pipeline'
@@ -44,7 +45,7 @@ export default async function DashboardPage() {
 
   const canSeeProposals = can(actor, 'proposals:view')
 
-  const [summary, pipeline, sources, owners, months, losses, proposals, services] =
+  const [summary, pipeline, sources, owners, months, losses, proposals, services, revenue] =
     await Promise.all([
       winLossSummary(actor),
       pipelineValue(actor),
@@ -56,6 +57,12 @@ export default async function DashboardPage() {
       lossReasons(actor),
       canSeeProposals ? proposalStats(actor) : Promise.resolve(null),
       canSeeProposals ? serviceBreakdown(actor) : Promise.resolve(null),
+      /*
+        Revenue by product, realised. Behind `reports:view` rather than
+        `proposals:view`, because it reads invoices — a salesperson sees what
+        they offered and a bookkeeper sees what was billed.
+      */
+      can(actor, 'reports:view') ? serviceRevenue(actor) : Promise.resolve(null),
     ])
 
   return (
@@ -224,6 +231,27 @@ export default async function DashboardPage() {
                   String(row.lostLineCount),
                   formatBasisPoints(row.winRateByValueBp),
                   formatCents(row.wonValueCents),
+                ])}
+              />
+            )}
+          </Card>
+        )}
+
+        {revenue && (
+          <Card
+            title="Revenue by service"
+            subtitle="Invoiced, in your own currency. What was billed, not what was offered."
+          >
+            {revenue.length === 0 ? (
+              <Empty>No invoice lines yet.</Empty>
+            ) : (
+              <Table
+                head={['Service', 'Lines', 'Invoiced', 'Share']}
+                rows={revenue.map((row) => [
+                  row.code ? `${row.code} — ${row.label}` : row.label,
+                  String(row.lineCount),
+                  formatCents(row.invoicedCents),
+                  formatBasisPoints(row.shareBp),
                 ])}
               />
             )}

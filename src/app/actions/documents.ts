@@ -119,6 +119,16 @@ const lineSchema = z.object({
   description: z.string().trim().min(1, 'Every line needs a description.'),
   quantity,
   unitPrice: money,
+  /**
+   * The catalogue item sold (Phase 169).
+   *
+   * `invoice_lines.item_id` has existed since Phase 14 and **nothing in the
+   * application had ever set it** — its only caller was `tests/inventory.test.ts`.
+   * So the inventory relief that column exists to trigger had never fired for a
+   * stocked item sold through this composer, and §9's revenue-by-product report
+   * had nothing to group on.
+   */
+  itemId: uuid.optional(),
 })
 
 // --- Parties ---------------------------------------------------------------
@@ -237,6 +247,7 @@ export async function createInvoiceAction(input: unknown): Promise<ActionResult>
         description: line.description,
         quantityMilli: line.quantity,
         unitPriceCents: line.unitPrice,
+        itemId: line.itemId ?? null,
       })),
     })
 

@@ -45,7 +45,7 @@ type Line = {
   isOptional: boolean
   chartAccountId: string
   /** Which catalogue item this line is, when it is one (Phase 168). */
-  serviceItemId: string
+  itemId: string
 }
 
 type Service = {
@@ -63,7 +63,7 @@ const BLANK: Line = {
   unitPrice: '',
   isOptional: false,
   chartAccountId: '',
-  serviceItemId: '',
+  itemId: '',
 }
 
 export function ProposalList({
@@ -418,15 +418,15 @@ function NewProposalForm({
                 else should not lose their words.
               */
               <select
-                value={line.serviceItemId}
+                value={line.itemId}
                 onChange={(event) => {
                   const chosen = services.find((item) => item.id === event.target.value)
                   if (!chosen) {
-                    update(index, { serviceItemId: '' })
+                    update(index, { itemId: '' })
                     return
                   }
                   update(index, {
-                    serviceItemId: chosen.id,
+                    itemId: chosen.id,
                     description:
                       line.description.trim() === ''
                         ? (chosen.defaultProposalCopy ?? chosen.name)
@@ -520,7 +520,7 @@ function NewProposalForm({
                     unitPrice: line.unitPrice,
                     isOptional: line.isOptional,
                     chartAccountId: line.chartAccountId || undefined,
-                    serviceItemId: line.serviceItemId || undefined,
+                    itemId: line.itemId || undefined,
                   })),
                 }),
               )

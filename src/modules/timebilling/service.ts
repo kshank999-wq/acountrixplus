@@ -50,7 +50,7 @@ import { missing } from '@/modules/errors/missing'
 export type LogTimeInput = {
   userId?: string
   projectId?: string | null
-  serviceItemId?: string | null
+  itemId?: string | null
   workedOn: string
   minutes: number
   description: string
@@ -83,7 +83,7 @@ export async function logTime(ctx: ActorContext, input: LogTimeInput) {
         companyId: ctx.companyId,
         userId,
         projectId: input.projectId ?? null,
-        serviceItemId: input.serviceItemId ?? null,
+        itemId: input.itemId ?? null,
         workedOn: input.workedOn,
         minutes: input.minutes,
         description,
@@ -123,8 +123,8 @@ export async function updateTime(
       .update(timeEntries)
       .set({
         projectId: input.projectId === undefined ? entry.projectId : input.projectId,
-        serviceItemId:
-          input.serviceItemId === undefined ? entry.serviceItemId : input.serviceItemId,
+        itemId:
+          input.itemId === undefined ? entry.itemId : input.itemId,
         workedOn: input.workedOn ?? entry.workedOn,
         minutes: input.minutes ?? entry.minutes,
         description: input.description?.trim() ?? entry.description,
@@ -367,7 +367,7 @@ export async function rateForEntry(
   entry: {
     userId: string
     projectId?: string | null
-    serviceItemId?: string | null
+    itemId?: string | null
     rateCents?: number | null
   },
   exec: Executor = db,
@@ -391,14 +391,14 @@ export async function rateForEntry(
       .where(and(eq(personRates.companyId, ctx.companyId), eq(personRates.userId, entry.userId)))
       .limit(1),
 
-    entry.serviceItemId
+    entry.itemId
       ? exec
           .select({ unitPriceCents: serviceItems.unitPriceCents })
           .from(serviceItems)
           .where(
             and(
               eq(serviceItems.companyId, ctx.companyId),
-              eq(serviceItems.id, entry.serviceItemId),
+              eq(serviceItems.id, entry.itemId),
             ),
           )
           .limit(1)
@@ -566,7 +566,7 @@ export async function unbilledWork(ctx: ActorContext): Promise<UnbilledWork[]> {
         userId: timeEntries.userId,
         minutes: timeEntries.minutes,
         workedOn: timeEntries.workedOn,
-        serviceItemId: timeEntries.serviceItemId,
+        itemId: timeEntries.itemId,
         rateCents: timeEntries.rateCents,
       })
       .from(timeEntries)
@@ -631,7 +631,7 @@ export async function unbilledWork(ctx: ActorContext): Promise<UnbilledWork[]> {
     const rate = await rateForEntry(ctx, {
       userId: row.userId,
       projectId: row.projectId,
-      serviceItemId: row.serviceItemId,
+      itemId: row.itemId,
       rateCents: row.rateCents,
     })
 

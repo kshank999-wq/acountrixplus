@@ -1,6 +1,8 @@
-import { and, eq, gte, inArray, lte, sql, type SQL } from 'drizzle-orm'
+import { and, eq, gte, inArray, lte, ne, sql, type SQL } from 'drizzle-orm'
 import { db } from '@/db'
 import {
+  invoiceLines,
+  invoices,
   opportunities,
   organizations,
   proposalItems,
@@ -473,7 +475,7 @@ export type ServiceBreakdownRow = {
  *
  * ## The uncatalogued group is reported, never dropped
  *
- * `service_item_id` is nullable because a line typed by hand is a real line.
+ * `item_id` is nullable because a line typed by hand is a real line.
  * Those lines are grouped under `'uncatalogued'` and shown, because a breakdown
  * that quietly omitted them would have a total that disagrees with
  * `proposalStats.totalValueCents` — and the person reading it would have no way
@@ -505,7 +507,7 @@ export async function serviceBreakdown(
 
   const rows = await db
     .select({
-      serviceItemId: proposalItems.serviceItemId,
+      itemId: proposalItems.itemId,
       serviceName: serviceItems.name,
       serviceCode: serviceItems.code,
       lineDescription: proposalItems.description,
@@ -516,7 +518,20 @@ export async function serviceBreakdown(
     })
     .from(proposalItems)
     .innerJoin(proposals, eq(proposals.id, proposalItems.proposalId))
-    .leftJoin(serviceItems, eq(serviceItems.id, proposalItems.serviceItemId))
+    /*
+      Scoped on the join, not only on the driving table. `scoped(ctx, ...)`
+      guards `proposal_items`; the join to the catalogue needs its own company
+      predicate, or an `item_id` carrying another tenant's uuid would put that
+      tenant's product **name** on this company's report.
+
+      Found by a test in Phase 169, which wrote the same unscoped join in
+      `serviceRevenue` and asserted what came back. Phase 149/150's rule reaches
+      every table in a statement, not the first one.
+    */
+    .leftJoin(
+      serviceItems,
+      and(eq(serviceItems.id, proposalItems.itemId), eq(serviceItems.companyId, ctx.companyId)),
+    )
     .where(scoped(ctx, proposalItems, ...conditions))
 
   const groups = new Map<string, ServiceBreakdownRow>()
@@ -525,14 +540,18 @@ export async function serviceBreakdown(
     // A declined optional line was offered and not bought, so it is neither won
     // nor open. Counted in `lineCount` so the offer is still visible.
     const counted = !(row.isOptional && !row.isSelected)
-    const key = row.serviceItemId ?? 'uncatalogued'
+    const key = row.itemId ?? 'uncatalogued'
 
     let group = groups.get(key)
     if (!group) {
       group = {
         key,
-        label: row.serviceItemId
-          ? (row.serviceName ?? 'Deleted catalogue item')
+        label: row.itemId
+          ? // Non-null and not joined. With the Phase 169 foreign key in place
+            // a deleted item nulls the column, so this can now only be an id
+            // belonging to another company — which is a defect, and the label
+            // says so rather than calling it deleted.
+            (row.serviceName ?? 'Not in this company’s catalogue')
           : 'Not from the catalogue',
         code: row.serviceCode ?? null,
         lineCount: 0,
@@ -585,6 +604,129 @@ export async function serviceBreakdown(
 
   return [...groups.values()].sort(
     (a, b) => b.wonValueCents - a.wonValueCents || a.label.localeCompare(b.label),
+  )
+}
+
+export type ServiceRevenueRow = {
+  /** The service item's id, or `'uncatalogued'`. */
+  key: string
+  label: string
+  code: string | null
+  lineCount: number
+  /** Invoiced in the functional currency, voids excluded. */
+  invoicedCents: number
+  /** Share of all invoiced line value in the window, in basis points. */
+  shareBp: number
+}
+
+/**
+ * Revenue by service or product, **realised** (spec §9).
+ *
+ * The other half of `serviceBreakdown`, and the half a business acts on at year
+ * end. That one reports what was *offered* and how often it was accepted; this
+ * reports what was actually invoiced.
+ *
+ * ## Which column this reads, and why that is the finding
+ *
+ * `invoice_lines.item_id` — which has referenced the catalogue since **Phase
+ * 14**. ADR 0168 nominated adding `service_item_id` to `invoice_lines` "which
+ * turns the same question on realised revenue rather than on offers", and the
+ * column it asked for was already there under the other name. Nothing had ever
+ * grouped by it: Phase 14 added it to relieve inventory, and relieving
+ * inventory is all it was used for.
+ *
+ * So this capability needed no column and no screen. It needed somebody to
+ * notice that the data had been sitting there for a hundred and fifty phases.
+ *
+ * ## Functional currency, not the invoice's own
+ *
+ * A line's `amount_cents` is in whatever the customer was billed in, so adding
+ * those across invoices in three currencies produces a number that is not money
+ * (Phase 129). The share is taken of `functional_total_cents` apportioned by
+ * line, which is the invoice's own rate applied to its own lines — never a
+ * today-rate on an old invoice.
+ */
+export async function serviceRevenue(
+  ctx: ActorContext,
+  range: DateRange = {},
+): Promise<ServiceRevenueRow[]> {
+  requirePermission(ctx, 'reports:view')
+
+  const conditions: (SQL | undefined)[] = [
+    range.startDate ? gte(invoices.issueDate, range.startDate) : undefined,
+    range.endDate ? lte(invoices.issueDate, range.endDate) : undefined,
+  ]
+
+  const rows = await db
+    .select({
+      itemId: invoiceLines.itemId,
+      serviceName: serviceItems.name,
+      serviceCode: serviceItems.code,
+      amountCents: invoiceLines.amountCents,
+      /*
+        The invoice's own total in both currencies, so a line can be converted
+        at the rate that invoice was raised at rather than at today's. Carried
+        per line rather than looked up, because one query is the point.
+      */
+      invoiceTotalCents: invoices.totalCents,
+      invoiceFunctionalCents: invoices.functionalTotalCents,
+    })
+    .from(invoiceLines)
+    .innerJoin(invoices, eq(invoices.id, invoiceLines.invoiceId))
+    // Scoped on the join — see `serviceBreakdown` above for what goes wrong
+    // without it.
+    .leftJoin(
+      serviceItems,
+      and(eq(serviceItems.id, invoiceLines.itemId), eq(serviceItems.companyId, ctx.companyId)),
+    )
+    .where(scoped(ctx, invoiceLines, ne(invoices.status, 'void'), ...conditions))
+
+  const groups = new Map<string, ServiceRevenueRow>()
+  let total = 0
+
+  for (const row of rows) {
+    /*
+      The line in functional terms: its share of the document, times the
+      document's functional total. An invoice already in the functional currency
+      has the two totals equal, so this is the identity and costs nothing.
+
+      Apportioning rather than converting is deliberate. Converting each line at
+      the invoice's rate and summing would round per line and could miss the
+      invoice's own functional total by a cent or two — which is Phase 145's
+      defect, a whole that existed before its parts.
+    */
+    const functionalCents =
+      row.invoiceTotalCents === 0
+        ? 0
+        : Math.round((row.amountCents * row.invoiceFunctionalCents) / row.invoiceTotalCents)
+
+    const key = row.itemId ?? 'uncatalogued'
+    let group = groups.get(key)
+    if (!group) {
+      group = {
+        key,
+        label: row.itemId
+          ? (row.serviceName ?? 'Not in this company’s catalogue')
+          : 'Not from the catalogue',
+        code: row.serviceCode ?? null,
+        lineCount: 0,
+        invoicedCents: 0,
+        shareBp: 0,
+      }
+      groups.set(key, group)
+    }
+
+    group.lineCount++
+    group.invoicedCents += functionalCents
+    total += functionalCents
+  }
+
+  for (const group of groups.values()) {
+    group.shareBp = basisPoints(group.invoicedCents, total)
+  }
+
+  return [...groups.values()].sort(
+    (a, b) => b.invoicedCents - a.invoicedCents || a.label.localeCompare(b.label),
   )
 }
 

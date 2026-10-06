@@ -196,7 +196,7 @@ export async function listPractitioners(ctx: ActorContext) {
 export type BookInput = {
   practitionerId: string
   customerId?: string | null
-  serviceItemId?: string | null
+  itemId?: string | null
   startsAt: Date
   endsAt: Date
   priceCents?: number
@@ -245,7 +245,7 @@ export async function book(ctx: ActorContext, input: BookInput): Promise<{ id: s
   const commissionBp = input.commissionBp ?? practitioner.commissionBp
   const productCommissionBp = input.productCommissionBp ?? practitioner.productCommissionBp
 
-  const priceCents = input.priceCents ?? (await defaultPrice(ctx, input.serviceItemId))
+  const priceCents = input.priceCents ?? (await defaultPrice(ctx, input.itemId))
 
   try {
     const [row] = await db
@@ -254,7 +254,7 @@ export async function book(ctx: ActorContext, input: BookInput): Promise<{ id: s
         companyId: ctx.companyId,
         practitionerId: input.practitionerId,
         customerId: input.customerId ?? null,
-        serviceItemId: input.serviceItemId ?? null,
+        itemId: input.itemId ?? null,
         startsAt: input.startsAt,
         endsAt: input.endsAt,
         priceCents,
@@ -298,13 +298,13 @@ function isExclusionViolation(error: unknown): boolean {
   return false
 }
 
-async function defaultPrice(ctx: ActorContext, serviceItemId?: string | null): Promise<number> {
-  if (!serviceItemId) return 0
+async function defaultPrice(ctx: ActorContext, itemId?: string | null): Promise<number> {
+  if (!itemId) return 0
 
   const [item] = await db
     .select({ price: serviceItems.unitPriceCents })
     .from(serviceItems)
-    .where(scoped(ctx, serviceItems, eq(serviceItems.id, serviceItemId)))
+    .where(scoped(ctx, serviceItems, eq(serviceItems.id, itemId)))
     .limit(1)
 
   return item?.price ?? 0

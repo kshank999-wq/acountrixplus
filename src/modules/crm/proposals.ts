@@ -55,7 +55,7 @@ export type ProposalItemInput = {
    * nobody recorded which product it was, and `serviceBreakdown` reports those
    * lines under their own heading rather than dropping them.
    */
-  serviceItemId?: string | null
+  itemId?: string | null
 }
 
 /** Extended amount for a line, rounded half-up to the nearest cent. */
@@ -141,7 +141,7 @@ export async function createProposal(
       isOptional: item.isOptional ?? false,
       isSelected: item.isSelected ?? true,
       chartAccountId: item.chartAccountId ?? null,
-      serviceItemId: item.serviceItemId ?? null,
+      itemId: item.itemId ?? null,
       sortOrder: index,
     }
   })
@@ -471,7 +471,7 @@ export async function updateProposalItems(
       isOptional: item.isOptional ?? false,
       isSelected: item.isSelected ?? true,
       chartAccountId: item.chartAccountId ?? null,
-      serviceItemId: item.serviceItemId ?? null,
+      itemId: item.itemId ?? null,
       sortOrder: index,
     }
   })

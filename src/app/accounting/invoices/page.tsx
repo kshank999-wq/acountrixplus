@@ -1,5 +1,6 @@
 import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
+import { listServiceItems } from '@/modules/studio/service'
 import { AppShell, SubNav } from '@/components/app-shell'
 import {
   listBills,
@@ -56,6 +57,7 @@ export default async function InvoicesPage() {
     vendors,
     revenueAccounts,
     costAccounts,
+    sellableItems,
     owedByCustomers,
     owedToVendors,
     banks,
@@ -68,6 +70,12 @@ export default async function InvoicesPage() {
     listVendors(actor),
     documentLineAccounts(actor, 'customer'),
     documentLineAccounts(actor, 'vendor'),
+    /*
+      The sellable catalogue, so an invoice line can say which item it sold
+      (Phase 169). Active items only: a deactivated item should not be sellable,
+      while the lines already pointing at one keep their reference.
+    */
+    listServiceItems(actor, { activeOnly: true }),
     partiesWithOpenDocuments(actor, 'customer'),
     partiesWithOpenDocuments(actor, 'vendor'),
     listFinancialAccounts(actor, { activeOnly: true }),
@@ -121,6 +129,14 @@ export default async function InvoicesPage() {
         costAccounts={costAccounts.map((row) => ({
           id: row.id,
           label: `${row.number} · ${row.name}`,
+        }))}
+        sellableItems={sellableItems.map((row) => ({
+          id: row.id,
+          code: row.code,
+          name: row.name,
+          unitPriceCents: row.unitPriceCents,
+          chartAccountId: row.chartAccountId,
+          isInventoried: row.isInventoried,
         }))}
         duplicates={duplicates.map((pair) => ({
           vendorName: pair.vendorName,

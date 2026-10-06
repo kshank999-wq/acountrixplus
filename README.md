@@ -6189,6 +6189,60 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### One name, and two references that were not (Phase 169)
+
+ADR 0168 nominated `service_item_id` on `invoice_lines`. **`invoice_lines.item_id`
+has referenced the catalogue since Phase 14** — its own docstring says so. Fourth
+false *reason* in this lineage, and the first one mine, written by the phase that
+had just spent four paragraphs on the cost of a claim nobody re-measured. Which
+is the useful part: the rule is not "audits go stale", it is that a nomination is
+a claim and writing it down does not check it, including when the writer has just
+said so.
+
+Phase 168 also **widened a naming split it had not noticed**: nine tables said
+`item_id`, two said `service_item_id`, and Phase 168 made it three. All three are
+renamed — `item_id` is what nine tables already said and is the better name,
+because `service_items` is the one catalogue of both services and stocked goods.
+The auto-named index came too; an index called `..._service_idx` on a column
+called `item_id` is the kind of small untruth that costs somebody an afternoon.
+
+**The worst finding is not a reporting gap.** `invoice_lines.item_id` has existed
+since Phase 14 and *no production path has ever set it* — the only caller passing
+it is `tests/inventory.test.ts`. The composer drops it, the proposal conversion
+bills stages rather than lines, and timebilling reads `time_entries.item_id` and
+drops it when building the invoice line. So `consumeStockForSale` — built, tested,
+behind `stockShortfalls` — has never fired for a stocked item sold through the
+application. Phase 49's rule one level down: a column with no writer is a field
+that does not exist. It is also why ADR 0168 was right that the capability was
+missing and wrong about why, and the why was what mattered — the fix is a select
+element, not a migration.
+
+So the composer now offers the catalogue on a line, and `groupTimeIntoLines`
+carries the item through **only when every entry in the group agrees**: grouped by
+person or by day one line can hold two services, and naming either would
+attribute the whole line's revenue to one of them.
+
+And `invoice_lines.item_id` and `bill_lines.item_id` were the **only two of twelve
+references to `service_items` that were not foreign keys** — the two that matter
+most, since a bad id relieves no stock and groups revenue under a product that
+does not exist, silently, because the stock path scopes its lookup by company and
+a bad id simply finds nothing.
+
+**The cross-tenant test caught a leak in this phase and the last one.**
+`serviceRevenue`'s first draft joined the catalogue on `id` alone — `scoped(ctx,
+…)` guards the driving table, and a join needs its own company predicate — so the
+report came back labelled "Their framing", another tenant's product name on this
+company's dashboard. `serviceBreakdown` from Phase 168 had the identical unscoped
+join. Phase 149/150's guarded-read rule reaches every table in a statement, not
+the first one, which is worth saying plainly because 110 writes and 883 reads were
+audited under it and a join predicate is not a read those counts would have seen.
+
+The test asserts what happens rather than a protection that is not there: the
+foreign key proves the row exists and says nothing about whose it is, so a
+cross-tenant id is still accepted on insert. The scoped join is containment, and a
+tenant predicate where `item_id` is *written* is nominated rather than claimed.
+
+
 ### Four figures, and the one that was a field (Phase 168)
 
 ADR 0167 nominated §9's four remaining gaps, and `docs/SPEC-AUDIT.md` said
@@ -8298,6 +8352,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/one-name-and-two-references.test.ts` | **One name, and two references that were not** (Phase 169): ADR 0168's own nomination, measured and found false — `invoice_lines.item_id` has referenced the catalogue since Phase 14. The test reads the schema directory rather than naming three tables, so a fourth cannot reintroduce the naming split quietly; asserts both `item_id` columns are now foreign keys, that a line naming a nonexistent item is refused by name, and that deleting a catalogue entry nulls the column rather than taking the line with it. `groupTimeIntoLines` carries the item only when every entry in a group agrees, and still sums to the same total however it is grouped. Its cross-tenant case caught the real defect: both `serviceRevenue` and Phase 168's `serviceBreakdown` joined the catalogue on `id` alone, putting another tenant's product name on this company's dashboard |
 | `tests/four-figures-and-the-one-that-was-a-field.test.ts` | **Four figures, and the one that was a field** (Phase 168): §9's last four gaps, and the audit sentence under them that was backwards on both halves. *Average time to decision* needed no new fact — `sent_at` and `decided_at` have been written since Phase 3 — while *performance by service/product* needed a column and the screen that fills it, because a proposal line had no reference to the catalogue and the only thing to group by was typed prose. A figure was already on the dashboard labelled "Days to decision" measuring creation to close, so the test asserts the old name is gone rather than coexisting. Average proposal size is a priced document and not the guess on the opportunity; the period dimension groups on arrival, so an open deal has a period at all; `serviceBreakdown` reports lines and not deals, counts an expired proposal against the win rate, shows the uncatalogued group so its total reconciles, and records nothing where nothing was chosen rather than matching by description |
 | `tests/the-accounts-nobody-had-called.test.ts` | **The accounts nobody had called** (Phase 167): §11's Strategic Account Assistant, and the half of it that is arithmetic. Identifying a neglected high-value account is `max(occurred_at)` against a cadence, a sum of invoices and a weighted pipeline, so it lives in a pure core with no database, no clock and no gateway — and the list answers with the AI module switched off, which §11 requires of the core product. A ground that fires on every row is not a finding, so a lead and a vendor have no cadence at all; the strategic override tightens one and never invents one; and what is at stake is a `max` and never a sum, because adding realised revenue to the weighted pipeline double-counts a renewal. `asOf` is a parameter all the way down, so the list can be asked what it looked like before the cadence elapsed. Writing it found `unowned` firing on nothing — `createOrganization` defaults the owner to its creator — and `intake.ts` as the path that produces one: a website lead has no acting user, so the accounts most likely to be unowned and uncontacted are the ones that arrived by themselves |
 | `tests/a-layout-a-machine-proposed.test.ts` | **A layout a machine proposed** (Phase 166): the AI Design Assistant, and the gap in Phase 165 that reading §11 closely found. What this assistant generates is the layout, which is the document, and provenance was on `assets` — so a document laid out entirely by an accepted suggestion and illustrated with the client's own photographs disclosed nothing. The schema permits an ordering over ids the model was given, never a block list, so ids it invents are dropped and blocks it omits are appended: the worst a bad suggestion can do is rearrange. A suggestion with no ledger row is refused with a sentence rather than left to the CHECK, and `markAccepted` runs last. `duplicateDocument` is where `derivedProvenance` earned the caller ADR 0165 said it lacked — a person authored the act, the copy contains the machine-laid-out artifact. Writing it found the mock provider had no `design` heuristic, found that `suggestLayout` asked for `proposals:manage` on documents that are all marketing documents, and found five of its own tests passing vacuously behind `if (!ok) return` while the module sat off by default |
