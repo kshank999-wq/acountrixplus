@@ -160,6 +160,19 @@ items. There is no line-to-line correspondence to carry.
 `logCommunication` proves every party it names. That is the prevention this
 phase only contained.
 
+> **Corrected by Phase 170.** This ADR says above that *"the foreign key cannot
+> express 'and it must be yours'"*. A single-column key cannot; a **composite**
+> one can — `FOREIGN KEY (company_id, item_id) REFERENCES service_items
+> (company_id, id)` — because the referencing row's own `company_id` becomes
+> part of the reference. So the prevention was a constraint rather than a lookup
+> in ten writers, and Phase 116's rule settles which to prefer.
+>
+> An unchecked claim about PostgreSQL rather than about this codebase, which is
+> the new variety: the habit of measuring the repository had not extended to
+> measuring the tool. Phase 170 also measured the scale — 271 references between
+> tenant-scoped tables, none carrying the tenant — which makes it a class rather
+> than the single hole this ADR described.
+
 Then the **bullet-level pass** over the sections `docs/SPEC-AUDIT.md` verified
 only at module level. §9 and §11 were its two enumerated sections; between them
 they produced four false reasons, one figure reported under the wrong name, one

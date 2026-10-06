@@ -6189,6 +6189,59 @@ being written — a registry named `CONTROL_ACCOUNTS` in a file whose constant i
 `POSTINGS`, and this section citing a count nobody had measured.
 
 
+### The tenant in the key (Phase 170)
+
+ADR 0169 nominated a tenant predicate where `item_id` is written, and explained
+the containment it had settled for: *"the foreign key cannot express 'and it must
+be yours'"*. **That clause was false.** A single-column key cannot; a composite
+one can, because the referencing row's own `company_id` becomes part of the
+reference — `FOREIGN KEY (company_id, item_id) REFERENCES service_items
+(company_id, id)`. A line in company A cannot point at an item in company B
+because the pair does not exist.
+
+Fifth consecutive phase whose inherited nomination needed correcting and the
+second running where the error was mine — and worth naming the *kind*: not an
+unchecked claim about this codebase, but an unchecked claim about **PostgreSQL**.
+The habit of measuring the repository had not extended to measuring the tool.
+
+Measured before building anything: **167 company-scoped tables, 271 foreign keys
+from one tenant-scoped table to another, and none carrying the tenant.** That
+changes what the phase is — one unguarded reference is a bug and 271 is a class,
+and a register of exceptions is the wrong instrument for 271 of anything. It also
+shows Phases 149 and 150 audited a different question and were right to: *can
+this statement be aimed at another tenant's row* is not *can this row store a
+reference to one*.
+
+So `references.ts` holds four proofs ordered by **what each survives**, which is
+the field that does the work. `composite-key` survives a new writer, a moved
+lookup and a path nobody has written yet; `scoped-lookup` is
+`logCommunication`'s shape and is a property of the *writer*, so the second
+writer of the same column inherits none of it; `derived` stops being true the
+moment somebody adds an overriding parameter, with no diff to the write;
+`unproved` is named rather than left as the default so a count of them is a
+number somebody can watch fall. Exactly one is enforced by the database, and a
+test asserts that rather than leaving it in the prose.
+
+`invoice_lines.item_id` and `bill_lines.item_id` are converted — the two Phase
+169 contained — and `REFERENCE_ROLLOUT` carries the other 269 with the count
+asserted, so adding a reference or converting one fails the test and sends
+somebody to the register.
+
+The delete rule is the part that is not a substitution, and the reason the other
+269 cannot be done by search and replace. A bare `ON DELETE SET NULL` nulls
+*every* column of the reference, and `company_id` is `NOT NULL` — so deleting a
+catalogue item would **fail** rather than clear the line, turning Phase 169's
+decision into its opposite. `ON DELETE SET NULL (item_id)` names the column
+(PostgreSQL 15+, verified against the 16.13 this runs on), and a test deletes an
+item and asserts the line survives with a null, because a wrong delete rule is
+wrong only on the day somebody deletes something.
+
+Nothing was removed: `proofOf` reports `composite-key` over `scoped-lookup` when
+both hold rather than calling the lookup redundant. Retiring a working guard
+because a stronger one arrived is how a stronger one that turns out to be
+misconfigured becomes no guard at all.
+
+
 ### One name, and two references that were not (Phase 169)
 
 ADR 0168 nominated `service_item_id` on `invoice_lines`. **`invoice_lines.item_id`
@@ -8352,6 +8405,7 @@ Coverage matches what spec §21 asks for:
 
 | File | What it covers |
 | --- | --- |
+| `tests/the-id-a-caller-hands-in.test.ts` | **The id a caller hands in** (Phase 170): the question Phases 149 and 150 did not cover — a write can be perfectly guarded, landing on the caller's own row, and still store a reference to somebody else's. Measured from `pg_constraint` rather than declared: 271 references between tenant-scoped tables, two now carrying the tenant, both numbers asserted so either direction fails the test and sends somebody to `REFERENCE_ROLLOUT`. The composite key is seen to refuse another company's item *and* to accept the company's own, because a key that refused everything would pass the first assertion. Deleting a catalogue item leaves the line with a null rather than failing — the column-list delete rule, which is the one part of a composite tenant key that is not a mechanical substitution. And exactly one of the four proofs is enforced by the database, asserted rather than left in the prose |
 | `tests/one-name-and-two-references.test.ts` | **One name, and two references that were not** (Phase 169): ADR 0168's own nomination, measured and found false — `invoice_lines.item_id` has referenced the catalogue since Phase 14. The test reads the schema directory rather than naming three tables, so a fourth cannot reintroduce the naming split quietly; asserts both `item_id` columns are now foreign keys, that a line naming a nonexistent item is refused by name, and that deleting a catalogue entry nulls the column rather than taking the line with it. `groupTimeIntoLines` carries the item only when every entry in a group agrees, and still sums to the same total however it is grouped. Its cross-tenant case caught the real defect: both `serviceRevenue` and Phase 168's `serviceBreakdown` joined the catalogue on `id` alone, putting another tenant's product name on this company's dashboard |
 | `tests/four-figures-and-the-one-that-was-a-field.test.ts` | **Four figures, and the one that was a field** (Phase 168): §9's last four gaps, and the audit sentence under them that was backwards on both halves. *Average time to decision* needed no new fact — `sent_at` and `decided_at` have been written since Phase 3 — while *performance by service/product* needed a column and the screen that fills it, because a proposal line had no reference to the catalogue and the only thing to group by was typed prose. A figure was already on the dashboard labelled "Days to decision" measuring creation to close, so the test asserts the old name is gone rather than coexisting. Average proposal size is a priced document and not the guess on the opportunity; the period dimension groups on arrival, so an open deal has a period at all; `serviceBreakdown` reports lines and not deals, counts an expired proposal against the win rate, shows the uncatalogued group so its total reconciles, and records nothing where nothing was chosen rather than matching by description |
 | `tests/the-accounts-nobody-had-called.test.ts` | **The accounts nobody had called** (Phase 167): §11's Strategic Account Assistant, and the half of it that is arithmetic. Identifying a neglected high-value account is `max(occurred_at)` against a cadence, a sum of invoices and a weighted pipeline, so it lives in a pure core with no database, no clock and no gateway — and the list answers with the AI module switched off, which §11 requires of the core product. A ground that fires on every row is not a finding, so a lead and a vendor have no cadence at all; the strategic override tightens one and never invents one; and what is at stake is a `max` and never a sum, because adding realised revenue to the weighted pipeline double-counts a renewal. `asOf` is a parameter all the way down, so the list can be asked what it looked like before the cadence elapsed. Writing it found `unowned` firing on nothing — `createOrganization` defaults the owner to its creator — and `intake.ts` as the path that produces one: a website lead has no acting user, so the accounts most likely to be unowned and uncontacted are the ones that arrived by themselves |
