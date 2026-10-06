@@ -206,7 +206,23 @@ describe('every registry refuses the same way', () => {
     // lookup answering `undefined` for a mistyped origin would return no
     // disclosure — and "nothing to disclose" is the one wrong answer that
     // reaches a client looking exactly like the right one.
-    expect(thrown.length).toBe(29)
+    //
+    // Thirty since Phase 170 and `REFERENCE_PROOFS`, which ranks what holds a
+    // stored reference up — three of its four values are properties of code and
+    // one is the database refusing the row. A lookup answering `undefined` for
+    // a mistyped proof would report a reference as unproved when it is keyed,
+    // or the reverse, and the reverse is the direction that retires a real
+    // guard.
+    //
+    // **Thirty-one since Phase 174 and `PUBLIC_WRITES`** — and this one is the
+    // fifth the count has caught rather than described. It was written in the
+    // same phase as this file was last read, by somebody who had read it, and
+    // the number still had to be moved by a failing run: `the-id-a-caller-hands-in`
+    // failed in the same run for the same reason. Four registries have been
+    // found by this line and two of this phase's own counts were found by their
+    // own tests, which is the argument of ADR 0132 holding against the person
+    // who was quoting it.
+    expect(thrown.length).toBe(31)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

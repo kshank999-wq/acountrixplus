@@ -89,8 +89,17 @@ describe('how many references could point at another tenant', () => {
 
     const [measured] = rows as unknown as Array<{ total: number; composite: number }>
 
-    expect(measured.total).toBe(271)
-    expect(measured.composite).toBe(16)
+    /*
+      273 and 18 since Phase 174, which added `communications.proposal_id` and
+      `communications.parent_id` — both composite from the start, so the total
+      and the composite count moved together and the backlog did not grow. That
+      is the only shape of growth this programme can absorb, and this assertion
+      is what makes it visible: Phase 174 wrote the new numbers into its own ADR
+      and commit message and forgot this line, and the failing run is what
+      found it.
+    */
+    expect(measured.total).toBe(273)
+    expect(measured.composite).toBe(18)
   })
 
   it('leaves no single-column reference into the catalogue at all', async () => {
