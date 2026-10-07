@@ -13,6 +13,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { applyRulesToNewTransactions } from '@/modules/bookkeeping/rules-engine'
 import { mintChartAccount } from './accounts'
 import { getBankProvider } from './registry'
+import { recordRevisions } from './revision-service'
 import { decryptSecret, encryptSecret } from '@/modules/auth/secret-box'
 import type { ProviderAccount, ProviderTransaction } from './provider'
 import { Refusal } from '@/modules/errors'
@@ -27,6 +28,17 @@ export type ImportSummary = {
   /** Of the imported rows, how many a rule categorized or suggested for. */
   autoCategorized: number
   suggested: number
+  /**
+   * What the feed changed about transactions it had already sent (Phase 177).
+   *
+   * `duplicates` used to be the whole story about a re-sent transaction, and it
+   * was the wrong story: a provider that revises a pending transaction into a
+   * posted one was counted as a duplicate and dropped. These three split that
+   * count into what actually happened.
+   */
+  revisionsApplied: number
+  /** Recorded and not applied, because something was derived from the stored row. */
+  revisionsHeld: number
 }
 
 /**
@@ -259,12 +271,21 @@ export async function importTransactions(
 ): Promise<ImportSummary> {
   const batchId = newBatchId()
 
+  /*
+    Kept so a transaction the insert declined can be compared against what is
+    stored (Phase 177). Keyed by the dedup key's own two columns, because the
+    same provider id on two accounts is two transactions.
+  */
+  const incomingByKey = new Map<string, ProviderTransaction>()
+
   const rows = input.transactions
     .map((transaction) => {
       const account = input.accountByProviderId.get(transaction.providerAccountId)
       // A transaction for an account the user did not import is skipped rather
       // than guessed at.
       if (!account) return null
+
+      incomingByKey.set(`${account.id}:${transaction.providerTransactionId}`, transaction)
 
       return {
         companyId: ctx.companyId,
@@ -288,6 +309,8 @@ export async function importTransactions(
       duplicates: 0,
       autoCategorized: 0,
       suggested: 0,
+      revisionsApplied: 0,
+      revisionsHeld: 0,
     }
   }
 
@@ -303,9 +326,33 @@ export async function importTransactions(
         bankTransactions.providerTransactionId,
       ],
     })
-    .returning({ id: bankTransactions.id })
+    .returning({
+      id: bankTransactions.id,
+      financialAccountId: bankTransactions.financialAccountId,
+      providerTransactionId: bankTransactions.providerTransactionId,
+    })
 
   const insertedIds = inserted.map((row) => row.id)
+
+  /*
+    Whatever the insert declined, the provider had already sent — and that is the
+    set to compare, whatever the provider *called* them (Phase 177). Plaid's own
+    `added`/`modified` split is deliberately not consulted: a provider may
+    re-send an `added` transaction, and comparing content is right whether or not
+    the label is.
+
+    `onConflictDoNothing` is kept exactly as it was, so the dedup guarantee this
+    function has carried since Phase 1 does not move. What changes is that
+    "declined" stops being the end of the story.
+  */
+  for (const row of inserted) {
+    incomingByKey.delete(`${row.financialAccountId}:${row.providerTransactionId}`)
+  }
+
+  const revisions = await recordRevisions(ctx, {
+    connectionId: input.connectionId,
+    incoming: incomingByKey,
+  })
 
   const ruleResult =
     insertedIds.length > 0
@@ -333,6 +380,8 @@ export async function importTransactions(
     duplicates: rows.length - insertedIds.length,
     autoCategorized: ruleResult.autoCategorized,
     suggested: ruleResult.suggested,
+    revisionsApplied: revisions.applied,
+    revisionsHeld: revisions.held,
   }
 }
 

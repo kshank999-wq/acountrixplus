@@ -3,12 +3,14 @@ import { can } from '@/modules/tenancy/context'
 import { inboxCounts, listInbox, UNREVIEWED_STATES, type ReviewState } from '@/modules/bookkeeping/transactions'
 import { categorizableAccounts } from '@/modules/coa/service'
 import { listFinancialAccounts } from '@/modules/banking/sync'
+import { heldRevisions } from '@/modules/banking/revision-service'
 import { aiAvailable } from '@/modules/ai/settings'
 import { logoutAction } from '@/app/actions/auth'
 import { AppShell } from '@/components/app-shell'
 import { Inbox } from './inbox'
 import { SyncButton } from './sync-button'
 import { AssistantPanel } from './assistant-panel'
+import { RevisionsPanel } from './revisions-panel'
 
 export const dynamic = 'force-dynamic'
 
@@ -49,7 +51,7 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
       ? [params.state as ReviewState]
       : UNREVIEWED_STATES
 
-  const [inbox, counts, accounts, financialAccounts] = await Promise.all([
+  const [inbox, counts, accounts, financialAccounts, revisions] = await Promise.all([
     listInbox(actor, {
       states,
       search: params.q,
@@ -60,6 +62,13 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
     inboxCounts(actor),
     categorizableAccounts(actor),
     listFinancialAccounts(actor),
+    /*
+      The changes a bank feed could not apply (Phase 177). Fetched here rather
+      than inside the panel so an empty list costs no round trip — and so the
+      panel is simply absent, which is what stops a permanently empty box from
+      training people to skim past it.
+    */
+    heldRevisions(actor),
   ])
 
   const canEdit = can(actor, 'bookkeeping:categorize')
@@ -76,6 +85,8 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
       active="bookkeeping"
       actions={can(actor, 'bookkeeping:import') ? <SyncButton /> : null}
     >
+      <RevisionsPanel rows={revisions} canEdit={canEdit} />
+
       {aiEnabled && <AssistantPanel />}
 
       <Inbox

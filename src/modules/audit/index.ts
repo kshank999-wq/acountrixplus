@@ -23,6 +23,18 @@ export type AuditAction =
    */
   | 'posting.restate'
   | 'transaction.import'
+  /**
+   * The bank changed a transaction it had already sent (Phase 177).
+   *
+   * One action for both halves — the feed applying a revision where nothing was
+   * derived, and a person applying a held one — because the question asked later
+   * is "why does this movement carry that figure?" and the answer wants both in
+   * one history. `before`/`after` say which figures moved; `recordAudit`'s own
+   * actor says who, and a revision the feed applied has no person on it.
+   */
+  | 'transaction.revise'
+  /** Somebody decided the stored figure stands and the feed is wrong. */
+  | 'transaction.revision_dismiss'
   | 'rule.create'
   | 'rule.update'
   | 'rule.delete'

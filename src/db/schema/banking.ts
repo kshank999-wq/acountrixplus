@@ -16,7 +16,7 @@ import {
   type AnyPgColumn,
 } from 'drizzle-orm/pg-core'
 import { sql } from 'drizzle-orm'
-import { companies } from './tenancy'
+import { companies, users } from './tenancy'
 import { chartAccounts, financialAccounts } from './accounting'
 import { reconciliations } from './ledger'
 import { projects } from './crm'
@@ -210,6 +210,14 @@ export const bankTransactions = pgTable(
       t.financialAccountId,
       t.providerTransactionId,
     ),
+    /**
+     * The target half of a composite tenant key (Phase 170, added in 177).
+     *
+     * `bank_transaction_revisions` references `(company_id, id)` so a revision
+     * cannot point at another company's transaction, and a composite foreign key
+     * needs a unique on exactly those columns to point at.
+     */
+    companyIdKey: unique('bank_transactions_company_id_key').on(t.companyId, t.id),
     // Named explicitly: the generated name would exceed Postgres's 63-byte
     // identifier limit and be silently truncated.
     financialAccountFk: foreignKey({
@@ -252,5 +260,123 @@ export const transactionSplits = pgTable(
   },
   (t) => ({
     transactionIdx: index('transaction_splits_transaction_idx').on(t.transactionId),
+  }),
+)
+
+/** Dispositions in `REVISION_HOLDS`' terms (Phase 177). */
+export const revisionDispositionEnum = pgEnum('revision_disposition', [
+  'applied',
+  'held',
+  'dismissed',
+])
+
+/**
+ * Every change a bank feed made to a transaction it had already sent
+ * (Phase 177).
+ *
+ * `/transactions/sync` returns `modified`, and the universal case is a pending
+ * transaction posting with its amount changed by the tip. `importTransactions`
+ * used `ON CONFLICT DO NOTHING`, so that update was dropped and a
+ * reconciliation would not close by exactly the difference.
+ *
+ * Append-only, and it logs the **applied** revisions too, which is what makes it
+ * the audit trail for a feed rather than a queue of exceptions. A table rather
+ * than columns on `bank_transactions` because a transaction is revised more than
+ * once — pending at $40, pending at $42, posted at $44.20 — and columns hold the
+ * last one and lose the path somebody reconciling wants to see.
+ *
+ * The decision about what may be applied is `modules/banking/revisions.ts`, which
+ * is pure. This table records what it decided.
+ */
+export const bankTransactionRevisions = pgTable(
+  'bank_transaction_revisions',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+    bankTransactionId: uuid('bank_transaction_id').notNull(),
+
+    /** What the feed now says. Every field, so a row reads on its own. */
+    amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
+    postedDate: date('posted_date').notNull(),
+    description: text('description').notNull(),
+    merchantName: text('merchant_name'),
+    providerCategory: text('provider_category'),
+    pending: boolean('pending').notNull(),
+
+    /**
+     * What was held when the revision arrived.
+     *
+     * Stored rather than derived, because the transaction moves on: by the time
+     * somebody reads a held revision from last Tuesday, a later revision may
+     * have been applied, and then "from" would be a lie.
+     */
+    previousAmountCents: bigint('previous_amount_cents', { mode: 'number' }).notNull(),
+    previousPostedDate: date('previous_posted_date').notNull(),
+    previousPending: boolean('previous_pending').notNull(),
+
+    disposition: revisionDispositionEnum('disposition').notNull(),
+    /**
+     * Which `REVISION_HOLDS` entry stopped it. Null unless held.
+     *
+     * Not a foreign key, because the register is code — and `revisionHoldFor`
+     * throws a `RegistryError` for a key nobody declared, which is the check a
+     * text column would otherwise lack.
+     */
+    holdGround: text('hold_ground'),
+    /** Whether a figure the books are built from moved. `BOOK_AFFECTING_FIELDS`. */
+    touchesBooks: boolean('touches_books').notNull(),
+    /**
+     * This revision's own provider payload. `bankTransactions.raw` carries the
+     * latest, and applying a revision overwrites it — so without this the
+     * payload that justified an earlier figure is gone.
+     */
+    raw: jsonb('raw').$type<Record<string, unknown>>(),
+
+    seenAt: timestamp('seen_at', { withTimezone: true }).notNull().defaultNow(),
+    resolvedAt: timestamp('resolved_at', { withTimezone: true }),
+    resolvedBy: uuid('resolved_by').references(() => users.id, { onDelete: 'set null' }),
+    resolutionNote: text('resolution_note'),
+  },
+  (t) => ({
+    /**
+     * The tenant travels in the key (Phase 170). A single-column reference to
+     * `bank_transactions (id)` would let a revision point at another company's
+     * transaction and the database would not care.
+     */
+    transactionFk: foreignKey({
+      name: 'bank_transaction_revisions_transaction_fkey',
+      columns: [t.companyId, t.bankTransactionId],
+      foreignColumns: [bankTransactions.companyId, bankTransactions.id],
+    }).onDelete('cascade'),
+    /**
+     * A held revision the provider keeps re-sending must not make a row every
+     * five minutes. The three fields that can hold a revision open are the three
+     * that identify it.
+     */
+    revisionUnique: unique('bank_transaction_revisions_unique').on(
+      t.companyId,
+      t.bankTransactionId,
+      t.amountCents,
+      t.postedDate,
+      t.pending,
+    ),
+    // A hold has a ground and nothing else does: without this the table could
+    // say "held" with no reason, which is a held revision with no remedy.
+    groundCheck: check(
+      'bank_transaction_revisions_ground_check',
+      sql`(${t.disposition} = 'held' and ${t.holdGround} is not null)
+          or (${t.disposition} <> 'held' and ${t.holdGround} is null)`,
+    ),
+    resolvedCheck: check(
+      'bank_transaction_revisions_resolved_check',
+      sql`(${t.disposition} = 'held' and ${t.resolvedAt} is null)
+          or (${t.disposition} <> 'held' and ${t.resolvedAt} is not null)`,
+    ),
+    transactionIdx: index('bank_transaction_revisions_transaction_idx').on(
+      t.companyId,
+      t.bankTransactionId,
+    ),
   }),
 )

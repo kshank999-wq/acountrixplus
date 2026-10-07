@@ -528,16 +528,19 @@ describe('draining the pages', () => {
   it('returns modified transactions alongside added ones', async () => {
     /**
      * Both become transactions carrying their own immutable ids, which is what
-     * `ProviderTransaction` asks for. **What happens to a modified one
-     * downstream is this phase's open finding:** `importTransactions` uses
-     * `onConflictDoNothing`, so the universal pending→posted transition — where
-     * the amount and the date both change — is ignored and the inbox keeps the
-     * pending figure.
+     * `ProviderTransaction` asks for. This test asserts the adapter hands them
+     * over, which was the half Phase 176 could honestly claim — downstream,
+     * `importTransactions` used `onConflictDoNothing` and dropped the universal
+     * pending→posted transition on the floor.
      *
-     * This test asserts the adapter hands them over, which is the half this
-     * phase can honestly claim. ADR 0176 nominates the other half, and it is not
-     * a one-line fix: a transaction somebody has already categorized and posted
-     * to the ledger must not be silently rewritten under a closed period.
+     * **Phase 177 fixed that half**, and not with `onConflictDoUpdate`:
+     * `modules/banking/revisions.ts` applies a revision when nothing has been
+     * derived from the stored row and holds it for a person when something has.
+     * See `tests/the-transaction-that-changed.test.ts`.
+     *
+     * This test stays as it was, because what it asserts is the adapter's
+     * contribution: the transactions reach the domain. Nothing here knows what
+     * the domain does with them, which is the seam working.
      */
     const { plaid } = provider([
       {

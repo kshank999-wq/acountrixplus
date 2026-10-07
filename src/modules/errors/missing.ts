@@ -141,6 +141,10 @@ export const RECORD_KINDS: readonly RecordKind[] = [
   scoped('payrollRun', 'payroll run'),
   scoped('filing', 'filing'),
   scoped('device', 'device'),
+  // A change the bank made to a transaction it had already sent (Phase 177).
+  // "revision" and not "change", because the inbox calls it one and a refusal
+  // naming a different noun than the screen is two names for one thing.
+  scoped('revision', 'revision'),
   open('company', 'company'),
   open('user', 'user'),
 ]

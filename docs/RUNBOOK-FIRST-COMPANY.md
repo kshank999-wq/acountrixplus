@@ -24,14 +24,23 @@ exports CSV. Run your books on this now and turn the feed on later without
 changing anything downstream: that isolation is `BankProvider`'s whole purpose,
 and writing the Plaid adapter is the first thing that tested it.
 
-One thing to fix before you trust an automatic feed, whichever adapter it is.
-A sync returns transactions Plaid has **modified**, which is what happens every
-time a pending transaction posts and its amount changes by the tip.
-`importTransactions` uses `ON CONFLICT DO NOTHING`, so that update is dropped and
-the inbox keeps the pending figure — a reconciliation that will not close, by
-exactly the tip. ADR 0176 nominates it as the next phase and says why it is not a
-one-line fix. **CSV import is unaffected**, because a statement row arrives once
-and already posted.
+When you do turn a feed on, one behaviour is worth knowing in advance. A sync
+returns transactions the bank has **modified**, which happens every time a
+pending transaction posts and its amount changes by the tip. Since Phase 177 the
+import handles that in two ways, and the division is deliberate:
+
+- **Nothing built from it yet** — the row is updated to match the bank, and the
+  change is logged.
+- **Something built from it** — a posted journal entry, splits, a match, a
+  reconciliation — the change is **held**, and a panel appears at the top of
+  Bookkeeping → Inbox saying what the bank changed and what to undo first. For
+  the commonest case (just posted, nothing else) there is an **Apply and
+  re-post** button that voids the entry and posts it again at the new amount; a
+  closed period refuses it, which is correct.
+
+Do not ignore that panel. A held revision left alone is a reconciliation that
+will not close, by exactly the difference. **CSV import is unaffected** either
+way, because a statement row arrives once and already posted.
 
 **Row-level security is installed and not switched on.** 163 tables carry
 policies; the application connects as the table owner, so they do not apply.

@@ -7,8 +7,10 @@
  * existed since Phase 2 with one implementation — the mock — so this is the
  * first time anything has proved the seam works.
  *
- * It mostly did. What it did not account for is recorded in ADR 0176 and in the
- * two notes at the bottom of this file.
+ * It mostly did. What it did not account for is recorded in ADR 0176 — and the
+ * largest of those findings, a `modified` transaction being silently dropped
+ * downstream, was fixed in Phase 177 (ADR 0177). What is left here is the note
+ * on `removed`, which `TransactionPage` still has nowhere to say.
  *
  * ## No library
  *
@@ -472,11 +474,18 @@ export class PlaidBankProvider implements BankProvider {
 
       /*
         `added` and `modified` both become transactions with their own immutable
-        ids, which is what `ProviderTransaction` asks for. What happens to a
-        *modified* one downstream is the finding at the bottom of this file:
-        `importTransactions` uses `onConflictDoNothing`, so today a pending
-        transaction that posts keeps its pending amount. Reported here rather
-        than silently dropped, so the fix has something to act on.
+        ids, which is what `ProviderTransaction` asks for, and the adapter does
+        not distinguish them beyond this line.
+
+        That is deliberate since Phase 177, which fixed what happens to a
+        modified one downstream. `importTransactions` now compares the incoming
+        values against what is stored and consults
+        `modules/banking/revisions.ts` — so a pending transaction that posts at a
+        different amount updates the row when nothing has been derived from it,
+        and is **held** for a person when something has. The provider's own
+        `added`/`modified` label is not consulted there, and should not be: a
+        provider may re-send an `added` transaction, so comparing content is
+        right whether or not the label is.
       */
       for (const raw of [...page.added, ...page.modified]) {
         transactions.push(this.toProviderTransaction(raw))

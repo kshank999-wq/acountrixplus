@@ -235,7 +235,16 @@ describe('every registry refuses the same way', () => {
     // moves when somebody remembers to move it is a count nobody is checking.
     // This one moved because a run failed, which is the only reason any of the
     // numbers above moved either.
-    expect(thrown.length).toBe(33)
+    //
+    // Thirty-four since Phase 177 and `REVISION_HOLDS`, the grounds a bank feed
+    // may not rewrite a transaction on. It earns the device twice over: each
+    // entry carries the **remedy** a person acts on, so a lookup answering
+    // `undefined` for a mistyped ground would show a held revision with no way
+    // out of it — and the ground is a *text column* on
+    // `bank_transaction_revisions`, read back out of the database and resolved
+    // through `revisionHoldFor`, which makes this throw the only check standing
+    // between a stored string and a screen.
+    expect(thrown.length).toBe(34)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

@@ -15,6 +15,7 @@ import {
 } from '@/modules/bookkeeping/transactions'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
 import { connectInstitution, syncConnection, listConnections } from '@/modules/banking/sync'
+import { applyHeldRevision, dismissRevision } from '@/modules/banking/revision-service'
 import { parseAmountToCents } from '@/lib/money'
 import { messageFor } from '@/modules/errors'
 
@@ -194,17 +195,68 @@ export async function connectAndSyncAction(): Promise<ActionResult> {
     const summary = await syncConnection(actor, connectionId)
     const isDemoFeed = (process.env.BANK_PROVIDER?.trim() || 'mock') === 'mock'
 
+    /*
+      Revisions are reported before the early return, because "no new
+      transactions" stopped being true for a sync that imported nothing and
+      changed three (Phase 177). A feed that revises a pending transaction into
+      a posted one did something, and a message saying otherwise is the kind
+      this project keeps finding in its own prose.
+    */
+    const revised: string[] = []
+    if (summary.revisionsApplied > 0) {
+      revised.push(`${summary.revisionsApplied} updated by the bank`)
+    }
+    if (summary.revisionsHeld > 0) {
+      revised.push(`${summary.revisionsHeld} changed by the bank and waiting on you`)
+    }
+
     if (summary.imported === 0) {
-      return 'Already up to date — no new transactions.'
+      return revised.length > 0
+        ? `No new transactions — ${revised.join(', ')}.`
+        : 'Already up to date — no new transactions.'
     }
 
     const parts = [`Imported ${summary.imported} transactions`]
     if (summary.autoCategorized > 0) parts.push(`${summary.autoCategorized} auto-categorized`)
     if (summary.suggested > 0) parts.push(`${summary.suggested} suggested`)
+    parts.push(...revised)
 
     return isDemoFeed
       ? `${parts.join(', ')} — from the sample feed, not a real bank. ` +
           'To bring in your own, import a statement from Settings → Bring in your books.'
       : `${parts.join(', ')}.`
+  })
+}
+
+/**
+ * Applies a revision the bank made after the transaction was already posted
+ * (Phase 177).
+ *
+ * The service re-decides whether the hold still stands rather than trusting the
+ * one recorded at sync time — a revision held on `reconciled` last week may be
+ * held on nothing today, because the remedy told somebody to reopen the
+ * reconciliation. A closed period refuses this with `ClosedPeriodError`, which
+ * `run` turns into the sentence the panel shows.
+ */
+export async function applyRevisionAction(revisionId: string): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const result = await applyHeldRevision(actor, revisionId)
+
+    return result.reposted
+      ? 'Applied, and the journal entry was re-posted at the new amount.'
+      : 'Applied.'
+  })
+}
+
+/** Records that the stored figure stands, and why. */
+export async function dismissRevisionAction(
+  revisionId: string,
+  note: string,
+): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    await dismissRevision(actor, revisionId, note)
+    return 'Dismissed. The books keep the figure they have.'
   })
 }

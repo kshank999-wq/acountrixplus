@@ -673,6 +673,13 @@
       "when": 1792600000000,
       "tag": "0095_phase176_a_connection_credential",
       "breakpoints": true
+    },
+    {
+      "idx": 96,
+      "version": "7",
+      "when": 1792700000000,
+      "tag": "0096_phase177_the_transaction_that_changed",
+      "breakpoints": true
     }
   ]
 }
