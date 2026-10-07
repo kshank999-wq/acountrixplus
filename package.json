@@ -20,7 +20,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "db:backup": "bash scripts/backup.sh",
-    "db:verify-restore": "bash scripts/verify-restore.sh"
+    "db:verify-restore": "bash scripts/verify-restore.sh",
+    "deploy:check": "tsx scripts/deploy-check.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.116.0",

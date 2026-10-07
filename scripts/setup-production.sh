@@ -136,6 +136,17 @@ CRON_SECRET="$(node -e "console.log(require('crypto').randomBytes(32).toString('
 
 PUBLIC_BASE_URL="${PUBLIC_BASE_URL:-https://www.accountrixplus.com}"
 
+# A VAPID pair, for web push. Optional — without it the mobile workspace simply
+# does not offer to subscribe, and nothing claims to have sent a notification it
+# did not send. Generated here because it is one command and finding the command
+# later is the hard part.
+VAPID_PUBLIC_KEY=""
+VAPID_PRIVATE_KEY=""
+if VAPID_JSON="$(node -e "const k=require('web-push').generateVAPIDKeys();console.log(JSON.stringify(k))" 2>/dev/null)"; then
+  VAPID_PUBLIC_KEY="$(node -e "console.log(JSON.parse(process.argv[1]).publicKey)" "$VAPID_JSON")"
+  VAPID_PRIVATE_KEY="$(node -e "console.log(JSON.parse(process.argv[1]).privateKey)" "$VAPID_JSON")"
+fi
+
 cat <<ENVBLOCK
 
 ────────────────────────────────────────────────────────────────────────
@@ -148,6 +159,20 @@ SESSION_SECRET=$SESSION_SECRET
 ENCRYPTION_KEY=$ENCRYPTION_KEY
 CRON_SECRET=$CRON_SECRET
 PUBLIC_BASE_URL=$PUBLIC_BASE_URL
+VAPID_PUBLIC_KEY=$VAPID_PUBLIC_KEY
+VAPID_PRIVATE_KEY=$VAPID_PRIVATE_KEY
+VAPID_SUBJECT=mailto:you@your-domain
+
+────────────────────────────────────────────────────────────────────────
+ And these two, which this script cannot generate because they are an
+ account somewhere else. Until they are set, the mail provider is the
+ mock: a password reset is "sent", logged to the console, and never
+ arrives. \`npm run deploy:check\` reports it; nothing at runtime will.
+
+TRANSACTIONAL_EMAIL_PROVIDER=postmark        # or: resend
+TRANSACTIONAL_FROM_EMAIL=books@your-domain
+TRANSACTIONAL_FROM_NAME=Your Company
+POSTMARK_SERVER_TOKEN=…                      # or: RESEND_API_KEY
 
 ────────────────────────────────────────────────────────────────────────
  Note the port: 6543 above, not the 5432 you passed in. The deployed
@@ -159,5 +184,13 @@ PUBLIC_BASE_URL=$PUBLIC_BASE_URL
  password-reset link points at the old address.
 
  These secrets are shown once. Do not commit them.
+
+ Then, against the deployment rather than your shell:
+
+   curl -H "Authorization: Bearer \$CRON_SECRET" \\
+        https://your-domain/api/health
+
+ which answers what *production* is missing. \`npm run deploy:check\`
+ reads the shell it runs in, which is not the shell Vercel runs.
 ────────────────────────────────────────────────────────────────────────
 ENVBLOCK
