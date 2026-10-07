@@ -56,7 +56,7 @@ it into Supabase's SQL editor instead:
 npm run db:bundle          # writes drizzle/bundle.sql
 ```
 
-It wraps all 98 migrations in a single transaction, so a failure anywhere
+It wraps all 99 migrations in a single transaction, so a failure anywhere
 leaves the database untouched rather than half built, and it refuses a database
 that already has the schema. It also writes Drizzle's own bookkeeping rows —
 without those, the next `npm run db:migrate` would see an empty
@@ -82,8 +82,8 @@ applying it changes nothing about how the application behaves.
 
 That is because row level security is never applied to a superuser, and is not
 applied to a table's owner without `FORCE`. `DATABASE_URL` here points at a role
-that is both, so the policies are skipped before they are consulted — 163 rows in
-`pg_policies`, 163 tables reporting `relrowsecurity`, and no isolation. If you
+that is both, so the policies are skipped before they are consulted — 162 rows in
+`pg_policies`, 162 tables reporting `relrowsecurity`, and no isolation. If you
 are answering a security questionnaire from `pg_policies`, read this paragraph
 first.
 

@@ -185,11 +185,27 @@ describe('every read from a company-scoped table', () => {
     // read the `companies` row itself, which carries no `company_id` because its
     // own `id` is the tenant. Measured the same way as the phases above — by
     // writing the length and reading which guard the map said had grown.
-    expect(READS.length).toBe(883)
+    /*
+      **911 since Phase 179, and the number is the finding.** 883 was written in
+      Phase 158 and did not move for twenty phases, across twenty-eight new
+      reads from company-scoped tables — the longest-standing stale count this
+      session found, and found only by its first complete full-suite run.
+
+      What makes it survivable rather than serious is the assertion below it:
+      every read this scan finds has to stand on a guard, and all 911 do. So
+      twenty phases of reads were written correctly and counted wrongly. The
+      count is what nobody maintained; the property it is attached to held.
+
+      The distribution moved in three places and nowhere else — `scoped-read`
+      +15, `explicit-company` +10, `established-above` +3 — which says the new
+      reads were written in the shapes already here rather than inventing a new
+      guard nobody had argued for.
+    */
+    expect(READS.length).toBe(911)
     expect(by).toEqual({
-      'scoped-read': 542,
-      'explicit-company': 252,
-      'established-above': 28,
+      'scoped-read': 557,
+      'explicit-company': 262,
+      'established-above': 31,
       'id-from-fetched-row': 17,
       'join-inherited': 13,
       'derives-tenant-from-row': 12,

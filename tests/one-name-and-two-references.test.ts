@@ -126,7 +126,18 @@ describe('the two that were never foreign keys', () => {
       (error: unknown) => (error as { cause?: { constraint_name?: string } }).cause?.constraint_name,
     )
 
-    expect(refused).toBe('invoice_lines_item_id_service_items_id_fk')
+    /*
+      `invoice_lines_item_tenant_fk` since **Phase 170**, which replaced this
+      single-column key with a composite one carrying the tenant — the whole
+      point of that phase.
+
+      This assertion kept the old name for nine phases and nine pushes, and
+      Phase 179's full run is what found it. Worth stating plainly: for those
+      nine phases nothing was checking that `invoice_lines` refuses an item from
+      another company *by this route*. Phase 170's own test covers the same
+      ground, so the guarantee held — the check on it did not.
+    */
+    expect(refused).toBe('invoice_lines_item_tenant_fk')
   })
 
   it('refuses another company’s catalogue item', async () => {
@@ -137,9 +148,28 @@ describe('the two that were never foreign keys', () => {
      * company does not own. The same shape Phase 160 found in `devices` and
      * `security_policies`.
      *
-     * The foreign key alone does not stop this one, because the item *does*
-     * exist — so this asserts what actually happens rather than claiming a
-     * protection that is not there.
+     * ## What this test used to say, and why that matters
+     *
+     * Written in Phase 169, it ended by asserting the line was **accepted**:
+     *
+     * > It is accepted, which is the honest finding: the key proves the row
+     * > exists and says nothing about whose it is. A tenant predicate on the
+     * > insert is the remaining gap and is nominated rather than claimed.
+     *
+     * **Phase 170 closed that gap**, which is what `invoice_lines_item_tenant_fk`
+     * is — a composite key carrying the tenant, so the database refuses a line
+     * naming another company's item. The nomination was taken up one phase
+     * later and this test kept asserting the gap for nine.
+     *
+     * It is worth being precise about the shape of that, because it is not a
+     * stale number. The assertion was **loudly wrong** from Phase 170 onward:
+     * the insert threw, nothing caught it, and the test errored rather than
+     * failing a comparison. Nine phases and nine pushes went past it, every one
+     * of them running the tests near the code it changed.
+     *
+     * So this now asserts the protection rather than its absence — and the
+     * assertion that was honest in Phase 169 is a quotation above instead of a
+     * claim, because deleting it would erase the finding that earned Phase 170.
      */
     const other = await createCompanyFixture({ name: 'Somebody Else Ltd' })
     const theirItem = await createServiceItem(other.ctx, {
@@ -150,7 +180,7 @@ describe('the two that were never foreign keys', () => {
     const customer = await createCustomer(fixture.ctx, { name: 'Harborview Marine' })
     const revenue = await fixture.account('4000')
 
-    const invoice = await createInvoice(fixture.ctx, {
+    const refused = await createInvoice(fixture.ctx, {
       customerId: customer.id,
       issueDate: '2026-06-01',
       lines: [
@@ -161,33 +191,116 @@ describe('the two that were never foreign keys', () => {
           itemId: theirItem.id,
         },
       ],
-    })
+    }).then(
+      () => undefined,
+      (error: unknown) => (error as { cause?: { constraint_name?: string } }).cause?.constraint_name,
+    )
 
-    const [line] = await db
+    // The database refuses it, by the composite key rather than by a check in
+    // the service — a constraint beats a check (Phase 116), and it is the same
+    // key that refuses the item which does not exist at all.
+    expect(refused).toBe('invoice_lines_item_tenant_fk')
+
+    // And nothing was written, which is the part a caught exception could still
+    // have got wrong: the whole invoice rolls back with its line.
+    const lines = await db
       .select({ itemId: invoiceLines.itemId })
       .from(invoiceLines)
-      .where(eq(invoiceLines.invoiceId, invoice.id))
+      .where(eq(invoiceLines.companyId, fixture.companyId))
 
-    // It is accepted, which is the honest finding: the key proves the row
-    // exists and says nothing about whose it is. A tenant predicate on the
-    // insert is the remaining gap and is nominated rather than claimed.
-    expect(line.itemId).toBe(theirItem.id)
+    expect(lines).toEqual([])
 
     /*
-      What this test actually caught. The first draft of `serviceRevenue` joined
-      the catalogue on `id` alone — `scoped(ctx, ...)` guards the driving table
-      and not the join — so the report came back labelled **"Their framing"**,
-      putting another tenant's product name on this company's dashboard.
-      `serviceBreakdown`, written in Phase 168, had the same unscoped join.
-      Both are scoped now.
+      What this test actually caught in Phase 169. The first draft of
+      `serviceRevenue` joined the catalogue on `id` alone — `scoped(ctx, …)`
+      guards the driving table and not the join — so the report came back
+      labelled **"Their framing"**, putting another tenant's product name on
+      this company's dashboard. `serviceBreakdown`, written in Phase 168, had
+      the same unscoped join. Both are scoped.
 
-      The group is named for what it is rather than called "deleted": with the
-      foreign key in place a deleted item nulls the column, so a non-null id
-      that does not join can only be a foreign one.
+      **That property still has to hold and this is no longer the way to test
+      it.** Phase 170's composite key makes a cross-tenant `item_id`
+      unstorable — `company_id` is `NOT NULL` on `invoice_lines`, so a non-null
+      `item_id` always has both halves of the key and is always checked — and
+      the assertion that used to live here needed the row the key now refuses.
+
+      So the scoping is asserted from the other end, which is reachable: the
+      other company raises an invoice against *its own* catalogue item, and this
+      company's report must not contain it. An unscoped join leaks exactly that.
     */
+    const theirCustomer = await createCustomer(other.ctx, { name: 'Their client' })
+    const theirRevenue = await other.account('4000')
+    await createInvoice(other.ctx, {
+      customerId: theirCustomer.id,
+      issueDate: '2026-06-01',
+      lines: [
+        {
+          chartAccountId: theirRevenue.id,
+          description: 'Their framing',
+          unitPriceCents: 100_000,
+          itemId: theirItem.id,
+        },
+      ],
+    })
+
+    expect(await serviceRevenue(fixture.ctx)).toEqual([])
+    // And it is their revenue, not nobody's — a report that returned nothing
+    // for everybody would pass the line above.
+    expect((await serviceRevenue(other.ctx)).map((row) => row.label)).toEqual(['Their framing'])
+  })
+
+  it('keeps the unmatched-item label, which now accuses rather than reports', async () => {
+    /**
+     * `serviceRevenue` groups a line whose `item_id` joins nothing under **"Not
+     * in this company's catalogue"**, and since Phase 170 that group cannot be
+     * produced: the composite key refuses a foreign item and `ON DELETE SET
+     * NULL` nulls a deleted one, so a non-null `item_id` always joins.
+     *
+     * Kept rather than deleted, on Phase 157's rule — *an unused declaration is
+     * kept when it accuses and deleted when it excuses.* This one accuses: if
+     * that label ever appears on a real report, a cross-tenant reference got
+     * stored and the key that was supposed to stop it did not. It is the belt to
+     * the constraint's braces.
+     *
+     * What this test can assert is the reachable half, and writing it found that
+     * the two cases have **different labels**, which is the thing that makes
+     * keeping the unreachable one worthwhile:
+     *
+     * - `item_id` null — a line nobody picked a catalogue entry for — groups
+     *   under `uncatalogued` / *"Not from the catalogue"*. Ordinary, and the
+     *   commonest row on the report.
+     * - `item_id` non-null and joining nothing — *"Not in this company's
+     *   catalogue"*. Unreachable, and an accusation if it ever appears.
+     *
+     * The first draft of this test asserted the no-item line was left out
+     * entirely. It is not; it is labelled. Worth recording because the mistake
+     * is the one the two labels exist to prevent — reading "not catalogued" and
+     * "not ours" as one thing.
+     */
+    const customer = await createCustomer(fixture.ctx, { name: 'Harborview Marine' })
+    const revenue = await fixture.account('4000')
+
+    await createInvoice(fixture.ctx, {
+      customerId: customer.id,
+      issueDate: '2026-06-01',
+      lines: [
+        {
+          chartAccountId: revenue.id,
+          description: 'Labour, no catalogue entry',
+          unitPriceCents: 50_000,
+        },
+      ],
+    })
+
     const rows = await serviceRevenue(fixture.ctx)
-    expect(rows.map((row) => row.label)).toEqual(['Not in this company’s catalogue'])
-    expect(rows[0].invoicedCents).toBe(100_000)
+
+    expect(rows).toHaveLength(1)
+    expect(rows[0].key).toBe('uncatalogued')
+    expect(rows[0].label).toBe('Not from the catalogue')
+    expect(rows[0].invoicedCents).toBe(50_000)
+
+    // And not the accusing one, which is the distinction the two labels carry.
+    expect(rows.map((row) => row.label)).not.toContain('Not in this company’s catalogue')
   })
 
   it('keeps the line when its catalogue item is deleted', async () => {

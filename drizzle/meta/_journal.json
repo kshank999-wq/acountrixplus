@@ -687,6 +687,13 @@
       "when": 1792800000000,
       "tag": "0097_phase178_the_transaction_the_bank_took_back",
       "breakpoints": true
+    },
+    {
+      "idx": 98,
+      "version": "7",
+      "when": 1792900000000,
+      "tag": "0098_phase179_the_table_the_tripwire_caught",
+      "breakpoints": true
     }
   ]
 }

@@ -50,7 +50,7 @@ an expense for money that never moved. **CSV import is unaffected** either way,
 because a statement row arrives once, already posted, and a file cannot take it
 back.
 
-**Row-level security is installed and not switched on.** 163 tables carry
+**Row-level security is installed and not switched on.** 162 tables carry
 policies; the application connects as the table owner, so they do not apply.
 `RLS_ROLLOUT` records this. The application-layer guards are complete and
 measured — 111 writes and 883 reads, every one accounted for — so for a single
@@ -81,7 +81,7 @@ applies the migrations, **proves the schema landed** rather than trusting an
 exit code, generates your secrets, and prints the environment block to paste
 into Vercel.
 
-Expect `181 tables present, ledger included.`
+Expect `182 tables present, ledger included.`
 
 > No machine to run it from? `npm run db:bundle` flattens every migration into
 > `drizzle/bundle.sql`, wrapped in one transaction, to paste into Supabase's SQL

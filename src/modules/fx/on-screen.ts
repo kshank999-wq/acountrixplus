@@ -373,8 +373,24 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
  * Worth recording rather than absorbing, because it is the third scan Phase 143
  * widened. The column list feeds the SQL sum scan, the reduce scan **and** this
  * one, and only two of those were expected.
+ *
+ * ## Twenty-nine in Phase 179, and here is why
+ *
+ * Two catalogue shapes on two screens: `crm/proposals/proposal-list.tsx:Service`
+ * (Phase 168) and `accounting/invoices/board.tsx:SellableItem` (Phase 169).
+ * Both carry a `unitPriceCents` and no currency, and both are the same
+ * character as the twenty-seven before them — `service_items` has **no currency
+ * column**, so a catalogue price is the company's own money by construction and
+ * there is nothing for the screen to ask.
+ *
+ * The number was set in **Phase 144**, whose title is *"run it, and fix what it
+ * caught — including four of its own claims"*. It has been wrong since Phase
+ * 168 and was found by Phase 179's run, which is the next complete one. The
+ * instruction above — "it must never grow without somebody saying why" — turns
+ * out to need a complete suite to enforce, because growing is invisible to any
+ * run that does not reach this file.
  */
-export const UNCLASSIFIED_CARRIERS = 27
+export const UNCLASSIFIED_CARRIERS = 29
 
 /**
  * Call sites where a face-column *name* appears on something that is not one.

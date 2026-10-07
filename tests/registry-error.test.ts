@@ -251,7 +251,19 @@ describe('every registry refuses the same way', () => {
     // The count did not move, which is the right outcome for a rename and worth
     // saying: this assertion is about how many registries exist, not how many
     // were edited.
-    expect(thrown.length).toBe(34)
+    //
+    // Thirty-five since Phase 179 and `PINNED_CLAIMS`, the numbers stated in
+    // prose that something now reads. It earns the throw for the reason the
+    // phase exists: a lookup answering `undefined` for a mistyped claim key
+    // would report a sentence as checked when nothing checks it, which is the
+    // register demonstrating its own subject.
+    //
+    // And the count caught it in the same hour it was written — the sixth time
+    // this line has found a registry rather than described one, and the first
+    // time it did so inside the phase that added it rather than one or nine
+    // phases later. Worth recording as the device working at full speed for
+    // once, because every other entry above is a story about how long it took.
+    expect(thrown.length).toBe(35)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

@@ -401,7 +401,7 @@ export const CONVERSION_SHAPES: readonly ConversionShape[] = [
 /**
  * How far the conversion has got, in the shape Phase 160 used for RLS.
  *
- * 271 references cannot be converted in one phase, and a phase that converted
+ * 274 references cannot be converted in one phase, and a phase that converted
  * two and said nothing about the other 269 would be the kind of partial work
  * this codebase keeps finding in its own history. So the count is measured by a
  * test, the stages are named here, and the number can only move one way.

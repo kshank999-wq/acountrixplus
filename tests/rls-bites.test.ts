@@ -31,7 +31,7 @@ import { RegistryError } from '@/modules/errors/registry'
  * needs this file rather than a migration and a paragraph:
  *
  * **The application connects as `postgres`, which is a superuser and owns all
- * 181 tables.** RLS is never applied to a superuser and is not applied to a
+ * 182 tables.** RLS is never applied to a superuser and is not applied to a
  * table's owner without FORCE, so a migration of ENABLE plus CREATE POLICY
  * would have produced 167 policies, 167 tables reporting `relrowsecurity`, and
  * no isolation at all — while looking, to anybody auditing the database by
@@ -221,9 +221,21 @@ describe('the policies bite', () => {
      * to let a later migration inherit.
      */
     const expected = policed()
-    expect(tenantTables()).toHaveLength(167)
-    // 161 since Phase 162 exempted the two queue tables.
-    expect(expected).toHaveLength(161)
+    /*
+      168 and 162 since Phase 177 added `bank_transaction_revisions`.
+
+      **This assertion did its job and nobody ran it.** The table carries a
+      `company_id` and had no policy, for two phases and two pushes — which is
+      exactly what the docstring above says this test exists to catch, and
+      exactly what ADR 0178 predicted would keep happening while tree-wide scans
+      were checked by running the tests near the code that changed.
+
+      Migration 0098 policed it. The six that stay out are out for one reason:
+      each is read in order to decide who the caller is, strictly before any
+      tenant can be set. A revision log is not one of those.
+    */
+    expect(tenantTables()).toHaveLength(168)
+    expect(expected).toHaveLength(162)
 
     const rows = (await db.execute(sql`
       select c.relname as table_name, c.relrowsecurity as enabled, c.relforcerowsecurity as forced,

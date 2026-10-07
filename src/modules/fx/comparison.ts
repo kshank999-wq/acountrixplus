@@ -280,6 +280,19 @@ export const COMPARED_PAIRS: readonly ComparedPair[] = [
       'company’s own money. Registered from both ends and repaired from both ends.',
   },
   {
+    file: 'src/modules/banking/revision-service.ts',
+    symbol: 'heldRevisions',
+    comparability: 'same-row',
+    because:
+      'Written in Phase 177 and undeclared until 179, which is the whole argument of ADR 0144 ' +
+      'landing on the person quoting it: `revision.previousAmountCents !== revision.amountCents` ' +
+      'is sound, because both operands come off one `bank_transaction_revisions` row and one row ' +
+      'has one currency — but soundness nobody declared is soundness nobody can check. It was ' +
+      'found by the first complete full-suite run of this session and by nothing in the two ' +
+      'phases that wrote it, neither of which named this scan. The declaration is the fix; the ' +
+      'code was already right.',
+  },
+  {
     file: 'src/modules/receivables/credits.ts',
     symbol: 'applyCreditWithin',
     comparability: 'refused-upstream',

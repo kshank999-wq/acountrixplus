@@ -98,8 +98,18 @@ describe('how many references could point at another tenant', () => {
       and commit message and forgot this line, and the failing run is what
       found it.
     */
-    expect(measured.total).toBe(273)
-    expect(measured.composite).toBe(18)
+    /*
+      274 and 19 since Phase 177, which added `bank_transaction_revisions` with
+      a composite tenant key from the day it was written — Phase 170's device
+      applied on the spot rather than 170 phases later.
+
+      Found by the first complete full-suite run of this session (Phase 179) and
+      not by Phase 177 or 178, neither of which named this file. ADR 0178
+      predicted exactly that: a scan that counts the whole tree cannot be checked
+      by running the tests near the code that changed.
+    */
+    expect(measured.total).toBe(274)
+    expect(measured.composite).toBe(19)
   })
 
   it('leaves no single-column reference into the catalogue at all', async () => {

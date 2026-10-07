@@ -209,9 +209,12 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 531 of ' +
-      'the 867 reads, against 27 of the 109 writes. The two halves of this system are guarded ' +
-      'quite differently and nobody had noticed, because nothing had counted either of them.',
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 542 of ' +
+      'the 911 reads, against 28 of the 111 writes. The two halves of this system are guarded ' +
+      'quite differently and nobody had noticed, because nothing had counted either of them. ' +
+      'All four of these numbers were a phase or more out until Phase 179 measured them — and ' +
+      'they are the one entry in `PINNED_CLAIMS` with no measure, because the scans that produce ' +
+      'them live inside two test files rather than in a module.',
   },
   {
     kind: 'join-inherited',

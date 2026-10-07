@@ -139,7 +139,19 @@ describe('the retention policy', () => {
   // question above by going in `NEVER_SWEPT`: a billing schedule is the payment
   // terms a client agreed to, and sweeping it would delete the terms behind
   // invoices that are themselves never swept.
-  const TABLE_COUNT = 181
+  // 182 since Phase 177 added `bank_transaction_revisions`, also `NEVER_SWEPT`:
+  // it is the audit trail for amounts in the books, not traffic. Sweeping it
+  // would leave a transaction carrying -4420 with no record that the bank moved
+  // it from -4000, and would delete a dismissed revision's note — the only
+  // written explanation of a deliberate disagreement with the bank. That is the
+  // state the `contribution_receipts` entry names: a total with nothing behind
+  // it. `bank_transactions` is never swept, and an explanation must not be swept
+  // before the thing it explains.
+  //
+  // This file says the price out loud — "that is the price of the moment where
+  // somebody decides" — and Phase 177 added a table and skipped the moment. It
+  // was red for two phases, because no full suite ran between them.
+  const TABLE_COUNT = 182
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

@@ -179,7 +179,13 @@ describe('reading the source for comparisons', () => {
     // defend.
     // Twenty-one since Phase 151 moved two of them into pure cores that take
     // their currencies as arguments — `affords` and `priceApplicationLines`.
-    expect(new Set(sites.map((site) => `${site.file}:${site.symbol}`)).size).toBe(21)
+    //
+    // Twenty-two since Phase 177 and `heldRevisions`, declared in Phase 179 when
+    // the first complete full-suite run of this session found it. Both halves of
+    // this file failed together, which is the device working as designed: the
+    // count said a comparison had appeared and the next test said it was
+    // undeclared, so neither could be dismissed as a stale number.
+    expect(new Set(sites.map((site) => `${site.file}:${site.symbol}`)).size).toBe(22)
 
     const found = new Set(sites.map((site) => site.form))
     expect([...found].sort()).toEqual(['bounded', 'equality', 'handed_over', 'relational'])

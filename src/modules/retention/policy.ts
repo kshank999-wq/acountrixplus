@@ -225,6 +225,13 @@ export const NEVER_SWEPT = [
   'payments',
   'payment_applications',
   'bank_transactions',
+  // Why a transaction's figures are what they are (Phase 177, classified in
+  // 179). Not traffic: sweeping it would leave an amount the bank revised with
+  // no record of the revision, and would delete the note behind a revision
+  // somebody dismissed on purpose — the only written reason the books disagree
+  // with the feed. `bank_transactions` is never swept and its explanation must
+  // outlive it, not the other way round.
+  'bank_transaction_revisions',
   'chart_accounts',
   // Who did what, which is the record §19 exists to protect.
   'audit_events',
