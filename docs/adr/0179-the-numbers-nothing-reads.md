@@ -335,6 +335,20 @@ Two lessons worth separating, because they point opposite ways:
   stronger half, precisely because the register does not have a method — it has
   thirteen named files and a test.
 
+## Where it ended
+
+Three complete passes, which is three more than the four phases before this one
+managed between them:
+
+| | files | tests | failures |
+| --- | --- | --- | --- |
+| Before the fixes | 242 | 4,437 | **10**, in 7 files |
+| After the fixes | 243 | 4,447 | **1** — this phase's own, in shard 7 |
+| After the follow-up | 243 | **4,447** | **none** |
+
+Every failure in all three runs was a tree-wide scan. Not one was a defect in a
+feature.
+
 ## A line worth stating
 
 A number in prose is either a claim about now or a record of what a phase
