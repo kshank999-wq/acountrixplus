@@ -13,6 +13,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { applyRulesToNewTransactions } from '@/modules/bookkeeping/rules-engine'
 import { mintChartAccount } from './accounts'
 import { getBankProvider } from './registry'
+import { decryptSecret, encryptSecret } from '@/modules/auth/secret-box'
 import type { ProviderAccount, ProviderTransaction } from './provider'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
@@ -42,7 +43,19 @@ export async function connectInstitution(
 
   const provider = getBankProvider(opts.providerKey)
   const exchanged = await provider.exchangePublicToken(opts.publicToken)
-  const providerAccounts = await provider.listAccounts(exchanged.providerItemId)
+
+  /*
+    The credential travels with the id and is never separated from it
+    (Phase 176). `ProviderConnection` exists so a caller cannot pass the id of
+    one connection and the credential of another, which the type system can
+    prevent and a second positional argument could not.
+  */
+  const handle = {
+    providerItemId: exchanged.providerItemId,
+    credential: exchanged.credential,
+  }
+
+  const providerAccounts = await provider.listAccounts(handle)
 
   return db.transaction(async (tx) => {
     const [connection] = await tx
@@ -53,6 +66,17 @@ export async function connectInstitution(
         providerItemId: exchanged.providerItemId,
         institutionName: exchanged.institutionName,
         status: 'active',
+        /*
+          Encrypted on the way in, with the envelope that protects TOTP seeds.
+          A Plaid `access_token` is a long-lived bearer credential for the whole
+          of a business's banking history, and §19 requires it encrypted at
+          rest — a leaked database without this is embarrassing and with it is a
+          disclosure.
+
+          `null` rather than an empty string when the adapter issues none, so
+          "needs no credential" and "has an empty one" stay distinguishable.
+        */
+        credentialCipher: exchanged.credential ? encryptSecret(exchanged.credential) : null,
       })
       .returning()
 
@@ -173,11 +197,25 @@ export async function syncConnection(
   if (!connection) throw missing('bankConnection')
 
   const provider = getBankProvider(connection.provider)
-  const page = await provider.fetchTransactions(connection.providerItemId, {
-    cursor: connection.syncCursor ?? undefined,
-    startDate: opts.startDate,
-    endDate: opts.endDate,
-  })
+
+  /*
+    Decrypted here and not stored in this shape. The plaintext exists for the
+    length of one provider call, which is the narrowest window the flow allows:
+    the adapter needs it to authenticate and nothing else in the request does.
+  */
+  const page = await provider.fetchTransactions(
+    {
+      providerItemId: connection.providerItemId,
+      credential: connection.credentialCipher
+        ? decryptSecret(connection.credentialCipher)
+        : undefined,
+    },
+    {
+      cursor: connection.syncCursor ?? undefined,
+      startDate: opts.startDate,
+      endDate: opts.endDate,
+    },
+  )
 
   const accounts = await db
     .select()

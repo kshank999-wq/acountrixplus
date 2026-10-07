@@ -8595,6 +8595,8 @@ Coverage matches what spec §21 asks for:
 | File | What it covers |
 | --- | --- |
 | `tests/a-question-from-the-client.test.ts` | **A question from the client** (Phase 174): §7's comments/questions on the client link, built as a *communication* rather than a comment — so the two tests that matter assert it reaches `organizationTimeline` and makes Phase 167's `gone-quiet` ground stop firing, which is the whole reason for the design. The unauthenticated path gets the attacker-first treatment `intake.ts` set: an unknown token and a draft return the same sentence so the endpoint is not an oracle, a draft records nothing at all, the limit is per proposal rather than per address, and the length bound is checked at its boundary. `clientThread` is proved never to show an internal note — including one filed against the proposal itself, the case a direction filter catches and a proposal filter does not |
+| `tests/fit-for-real-data.test.ts` | **Fit for real data** (Phase 175): the register of configuration a deployment can be missing while reporting success. Pure — no database, no clock, no `process.env` — because the same function has to answer for a *remote* deployment's environment through `/api/health`, and the typecheck caught that `NodeJS.ProcessEnv` requires `NODE_ENV` and would have falsified exactly that claim while every test still passed. The headline assertion is that a deployment with no mail provider is **not fit**: `getTransactionalProvider` throws for a provider that is named and misconfigured, and defaults to the mock for the omission, so a password reset is "sent" to a console log and the person waiting concludes their account is broken. A missing `CRON_SECRET` is a silent failure and not a degradation, because the worker route refusing every request is the *right* default and means the queue simply never drains. Two things deliberately pass: no aggregator and no AI key, because CSV import needs neither and §11 requires the core product to work without AI. One test asserts the output never contains a secret's value, including the password inside `DATABASE_URL` — the one entry that parses a secret-bearing string — because `/api/health` serves the same structure. And one reads `docs/DEPLOY.md` and asserts its migration count against the journal, after the document spent 57 migrations claiming 38; it caught the number again one migration later, in Phase 176 |
+| `tests/the-first-real-bank.test.ts` | **The first real bank** (Phase 176): the Plaid adapter, and the first thing in 174 phases to test `BankProvider`'s claim that *"swapping Plaid for another aggregator means writing one new adapter"*. The sign is asserted **in both directions** because Plaid reports a purchase as *positive* and this codebase's convention is the opposite, and a test that only checked a purchase would pass with the inversion backwards if the fixture were backwards too — the third assertion in that test is what found `-Math.round(0 * 100)` returning `-0` for a $0 pre-authorisation, which a petrol pump does every day. Every test drives a stubbed `fetch` built on a real `Response`, because `response.ok`, an empty `statusText` and a body that can only be read once are all behaviours the adapter depends on. Pagination is drained to eight pages and `hasMore` asserted *true* at the bound, since what makes the bound safe is the honesty of the flag rather than the size of it. Failures are split into "could not take it just now" and "understood and said no" across seven status codes, with 400 non-retryable because Plaid uses it for `ITEM_LOGIN_REQUIRED` — the one failure a person has to fix. A connection with no credential refuses **before reaching the network** and is marked not-retryable, because a row predating the credential column has no token and no amount of waiting produces one. Four failure paths are checked at once for leaking the secret, which travels in the request *body* and is therefore one line from every error string the adapter builds. And two promises the adapter cannot keep are pinned as assertions rather than left in comments: the date bounds `/transactions/sync` has no parameters for, and `removed`, which `TransactionPage` has nowhere to say |
 | `tests/public-writes.test.ts` | **Every write a stranger can reach** (Phase 174): the register that exists because four files each kept the count in prose and all four went stale — "the only", "the only", "the second", "the third", and the answer is five. The scan found the two nobody had written down (the unsubscribe link and the email webhook) on the day the register was written, and holds it to the source in both directions: an entry whose module has moved is stale, and an unauthenticated write route that does not delegate to a declared module is the case it exists to catch |
 | `tests/the-id-a-caller-hands-in.test.ts` | **The id a caller hands in** (Phase 170): the question Phases 149 and 150 did not cover — a write can be perfectly guarded, landing on the caller's own row, and still store a reference to somebody else's. Measured from `pg_constraint` rather than declared: 271 references between tenant-scoped tables, two now carrying the tenant, both numbers asserted so either direction fails the test and sends somebody to `REFERENCE_ROLLOUT`. The composite key is seen to refuse another company's item *and* to accept the company's own, because a key that refused everything would pass the first assertion. Deleting a catalogue item leaves the line with a null rather than failing — the column-list delete rule, which is the one part of a composite tenant key that is not a mechanical substitution. And exactly one of the four proofs is enforced by the database, asserted rather than left in the prose. **Phase 171** took every reference into the catalogue and asserts zero single-column ones remain — a claim about the data rather than the backlog — proves a cross-tenant reference refused on a `time_entries` row nobody had examined, deletes an item out from under one to prove the column-list delete rule, and checks no constraint anywhere still says `service_item_id`. **Phase 172** adds the assertion the programme needed: no converted key may have a nullable source `company_id`, because under `MATCH SIMPLE` such a key is not checked at all — it would count toward the total and enforce nothing. It also measures the ceiling (two references from unscoped tables, three with a nullable end, so 268 of 271 convertible) rather than leaving it a worry |
 | `tests/one-name-and-two-references.test.ts` | **One name, and two references that were not** (Phase 169): ADR 0168's own nomination, measured and found false — `invoice_lines.item_id` has referenced the catalogue since Phase 14. The test reads the schema directory rather than naming three tables, so a fourth cannot reintroduce the naming split quietly; asserts both `item_id` columns are now foreign keys, that a line naming a nonexistent item is refused by name, and that deleting a catalogue entry nulls the column rather than taking the line with it. `groupTimeIntoLines` carries the item only when every entry in a group agrees, and still sums to the same total however it is grouped. Its cross-tenant case caught the real defect: both `serviceRevenue` and Phase 168's `serviceBreakdown` joined the catalogue on `id` alone, putting another tenant's product name on this company's dashboard |
@@ -10121,15 +10123,58 @@ work in production.
 
 ## Switching bank providers
 
-Set `BANK_PROVIDER` in `.env.local`. To add a real aggregator:
+Set `BANK_PROVIDER` in `.env.local`. Two adapters are registered: `mock` (the default,
+which generates a plausible history and needs no credentials) and `plaid`.
+
+### Plaid
+
+```bash
+BANK_PROVIDER=plaid
+PLAID_CLIENT_ID=...
+PLAID_SECRET=...
+PLAID_ENV=sandbox          # or production; Plaid retired "development"
+PLAID_CLIENT_NAME=...      # optional, what the link widget shows the account holder
+PLAID_COUNTRY_CODES=US     # optional, comma-separated
+```
+
+`npm run deploy:check` refuses a deployment that selects `plaid` and sets neither secret,
+and calls it a **silent failure** rather than a degradation for a specific reason:
+`bank.sync_all` catches a per-institution error and returns it in the job result so one
+dead institution cannot stop the others. So an unconfigured Plaid runs a job that
+*succeeds*, every five minutes, imports nothing, and records why in a row nobody reads.
+
+**This adapter has never been run against Plaid.** Every test drives a stubbed `fetch`
+with payloads shaped from the documented API, so the logic is tested — the sign inversion,
+pagination, the account-kind mapping, error classification — and the field names are
+asserted against fixtures this repository wrote. Run it against Plaid's sandbox, which is
+free, and compare one real payload against `PlaidTransaction` before it handles real
+money. `Plaid-Version` is pinned to `2020-09-14` so that comparison stays valid.
+
+There is also no link widget in the UI yet: `createLinkSession` has no caller outside a
+test, so connecting an institution today means calling `connectInstitution` with a public
+token obtained elsewhere. Phase 49's rule, stated rather than argued away.
+
+### Adding another
 
 1. Implement the `BankProvider` interface from `src/modules/banking/provider.ts`.
-2. Register it in `src/modules/banking/registry.ts`.
+2. Register a **factory** for it in `src/modules/banking/registry.ts` —
+   `registerProvider('key', () => new YourProvider())`. A factory and not an instance
+   because an adapter that refuses to construct without its secrets must not do so on
+   *import*, in every deployment that selected a different one.
 3. Set `BANK_PROVIDER` to its key.
 
-No changes to import, dedup, categorization, or the inbox — that isolation is the point
-(spec §3). Provider credentials stay server-side and are never exposed to the browser
-(spec §19).
+Writing the Plaid adapter is the first time anything tested this isolation, and it held:
+`importTransactions`, the dedup index, the rules engine, the inbox, `createFinancialAccounts`,
+numbering, reconciliation and the ledger were untouched (spec §3). What it did change is
+instructive — `ExchangeResult` had nowhere to carry a credential and `bank_connections`
+had no column for one, because a mock has no secret. See ADR 0176.
+
+Provider credentials stay server-side and are never exposed to the browser. A durable one
+is stored in `bank_connections.credential_cipher`, encrypted with `modules/auth/secret-box`
+— the same envelope as a TOTP seed, because a Plaid `access_token` is a bearer credential
+for a business's entire banking history (spec §19). Rotating `ENCRYPTION_KEY` does not
+raise an error about keys; it makes every stored credential undecryptable and every sync
+stop. Generate once, keep it.
 
 ## Switching email providers
 

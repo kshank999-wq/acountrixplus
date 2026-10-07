@@ -666,6 +666,13 @@
       "when": 1792500000000,
       "tag": "0094_phase174_a_question_from_the_client",
       "breakpoints": true
+    },
+    {
+      "idx": 95,
+      "version": "7",
+      "when": 1792600000000,
+      "tag": "0095_phase176_a_connection_credential",
+      "breakpoints": true
     }
   ]
 }

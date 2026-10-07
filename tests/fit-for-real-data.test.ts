@@ -51,10 +51,17 @@ describe('the register itself', () => {
     expect(problems).toEqual([])
   })
 
-  it('declares ten checks, counted rather than bounded', () => {
-    // Phase 126.
-    expect(DEPLOY_CHECKS).toHaveLength(10)
-    expect(new Set(DEPLOY_CHECKS.map((check) => check.key)).size).toBe(10)
+  it('declares eleven checks, counted rather than bounded', () => {
+    /**
+     * Phase 126. Eleven since Phase 176 added `plaid-credentials` — and that
+     * phase also had to *reword* `bank-provider`, whose argument opened with
+     * "there is no real aggregator adapter in this codebase". True when written,
+     * false the moment one was written, which is Phase 110's defect in the one
+     * register whose whole job is to be read by somebody pointing a production
+     * database at this repository.
+     */
+    expect(DEPLOY_CHECKS).toHaveLength(11)
+    expect(new Set(DEPLOY_CHECKS.map((check) => check.key)).size).toBe(11)
   })
 
   it('throws on a check nobody declared, naming the ones that exist', () => {
@@ -147,16 +154,83 @@ describe('what makes a deployment unfit', () => {
     expect(readiness.silent.map((result) => result.key)).toEqual(['cron-secret'])
     expect(readiness.fitForRealData).toBe(false)
   })
+
+  it('refuses a deployment that selected Plaid and did not configure it', () => {
+    /**
+     * The second check in this register whose severity comes from *how* the
+     * failure hides rather than how bad it is. `bank.sync_all` catches a
+     * per-institution error and returns it in the job result, so one dead
+     * institution cannot stop the others — right, and it means an unconfigured
+     * Plaid runs a job that **succeeds** every five minutes, imports nothing,
+     * and records the reason in a row nobody reads.
+     */
+    const noSecrets = assessDeployment({ ...CONFIGURED, BANK_PROVIDER: 'plaid' })
+
+    expect(noSecrets.silent.map((result) => result.key)).toEqual(['plaid-credentials'])
+    expect(noSecrets.fitForRealData).toBe(false)
+    expect(noSecrets.silent[0].detail).toContain('PLAID_CLIENT_ID and PLAID_SECRET')
+
+    // Half-configured is named precisely, because "Plaid is not set up" sends
+    // somebody to check both variables and the dashboard.
+    const halfConfigured = assessDeployment({
+      ...CONFIGURED,
+      BANK_PROVIDER: 'plaid',
+      PLAID_CLIENT_ID: 'client-id',
+    })
+    expect(halfConfigured.silent[0].detail).toContain('PLAID_SECRET is not set')
+
+    const configured = assessDeployment({
+      ...CONFIGURED,
+      BANK_PROVIDER: 'plaid',
+      PLAID_CLIENT_ID: 'client-id',
+      PLAID_SECRET: 'secret',
+    })
+    expect(configured.fitForRealData).toBe(true)
+  })
+
+  it('catches the environment Plaid retired, in the same breath as the secrets', () => {
+    /**
+     * One check and not two, because it is one question — "is the selected
+     * aggregator usable" — and two registers answering it is the defect this
+     * project keeps naming. `development.plaid.com` resolves to nothing, so the
+     * alternative is discovering it as a DNS failure inside a swallowed job
+     * error.
+     */
+    const readiness = assessDeployment({
+      ...CONFIGURED,
+      BANK_PROVIDER: 'plaid',
+      PLAID_CLIENT_ID: 'client-id',
+      PLAID_SECRET: 'secret',
+      PLAID_ENV: 'development',
+    })
+
+    expect(readiness.silent.map((result) => result.key)).toEqual(['plaid-credentials'])
+    expect(readiness.silent[0].detail).toContain('retired "development"')
+
+    // And the default, which is what an unset PLAID_ENV means.
+    const defaulted = assessDeployment({
+      ...CONFIGURED,
+      BANK_PROVIDER: 'plaid',
+      PLAID_CLIENT_ID: 'client-id',
+      PLAID_SECRET: 'secret',
+    })
+    expect(
+      defaulted.results.find((result) => result.key === 'plaid-credentials')?.ok,
+    ).toBe(true)
+  })
 })
 
 describe('what does not make a deployment unfit', () => {
-  it('lets a missing bank aggregator through, because CSV import needs none', () => {
+  it('lets an unselected bank aggregator through, because CSV import needs none', () => {
     /**
      * `degraded` rather than `silent-failure`, and the distinction is the one
-     * that matters for a first real deployment: there is no aggregator adapter
-     * in this codebase at all, so a connection attempt fails where somebody can
-     * see it. Importing a statement as CSV needs no provider and is the path a
-     * real business uses until an adapter exists.
+     * that matters for a first real deployment: with no aggregator selected
+     * nothing claims to be syncing, and importing a statement as CSV needs no
+     * provider at all.
+     *
+     * There is a Plaid adapter since Phase 176, which changed the *argument* on
+     * this entry and not the severity — an adapter nobody selected and an
+     * adapter that does not exist degrade a deployment identically.
      */
     const readiness = assessDeployment(CONFIGURED)
     const bank = readiness.results.find((result) => result.key === 'bank-provider')
@@ -165,6 +239,19 @@ describe('what does not make a deployment unfit', () => {
     expect(bank?.severity).toBe('degraded')
     expect(readiness.fitForRealData).toBe(true)
     expect(bank?.detail).toContain('CSV')
+  })
+
+  it('says nothing about Plaid until Plaid is the selected provider', () => {
+    /**
+     * Phase 160's shape, avoided in the other direction: a check that fired at
+     * every CSV-only deployment for not having Plaid secrets would be noise, and
+     * noise in this register is how the four entries that matter get skimmed.
+     */
+    const readiness = assessDeployment(CONFIGURED)
+    const plaid = readiness.results.find((result) => result.key === 'plaid-credentials')
+
+    expect(plaid?.ok).toBe(true)
+    expect(readiness.fitForRealData).toBe(true)
   })
 
   it('lets a missing AI key through, because §23 makes AI additive', () => {

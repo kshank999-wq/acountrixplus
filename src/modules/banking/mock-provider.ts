@@ -7,6 +7,7 @@ import type {
   ProviderAccount,
   ProviderTransaction,
   TransactionPage,
+  ProviderConnection,
 } from './provider'
 
 /**
@@ -128,14 +129,18 @@ export class MockBankProvider implements BankProvider {
     }
   }
 
-  async listAccounts(_providerItemId: string): Promise<ProviderAccount[]> {
+  async listAccounts(_connection: ProviderConnection): Promise<ProviderAccount[]> {
     return MOCK_ACCOUNTS.map((account) => ({ ...account }))
   }
 
   async fetchTransactions(
-    providerItemId: string,
+    connection: ProviderConnection,
     options: FetchOptions = {},
   ): Promise<TransactionPage> {
+    // The mock needs no credential and does not look at one. Named so a reader
+    // can see the parameter widened in Phase 176 without a behaviour change
+    // here (Phase 176 found there was nowhere to keep a real one).
+    const providerItemId = connection.providerItemId
     const months = this.options.months ?? 3
     const reference = this.options.referenceDate ?? new Date()
     const transactions: ProviderTransaction[] = []

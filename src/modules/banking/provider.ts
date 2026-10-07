@@ -59,6 +59,39 @@ export type LinkSession = {
 export type ExchangeResult = {
   providerItemId: string
   institutionName: string
+  /**
+   * The durable credential this connection will need, if the provider issues
+   * one (Phase 176).
+   *
+   * Opaque to the domain on purpose: for Plaid it is an `access_token`, for
+   * another aggregator it may be a refresh token or a signed handle, and
+   * nothing outside the adapter should parse it. The *domain* stores it —
+   * encrypted, in `bank_connections.credential_cipher` — rather than the
+   * adapter keeping state, because an adapter that reads and writes the
+   * database is exactly the provider-specific leak this file's own docstring
+   * forbids.
+   *
+   * Absent for an adapter that needs none. The mock is the reason it is
+   * optional, and the reason this gap went unnoticed for 174 phases: a mock has
+   * no secret, so nothing ever had to carry one.
+   */
+  credential?: string
+}
+
+/**
+ * What an adapter is handed to act on an existing connection (Phase 176).
+ *
+ * A bare `providerItemId` was enough while the only implementation was the
+ * mock. A real aggregator needs the credential as well, and passing it as a
+ * second positional argument would have made the two separable — a caller could
+ * pass the id of one connection and the credential of another, which is a
+ * cross-tenant mistake the type system can prevent by refusing to let them
+ * travel apart.
+ */
+export type ProviderConnection = {
+  providerItemId: string
+  /** Decrypted at the call site, never stored in this shape. */
+  credential?: string
 }
 
 export type FetchOptions = {
@@ -80,13 +113,16 @@ export interface BankProvider {
   exchangePublicToken(publicToken: string): Promise<ExchangeResult>
 
   /** Lists the accounts available on a connection. */
-  listAccounts(providerItemId: string): Promise<ProviderAccount[]>
+  listAccounts(connection: ProviderConnection): Promise<ProviderAccount[]>
 
   /**
    * Fetches transactions. Implementations must return the provider's own
    * immutable ids so repeated calls over the same window deduplicate.
    */
-  fetchTransactions(providerItemId: string, options?: FetchOptions): Promise<TransactionPage>
+  fetchTransactions(
+    connection: ProviderConnection,
+    options?: FetchOptions,
+  ): Promise<TransactionPage>
 }
 
 /** Raised when a provider call fails in a way the caller should surface. */

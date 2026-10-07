@@ -189,15 +189,50 @@ export const DEPLOY_CHECKS: readonly Check[] = [
     key: 'bank-provider',
     severity: 'degraded',
     because:
-      'Degraded rather than a silent failure, and the distinction is the point: there is no real ' +
-      'aggregator adapter in this codebase, only the mock, so a connection attempt fails where ' +
-      'somebody can see it. Importing a bank CSV through Settings → Import needs no provider at ' +
-      'all and is the path a real business uses until an adapter exists.',
+      'Degraded rather than a silent failure, and the distinction is the point: with no aggregator ' +
+      'selected there are no automatic feeds and nothing claims otherwise — a bank CSV through ' +
+      'Settings → Import needs no provider at all, and is the path a business can run its books ' +
+      'on indefinitely. This entry used to argue that no real adapter existed, which stopped ' +
+      'being true in Phase 176; the severity did not change, because an unselected adapter and an ' +
+      'absent one degrade a deployment identically.',
     detect: (env) => {
       const provider = value(env, 'BANK_PROVIDER')
       return !provider || provider === 'mock'
-        ? 'No bank aggregator is configured. Import statements as CSV; automatic feeds need an adapter that does not exist yet.'
+        ? 'No bank aggregator is selected. Import statements as CSV, or set BANK_PROVIDER=plaid for automatic feeds.'
         : null
+    },
+  },
+  {
+    key: 'plaid-credentials',
+    severity: 'silent-failure',
+    because:
+      'A silent failure specifically because of how the *scheduled* sync fails. `bank.sync_all` ' +
+      'catches a per-institution error and returns it in the job result so one dead institution ' +
+      'cannot stop the others — which is right, and means a deployment with `BANK_PROVIDER=plaid` ' +
+      'and no secrets runs a job that **succeeds**, every five minutes, importing nothing, with ' +
+      'the reason buried in a row nobody reads. A manual sync does surface the error, so the ' +
+      'thing that fails quietly is the feed somebody stopped watching because it was automatic. ' +
+      'The environment name is the same question and is checked here too: Plaid retired ' +
+      '`development`, so a config carrying it reaches an adapter that refuses to construct.',
+    detect: (env) => {
+      // Only when Plaid is the selected provider. A deployment running on CSV
+      // has nothing to configure here, and a check that fires at it would be
+      // the register being wrong in the direction nobody can act on.
+      if (value(env, 'BANK_PROVIDER') !== 'plaid') return null
+
+      const missing = ['PLAID_CLIENT_ID', 'PLAID_SECRET'].filter((name) => !value(env, name))
+      if (missing.length > 0) {
+        return `BANK_PROVIDER is "plaid" but ${missing.join(' and ')} ${
+          missing.length === 1 ? 'is' : 'are'
+        } not set, so every scheduled sync will succeed and import nothing.`
+      }
+
+      const environment = value(env, 'PLAID_ENV') ?? 'sandbox'
+      if (environment !== 'sandbox' && environment !== 'production') {
+        return `PLAID_ENV is "${environment}". Plaid retired "development" — use "sandbox" or "production".`
+      }
+
+      return null
     },
   },
   {

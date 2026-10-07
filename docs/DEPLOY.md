@@ -56,7 +56,7 @@ it into Supabase's SQL editor instead:
 npm run db:bundle          # writes drizzle/bundle.sql
 ```
 
-It wraps all 95 migrations in a single transaction, so a failure anywhere
+It wraps all 96 migrations in a single transaction, so a failure anywhere
 leaves the database untouched rather than half built, and it refuses a database
 that already has the schema. It also writes Drizzle's own bookkeeping rows —
 without those, the next `npm run db:migrate` would see an empty
@@ -258,6 +258,14 @@ Neither blocks a deployment, and both are behind provider interfaces:
 - **Bank feeds** (`BANK_PROVIDER=mock`). Transactions are generated, not
   fetched. Everything downstream — rules, categorisation, reconciliation — is
   real.
+
+  There is a **Plaid** adapter since Phase 176 (`BANK_PROVIDER=plaid`, plus
+  `PLAID_CLIENT_ID` and `PLAID_SECRET`), and it is still not the path for a
+  first deployment: it has never been run against Plaid, and nothing in the UI
+  starts a link. `npm run deploy:check` refuses a deployment that selects it and
+  configures neither secret. README → *Switching bank providers* has the whole
+  list; ADR 0176 has the reasoning and the one defect to fix before an automatic
+  feed can be trusted.
 
   **"Sync bank" on a real company's books puts invented transactions in them.**
   The result message says so, but the rows are as real as any others once

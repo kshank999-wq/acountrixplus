@@ -222,7 +222,20 @@ describe('every registry refuses the same way', () => {
     // found by this line and two of this phase's own counts were found by their
     // own tests, which is the argument of ADR 0132 holding against the person
     // who was quoting it.
-    expect(thrown.length).toBe(31)
+    //
+    // **Thirty-three since Phase 176, and this is the sixth and seventh catch —
+    // but read what it caught.** `BANK_PROVIDERS` is the one Phase 176 wrote.
+    // `DEPLOY_CHECKS` was written in **Stage A**, a commit earlier, by somebody
+    // who did not run this file; it has been failing ever since, in a push that
+    // was reported as green on the tests it did run. Two registries and only one
+    // of them is this phase's.
+    //
+    // So the device has now caught a registry six times and a *stale suite*
+    // once, and the second is the more useful catch: a count that only ever
+    // moves when somebody remembers to move it is a count nobody is checking.
+    // This one moved because a run failed, which is the only reason any of the
+    // numbers above moved either.
+    expect(thrown.length).toBe(33)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

@@ -90,8 +90,8 @@ describe('bank import deduplication', () => {
       referenceDate: new Date('2026-06-15T00:00:00Z'),
     })
 
-    const first = await provider.fetchTransactions('mock-item-demo')
-    const second = await provider.fetchTransactions('mock-item-demo')
+    const first = await provider.fetchTransactions({ providerItemId: 'mock-item-demo' })
+    const second = await provider.fetchTransactions({ providerItemId: 'mock-item-demo' })
 
     expect(first.transactions.length).toBeGreaterThan(0)
     expect(first.transactions.map((t) => t.providerTransactionId)).toEqual(
@@ -105,7 +105,7 @@ describe('bank import deduplication', () => {
       referenceDate: new Date('2026-06-15T00:00:00Z'),
     })
 
-    const page = await provider.fetchTransactions('mock-item-demo')
+    const page = await provider.fetchTransactions({ providerItemId: 'mock-item-demo' })
     const ids = page.transactions.map((t) => t.providerTransactionId)
 
     expect(new Set(ids).size).toBe(ids.length)

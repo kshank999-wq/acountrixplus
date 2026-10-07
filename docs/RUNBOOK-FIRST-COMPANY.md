@@ -7,16 +7,31 @@ made.
 
 Two things to know before starting, because they shape everything below.
 
-**There is no bank aggregator adapter.** `BankProvider` is a four-method
-interface with exactly one implementation — `MockBankProvider`. So "connect my
-bank and let it sync" is not available yet. What *is* available is a complete
-bank-statement CSV import: field mapping, date-order ambiguity detection,
-duplicate fingerprinting, and a plan-then-commit flow that shows you what it
-will do before it does it. Its own docstring says it was built for this exact
-situation — *"a business with real books and no aggregator connection had no way
-to get a single transaction into the system."* Every bank exports CSV. You can
-run your books on this now and add an aggregator later without changing
-anything downstream.
+**Start on CSV, not on the bank feed.** There is a Plaid adapter since Phase 176
+and it is not the path for a first month, for two reasons that are worth knowing
+rather than discovering. It has **never been run against Plaid** — its logic is
+tested against stubbed responses, its field names are not — and there is **no
+link widget in the UI**, so connecting an institution means calling
+`connectInstitution` with a public token you obtained some other way. See
+`README.md` → *Switching bank providers* and ADR 0176.
+
+What *is* complete is the bank-statement CSV import: field mapping, date-order
+ambiguity detection, duplicate fingerprinting, and a plan-then-commit flow that
+shows you what it will do before it does it. Its own docstring says it was built
+for this exact situation — *"a business with real books and no aggregator
+connection had no way to get a single transaction into the system."* Every bank
+exports CSV. Run your books on this now and turn the feed on later without
+changing anything downstream: that isolation is `BankProvider`'s whole purpose,
+and writing the Plaid adapter is the first thing that tested it.
+
+One thing to fix before you trust an automatic feed, whichever adapter it is.
+A sync returns transactions Plaid has **modified**, which is what happens every
+time a pending transaction posts and its amount changes by the tip.
+`importTransactions` uses `ON CONFLICT DO NOTHING`, so that update is dropped and
+the inbox keeps the pending figure — a reconciliation that will not close, by
+exactly the tip. ADR 0176 nominates it as the next phase and says why it is not a
+one-line fix. **CSV import is unaffected**, because a statement row arrives once
+and already posted.
 
 **Row-level security is installed and not switched on.** 163 tables carry
 policies; the application connects as the table owner, so they do not apply.
@@ -172,7 +187,9 @@ Run the second one. A backup nobody has restored is a hope, and §19 asks for a
 Measured in ADR 0173's bullet-level pass, so this list is complete rather than
 impressionistic — for the sections it covered.
 
-- **No aggregator feed.** CSV, monthly, until an adapter exists.
+- **No aggregator feed you should rely on yet.** The Plaid adapter exists and has
+  never been run against Plaid, and nothing in the UI starts a link. CSV,
+  monthly, until it has.
 - **The design engine is blocks, not a canvas.** No guides, rulers, snapping,
   layers, vector primitives, crop/mask or SVG import. Proposals and marketing
   documents work; an Illustrator-class editor is not there.

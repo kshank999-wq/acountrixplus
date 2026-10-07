@@ -62,6 +62,19 @@ export const bankConnections = pgTable(
     lastSyncedAt: timestamp('last_synced_at', { withTimezone: true }),
     /** Provider cursor for incremental sync. */
     syncCursor: text('sync_cursor'),
+    /**
+     * The provider's durable credential, encrypted (Phase 176).
+     *
+     * For Plaid this is an `access_token`; for another aggregator it may be a
+     * refresh token. Opaque to everything outside the adapter, and held in
+     * `modules/auth/secret-box`'s envelope because it is the most sensitive
+     * single value this application stores — a long-lived bearer credential for
+     * a business's entire banking history (§19).
+     *
+     * Null for an adapter that needs none, which is the mock and is why nothing
+     * noticed this column was missing for 174 phases.
+     */
+    credentialCipher: text('credential_cipher'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
