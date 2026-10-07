@@ -120,12 +120,21 @@ describe('the register itself', () => {
     expect(PINNED_CLAIMS.flatMap((claim) => pinnedClaimArgues(claim))).toEqual([])
   })
 
-  it('declares twelve claims, eleven of them pinned', () => {
-    // Phase 126, and the second number is the honest one: the twelfth is
-    // declared with no measure, on Phase 139's rule.
-    expect(PINNED_CLAIMS).toHaveLength(12)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(12)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(11)
+  it('declares thirteen claims, twelve of them pinned', () => {
+    /**
+     * Phase 126, and the second number is the honest one: one entry is declared
+     * with no measure, on Phase 139's rule.
+     *
+     * Thirteen and not twelve because the first draft had twelve. The audit that
+     * produced this register read three operational documents and missed
+     * `docs/SPEC-AUDIT.md` — the one that answers "is tenant isolation done" —
+     * and the verification run caught it still carrying the old figure. A
+     * register assembled by grepping the documents somebody thought of is this
+     * phase's own subject one level up.
+     */
+    expect(PINNED_CLAIMS).toHaveLength(13)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(13)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(12)
   })
 
   it('names the one it cannot pin, and why', () => {
@@ -213,7 +222,7 @@ describe('every pinned number', () => {
 
     const twice = claimStands(
       claim,
-      'installed on all 161 policed tables … installed on all 161 policed tables',
+      'installed on all 162 policed tables … installed on all 162 policed tables',
       facts,
     )
     expect(twice.ok).toBe(false)

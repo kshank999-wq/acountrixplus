@@ -168,9 +168,9 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — 110 writes
-and 883 reads, every one guarded (Phases 149–150) — and the database layer is
-installed, forced on 161 tables, proven against a restricted role, and **not
+rather than vaguely: the application layer is complete and measured — 111 writes
+and 911 reads, every one guarded (Phases 149–150, counted again in 179) — and
+the database layer is installed, forced on 162 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.

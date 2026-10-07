@@ -298,6 +298,43 @@ core gets a register and an acceptance test saying what is not wired — because
 the alternative is a register that looks complete and covers eleven of twelve,
 which is this phase's own subject one level up.
 
+## The eleventh finding, which the verification run found in the fix
+
+The suite was re-run after the fixes, and shard 7 failed:
+
+```
+a-job-through-the-policies.test.ts
+  "leaves them unpoliced in the database, and the count at 161"
+  expected 162 to be 161
+```
+
+That is this phase's own subject, committed inside the phase. The audit **read
+that file** while measuring the policed count — it was one of the two tests cited
+as evidence that 161 was the measured figure — and then migration 0098 moved the
+figure to 162 and nobody came back to it. The number was used as a source and not
+updated as a consequence.
+
+Re-running found a second one in the same sweep: `docs/SPEC-AUDIT.md` still said
+*"installed, forced on 161 tables"*, and said it next to *"110 writes and 883
+reads"*. **That document was never audited at all**, because the audit read three
+operational documents — README, DEPLOY, RUNBOOK — and this is the fourth. It is
+the one that answers "is tenant isolation done" with a *partial* and then says
+precisely how partial.
+
+So `PINNED_CLAIMS` has thirteen entries, not twelve, and the thirteenth is there
+as much for the omission as for the number: **a register assembled by grepping
+the documents somebody thought of is this phase's own defect one level up.** The
+pinning now covers it, which is the only part of this that does not depend on
+somebody remembering.
+
+Two lessons worth separating, because they point opposite ways:
+
+- Running the suite again after fixing it was not ceremony. Reasoning that the
+  fixes were obviously sufficient would have shipped two of them wrong.
+- The audit's *method* was the weaker half of this phase, and the register is the
+  stronger half, precisely because the register does not have a method — it has
+  thirteen named files and a test.
+
 ## A line worth stating
 
 A number in prose is either a claim about now or a record of what a phase

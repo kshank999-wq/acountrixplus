@@ -143,7 +143,7 @@ describe('the queue the policies had taken out', () => {
     ])
   })
 
-  it('leaves them unpoliced in the database, and the count at 161', async () => {
+  it('leaves them unpoliced in the database, and the count at 162', async () => {
     const rows = (await db.execute(sql`
       select
         (select count(*)::int from pg_class where relrowsecurity) as policed,
@@ -152,8 +152,20 @@ describe('the queue the policies had taken out', () => {
     `)) as unknown as Array<{ policed: number; queue: number }>
 
     expect(rows[0].queue).toBe(0)
-    // 163 from Phase 160, less the two this phase exempted.
-    expect(rows[0].policed).toBe(161)
+    /*
+      163 from Phase 160, less the two this phase exempted, plus
+      `bank_transaction_revisions` — which Phase 177 added tenant-scoped and
+      unpoliced, and Phase 179 policed.
+
+      **This line is Phase 179's own eleventh finding, and it is the phase's
+      subject committed inside the phase.** The audit read this file while
+      measuring the policed count, used the 161 here as *evidence* that 161 was
+      right, and then moved the count to 162 with a migration without coming
+      back to it. The verification run is what caught it — which is the argument
+      for running the suite again after fixing it, rather than reasoning that
+      the fixes were obviously sufficient.
+    */
+    expect(rows[0].policed).toBe(162)
   })
 
   it('names what policing them would have done, because it would have been silent', () => {

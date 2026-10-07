@@ -150,7 +150,23 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
     because:
       'This paragraph ends "if you are answering a security questionnaire from `pg_policies`, ' +
       'read this paragraph first", which makes it the single highest-stakes number in the ' +
-      'documentation: somebody will copy it into an answer. It said 163 against a measured 161.',
+      'documentation: somebody will copy it into an answer. It said 163 against a measured 161 — ' +
+      'and then against 162, because the same run found a tenant-scoped table with no policy ' +
+      'and policing it moved the figure while the sentence was being corrected.',
+    measure: (facts) => facts.policedTables,
+  },
+  {
+    key: 'spec-audit-policed-tables',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /installed, forced on (\d+) tables/,
+    because:
+      'The §19 row of the specification audit, which is the document that answers "is tenant ' +
+      'isolation done" with a *partial* and then says precisely how partial. **This claim was ' +
+      'not in the first draft of this register, because the audit that produced the register ' +
+      'read three operational documents and not this one** — and the verification run found it ' +
+      'still saying 161 after the policed count moved to 162. A register assembled by grepping ' +
+      'the documents somebody thought of is the same defect one level up, so this entry is here ' +
+      'as much for the omission as for the number.',
     measure: (facts) => facts.policedTables,
   },
   {
