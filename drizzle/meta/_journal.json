@@ -680,6 +680,13 @@
       "when": 1792700000000,
       "tag": "0096_phase177_the_transaction_that_changed",
       "breakpoints": true
+    },
+    {
+      "idx": 97,
+      "version": "7",
+      "when": 1792800000000,
+      "tag": "0097_phase178_the_transaction_the_bank_took_back",
+      "breakpoints": true
     }
   ]
 }

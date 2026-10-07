@@ -15,7 +15,7 @@ import {
 } from '@/modules/bookkeeping/transactions'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
 import { connectInstitution, syncConnection, listConnections } from '@/modules/banking/sync'
-import { applyHeldRevision, dismissRevision } from '@/modules/banking/revision-service'
+import { applyHeldChange, dismissRevision } from '@/modules/banking/revision-service'
 import { parseAmountToCents } from '@/lib/money'
 import { messageFor } from '@/modules/errors'
 
@@ -209,6 +209,18 @@ export async function connectAndSyncAction(): Promise<ActionResult> {
     if (summary.revisionsHeld > 0) {
       revised.push(`${summary.revisionsHeld} changed by the bank and waiting on you`)
     }
+    /*
+      Withdrawals say something different from a corrected figure, so they get
+      their own words (Phase 178). Folding them into "updated by the bank" would
+      report "the bank corrected a figure" for a transaction the bank now denies
+      ever happened.
+    */
+    if (summary.retractionsApplied > 0) {
+      revised.push(`${summary.retractionsApplied} withdrawn by the bank and excluded`)
+    }
+    if (summary.retractionsHeld > 0) {
+      revised.push(`${summary.retractionsHeld} withdrawn by the bank and waiting on you`)
+    }
 
     if (summary.imported === 0) {
       return revised.length > 0
@@ -229,20 +241,26 @@ export async function connectAndSyncAction(): Promise<ActionResult> {
 }
 
 /**
- * Applies a revision the bank made after the transaction was already posted
- * (Phase 177).
+ * Does what the bank said about a transaction it had already sent (Phases 177,
+ * 178) — a changed figure applied and re-posted, or a withdrawal excluded and
+ * its entry voided.
  *
- * The service re-decides whether the hold still stands rather than trusting the
- * one recorded at sync time — a revision held on `reconciled` last week may be
- * held on nothing today, because the remedy told somebody to reopen the
- * reconciliation. A closed period refuses this with `ClosedPeriodError`, which
- * `run` turns into the sentence the panel shows.
+ * One action for both, because the service has one entry point for both: the
+ * decision is the same and only the act differs. The service re-decides whether
+ * the hold still stands rather than trusting the one recorded at sync time — a
+ * change held on `reconciled` last week may be held on nothing today, because
+ * the remedy told somebody to reopen the reconciliation. A closed period
+ * refuses it with `ClosedPeriodError`, which `run` turns into the sentence the
+ * panel shows.
  */
-export async function applyRevisionAction(revisionId: string): Promise<ActionResult> {
+export async function applyChangeAction(revisionId: string): Promise<ActionResult> {
   return run(async () => {
     const actor = await requireActor()
-    const result = await applyHeldRevision(actor, revisionId)
+    const result = await applyHeldChange(actor, revisionId)
 
+    if (result.excluded) {
+      return 'Excluded, and the journal entry it had posted was voided.'
+    }
     return result.reposted
       ? 'Applied, and the journal entry was re-posted at the new amount.'
       : 'Applied.'

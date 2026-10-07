@@ -7,10 +7,10 @@
  * existed since Phase 2 with one implementation — the mock — so this is the
  * first time anything has proved the seam works.
  *
- * It mostly did. What it did not account for is recorded in ADR 0176 — and the
- * largest of those findings, a `modified` transaction being silently dropped
- * downstream, was fixed in Phase 177 (ADR 0177). What is left here is the note
- * on `removed`, which `TransactionPage` still has nowhere to say.
+ * It mostly did. What it did not account for is recorded in ADR 0176, and both
+ * of the findings it nominated have since been fixed: a `modified` transaction
+ * silently dropped downstream (Phase 177) and `removed` having nowhere to go
+ * (Phase 178). All three of a sync's lists now reach the domain.
  *
  * ## No library
  *
@@ -457,6 +457,7 @@ export class PlaidBankProvider implements BankProvider {
     const accessToken = this.requireCredential(connection)
 
     const transactions: ProviderTransaction[] = []
+    const retracted: string[] = []
     let cursor = options.cursor
     let hasMore = true
     let pages = 0
@@ -492,20 +493,26 @@ export class PlaidBankProvider implements BankProvider {
       }
 
       /*
-        `page.removed` has nowhere to go. `TransactionPage` carries transactions
-        and a cursor and has no way to say "this one was retracted", so a
-        transaction Plaid removes — a disputed authorisation that never posted —
-        stays in the inbox. Returning it as a transaction would be worse, and
-        inventing a shape for it is the follow-up phase ADR 0176 nominates. It is
-        in the type above so the reader can see it was read and not missed.
+        `page.removed` is the third thing a sync returns, and Phase 178 gave it
+        somewhere to go. Ids and not records, because that is all Plaid sends:
+        a withdrawal says the transaction never happened, so there are no
+        figures to carry.
+
+        What the domain does with them is `recordRetractions` — excluded where
+        nothing was built from the row, held for a person where something was.
+        Nothing Plaid-specific crosses the seam: the adapter reports ids, and
+        the word `removed` stops here.
       */
+      for (const entry of page.removed) {
+        retracted.push(entry.transaction_id)
+      }
 
       cursor = page.next_cursor
       hasMore = page.has_more
       pages += 1
     }
 
-    return { transactions, nextCursor: cursor, hasMore }
+    return { transactions, retracted, nextCursor: cursor, hasMore }
   }
 
   private toProviderTransaction(raw: PlaidTransaction): ProviderTransaction {

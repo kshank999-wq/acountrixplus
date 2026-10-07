@@ -13,7 +13,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { applyRulesToNewTransactions } from '@/modules/bookkeeping/rules-engine'
 import { mintChartAccount } from './accounts'
 import { getBankProvider } from './registry'
-import { recordRevisions } from './revision-service'
+import { recordRetractions, recordRevisions } from './revision-service'
 import { decryptSecret, encryptSecret } from '@/modules/auth/secret-box'
 import type { ProviderAccount, ProviderTransaction } from './provider'
 import { Refusal } from '@/modules/errors'
@@ -39,6 +39,17 @@ export type ImportSummary = {
   revisionsApplied: number
   /** Recorded and not applied, because something was derived from the stored row. */
   revisionsHeld: number
+  /**
+   * Transactions the feed **withdrew** (Phase 178), excluded where nothing had
+   * been built from them.
+   *
+   * Separate from `revisionsApplied` rather than folded in, because the two
+   * read differently to the person who pressed Sync: one says the bank
+   * corrected a figure, the other says the bank now denies the transaction.
+   */
+  retractionsApplied: number
+  /** Withdrawals waiting on somebody, because something had been built from the row. */
+  retractionsHeld: number
 }
 
 /**
@@ -247,6 +258,12 @@ export async function syncConnection(
     connectionId,
     transactions: page.transactions,
     accountByProviderId,
+    /*
+      The third of a sync's three lists (Phase 178). Passed through rather than
+      handled here so the whole of "what this feed said" lands in one function
+      — `syncConnection`'s job is to fetch and persist the cursor.
+    */
+    retracted: page.retracted,
   })
 
   await db
@@ -267,6 +284,15 @@ export async function importTransactions(
     connectionId: string
     transactions: ProviderTransaction[]
     accountByProviderId: Map<string | null, { id: string }>
+    /**
+     * Provider ids the feed has withdrawn (Phase 178).
+     *
+     * Optional, and absent for the CSV importer — a statement row arrives once
+     * and already posted, so a file has no way to retract anything. `undefined`
+     * means "this source does not say", which is not the same as "nothing was
+     * withdrawn" and must not be treated as it.
+     */
+    retracted?: string[]
   },
 ): Promise<ImportSummary> {
   const batchId = newBatchId()
@@ -303,6 +329,18 @@ export async function importTransactions(
     .filter((row): row is NonNullable<typeof row> => row !== null)
 
   if (rows.length === 0) {
+    /*
+      No transactions does not mean nothing to do (Phase 178). A sync can return
+      an empty `transactions` list and a withdrawal — a pending authorisation
+      that expired in a window where nothing else moved — and the first draft of
+      this phase returned zeros here and dropped it on the floor. Exactly the
+      defect the phase is about, one function away from the fix for it.
+    */
+    const retractions = await recordRetractions(ctx, {
+      connectionId: input.connectionId,
+      providerTransactionIds: input.retracted ?? [],
+    })
+
     return {
       connectionId: input.connectionId,
       imported: 0,
@@ -311,6 +349,8 @@ export async function importTransactions(
       suggested: 0,
       revisionsApplied: 0,
       revisionsHeld: 0,
+      retractionsApplied: retractions.applied,
+      retractionsHeld: retractions.held,
     }
   }
 
@@ -354,6 +394,17 @@ export async function importTransactions(
     incoming: incomingByKey,
   })
 
+  /*
+    After the insert and the revisions, in that order, and the order matters: a
+    provider can send a transaction and withdraw it in the same page, and a
+    withdrawal applied to a row that had not been written yet would be a
+    withdrawal silently dropped.
+  */
+  const retractions = await recordRetractions(ctx, {
+    connectionId: input.connectionId,
+    providerTransactionIds: input.retracted ?? [],
+  })
+
   const ruleResult =
     insertedIds.length > 0
       ? await applyRulesToNewTransactions(ctx, insertedIds, batchId)
@@ -382,6 +433,8 @@ export async function importTransactions(
     suggested: ruleResult.suggested,
     revisionsApplied: revisions.applied,
     revisionsHeld: revisions.held,
+    retractionsApplied: retractions.applied,
+    retractionsHeld: retractions.held,
   }
 }
 

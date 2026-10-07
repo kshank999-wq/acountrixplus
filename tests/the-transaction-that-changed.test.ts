@@ -18,16 +18,16 @@ import type { ProviderTransaction } from '@/modules/banking/provider'
 import {
   BOOK_AFFECTING_FIELDS,
   DESCRIPTIVE_FIELDS,
-  REVISION_HOLDS,
+  FEED_CHANGE_HOLDS,
   describeHold,
   dispositionFor,
-  revisionHoldFor,
-  revisionStands,
+  feedChangeHoldFor,
+  feedChangeStands,
   type DerivedState,
   type RevisableValues,
 } from '@/modules/banking/revisions'
 import {
-  applyHeldRevision,
+  applyHeldChange,
   dismissRevision,
   heldRevisionCount,
   heldRevisions,
@@ -157,14 +157,14 @@ describe('the register of grounds', () => {
      * whose ground names no remedy is a transaction that is wrong forever and
      * says so. Every remedy here is a screen that already exists.
      */
-    const problems = REVISION_HOLDS.flatMap((hold) => revisionStands(hold))
+    const problems = FEED_CHANGE_HOLDS.flatMap((hold) => feedChangeStands(hold))
     expect(problems).toEqual([])
   })
 
   it('declares six grounds, counted rather than bounded', () => {
     // Phase 126.
-    expect(REVISION_HOLDS).toHaveLength(6)
-    expect(new Set(REVISION_HOLDS.map((hold) => hold.key)).size).toBe(6)
+    expect(FEED_CHANGE_HOLDS).toHaveLength(6)
+    expect(new Set(FEED_CHANGE_HOLDS.map((hold) => hold.key)).size).toBe(6)
   })
 
   it('orders them by what has to be undone first', () => {
@@ -177,7 +177,7 @@ describe('the register of grounds', () => {
      * Asserted exactly rather than as a property, because "sorted correctly" is
      * not a thing a reader can check and this list is.
      */
-    expect(REVISION_HOLDS.map((hold) => hold.key)).toEqual([
+    expect(FEED_CHANGE_HOLDS.map((hold) => hold.key)).toEqual([
       'reconciled',
       'cleared',
       'split',
@@ -188,13 +188,13 @@ describe('the register of grounds', () => {
   })
 
   it('throws on a ground nobody declared, naming the ones that exist', () => {
-    expect(() => revisionHoldFor('pending')).toThrow(RegistryError)
+    expect(() => feedChangeHoldFor('pending')).toThrow(RegistryError)
 
     try {
-      revisionHoldFor('pending')
+      feedChangeHoldFor('pending')
       expect.unreachable()
     } catch (error) {
-      expect((error as RegistryError).registry).toBe('REVISION_HOLDS')
+      expect((error as RegistryError).registry).toBe('FEED_CHANGE_HOLDS')
       expect((error as RegistryError).message).toContain('posted-to-the-ledger')
     }
   })
@@ -302,7 +302,9 @@ describe('what a feed may rewrite', () => {
 
     if (disposition.kind !== 'hold') expect.unreachable()
     expect(disposition.ground.key).toBe('reconciled')
-    expect(disposition.ground.remedy).toContain('Reopen the reconciliation')
+    // `.remedy.revision` since Phase 178 gave each ground a remedy per kind,
+    // because a withdrawal's remedy ends in a different button.
+    expect(disposition.ground.remedy.revision).toContain('Reopen the reconciliation')
   })
 
   it('distinguishes cleared in an open session from reconciled', () => {
@@ -353,7 +355,7 @@ describe('what a feed may rewrite', () => {
   })
 
   it('writes one sentence naming both figures and the remedy', () => {
-    const ground = revisionHoldFor('posted-to-the-ledger')
+    const ground = feedChangeHoldFor('posted-to-the-ledger')
     const sentence = describeHold(
       [{ field: 'amountCents', from: -4000, to: -4420 }],
       ground,
@@ -363,7 +365,7 @@ describe('what a feed may rewrite', () => {
     // bank transaction has no currency of its own, it inherits the account's.
     expect(sentence).toContain('-40.00')
     expect(sentence).toContain('-44.20')
-    expect(sentence).toContain(ground.remedy)
+    expect(sentence).toContain(ground.remedy.revision)
   })
 })
 
@@ -516,7 +518,7 @@ describe('what a person can do about a held one', () => {
     const { fixture, transactionId } = await postedAndRevised()
     const [held] = await heldRevisions(fixture.ctx)
 
-    const result = await applyHeldRevision(fixture.ctx, held.id)
+    const result = await applyHeldChange(fixture.ctx, held.id)
     expect(result.reposted).toBe(true)
 
     const row = await storedRow(fixture)
@@ -558,8 +560,8 @@ describe('what a person can do about a held one', () => {
     const { fixture } = await postedAndRevised()
     const [held] = await heldRevisions(fixture.ctx)
 
-    await applyHeldRevision(fixture.ctx, held.id)
-    await expect(applyHeldRevision(fixture.ctx, held.id)).rejects.toThrow(/already applied/)
+    await applyHeldChange(fixture.ctx, held.id)
+    await expect(applyHeldChange(fixture.ctx, held.id)).rejects.toThrow(/already applied/)
   })
 
   it('records why the stored figure stands, and insists on a reason', async () => {
@@ -600,7 +602,7 @@ describe('what a person can do about a held one', () => {
 
     await closePeriod(fixture.ctx, { periodStart: '2026-08-01', periodEnd: '2026-08-31' })
 
-    await expect(applyHeldRevision(fixture.ctx, held.id)).rejects.toThrow(ClosedPeriodError)
+    await expect(applyHeldChange(fixture.ctx, held.id)).rejects.toThrow(ClosedPeriodError)
 
     expect((await storedRow(fixture)).amountCents).toBe(-4000)
     // Still held, so it is still in front of somebody.
@@ -619,7 +621,7 @@ describe('what a person can do about a held one', () => {
     const readonly = await addUserWithRole(fixture, 'readonly')
 
     expect(await heldRevisionCount(readonly)).toBe(1)
-    await expect(applyHeldRevision(readonly, held.id)).rejects.toThrow(PermissionError)
+    await expect(applyHeldChange(readonly, held.id)).rejects.toThrow(PermissionError)
     await expect(dismissRevision(readonly, held.id, 'no reason')).rejects.toThrow(PermissionError)
   })
 })
@@ -654,7 +656,7 @@ describe('the grounds that need something undone first', () => {
     expect(held.applyable).toBe(false)
     expect(held.remedy).toContain('re-split it')
 
-    await expect(applyHeldRevision(fixture.ctx, held.id)).rejects.toThrow(/re-split/)
+    await expect(applyHeldChange(fixture.ctx, held.id)).rejects.toThrow(/re-split/)
     // And the splits still sum to what they summed to.
     expect((await storedRow(fixture)).amountCents).toBe(-4000)
   })
@@ -680,7 +682,7 @@ describe('the grounds that need something undone first', () => {
     const [held] = await heldRevisions(fixture.ctx)
     expect(held.holdGround).toBe('reconciled')
     expect(held.applyable).toBe(false)
-    await expect(applyHeldRevision(fixture.ctx, held.id)).rejects.toThrow(/Reopen the reconciliation/)
+    await expect(applyHeldChange(fixture.ctx, held.id)).rejects.toThrow(/Reopen the reconciliation/)
   })
 
   it('applies a held revision once the ground is gone', async () => {
@@ -713,7 +715,7 @@ describe('the grounds that need something undone first', () => {
       .set({ reviewState: 'new', clearedAt: null })
       .where(eq(bankTransactions.id, row.id))
 
-    await applyHeldRevision(fixture.ctx, held.id)
+    await applyHeldChange(fixture.ctx, held.id)
 
     expect((await storedRow(fixture)).amountCents).toBe(-4420)
   })
@@ -779,7 +781,7 @@ describe('what the log refuses to become', () => {
     /**
      * Both CHECKs, both in the direction that matters: a row claiming `held`
      * with no ground is a held revision with no remedy, which is the one thing
-     * `revisionStands` exists to stop the register doing — and a constraint is
+     * `feedChangeStands` exists to stop the register doing — and a constraint is
      * what stops a future writer doing it anyway.
      */
     const fixture = await createCompanyFixture()
@@ -798,6 +800,10 @@ describe('what the log refuses to become', () => {
       previousPostedDate: '2026-08-01',
       previousPending: true,
       touchesBooks: true,
+      // Required with no default since Phase 178: a writer that does not say
+      // which kind it means has not thought about it, and the typecheck is what
+      // said so when `kind` arrived.
+      kind: 'revision' as const,
     }
 
     expect(
@@ -836,7 +842,7 @@ describe('whose transaction it was', () => {
 
     // And the id, handed over, resolves to nothing rather than to Alpha's row.
     const [held] = await heldRevisions(alpha.ctx)
-    await expect(applyHeldRevision(beta.ctx, held.id)).rejects.toThrow(DomainError)
+    await expect(applyHeldChange(beta.ctx, held.id)).rejects.toThrow(DomainError)
     await expect(revisionsForTransaction(beta.ctx, row.id)).resolves.toEqual([])
   })
 
@@ -867,6 +873,7 @@ describe('whose transaction it was', () => {
       previousPostedDate: '2026-08-01',
       previousPending: true,
       touchesBooks: true,
+      kind: 'revision' as const,
       disposition: 'applied' as const,
       resolvedAt: new Date(),
     }

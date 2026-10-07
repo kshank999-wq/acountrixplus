@@ -13,10 +13,14 @@ import { syncLedgerForTransaction } from '@/modules/ledger/posting'
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 import type { ProviderTransaction } from './provider'
+import { excludeTransaction } from '@/modules/bookkeeping/transactions'
 import {
   describeHold,
+  describeRetraction,
+  retractionDispositionFor,
+  type ChangeKind,
   dispositionFor,
-  revisionHoldFor,
+  feedChangeHoldFor,
   type DerivedState,
   type FieldChange,
   type RevisableValues,
@@ -55,6 +59,32 @@ export type RevisionOutcome = {
 }
 
 const EMPTY: RevisionOutcome = { applied: 0, held: 0, unchanged: 0 }
+
+/**
+ * What goes in `excludeReason` when a feed withdraws a transaction.
+ *
+ * Named once because it is written on the row and read on a screen, and because
+ * it is the only thing distinguishing a withdrawal from somebody's own decision
+ * to exclude — `excluded` is one state with two causes, and the reason is where
+ * the cause lives.
+ */
+export const RETRACTED_REASON =
+  'Withdrawn by the bank: the provider says this transaction never happened.'
+
+/**
+ * The dedup key, named once (Phase 178 added `kind` to it).
+ *
+ * Spelled out at two insert sites before this phase, which is how the fifth
+ * column would have been added to one of them.
+ */
+const CHANGE_CONFLICT_TARGET = [
+  bankTransactionRevisions.companyId,
+  bankTransactionRevisions.bankTransactionId,
+  bankTransactionRevisions.kind,
+  bankTransactionRevisions.amountCents,
+  bankTransactionRevisions.postedDate,
+  bankTransactionRevisions.pending,
+] as const
 
 type StoredRow = typeof bankTransactions.$inferSelect
 
@@ -198,6 +228,7 @@ export async function recordRevisions(
             bankTransactionId: row.id,
             ...incoming,
             ...previous,
+            kind: 'revision',
             disposition: 'held',
             holdGround: disposition.ground.key,
             touchesBooks: true,
@@ -209,15 +240,7 @@ export async function recordRevisions(
             hold one open, so a re-send of the same revision is a no-op and a
             genuinely different one is a new row.
           */
-          .onConflictDoNothing({
-            target: [
-              bankTransactionRevisions.companyId,
-              bankTransactionRevisions.bankTransactionId,
-              bankTransactionRevisions.amountCents,
-              bankTransactionRevisions.postedDate,
-              bankTransactionRevisions.pending,
-            ],
-          })
+          .onConflictDoNothing({ target: [...CHANGE_CONFLICT_TARGET] })
 
         outcome.held += 1
         continue
@@ -237,6 +260,7 @@ export async function recordRevisions(
           bankTransactionId: row.id,
           ...incoming,
           ...previous,
+          kind: 'revision',
           disposition: 'applied',
           touchesBooks: disposition.touchesBooks,
           raw: transaction.raw ?? null,
@@ -247,15 +271,7 @@ export async function recordRevisions(
           */
           resolvedAt: new Date(),
         })
-        .onConflictDoNothing({
-          target: [
-            bankTransactionRevisions.companyId,
-            bankTransactionRevisions.bankTransactionId,
-            bankTransactionRevisions.amountCents,
-            bankTransactionRevisions.postedDate,
-            bankTransactionRevisions.pending,
-          ],
-        })
+        .onConflictDoNothing({ target: [...CHANGE_CONFLICT_TARGET] })
 
       outcome.applied += 1
     }
@@ -277,6 +293,153 @@ export async function recordRevisions(
   })
 }
 
+/**
+ * Acts on the transactions a provider has **withdrawn** (Phase 178).
+ *
+ * The one of Phase 176's three findings that leaves a wrong row in the books
+ * rather than a slow sync: a withdrawn transaction that had been categorised was
+ * a posted expense for money that never moved.
+ *
+ * Same division as a revision, and the same six grounds. What differs is the
+ * action — a withdrawal ends in `excludeTransaction`, which sets the row to
+ * `excluded` and lets `syncLedgerForTransaction` void whatever it had posted,
+ * because `excluded` is not a postable state.
+ *
+ * ## Why `excluded` and not a seventh review state
+ *
+ * `excluded` already means "this does not belong in the books" and carries an
+ * `excludeReason`. A `retracted` state would behave identically everywhere —
+ * every filter, every count, every report — and differ only in what it is
+ * *called*, so the distinction belongs in the reason and in this log, which is
+ * where it is. A seventh enum value would have rippled through the inbox for no
+ * behavioural difference.
+ *
+ * ## Why this calls `excludeTransaction` rather than writing the row
+ *
+ * It needs `bookkeeping:categorize` and the importer holds
+ * `bookkeeping:import`. Measured rather than assumed: **every role with
+ * `import` also has `categorize`** — owner, bookkeeper and accountant — so
+ * there is no caller that can reach a sync and not this. `manager` has
+ * `categorize` without `import`, which is the harmless direction.
+ *
+ * A test pins that relationship, because it is the fact this design rests on: a
+ * role given `import` without `categorize` would make a retraction throw
+ * `PermissionError` in the middle of a sync, and the sentence would be about
+ * permissions rather than about the bank.
+ */
+export async function recordRetractions(
+  ctx: ActorContext,
+  input: {
+    connectionId: string
+    /** Provider transaction ids the provider says never happened. */
+    providerTransactionIds: string[]
+  },
+): Promise<RevisionOutcome> {
+  if (input.providerTransactionIds.length === 0) return EMPTY
+
+  const outcome = { ...EMPTY }
+
+  /*
+    One transaction per withdrawal rather than one for the batch, because
+    `excludeTransaction` voids a journal entry and a closed period refuses it —
+    and one unreachable month must not roll back the withdrawals that did apply.
+    The same argument `bank.sync_all` makes about one dead institution not
+    stopping the others.
+  */
+  for (const providerTransactionId of input.providerTransactionIds) {
+    const resolved = await db.transaction(async (tx) => {
+      const [row] = await tx
+        .select()
+        .from(bankTransactions)
+        .where(
+          and(
+            eq(bankTransactions.companyId, ctx.companyId),
+            eq(bankTransactions.providerTransactionId, providerTransactionId),
+          ),
+        )
+        .for('update')
+        .limit(1)
+
+      // A withdrawal for a transaction never imported is nothing to do, not an
+      // error: the provider is entitled to retract something inside a window we
+      // never pulled.
+      if (!row) return 'absent' as const
+
+      /*
+        Already excluded — by a person, or by an earlier tick of this same
+        withdrawal. Counted as unchanged rather than re-excluded, so a
+        provider that keeps re-sending a withdrawal does not keep writing audit
+        entries for a decision that was already made.
+      */
+      if (row.reviewState === 'excluded') return 'unchanged' as const
+
+      const postedIds = await postedTransactionIds(ctx, [row.id], tx)
+      const disposition = retractionDispositionFor(derivedStateOf(row, postedIds))
+
+      const values = {
+        companyId: ctx.companyId,
+        bankTransactionId: row.id,
+        kind: 'retraction' as const,
+        /*
+          Copied from the stored row, which the CHECK requires: a withdrawal
+          carries no new figures, because the provider sends an id and nothing
+          else. `previous_*` and the new values are therefore equal by
+          construction, and the constraint is what keeps that true of the next
+          writer too.
+        */
+        amountCents: row.amountCents,
+        postedDate: row.postedDate,
+        description: row.description,
+        merchantName: row.merchantName,
+        providerCategory: row.providerCategory,
+        pending: row.pending,
+        previousAmountCents: row.amountCents,
+        previousPostedDate: row.postedDate,
+        previousPending: row.pending,
+        // A withdrawal always touches the books: it either removes a posting or
+        // takes a row out of an inbox that should not review it.
+        touchesBooks: true,
+      }
+
+      if (disposition.kind === 'hold') {
+        await tx
+          .insert(bankTransactionRevisions)
+          .values({ ...values, disposition: 'held', holdGround: disposition.ground.key })
+          .onConflictDoNothing({ target: [...CHANGE_CONFLICT_TARGET] })
+
+        return 'held' as const
+      }
+
+      await excludeTransaction(ctx, row.id, RETRACTED_REASON, tx)
+
+      await tx
+        .insert(bankTransactionRevisions)
+        .values({ ...values, disposition: 'applied', resolvedAt: new Date() })
+        .onConflictDoNothing({ target: [...CHANGE_CONFLICT_TARGET] })
+
+      await recordAudit(
+        ctx,
+        {
+          action: 'transaction.retract',
+          entityType: 'bank_transaction',
+          entityId: row.id,
+          before: { reviewState: row.reviewState, amountCents: row.amountCents },
+          after: { reviewState: 'excluded', excludeReason: RETRACTED_REASON },
+        },
+        tx,
+      )
+
+      return 'applied' as const
+    })
+
+    if (resolved === 'applied') outcome.applied += 1
+    else if (resolved === 'held') outcome.held += 1
+    else if (resolved === 'unchanged') outcome.unchanged += 1
+  }
+
+  return outcome
+}
+
 export type HeldRevision = {
   id: string
   transactionId: string
@@ -290,9 +453,18 @@ export type HeldRevision = {
   currency: string
   description: string
   seenAt: Date
+  /** What the bank asserted: different figures, or that it never happened. */
+  kind: ChangeKind
   holdGround: string
-  /** The register's own argument and remedy, resolved through `revisionHoldFor`. */
+  /** The register's own argument and remedy, resolved through `feedChangeHoldFor`. */
   because: string
+  /**
+   * The remedy **for this kind**, not the whole record.
+   *
+   * Resolved here rather than in the screen, because picking the wrong one of
+   * the two is the mistake that sends somebody to apply a figure that does not
+   * exist — and a screen holding both would be the one place able to make it.
+   */
   remedy: string
   /** One sentence naming the change and what to undo. */
   summary: string
@@ -345,7 +517,7 @@ export async function heldRevisions(ctx: ActorContext): Promise<HeldRevision[]> 
   return rows.map(({ revision, accountName, currency }) => {
     // Throws a `RegistryError` for a ground nobody declared, which is the check
     // the text column does not have.
-    const ground = revisionHoldFor(revision.holdGround!)
+    const ground = feedChangeHoldFor(revision.holdGround!)
 
     const changes: FieldChange[] = []
     if (revision.previousAmountCents !== revision.amountCents) {
@@ -370,14 +542,24 @@ export async function heldRevisions(ctx: ActorContext): Promise<HeldRevision[]> 
       currency,
       description: revision.description,
       seenAt: revision.seenAt,
+      kind: revision.kind,
       holdGround: ground.key,
       because: ground.because,
-      remedy: ground.remedy,
-      summary: describeHold(changes, ground),
+      remedy: ground.remedy[revision.kind],
+      summary:
+        revision.kind === 'retraction'
+          ? describeRetraction(revision.amountCents, ground)
+          : describeHold(changes, ground),
       fromAmountCents: revision.previousAmountCents,
       toAmountCents: revision.amountCents,
       fromPostedDate: revision.previousPostedDate,
       toPostedDate: revision.postedDate,
+      /*
+        The same ground for both kinds, and for the same reason: it is the only
+        one whose remedy *is* the button. A revision re-posts the entry at the
+        new figure; a retraction voids it and posts nothing. Everything else
+        needs something undone on a screen that already exists.
+      */
       applyable: ground.key === APPLYABLE_GROUND,
     }
   })
@@ -417,18 +599,25 @@ async function loadHeld(ctx: ActorContext, revisionId: string, exec: Executor) {
 }
 
 /**
- * Applies a held revision, and brings the ledger with it.
+ * Does what the bank said, and brings the ledger with it.
+ *
+ * One entry point for both kinds (Phase 178), dispatching on `kind` rather than
+ * two exported functions — because two would be two places for the
+ * re-decide-before-acting step to live, and the one that got it wrong would be
+ * the one that silently rewrote a posted figure. The *action* differs, the
+ * decision does not.
  *
  * The permission is `bookkeeping:categorize` rather than `bookkeeping:import`,
- * because what this does is change a posted figure. Importing a feed is
- * clerical; deciding that the books should now say $44.20 is the categorizing
- * decision, and it is refused outright in a closed period by the same
- * `ClosedPeriodError` that refuses recategorizing one.
+ * because what this does is change a posted figure or void a posted entry.
+ * Importing a feed is clerical; deciding that the books should now say $44.20,
+ * or nothing at all, is the categorizing decision — and it is refused outright
+ * in a closed period by the same `ClosedPeriodError` that refuses recategorizing
+ * one.
  */
-export async function applyHeldRevision(
+export async function applyHeldChange(
   ctx: ActorContext,
   revisionId: string,
-): Promise<{ transactionId: string; reposted: boolean }> {
+): Promise<{ transactionId: string; reposted: boolean; excluded: boolean }> {
   requirePermission(ctx, 'bookkeeping:categorize')
 
   return db.transaction(async (tx) => {
@@ -449,13 +638,64 @@ export async function applyHeldRevision(
     if (!row) throw missing('transaction')
 
     /*
-      Re-decided rather than trusted. A revision held last Tuesday on
-      `reconciled` may be held on nothing at all today, because somebody reopened
-      the reconciliation — which is what the remedy told them to do. Re-running
-      the same pure function is what makes the remedy work, and what stops this
-      path from being a second, more permissive copy of the rule.
+      Re-decided rather than trusted. A change held last Tuesday on `reconciled`
+      may be held on nothing at all today, because somebody reopened the
+      reconciliation — which is what the remedy told them to do. Re-running the
+      same pure function is what makes the remedy work, and what stops this path
+      from being a second, more permissive copy of the rule.
     */
     const postedIds = await postedTransactionIds(ctx, [row.id], tx)
+
+    if (revision.kind === 'retraction') {
+      const verdict = retractionDispositionFor(derivedStateOf(row, postedIds))
+
+      if (verdict.kind === 'hold' && verdict.ground.key !== APPLYABLE_GROUND) {
+        throw new Refusal(verdict.ground.remedy.retraction)
+      }
+
+      /*
+        `excludeTransaction` and not a direct write: it is the one path that
+        sets the state, records the reason, and lets
+        `syncLedgerForTransaction` void whatever was posted — and a closed
+        period refuses the void inside this transaction, so nothing moves.
+
+        It also refuses a reconciled transaction through `assertEditable`,
+        which is the `reconciled` ground enforced a second time by the code
+        that would do the damage. Belt and braces on purpose: the ground is
+        read from a stored string, and this is not.
+      */
+      await excludeTransaction(ctx, row.id, RETRACTED_REASON, tx)
+
+      await tx
+        .update(bankTransactionRevisions)
+        .set({
+          disposition: 'applied',
+          holdGround: null,
+          resolvedAt: new Date(),
+          resolvedBy: ctx.userId,
+        })
+        .where(
+          and(
+            eq(bankTransactionRevisions.companyId, ctx.companyId),
+            eq(bankTransactionRevisions.id, revision.id),
+          ),
+        )
+
+      await recordAudit(
+        ctx,
+        {
+          action: 'transaction.retract',
+          entityType: 'bank_transaction',
+          entityId: row.id,
+          before: { reviewState: row.reviewState, amountCents: row.amountCents },
+          after: { reviewState: 'excluded', excludeReason: RETRACTED_REASON },
+        },
+        tx,
+      )
+
+      return { transactionId: row.id, reposted: false, excluded: true }
+    }
+
     const disposition = dispositionFor({
       stored: storedValues(row),
       incoming: {
@@ -479,7 +719,7 @@ export async function applyHeldRevision(
     if (disposition.kind === 'hold' && disposition.ground.key !== APPLYABLE_GROUND) {
       // Phase 119: the refusal is the remedy. Nothing here can do it for them,
       // and every one of these is a screen that exists.
-      throw new Refusal(disposition.ground.remedy)
+      throw new Refusal(disposition.ground.remedy.revision)
     }
 
     await tx
@@ -534,7 +774,7 @@ export async function applyHeldRevision(
       tx,
     )
 
-    return { transactionId: row.id, reposted: posted.posted }
+    return { transactionId: row.id, reposted: posted.posted, excluded: false }
   })
 }
 

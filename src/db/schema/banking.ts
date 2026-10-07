@@ -263,7 +263,10 @@ export const transactionSplits = pgTable(
   }),
 )
 
-/** Dispositions in `REVISION_HOLDS`' terms (Phase 177). */
+/** What the bank asserted about a transaction it had already sent (Phase 178). */
+export const feedChangeKindEnum = pgEnum('feed_change_kind', ['revision', 'retraction'])
+
+/** Dispositions in `FEED_CHANGE_HOLDS`' terms (Phase 177). */
 export const revisionDispositionEnum = pgEnum('revision_disposition', [
   'applied',
   'held',
@@ -297,6 +300,20 @@ export const bankTransactionRevisions = pgTable(
       .references(() => companies.id, { onDelete: 'cascade' }),
     bankTransactionId: uuid('bank_transaction_id').notNull(),
 
+    /**
+     * What the feed asserted (Phase 178).
+     *
+     * `revision` — different figures for a transaction it had sent.
+     * `retraction` — the transaction never happened: a pending authorisation
+     * that never captured, or a charge reversed at source.
+     *
+     * Decides which of the ground's two remedies a person is shown, because a
+     * revision ends in "apply and re-post" and a retraction in "exclude and
+     * void". No default: a writer that does not say which kind it means has not
+     * thought about it.
+     */
+    kind: feedChangeKindEnum('kind').notNull(),
+
     /** What the feed now says. Every field, so a row reads on its own. */
     amountCents: bigint('amount_cents', { mode: 'number' }).notNull(),
     postedDate: date('posted_date').notNull(),
@@ -318,9 +335,9 @@ export const bankTransactionRevisions = pgTable(
 
     disposition: revisionDispositionEnum('disposition').notNull(),
     /**
-     * Which `REVISION_HOLDS` entry stopped it. Null unless held.
+     * Which `FEED_CHANGE_HOLDS` entry stopped it. Null unless held.
      *
-     * Not a foreign key, because the register is code — and `revisionHoldFor`
+     * Not a foreign key, because the register is code — and `feedChangeHoldFor`
      * throws a `RegistryError` for a key nobody declared, which is the check a
      * text column would otherwise lack.
      */
@@ -355,12 +372,40 @@ export const bankTransactionRevisions = pgTable(
      * five minutes. The three fields that can hold a revision open are the three
      * that identify it.
      */
+    /**
+     * A held change the provider keeps re-sending must not make a row every
+     * five minutes. The fields that can hold one open are the ones that
+     * identify it.
+     *
+     * `kind` is in the key because of a real collision, not for tidiness: a
+     * revision applied at -4420 and a later *withdrawal* of that transaction
+     * carry identical figures, since a retraction copies them — so without it
+     * the withdrawal would conflict with the applied revision and
+     * `onConflictDoNothing` would drop it. The feed would have said "this never
+     * happened" and the log would have said nothing.
+     */
     revisionUnique: unique('bank_transaction_revisions_unique').on(
       t.companyId,
       t.bankTransactionId,
+      t.kind,
       t.amountCents,
       t.postedDate,
       t.pending,
+    ),
+    /*
+      A withdrawal carries no new figures — Plaid's `removed` gives an id and
+      nothing else, so the new-value columns are copied from the stored row.
+      That is true by construction, which is a property of today's writer; as a
+      constraint it stops a future one smuggling a figure change in under
+      `kind = 'retraction'` and bypassing the holds, the re-post and the
+      closed-period refusal.
+    */
+    retractionCheck: check(
+      'bank_transaction_revisions_retraction_check',
+      sql`${t.kind} <> 'retraction'
+          or (${t.amountCents} = ${t.previousAmountCents}
+              and ${t.postedDate} = ${t.previousPostedDate}
+              and ${t.pending} = ${t.previousPending})`,
     ),
     // A hold has a ground and nothing else does: without this the table could
     // say "held" with no reason, which is a held revision with no remedy.

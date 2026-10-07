@@ -45,6 +45,25 @@ export type ProviderTransaction = {
 
 export type TransactionPage = {
   transactions: ProviderTransaction[]
+  /**
+   * Provider ids the provider has **withdrawn** (Phase 178).
+   *
+   * A pending authorisation that never captured, or a disputed charge the bank
+   * reversed at source rather than with an offsetting credit. The provider is
+   * not correcting a figure — it is saying the transaction never happened, so
+   * there is nothing to put in a `ProviderTransaction` and this is a list of
+   * ids rather than a list of records.
+   *
+   * `retracted` and not `removed`, which is Plaid's word: nothing is removed
+   * here. The stored row survives as `excluded` carrying the reason, because a
+   * row that vanished would leave a reconciliation unable to explain itself.
+   *
+   * Optional, because an adapter that cannot report withdrawals must not have
+   * to claim it had none — an empty array and "this provider does not say" are
+   * different facts, and only the second one should stop a transaction being
+   * trusted.
+   */
+  retracted?: string[]
   /** Opaque cursor for the next incremental sync. */
   nextCursor?: string
   hasMore: boolean

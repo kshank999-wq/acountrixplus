@@ -35,6 +35,16 @@ export type AuditAction =
   | 'transaction.revise'
   /** Somebody decided the stored figure stands and the feed is wrong. */
   | 'transaction.revision_dismiss'
+  /**
+   * The bank withdrew a transaction it had sent (Phase 178).
+   *
+   * Its own action rather than `transaction.exclude`, although the row ends in
+   * the same state: the question somebody asks later is *why is this excluded*,
+   * and "a person judged it did not belong" and "the bank says it never
+   * happened" are different answers that an audit trail should not have to
+   * infer from an `excludeReason` string.
+   */
+  | 'transaction.retract'
   | 'rule.create'
   | 'rule.update'
   | 'rule.delete'

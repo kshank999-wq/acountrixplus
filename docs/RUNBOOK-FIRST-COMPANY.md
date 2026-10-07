@@ -38,9 +38,17 @@ import handles that in two ways, and the division is deliberate:
   re-post** button that voids the entry and posts it again at the new amount; a
   closed period refuses it, which is correct.
 
-Do not ignore that panel. A held revision left alone is a reconciliation that
-will not close, by exactly the difference. **CSV import is unaffected** either
-way, because a statement row arrives once and already posted.
+The same division handles a transaction the bank **withdraws** — a hotel or fuel
+authorisation that never captured, or a charge reversed at source. Nothing built
+from it, and it is excluded with the bank named as the reason; something built
+from it, and it is held with an **Exclude and void** button. The row is never
+deleted, so a reconciliation can still explain itself.
+
+Do not ignore that panel. A held change left alone is a reconciliation that will
+not close, by exactly the difference — and a withdrawn transaction left posted is
+an expense for money that never moved. **CSV import is unaffected** either way,
+because a statement row arrives once, already posted, and a file cannot take it
+back.
 
 **Row-level security is installed and not switched on.** 163 tables carry
 policies; the application connects as the table owner, so they do not apply.

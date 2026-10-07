@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useTransition } from 'react'
-import { applyRevisionAction, dismissRevisionAction } from '@/app/actions/bookkeeping'
+import { applyChangeAction, dismissRevisionAction } from '@/app/actions/bookkeeping'
 import { formatCents } from '@/lib/money'
 
 /**
@@ -24,6 +24,8 @@ export type HeldRevisionRow = {
   /** The account's own currency. A bank transaction inherits it. */
   currency: string
   description: string
+  /** What the bank asserted: different figures, or that it never happened. */
+  kind: 'revision' | 'retraction'
   holdGround: string
   remedy: string
   summary: string
@@ -53,8 +55,9 @@ export function RevisionsPanel({
         </h2>
         <p className="mt-1 text-xs text-muted">
           Usually a pending transaction posting at a different amount — a tip, an exchange rate, a
-          fuel hold settling. None of these were applied, because something in the books was built
-          from the figure already stored. Leaving them is a reconciliation that will not close by
+          fuel hold settling. Sometimes the bank withdraws one outright, because an authorisation
+          never captured. None of these were acted on, because something in the books was built
+          from what is already stored. Leaving them is a reconciliation that will not close by
           exactly the difference.
         </p>
       </header>
@@ -74,13 +77,17 @@ function RevisionRow({ row, canEdit }: { row: HeldRevisionRow; canEdit: boolean 
   const [dismissing, setDismissing] = useState(false)
   const [note, setNote] = useState('')
 
-  const amountMoved = row.fromAmountCents !== row.toAmountCents
-  const dateMoved = row.fromPostedDate !== row.toPostedDate
+  const retracted = row.kind === 'retraction'
+  // A withdrawal carries no new figures — the amount is what is being taken
+  // back, not what it is becoming — so the before/after columns would both read
+  // the same. Shown as one amount instead.
+  const amountMoved = !retracted && row.fromAmountCents !== row.toAmountCents
+  const dateMoved = !retracted && row.fromPostedDate !== row.toPostedDate
 
   function apply() {
     setError(null)
     startTransition(async () => {
-      const result = await applyRevisionAction(row.id)
+      const result = await applyChangeAction(row.id)
       if (!result.ok) setError(result.error)
     })
   }
@@ -102,6 +109,14 @@ function RevisionRow({ row, canEdit }: { row: HeldRevisionRow; canEdit: boolean 
       </div>
 
       <dl className="mt-2 flex flex-wrap gap-x-6 gap-y-1 text-xs">
+        {retracted && (
+          <div>
+            <dt className="text-muted">The bank says this never happened</dt>
+            <dd className="font-medium line-through">
+              {formatCents(row.toAmountCents, row.currency)}
+            </dd>
+          </div>
+        )}
         {amountMoved && (
           <div>
             <dt className="text-muted">Amount</dt>
@@ -140,7 +155,19 @@ function RevisionRow({ row, canEdit }: { row: HeldRevisionRow; canEdit: boolean 
           */}
           {row.applyable && (
             <button className="btn btn-sm" onClick={apply} disabled={pending}>
-              {pending ? 'Applying…' : 'Apply and re-post'}
+              {/*
+                The label says which act it is, because the two are not
+                interchangeable: one re-posts the entry at a new figure and the
+                other voids it and posts nothing. A single "Apply" would be the
+                button asking somebody to guess.
+              */}
+              {pending
+                ? retracted
+                  ? 'Excluding…'
+                  : 'Applying…'
+                : retracted
+                  ? 'Exclude and void'
+                  : 'Apply and re-post'}
             </button>
           )}
 
@@ -148,7 +175,11 @@ function RevisionRow({ row, canEdit }: { row: HeldRevisionRow; canEdit: boolean 
             <span className="flex flex-wrap items-center gap-2">
               <input
                 className="input input-sm"
-                placeholder="Why does the stored figure stand?"
+                placeholder={
+                retracted
+                  ? 'Why does the transaction stand?'
+                  : 'Why does the stored figure stand?'
+              }
                 value={note}
                 onChange={(event) => setNote(event.target.value)}
               />
@@ -169,7 +200,7 @@ function RevisionRow({ row, canEdit }: { row: HeldRevisionRow; canEdit: boolean 
               onClick={() => setDismissing(true)}
               disabled={pending}
             >
-              The stored figure stands
+              {retracted ? 'The transaction stands' : 'The stored figure stands'}
             </button>
           )}
         </div>

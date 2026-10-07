@@ -120,12 +120,46 @@ export type DerivedState = {
   isTransferLeg: boolean
 }
 
-export type RevisionHold = {
+/**
+ * What the feed is asserting (Phase 178).
+ *
+ * The grounds for holding are the **same six facts** for both — something has
+ * been derived from the stored figure — so there is one register and one
+ * `applies` predicate per ground. What differs is the *remedy*, because the two
+ * end in different buttons: a revision is applied and re-posted at the new
+ * figure, a retraction is excluded and its entry voided.
+ *
+ * Two registers would have meant two copies of six predicates, which is the
+ * "two answers to one question" defect with the question being *what blocks a
+ * change to this row*.
+ */
+export type ChangeKind =
+  /** The bank sent different figures for a transaction it had already sent. */
+  | 'revision'
+  /**
+   * The bank withdrew the transaction: a pending authorisation that never
+   * captured, or a charge reversed at source. There is no new figure, only a
+   * record that should not be in the books.
+   */
+  | 'retraction'
+
+export const CHANGE_KINDS: readonly ChangeKind[] = ['revision', 'retraction']
+
+export type FeedChangeHold = {
   key: string
   /** Why a feed may not rewrite this silently, argued. */
   because: string
-  /** What a person does about it. A path that already exists. */
-  remedy: string
+  /**
+   * What a person does about it, per kind of change. A path that already
+   * exists.
+   *
+   * Keyed rather than one sentence because the undo is shared and the action is
+   * not: *"reopen the reconciliation"* is the same for both, and *"then apply
+   * the revision"* against *"then exclude it"* are different screens. One
+   * sentence covering both would have had to be vague about the only part a
+   * person needs.
+   */
+  remedy: Readonly<Record<ChangeKind, string>>
   /** True when this ground applies. */
   applies: (derived: DerivedState) => boolean
 }
@@ -140,7 +174,7 @@ export type RevisionHold = {
  * completed reconciliation has locked sends them to a screen that will refuse
  * them.
  */
-export const REVISION_HOLDS: readonly RevisionHold[] = [
+export const FEED_CHANGE_HOLDS: readonly FeedChangeHold[] = [
   {
     key: 'reconciled',
     because:
@@ -150,10 +184,17 @@ export const REVISION_HOLDS: readonly RevisionHold[] = [
       'no longer be the sum of what they cleared, and nothing would say when it stopped being so. ' +
       'This is the same reason `assertEditable` refuses a person the same change, and a feed has ' +
       'strictly less standing than a person.',
-    remedy:
-      'Reopen the reconciliation (Reconciliation → the account → Reopen, which needs ' +
-      '`reconciliation:reopen`), apply the revision, then complete it again against the real ' +
-      'statement.',
+    remedy: {
+      revision:
+        'Reopen the reconciliation (Reconciliation → the account → Reopen, which needs ' +
+        '`reconciliation:reopen`), apply the revision, then complete it again against the real ' +
+        'statement.',
+      retraction:
+        'Reopen the reconciliation (Reconciliation → the account → Reopen, which needs ' +
+        '`reconciliation:reopen`), exclude the transaction, then complete it again. The cleared ' +
+        'balance will change by the amount withdrawn, which is the point — the statement never ' +
+        'had it.',
+    },
     applies: (derived) => derived.isReconciled,
   },
   {
@@ -165,9 +206,15 @@ export const REVISION_HOLDS: readonly RevisionHold[] = [
       'they chase it — and the feed is the last place they would look for the reason. Held until ' +
       'the session is finished, because a revision is not urgent and a reconciliation in progress ' +
       'is.',
-    remedy:
-      'Finish or abandon the open reconciliation first, then apply the revision. If the statement ' +
-      'itself shows the revised figure, untick the line, apply, and tick it again.',
+    remedy: {
+      revision:
+        'Finish or abandon the open reconciliation first, then apply the revision. If the ' +
+        'statement itself shows the revised figure, untick the line, apply, and tick it again.',
+      retraction:
+        'Untick the line in the open reconciliation — the statement cannot show a transaction the ' +
+        'bank says never happened — then exclude it. Doing it in that order is what keeps the ' +
+        'difference you are chasing explainable.',
+    },
     applies: (derived) => derived.isCleared && !derived.isReconciled,
   },
   {
@@ -179,9 +226,14 @@ export const REVISION_HOLDS: readonly RevisionHold[] = [
       'splits. Dividing the difference automatically is the one thing that must not happen here: ' +
       'the extra $4.20 on a split restaurant bill is the tip, and this module cannot know which ' +
       'line it belongs on.',
-    remedy:
-      'Open the transaction and re-split it at the new total. The splits are the decision; only ' +
-      'the person who made it knows where the difference goes.',
+    remedy: {
+      revision:
+        'Open the transaction and re-split it at the new total. The splits are the decision; only ' +
+        'the person who made it knows where the difference goes.',
+      retraction:
+        'Remove the splits, then exclude the transaction. Excluding it with the splits in place ' +
+        'would leave rows apportioning money across accounts for a movement that never happened.',
+    },
     applies: (derived) => derived.isSplit,
   },
   {
@@ -192,9 +244,15 @@ export const REVISION_HOLDS: readonly RevisionHold[] = [
       'disagreeing about how much moved, which is a state the pair has no way to post from — and ' +
       'the other leg is on a different account, usually at a different institution, so the feed ' +
       'that revised this one has no idea the other exists.',
-    remedy:
-      'Unlink the transfer pair, apply the revision to each leg as its own bank sends it, then ' +
-      'pair them again.',
+    remedy: {
+      revision:
+        'Unlink the transfer pair, apply the revision to each leg as its own bank sends it, then ' +
+        'pair them again.',
+      retraction:
+        'Unlink the transfer pair and then exclude this leg. The other leg is on a different ' +
+        'account and its own bank has said nothing — a transfer with one leg withdrawn is money ' +
+        'that left one account and arrived nowhere, which needs looking at rather than resolving.',
+    },
     applies: (derived) => derived.isTransferLeg,
   },
   {
@@ -205,9 +263,16 @@ export const REVISION_HOLDS: readonly RevisionHold[] = [
       'receivable was relieved by, so revising it would leave an invoice recorded as settled by a ' +
       'figure that no longer exists. The subledger and the bank would then disagree by the ' +
       'revision, which is precisely the reconciliation this product is for.',
-    remedy:
-      'Unmatch the transaction, apply the revision, then match it again — or, if the bank is right ' +
-      'and the document was wrong, correct the document and let the match follow it.',
+    remedy: {
+      revision:
+        'Unmatch the transaction, apply the revision, then match it again — or, if the bank is ' +
+        'right and the document was wrong, correct the document and let the match follow it.',
+      retraction:
+        'Unmatch the transaction first, then exclude it. The invoice it settled becomes unpaid ' +
+        'again, which is the honest outcome: the payment the bank withdrew is one the customer ' +
+        'never made, and a receivable that still shows settled is the one error a statement run ' +
+        'will send to them.',
+    },
     applies: (derived) => derived.isMatched,
   },
   {
@@ -220,26 +285,32 @@ export const REVISION_HOLDS: readonly RevisionHold[] = [
       "person's, and `ClosedPeriodError` is what refuses it when it should be refused. Held " +
       'rather than applied because a feed silently moving a posted figure is the defect this whole ' +
       'module exists to stop.',
-    remedy:
-      'Apply the revision from the inbox, which voids the entry and re-posts it at the new amount. ' +
-      'A closed period refuses this — reopen it, or leave the revision held and correct the ' +
-      'difference with a dated entry instead.',
+    remedy: {
+      revision:
+        'Apply the revision from the inbox, which voids the entry and re-posts it at the new ' +
+        'amount. A closed period refuses this — reopen it, or leave the revision held and correct ' +
+        'the difference with a dated entry instead.',
+      retraction:
+        'Exclude it from the inbox, which voids the entry and posts nothing in its place. A closed ' +
+        'period refuses this, because voiding changes a month somebody has already reported on — ' +
+        'reopen it, or leave the entry standing and reverse it with a dated correction.',
+    },
     applies: (derived) => derived.hasPostedEntry,
   },
 ]
 
-export function revisionHoldFor(key: string): RevisionHold {
-  const found = REVISION_HOLDS.find((hold) => hold.key === key)
+export function feedChangeHoldFor(key: string): FeedChangeHold {
+  const found = FEED_CHANGE_HOLDS.find((hold) => hold.key === key)
   if (found) return found
 
   throw new RegistryError({
-    registry: 'REVISION_HOLDS',
+    registry: 'FEED_CHANGE_HOLDS',
     key,
     message:
       `No revision hold is declared as "${key}". This register is the list of reasons a bank ` +
       'feed may not silently rewrite a transaction, and every entry carries the remedy a person ' +
       'acts on — so a lookup answering `undefined` would report a held revision with no way out ' +
-      `of it. Declared: ${REVISION_HOLDS.map((hold) => hold.key).join(', ')}.`,
+      `of it. Declared: ${FEED_CHANGE_HOLDS.map((hold) => hold.key).join(', ')}.`,
   })
 }
 
@@ -256,7 +327,7 @@ export type Disposition =
   /** Safe to write onto the row. */
   | { kind: 'apply'; changes: FieldChange[]; touchesBooks: boolean }
   /** Not safe. The ground names what to undo. */
-  | { kind: 'hold'; changes: FieldChange[]; ground: RevisionHold }
+  | { kind: 'hold'; changes: FieldChange[]; ground: FeedChangeHold }
 
 const ALL_FIELDS: readonly RevisableField[] = [...BOOK_AFFECTING_FIELDS, ...DESCRIPTIVE_FIELDS]
 
@@ -309,7 +380,7 @@ export function dispositionFor(input: {
   */
   if (!touchesBooks) return { kind: 'apply', changes, touchesBooks: false }
 
-  const ground = REVISION_HOLDS.find((hold) => hold.applies(input.derived))
+  const ground = FEED_CHANGE_HOLDS.find((hold) => hold.applies(input.derived))
   if (ground) return { kind: 'hold', changes, ground }
 
   return { kind: 'apply', changes, touchesBooks: true }
@@ -323,7 +394,7 @@ export function dispositionFor(input: {
  * as long as a true one, applied to a sentence that is about to be written three
  * times.
  */
-export function describeHold(changes: FieldChange[], ground: RevisionHold): string {
+export function describeHold(changes: FieldChange[], ground: FeedChangeHold): string {
   const parts = changes
     .filter((change) => (BOOK_AFFECTING_FIELDS as readonly string[]).includes(change.field))
     .map((change) =>
@@ -332,7 +403,42 @@ export function describeHold(changes: FieldChange[], ground: RevisionHold): stri
         : `the date from ${String(change.from)} to ${String(change.to)}`,
     )
 
-  return `The bank changed ${joinWords(parts)}, and this was not applied: ${ground.remedy}`
+  return `The bank changed ${joinWords(parts)}, and this was not applied: ${ground.remedy.revision}`
+}
+
+/**
+ * One sentence for a withdrawal, naming the amount that is being taken back.
+ *
+ * Separate from `describeHold` because there is nothing to put a "from" and a
+ * "to" around: the figures do not change, the transaction stops existing. A
+ * sentence of the form *"the bank changed the amount from X to X"* is the kind
+ * of true-and-useless prose this project's own rules keep catching.
+ */
+export function describeRetraction(amountCents: number, ground: FeedChangeHold): string {
+  return (
+    `The bank withdrew this transaction — it says the ${formatCents(amountCents)} never moved — ` +
+    `and it was not excluded: ${ground.remedy.retraction}`
+  )
+}
+
+/**
+ * Whether a withdrawal may be acted on now (Phase 178).
+ *
+ * No field comparison, because there is nothing to compare: a retraction is not
+ * a different figure, it is the absence of one. So the only question is whether
+ * anything has been derived from the stored row — and the answer uses the same
+ * six grounds, in the same order, as a revision.
+ *
+ * Note that there is no `unchanged` case and no descriptive escape hatch. A
+ * revision can be harmless; a withdrawal never is, because it always ends with
+ * a posting that should not exist or a row in an inbox that should not be
+ * reviewed.
+ */
+export function retractionDispositionFor(
+  derived: DerivedState,
+): { kind: 'apply' } | { kind: 'hold'; ground: FeedChangeHold } {
+  const ground = FEED_CHANGE_HOLDS.find((hold) => hold.applies(derived))
+  return ground ? { kind: 'hold', ground } : { kind: 'apply' }
 }
 
 /** Minor units as a signed decimal. No currency symbol — the account owns that. */
@@ -348,7 +454,7 @@ function joinWords(parts: string[]): string {
   return `${parts.slice(0, -1).join(', ')} and ${parts[parts.length - 1]}`
 }
 
-export function revisionStands(hold: RevisionHold): string[] {
+export function feedChangeStands(hold: FeedChangeHold): string[] {
   const problems: string[] = []
 
   if (hold.because.length < 240) {
@@ -359,11 +465,31 @@ export function revisionStands(hold: RevisionHold): string[] {
     )
   }
 
-  if (hold.remedy.length < 80) {
-    problems.push(
-      `${hold.key} names no remedy a person can act on (Phase 119). A held revision with no way ` +
-        'out of it is a transaction that is wrong forever and says so.',
-    )
+  for (const kind of CHANGE_KINDS) {
+    const remedy = hold.remedy[kind]
+
+    if (!remedy || remedy.length < 80) {
+      problems.push(
+        `${hold.key} names no ${kind} remedy a person can act on (Phase 119). A held change with ` +
+          'no way out of it is a transaction that is wrong forever and says so.',
+      )
+      continue
+    }
+
+    /*
+      Both remedies, and distinct ones. A retraction remedy that was the
+      revision's text copied across would pass a length check and send somebody
+      to apply a figure that does not exist — the two sentences were separated
+      in Phase 178 precisely because they end in different buttons, so a check
+      that let them be identical would be checking nothing.
+    */
+    if (kind !== 'revision' && remedy === hold.remedy.revision) {
+      problems.push(
+        `${hold.key}'s ${kind} remedy is word for word its revision remedy. The remedies were ` +
+          'split because the two end in different actions; identical text means one of them is ' +
+          'telling somebody to press a button that is not there.',
+      )
+    }
   }
 
   return problems

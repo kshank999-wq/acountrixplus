@@ -486,6 +486,11 @@ describe('draining the pages', () => {
     ])
     expect(page.nextCursor).toBe('cursor-c')
     expect(page.hasMore).toBe(false)
+    // Withdrawals accumulate across the drained pages the same way transactions
+    // do. A `retracted` built inside the loop instead of outside it would have
+    // returned only the last page's, which is a silent loss rather than an
+    // error (Phase 178).
+    expect(page.retracted).toEqual([])
 
     // The first call carries no cursor at all — `/transactions/sync` reads an
     // absent cursor as "from the beginning" and an explicit null as an error.
@@ -569,10 +574,15 @@ describe('draining the pages', () => {
     expect(page.transactions[1].amountCents).toBe(-4410)
     expect(page.transactions[1].pending).toBe(false)
 
-    // `removed` has nowhere to go on `TransactionPage`, so a retracted
-    // transaction is not reported. Asserted so the gap is a fact in a test
-    // rather than a sentence in a comment.
+    /*
+      `removed` reaches the domain as ids since Phase 178, and not as
+      transactions: a withdrawal says the transaction never happened, so there
+      are no figures to carry. Both halves asserted, because reporting it in the
+      wrong list is the mistake worth catching — a retracted id arriving as a
+      `ProviderTransaction` would be re-imported as a real movement.
+    */
     expect(page.transactions.map((t) => t.providerTransactionId)).not.toContain('txn-retracted')
+    expect(page.retracted).toEqual(['txn-retracted'])
   })
 
   it('ignores the date bounds, which is a promise this endpoint cannot keep', async () => {

@@ -236,14 +236,21 @@ describe('every registry refuses the same way', () => {
     // This one moved because a run failed, which is the only reason any of the
     // numbers above moved either.
     //
-    // Thirty-four since Phase 177 and `REVISION_HOLDS`, the grounds a bank feed
-    // may not rewrite a transaction on. It earns the device twice over: each
-    // entry carries the **remedy** a person acts on, so a lookup answering
-    // `undefined` for a mistyped ground would show a held revision with no way
-    // out of it — and the ground is a *text column* on
-    // `bank_transaction_revisions`, read back out of the database and resolved
-    // through `revisionHoldFor`, which makes this throw the only check standing
-    // between a stored string and a screen.
+    // Thirty-four since Phase 177 and the grounds a bank feed may not rewrite a
+    // transaction on. It earns the device twice over: each entry carries the
+    // **remedy** a person acts on, so a lookup answering `undefined` for a
+    // mistyped ground would show a held change with no way out of it — and the
+    // ground is a *text column* on `bank_transaction_revisions`, read back out
+    // of the database and resolved through `feedChangeHoldFor`, which makes this
+    // throw the only check standing between a stored string and a screen.
+    //
+    // It was `REVISION_HOLDS` for one phase. Phase 178 renamed it
+    // `FEED_CHANGE_HOLDS` because the same six grounds now answer for a
+    // *withdrawal* as well as a changed figure, and a register named after one
+    // of the two things it decides is a name that will mislead the next reader.
+    // The count did not move, which is the right outcome for a rename and worth
+    // saying: this assertion is about how many registries exist, not how many
+    // were edited.
     expect(thrown.length).toBe(34)
   })
 
