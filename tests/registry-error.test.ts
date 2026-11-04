@@ -273,7 +273,15 @@ describe('every registry refuses the same way', () => {
     //
     // A register entry that accuses the schema rather than the caller is new
     // here, and it is the shape a CHECK and a register produce together.
-    expect(thrown.length).toBe(37)
+    //
+    // Thirty-eight since Phase 181 and `BLOCK_SURFACES`, the places a block
+    // type has to reach. It earns the throw by what it is a register *of*:
+    // seven of its eight surfaces handle an unknown type **silently** — a
+    // `default:` returning `''`, `null`, `[]` or nothing at all — so a lookup
+    // answering `undefined` would report a surface as covered when nothing
+    // checks it, in a register written because three block types went
+    // twenty-three phases with no editor and nothing said so.
+    expect(thrown.length).toBe(38)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

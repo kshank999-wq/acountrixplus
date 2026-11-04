@@ -555,6 +555,8 @@ function labelFor(block: Block): string {
       return `Text — ${truncate(block.text) || 'empty'}`
     case 'list':
       return `List — ${block.items.length} item${block.items.length === 1 ? '' : 's'}`
+    case 'table':
+      return `Table — ${truncate(block.title) || `${block.rows.length} rows`}`
     case 'keyValue':
       return `Details — ${truncate(block.title) || `${block.rows.length} rows`}`
     case 'pricingTable':

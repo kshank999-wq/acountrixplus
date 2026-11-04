@@ -1,6 +1,6 @@
 import { formatCents } from '@/lib/money'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
-import type { Block } from '@/modules/design/blocks'
+import { normalizeTable, type Block } from '@/modules/design/blocks'
 import { safeUrl } from '@/modules/design/urls'
 
 /**
@@ -109,6 +109,8 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
       return <ListBlock block={block} />
     case 'keyValue':
       return <KeyValueBlock block={block} />
+    case 'table':
+      return <TableBlock block={block} />
     case 'pricingTable':
       return <PricingBlock block={block} data={data} />
     case 'image':
@@ -142,6 +144,71 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
  * Still an anchor, so it degrades to a plain link in print and in email
  * clients that strip styling.
  */
+/**
+ * A plain table (Phase 181, §7).
+ *
+ * `normalizeTable` rather than reading `block.rows` directly, so a table stored
+ * ragged renders padded here exactly as it does in the PDF and the email. Three
+ * renderers reading the raw rows is how one document becomes three documents.
+ */
+function TableBlock({ block }: { block: Extract<Block, { type: 'table' }> }) {
+  const { width, header, rows, align } = normalizeTable(block)
+  if (width === 0) return null
+
+  const rule = block.style === 'plain' ? 'none' : '1px solid var(--doc-rule)'
+
+  return (
+    <div className="doc-block doc-table-block">
+      {block.title && <p className="doc-table-title">{block.title}</p>}
+      <table className="doc-table" style={{ borderCollapse: 'collapse', width: '100%' }}>
+        {header.length > 0 && (
+          <thead>
+            <tr>
+              {header.map((cell, index) => (
+                <th
+                  key={index}
+                  scope="col"
+                  style={{
+                    textAlign: align[index],
+                    borderBottom: block.style === 'plain' ? 'none' : '2px solid var(--doc-rule)',
+                    borderRight: block.style === 'grid' && index < width - 1 ? rule : 'none',
+                    padding: '6px 8px',
+                    fontWeight: 600,
+                  }}
+                >
+                  {cell}
+                </th>
+              ))}
+            </tr>
+          </thead>
+        )}
+        <tbody>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, index) => (
+                <td
+                  key={index}
+                  style={{
+                    textAlign: align[index],
+                    // `rows` rules between rows and `grid` also between cells;
+                    // neither puts a rule after the last of either, which is
+                    // what makes a bordered table look drawn rather than boxed.
+                    borderTop: block.style === 'plain' || rowIndex === 0 ? 'none' : rule,
+                    borderRight: block.style === 'grid' && index < width - 1 ? rule : 'none',
+                    padding: '6px 8px',
+                  }}
+                >
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function ButtonBlock({ block }: { block: Extract<Block, { type: 'button' }> }) {
   if (!block.label) return null
 

@@ -1,4 +1,4 @@
-import type { Block } from '@/modules/design/blocks'
+import { normalizeTable, type Block } from '@/modules/design/blocks'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { safeUrl } from '@/modules/design/urls'
 
@@ -162,6 +162,46 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
           </table>
         </td></tr>`
 
+    case 'table': {
+      /*
+        A real `<table>` with `role="presentation"` left off, deliberately: this
+        one *is* tabular data, and the attribute that tells a screen reader to
+        ignore the structure is exactly wrong here. Every other table in this
+        renderer is layout and carries it.
+
+        Borders inline on each cell rather than on the table, because Outlook
+        ignores `border-collapse` and renders a collapsed table's rules twice.
+      */
+      const { width, header, rows, align } = normalizeTable(block)
+      if (width === 0) return ''
+
+      const rule = block.style === 'plain' ? 'none' : `1px solid ${styleValue(brand.mutedColor)}`
+      const cell = (
+        content: string,
+        index: number,
+        rowIndex: number,
+        heading: boolean,
+      ) =>
+        `<t${heading ? 'h' : 'd'} style="padding:6px 8px;font-size:14px;text-align:${align[index]};` +
+        `color:${styleValue(heading ? brand.textColor : brand.textColor)};` +
+        `font-weight:${heading ? 600 : 400};` +
+        `border-bottom:${heading && block.style !== 'plain' ? `2px solid ${styleValue(brand.mutedColor)}` : 'none'};` +
+        `border-top:${!heading && rowIndex > 0 ? rule : 'none'};` +
+        `border-right:${block.style === 'grid' && index < width - 1 ? rule : 'none'};">` +
+        `${escapeHtml(content)}</t${heading ? 'h' : 'd'}>`
+
+      return `
+        <tr><td style="padding:6px 24px;">
+          ${block.title ? `<p style="margin:0 0 8px;font-weight:600;color:${styleValue(brand.textColor)};">${escapeHtml(block.title)}</p>` : ''}
+          <table cellpadding="0" cellspacing="0" width="100%">
+            ${header.length > 0 ? `<thead><tr>${header.map((text, index) => cell(text, index, 0, true)).join('')}</tr></thead>` : ''}
+            <tbody>
+              ${rows.map((row, rowIndex) => `<tr>${row.map((text, index) => cell(text, index, rowIndex, false)).join('')}</tr>`).join('')}
+            </tbody>
+          </table>
+        </td></tr>`
+    }
+
     case 'columns':
       // Stacked rather than side by side: Outlook does not do grid, and a
       // single column is what a phone shows anyway.
@@ -323,6 +363,35 @@ export function renderEmailText(input: {
           '',
         )
         break
+      case 'table': {
+        /*
+          Column-aligned with spaces rather than comma-separated, because the
+          plain-text alternative is read by someone who chose it and a table
+          flattened to prose is the one block that loses its meaning entirely
+          without its shape.
+
+          Widths from the widest cell in each column, capped so one long cell
+          cannot push the rest off an 80-column terminal.
+        */
+        const { width, header, rows } = normalizeTable(block)
+        if (width === 0) break
+
+        if (block.title) lines.push(block.title)
+
+        const all = header.length > 0 ? [header, ...rows] : rows
+        const widths = Array.from({ length: width }, (_, index) =>
+          Math.min(Math.max(...all.map((row) => row[index].length), 1), 24),
+        )
+        const line = (row: string[]) =>
+          '  ' + row.map((cell, index) => cell.padEnd(widths[index])).join('  ').trimEnd()
+
+        if (header.length > 0) {
+          lines.push(line(header))
+          lines.push('  ' + widths.map((w) => '-'.repeat(w)).join('  '))
+        }
+        lines.push(...rows.map(line), '')
+        break
+      }
       case 'columns':
         for (const column of block.columns) {
           if (column.heading) lines.push(column.heading)

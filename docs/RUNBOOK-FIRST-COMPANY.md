@@ -210,7 +210,8 @@ impressionistic — for the sections it covered.
 - **The design engine is blocks, not a canvas.** No guides, rulers, snapping,
   layers, vector primitives, crop/mask or SVG import. Proposals and marketing
   documents work; an Illustrator-class editor is not there.
-- **No generic table block** — `pricingTable` exists, a plain table does not.
+- **The design engine is blocks, not a canvas** — see above. A plain `table`
+  block exists since Phase 181, alongside the fee table.
 - **Asset association is one screen of five.** Built in Phase 180: the client
   record carries "n things sent", and campaigns, contacts, opportunities and
   clients have the table and the service but no attach control yet.

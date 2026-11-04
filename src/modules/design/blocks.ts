@@ -85,6 +85,141 @@ export const pricingTableBlockSchema = z.object({
   showTotals: z.boolean().default(true),
 })
 
+/**
+ * A plain table (spec §7, Phase 181).
+ *
+ * §7 names *"tables, pricing tables"* as two things. `pricingTable` renders the
+ * proposal's own line items and holds no figures of its own, which is right for
+ * a fee table and useless for everything else — a specification table, a
+ * schedule with three columns, a comparison, a list of materials with
+ * quantities. ADR 0173 measured the absence; until now such a table was built
+ * from `keyValue` rows, which are two columns with no header and no way to add
+ * a third.
+ *
+ * ## Rectangular, enforced
+ *
+ * Every row must have as many cells as the header. A ragged table is not a
+ * rendering edge case, it is four different wrong answers: HTML drops the
+ * missing cells, the PDF computes column widths from a row that is not
+ * representative, the email's table-based layout silently misaligns, and the
+ * plain-text alternative loses the column boundary entirely. Refusing it in the
+ * schema is one answer instead.
+ *
+ * ## Why the column cap is six
+ *
+ * Not taste — the PDF. §7 asks for *"print-quality output"*, and the content
+ * width of a letter page at the body size this engine uses fits six columns of
+ * readable text. A seventh does not become ugly, it becomes unreadable, and a
+ * block that renders acceptably on a screen and illegibly in the document the
+ * client downloads is the kind of half-working this engine's single-model
+ * design exists to avoid.
+ */
+/**
+ * How many columns a table may have, and why it is six.
+ *
+ * Not taste — the PDF. §7 asks for *"print-quality output"*, and the content
+ * width of a letter page at the body size this engine uses fits six columns of
+ * readable text. A seventh does not become ugly, it becomes unreadable, and a
+ * block that renders acceptably on a screen and illegibly in the document the
+ * client downloads is the half-working this engine's single-model design exists
+ * to avoid.
+ */
+export const MAX_TABLE_COLUMNS = 6
+
+export const tableBlockSchema = z.object({
+  ...baseBlock,
+  type: z.literal('table'),
+  title: z.string().default(''),
+  /**
+   * Header cells. Empty means no header row — a table used for layout does not
+   * need one, and a header of empty strings is not the same thing.
+   */
+  header: z.array(z.string()).max(MAX_TABLE_COLUMNS).default([]),
+  rows: z.array(z.array(z.string()).max(MAX_TABLE_COLUMNS)).max(200).default([]),
+  /**
+   * Per-column alignment, so a quantity or a figure can sit right.
+   *
+   * Shorter than the row is allowed and means "left from here on", because a
+   * three-column table where only the last is right-aligned should not have to
+   * say `['left', 'left', 'right']`.
+   */
+  columnAlign: z.array(z.enum(['left', 'center', 'right'])).max(MAX_TABLE_COLUMNS).default([]),
+  /** `grid` rules every cell, `rows` only between rows, `plain` neither. */
+  style: z.enum(['grid', 'rows', 'plain']).default('rows'),
+})
+
+
+export type TableBlock = Extract<Block, { type: 'table' }>
+
+/**
+ * A table's column count, and every row padded to it.
+ *
+ * Called by **every** renderer, and that is the point. A ragged table is not a
+ * rendering edge case, it is four different wrong answers: HTML drops the
+ * missing cells, the PDF computes column widths from a row that is not
+ * representative, the email's table layout silently misaligns, and the
+ * plain-text alternative loses the column boundary.
+ *
+ * `validateBlocks` refuses to *save* a ragged table, so the editor cannot
+ * produce one. This exists for the other direction — a document stored by an
+ * older editor, or hand-edited, still renders, because `parseBlocks` is
+ * deliberately lenient: *"a document that fails to render is worse than one
+ * missing a block."* Lenient and **consistent** is the pair that needs a
+ * function; lenient alone is how the four wrong answers happen.
+ */
+export function normalizeTable(block: TableBlock): {
+  width: number
+  header: string[]
+  rows: string[][]
+  align: Array<'left' | 'center' | 'right'>
+} {
+  const width = Math.min(
+    block.header.length > 0 ? block.header.length : (block.rows[0]?.length ?? 0),
+    MAX_TABLE_COLUMNS,
+  )
+
+  const pad = (cells: string[]) =>
+    Array.from({ length: width }, (_, index) => cells[index] ?? '')
+
+  return {
+    width,
+    header: block.header.length > 0 ? pad(block.header) : [],
+    rows: block.rows.map(pad),
+    // Left from here on, so a caller never indexes past the end.
+    align: Array.from({ length: width }, (_, index) => block.columnAlign[index] ?? 'left'),
+  }
+}
+
+/**
+ * What is wrong with a table, in sentences for the editor's save path.
+ *
+ * Separate from the schema because a discriminated union cannot hold a
+ * `superRefine` — Zod turns one into a `ZodEffects`, which is not a `ZodObject`,
+ * and the union degrades to `any` without saying so. The first draft of this
+ * phase did exactly that and the typecheck caught it in seven places.
+ */
+export function tableProblems(block: TableBlock): string[] {
+  const problems: string[] = []
+  const width = block.header.length > 0 ? block.header.length : (block.rows[0]?.length ?? 0)
+
+  if (width === 0 && block.rows.length > 0) {
+    problems.push('A table with rows needs at least one column.')
+    return problems
+  }
+
+  for (const [index, row] of block.rows.entries()) {
+    if (row.length !== width) {
+      problems.push(
+        `Row ${index + 1} has ${row.length} cells and the table has ${width} columns. Every row ` +
+          'must be the same width — a ragged table renders four different wrong ways across the ' +
+          'page, the PDF, the email and the plain-text alternative.',
+      )
+    }
+  }
+
+  return problems
+}
+
 export const imageBlockSchema = z.object({
   ...baseBlock,
   type: z.literal('image'),
@@ -199,6 +334,7 @@ export const blockSchema = z.discriminatedUnion('type', [
   textBlockSchema,
   listBlockSchema,
   keyValueBlockSchema,
+  tableBlockSchema,
   pricingTableBlockSchema,
   imageBlockSchema,
   dividerBlockSchema,
@@ -243,6 +379,20 @@ export function validateBlocks(raw: unknown): { blocks: Block[]; errors: string[
   raw.forEach((candidate, index) => {
     const parsed = blockSchema.safeParse(candidate)
     if (parsed.success) {
+      /*
+        The rectangularity rule lives here and not in the schema, because the
+        schema is shared with `parseBlocks` — which is lenient on purpose, and
+        must stay so: a table stored ragged by an older editor should render
+        padded rather than disappear from a client-facing page.
+
+        Strict on save, lenient on render, consistent in both. The consistency
+        is `normalizeTable`.
+      */
+      if (parsed.data.type === 'table') {
+        for (const problem of tableProblems(parsed.data)) {
+          errors.push(`Block ${index + 1}: ${problem}`)
+        }
+      }
       blocks.push(parsed.data)
     } else {
       errors.push(`Block ${index + 1}: ${parsed.error.issues[0]?.message ?? 'invalid'}`)
@@ -308,6 +458,23 @@ export const BLOCK_DEFINITIONS: BlockDefinition[] = [
         type: 'keyValue',
         title: 'Project details',
         rows: [{ label: 'Prepared for', value: '{{client.name}}' }],
+      }),
+  },
+  {
+    type: 'table',
+    label: 'Table',
+    description:
+      'Rows and columns with an optional header — a specification, a schedule, a comparison.',
+    kinds: ['proposal', 'marketing'],
+    create: (id) =>
+      tableBlockSchema.parse({
+        id,
+        type: 'table',
+        header: ['Item', 'Detail'],
+        rows: [
+          ['', ''],
+          ['', ''],
+        ],
       }),
   },
   {

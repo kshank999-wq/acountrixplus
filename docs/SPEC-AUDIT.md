@@ -207,18 +207,19 @@ otherwise.
 | § | capability | measured |
 | --- | --- | --- |
 | 7 | **Comments/questions on the client link** | No table, column or module. The link tracks views and takes an acceptance; a client cannot ask a question through it. |
-| 7 | **Generic `table` block** | §7 names *"tables, pricing tables"* as two things. `pricingTable` exists; a plain table does not, so a specification table in a proposal has to be built from `keyValue` rows. |
+| 7 | ~~**Generic `table` block**~~ | **Built in Phase 181.** A `table` block with an optional header, up to six columns, per-column alignment and three border styles, rendered on all eight surfaces. Writing it found that three block types had never reached one of them — see ADR 0181. |
 | 7 | **Crop/mask on images** | Nothing. An image block places a whole asset. |
 | 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
-| 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 16 block types. |
+| 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 17 block types. |
 | 7 | **`deliverables` and `assumptions`** | 10 of the 12 components §7 names have a dedicated block or column; these two have neither and would be typed into a `text` or `list` block. |
 | 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` uses — see ADR 0180 for why the precedent was not followed. Four of the five kinds have no attach control yet. |
 | 15 | **Team bios** | Nothing. `company_profiles.credentials` covers licences, certifications and insurance; bios have no home. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
-rows are one piece of work. **One is struck through: asset association, built in
-Phase 180.** Eight capabilities remain, seven of them §7's design engine.
+rows are one piece of work. **Two are struck through: asset association (Phase
+180) and the generic table block (Phase 181).** Seven capabilities remain, six of
+them §7's design engine.
 
 **On §7's own deferral.** The section ends: *"advanced Illustrator-class path
 editing can be phased in after the core proposal workflow is stable."* That

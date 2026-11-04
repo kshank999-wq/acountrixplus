@@ -1,4 +1,4 @@
-import type { Block } from '@/modules/design/blocks'
+import { normalizeTable, type Block } from '@/modules/design/blocks'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { resolveMergeFields, type MergeContext } from '@/modules/design/merge-fields'
 import {
@@ -437,6 +437,114 @@ class Composer {
             },
           })
         }
+
+        this.gap(base * 0.6)
+        return
+      }
+
+      case 'table': {
+        /*
+          A plain table (Phase 181, §7). Each row is its own piece, so a long
+          table breaks across pages where the engine already knows how to break
+          — and the header is `keepWithNext` so a table never starts with its
+          header orphaned at the foot of a page.
+
+          Columns are equal width. Measuring content to size them is the right
+          answer and a bigger one: it needs two passes over the rows and a rule
+          for what to do when the widths do not fit, and equal columns are
+          predictable rather than surprising. `MAX_TABLE_COLUMNS` is six for
+          exactly this reason — six equal columns of this content width are
+          still readable.
+        */
+        const { width, header, rows, align } = normalizeTable(block)
+        if (width === 0) return
+
+        if (block.title) {
+          this.paragraph(block.title, {
+            font: this.headingBold,
+            size: base * 1.15,
+            spaceAfter: base * 0.3,
+          })
+          const last = this.pieces[this.pieces.length - 1]
+          if (last) last.keepWithNext = true
+        }
+
+        const columnWidth = this.contentWidth / width
+        const PAD = 4
+
+        /** Where a cell's text starts, given its alignment. */
+        const cellX = (text: string, index: number, font: StandardFont, size: number) => {
+          const left = MARGIN + index * columnWidth
+          if (align[index] === 'left') return left + PAD
+          // `widthOf` and not a font method: the fonts here are the standard
+          // PDF fourteen, named by string, and their metrics live in
+          // `pdf/metrics.ts`. The first draft called `widthOfTextAtSize` and
+          // the typecheck refused it.
+          const textWidth = widthOf(text, font, size)
+          if (align[index] === 'right') return left + columnWidth - PAD - textWidth
+          return left + (columnWidth - textWidth) / 2
+        }
+
+        const row = (
+          cells: string[],
+          options: { font: StandardFont; heading: boolean; first: boolean },
+        ) => {
+          const resolved = cells.map((cell) =>
+            truncateToWidth(this.resolve(cell), {
+              font: options.font,
+              size: base,
+              maxWidth: columnWidth - PAD * 2,
+            }),
+          )
+
+          this.pieces.push({
+            height: base * 1.7,
+            keepWithNext: options.heading,
+            draw: (page, y) => {
+              resolved.forEach((text, index) => {
+                page.text(text, {
+                  x: cellX(text, index, options.font, base),
+                  y: y + base * 0.35,
+                  font: options.font,
+                  size: base,
+                  color: options.heading ? this.text : this.text,
+                })
+              })
+
+              // A rule under the header, and between rows for `rows`/`grid`.
+              // Nothing after the last row, which is what makes a bordered
+              // table look drawn rather than boxed.
+              if (block.style !== 'plain' && (options.heading || !options.first)) {
+                page.rect({
+                  x: MARGIN,
+                  y: options.heading ? y : y + base * 1.7,
+                  width: this.contentWidth,
+                  height: options.heading ? 1 : 0.5,
+                  color: this.muted,
+                })
+              }
+
+              if (block.style === 'grid') {
+                for (let index = 1; index < width; index += 1) {
+                  page.rect({
+                    x: MARGIN + index * columnWidth,
+                    y,
+                    width: 0.5,
+                    height: base * 1.7,
+                    color: this.muted,
+                  })
+                }
+              }
+            },
+          })
+        }
+
+        if (header.length > 0) {
+          row(header, { font: this.headingBold, heading: true, first: true })
+        }
+        rows.forEach((cells, index) => {
+          row(cells, { font: this.body, heading: false, first: index === 0 && header.length === 0 })
+        })
 
         this.gap(base * 0.6)
         return

@@ -125,6 +125,16 @@ export function resolveBlock(block: Block, context: MergeContext): Block {
         title: fill(block.title),
         rows: block.rows.map((row) => ({ label: fill(row.label), value: fill(row.value) })),
       }
+    case 'table':
+      // Header as well as body: a column headed `{{client.name}}` is a
+      // comparison table, which is a real document and the reason the header
+      // is a list of strings rather than a list of labels.
+      return {
+        ...block,
+        title: fill(block.title),
+        header: block.header.map(fill),
+        rows: block.rows.map((row) => row.map(fill)),
+      }
     case 'columns':
       return {
         ...block,
@@ -147,6 +157,20 @@ export function resolveBlock(block: Block, context: MergeContext): Block {
       return { ...block, value: fill(block.value), caption: fill(block.caption) }
     case 'video':
       return { ...block, url: fill(block.url), caption: fill(block.caption) }
+    /*
+      The three blocks with no text in them. Listed rather than left to the
+      `default`, because a default doing double duty for "nothing to merge" and
+      "somebody forgot" is the ambiguity that let `button`, `qrCode` and `video`
+      go twenty-three phases without an editor (Phase 181).
+
+      With these here, the `default` below means one thing: a block type nobody
+      declared. `BLOCK_SURFACES` asserts every declared type appears at every
+      surface, and these lines are how these three say they were considered.
+    */
+    case 'divider':
+    case 'spacer':
+    case 'pageBreak':
+      return block
     default:
       return block
   }
@@ -181,6 +205,8 @@ function textsOf(block: Block): string[] {
       return block.items
     case 'keyValue':
       return [block.title, ...block.rows.flatMap((row) => [row.label, row.value])]
+    case 'table':
+      return [block.title, ...block.header, ...block.rows.flat()]
     case 'columns':
       return block.columns.flatMap((column) => [column.heading, column.body])
     case 'clause':
@@ -197,6 +223,11 @@ function textsOf(block: Block): string[] {
       return [block.value, block.caption]
     case 'video':
       return [block.url, block.caption]
+    // The same three, for the same reason.
+    case 'divider':
+    case 'spacer':
+    case 'pageBreak':
+      return []
     default:
       return []
   }

@@ -1,6 +1,6 @@
 'use client'
 
-import type { Block } from '@/modules/design/blocks'
+import { MAX_TABLE_COLUMNS, type Block } from '@/modules/design/blocks'
 
 /**
  * Field editor for the selected block.
@@ -291,6 +291,163 @@ export function BlockEditor({
             className="w-full"
           />
         </label>
+      )}
+
+      {block.type === 'table' && (
+        <div className="space-y-2">
+          <Field label="Title" value={block.title} onChange={(title) => set({ title })} />
+          <TextArea
+            label="Header"
+            value={block.header.join(' | ')}
+            rows={1}
+            onChange={(value) =>
+              set({
+                header: value.trim()
+                  ? value.split('|').map((cell) => cell.trim()).slice(0, MAX_TABLE_COLUMNS)
+                  : [],
+              })
+            }
+            hint={`Pipe-separated, up to ${MAX_TABLE_COLUMNS} columns. Leave empty for no header row.`}
+          />
+          <TextArea
+            label="Rows"
+            value={block.rows.map((row) => row.join(' | ')).join('\n')}
+            rows={6}
+            onChange={(value) =>
+              set({
+                /*
+                  Padded to the table's width as it is typed, so the save path
+                  never sees a ragged table — `validateBlocks` refuses one and
+                  the author would get an error about a row they are halfway
+                  through writing.
+                */
+                rows: value
+                  .split('\n')
+                  .filter((line) => line.trim())
+                  .map((line) => {
+                    const cells = line.split('|').map((cell) => cell.trim())
+                    const width = Math.min(
+                      block.header.length > 0 ? block.header.length : cells.length,
+                      MAX_TABLE_COLUMNS,
+                    )
+                    return Array.from({ length: width }, (_, index) => cells[index] ?? '')
+                  }),
+              })
+            }
+            hint="One row per line, cells separated by |"
+          />
+          <label className="block text-xs text-muted">
+            <span className="mb-1 block">Alignment</span>
+            <input
+              value={block.columnAlign.join(' | ')}
+              onChange={(event) =>
+                set({
+                  columnAlign: event.target.value
+                    .split('|')
+                    .map((part) => part.trim().toLowerCase())
+                    .filter((part): part is 'left' | 'center' | 'right' =>
+                      part === 'left' || part === 'center' || part === 'right',
+                    )
+                    .slice(0, MAX_TABLE_COLUMNS),
+                })
+              }
+              className="field py-1.5 text-sm"
+              placeholder="left | left | right"
+            />
+            <span className="mt-1 block text-faint">
+              Per column. Shorter than the row means left from there on.
+            </span>
+          </label>
+          <Select
+            label="Rules"
+            value={block.style}
+            options={[
+              { value: 'rows', label: 'Between rows' },
+              { value: 'grid', label: 'Every cell' },
+              { value: 'plain', label: 'None' },
+            ]}
+            onChange={(value) => set({ style: value as 'grid' | 'rows' | 'plain' })}
+          />
+        </div>
+      )}
+
+      {/*
+        Phase 5 added `button`, `qrCode` and `video` to the union, the palette
+        and all three renderers — and not to this editor, whose own docstring
+        says "one case per block type". So for twenty-three phases a marketing
+        document could contain a call-to-action button that rendered on the
+        page, in the email and in the PDF with its default label and an **empty
+        url**, and there was no way to set it.
+
+        Found in Phase 181 by counting which types reach which surfaces, which
+        is now a test. The capability was §8's "buttons/links, QR codes,
+        embedded/linked video" — three bullets that existed everywhere except
+        where somebody would configure them.
+      */}
+      {block.type === 'button' && (
+        <div className="space-y-2">
+          <Field label="Label" value={block.label} onChange={(label) => set({ label })} />
+          <Field label="Link" value={block.url} onChange={(url) => set({ url })} />
+          <Select
+            label="Style"
+            value={block.style}
+            options={[
+              { value: 'solid', label: 'Solid' },
+              { value: 'outline', label: 'Outline' },
+            ]}
+            onChange={(value) => set({ style: value as 'solid' | 'outline' })}
+          />
+          <AlignPicker value={block.align} onChange={(align) => set({ align })} />
+        </div>
+      )}
+
+      {block.type === 'qrCode' && (
+        <div className="space-y-2">
+          <Field
+            label="Encodes"
+            value={block.value}
+            onChange={(value) => set({ value })}
+          />
+          <Field label="Caption" value={block.caption} onChange={(caption) => set({ caption })} />
+          <label className="block text-xs text-muted">
+            <span className="mb-1 block">Size — {block.sizePt}pt</span>
+            <input
+              type="range"
+              min={48}
+              max={288}
+              step={12}
+              value={block.sizePt}
+              onChange={(event) => set({ sizePt: Number(event.target.value) })}
+              className="w-full"
+            />
+          </label>
+        </div>
+      )}
+
+      {block.type === 'video' && (
+        <div className="space-y-2">
+          <Field label="Link" value={block.url} onChange={(url) => set({ url })} />
+          <Field label="Caption" value={block.caption} onChange={(caption) => set({ caption })} />
+          <label className="block text-xs text-muted">
+            <span className="mb-1 block">Thumbnail</span>
+            <select
+              value={block.thumbnailAssetId ?? ''}
+              onChange={(event) => set({ thumbnailAssetId: event.target.value || null })}
+              className="field py-1.5 text-sm"
+            >
+              <option value="">None</option>
+              {assets.map((asset) => (
+                <option key={asset.id} value={asset.id}>
+                  {asset.filename}
+                </option>
+              ))}
+            </select>
+            <span className="mt-1 block text-faint">
+              Rendered as a still that links out — a document that has to survive print and email
+              cannot rely on an embedded player.
+            </span>
+          </label>
+        </div>
       )}
 
       {(block.type === 'divider' || block.type === 'pageBreak') && (
