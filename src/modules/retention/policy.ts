@@ -278,6 +278,17 @@ export const NEVER_SWEPT = [
   // Failures nobody has looked at yet. A dead job swept is a question
   // deleted before it was asked.
   'background_jobs',
+  // The firm's own people (Phase 183, §15). Never swept for a reason the table
+  // already enforces in the other direction: `is_active` exists because a
+  // proposal sent last year named the people who were going to do the work, and
+  // the `team` block holds their ids. A sweep would do precisely what the
+  // retirement flag was built to prevent — change what a client was shown,
+  // after they were shown it.
+  //
+  // It needs no age policy because it does not grow with traffic. A firm has a
+  // bounded number of people, `MAX_TEAM_MEMBERS` says a hundred, and the rows
+  // cascade away with the company.
+  'team_members',
 ] as const
 
 export function policyFor(kind: RetentionKind): RetentionPolicy {

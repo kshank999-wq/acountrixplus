@@ -116,8 +116,18 @@ describe('how many references could point at another tenant', () => {
       because the alternative was the polymorphic shape Phase 170 was written to
       retire.
     */
-    expect(measured.total).toBe(280)
-    expect(measured.composite).toBe(25)
+    /*
+      281 and 26 since Phase 183 and `team_members.headshot_asset_id`.
+
+      One reference, composite from the day it was written, and the reason is
+      worth keeping: a headshot is the only thing a bio points at, and a
+      single-column `REFERENCES assets (id)` would have let one firm's bio show
+      another firm's photograph. The migration says so and the test says the
+      database agrees — `team_members_headshot_fkey` refusing a cross-tenant
+      asset is asserted by name in `the-people-on-the-proposal.test.ts`.
+    */
+    expect(measured.total).toBe(281)
+    expect(measured.composite).toBe(26)
   })
 
   it('leaves no single-column reference into the catalogue at all', async () => {

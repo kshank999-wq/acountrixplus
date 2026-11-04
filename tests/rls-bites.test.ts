@@ -31,7 +31,7 @@ import { RegistryError } from '@/modules/errors/registry'
  * needs this file rather than a migration and a paragraph:
  *
  * **The application connects as `postgres`, which is a superuser and owns all
- * 183 tables.** RLS is never applied to a superuser and is not applied to a
+ * 184 tables.** RLS is never applied to a superuser and is not applied to a
  * table's owner without FORCE, so a migration of ENABLE plus CREATE POLICY
  * would have produced 167 policies, 167 tables reporting `relrowsecurity`, and
  * no isolation at all — while looking, to anybody auditing the database by
@@ -239,8 +239,16 @@ describe('the policies bite', () => {
       migration that created it — which is the whole of Phase 179's lesson
       applied on purpose rather than after the fact.
     */
-    expect(tenantTables()).toHaveLength(169)
-    expect(expected).toHaveLength(163)
+    /*
+      170 and 164 since Phase 183 added `team_members`, policed in migration
+      0101 for the same reason, in the same file that creates the table. The
+      directory is read by the public proposal page with no session behind it,
+      so the policy is the one thing standing between an anonymous reader and
+      another firm's people — `teamForDocument` takes a bare `companyId`, and a
+      bare id is exactly what row-level security is for.
+    */
+    expect(tenantTables()).toHaveLength(170)
+    expect(expected).toHaveLength(164)
 
     const rows = (await db.execute(sql`
       select c.relname as table_name, c.relrowsecurity as enabled, c.relforcerowsecurity as forced,

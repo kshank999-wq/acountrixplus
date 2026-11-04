@@ -11,7 +11,10 @@ import {
   unique,
   pgEnum,
   customType,
+  check,
+  foreignKey,
 } from 'drizzle-orm/pg-core'
+import { sql } from 'drizzle-orm'
 import { companies, users } from './tenancy'
 import { chartAccounts } from './accounting'
 import { aiRequests } from './ai'
@@ -330,5 +333,80 @@ export const clauseVersions = pgTable(
   },
   (t) => ({
     clauseVersionUnique: unique('clause_versions_unique').on(t.clauseId, t.versionNumber),
+  }),
+)
+
+/**
+ * The firm's people, for §15's team bios (Phase 183).
+ *
+ * A table and not a `jsonb` array on `company_profiles` beside `credentials`,
+ * for three reasons and the third is decisive: **a document has to point at
+ * one.** §15 ends "brand assets feed both the Proposal Designer and Marketing
+ * Creative Studio", so a proposal names two of a firm's five people — and a
+ * reference into a `jsonb` array has no key.
+ *
+ * Also: a bio has a headshot, which is a reference to `assets` and therefore a
+ * composite tenant key, which a `jsonb` element cannot carry. And a credential
+ * is a fact about the company while a bio is a person — a licence number has no
+ * photograph and no ordering anybody argues about.
+ *
+ * Not hung off `memberships`, which is wrong in both directions: a founding
+ * principal who never signs in still goes on the capability statement, and a
+ * bookkeeper with a login does not. `userId` is nullable so a bio *can* name
+ * the account it describes where there is one.
+ */
+export const teamMembers = pgTable(
+  'team_members',
+  {
+    id: uuid('id').primaryKey().defaultRandom(),
+    companyId: uuid('company_id')
+      .notNull()
+      .references(() => companies.id, { onDelete: 'cascade' }),
+
+    name: text('name').notNull(),
+    /** "Principal", "Lead estimator" — what they do, not their login's role. */
+    title: text('title'),
+    bio: text('bio'),
+    /**
+     * Letters after the name — "PE, LEED AP".
+     *
+     * Separate from `companyProfiles.credentials`, which is the *company's*
+     * licences: a person's qualifications and a firm's insurance are different
+     * trust signals and a client reads them in different places.
+     */
+    qualifications: text('qualifications'),
+
+    email: text('email'),
+    phone: text('phone'),
+
+    /**
+     * The headshot, by composite tenant key (Phase 180's device).
+     *
+     * `set null` on the column rather than cascade: deleting a photograph must
+     * not delete the person.
+     */
+    headshotAssetId: uuid('headshot_asset_id'),
+
+    /** The account this describes, where there is one. */
+    userId: uuid('user_id').references(() => users.id, { onDelete: 'set null' }),
+
+    sortOrder: integer('sort_order').notNull().default(0),
+    /** Retired rather than deleted, so a sent proposal still names them. */
+    isActive: boolean('is_active').notNull().default(true),
+
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    headshotFk: foreignKey({
+      name: 'team_members_headshot_fkey',
+      columns: [t.companyId, t.headshotAssetId],
+      foreignColumns: [assets.companyId, assets.id],
+    }).onDelete('set null'),
+    /** The target half for anything that references a member — the `team` block. */
+    companyIdKey: unique('team_members_company_id_key').on(t.companyId, t.id),
+    // A name of spaces passes a NOT NULL and renders as a gap in the page.
+    namePresent: check('team_members_name_present_check', sql`length(btrim(${t.name})) > 0`),
+    companyIdx: index('team_members_company_idx').on(t.companyId, t.sortOrder),
   }),
 )

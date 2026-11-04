@@ -220,6 +220,45 @@ export function tableProblems(block: TableBlock): string[] {
   return problems
 }
 
+/**
+ * The firm's people on a document (spec §15, Phase 183).
+ *
+ * §15 ends *"brand assets feed both the Proposal Designer and Marketing
+ * Creative Studio"*, and a team bio is the asset most obviously meant: a
+ * capability statement is largely who you are, and a proposal for professional
+ * services names the two people who will do the work.
+ *
+ * ## It holds ids, not bios
+ *
+ * The same decision `pricingTable` makes and for the same reason — its comment
+ * says *"the figures on the page can never drift from the proposal's actual
+ * totals."* A bio copied into the block is a second copy of a paragraph that
+ * will be edited once, and the stale one is the one the client reads.
+ *
+ * So the block names members and `RenderData` supplies them, which also means a
+ * member retired after a proposal was sent still renders on it: the block kept
+ * the id and `team_members` kept the row.
+ *
+ * ## Why `memberIds` and not "all of them"
+ *
+ * A firm of twelve puts three on a proposal. An empty list means *the active
+ * members in their sort order* — the useful default for a capability statement —
+ * and a non-empty one is a deliberate selection, in the order the author put
+ * them rather than the firm's standing order, because who leads a pitch is not
+ * who leads the firm.
+ */
+export const teamBlockSchema = z.object({
+  ...baseBlock,
+  type: z.literal('team'),
+  title: z.string().default('Who you will be working with'),
+  /** Empty means every active member, in the firm's own order. */
+  memberIds: z.array(z.string()).max(24).default([]),
+  showPhotos: z.boolean().default(true),
+  showQualifications: z.boolean().default(true),
+  /** `list` is one per row with the photo beside; `grid` is cards. */
+  layout: z.enum(['list', 'grid']).default('list'),
+})
+
 export const imageBlockSchema = z.object({
   ...baseBlock,
   type: z.literal('image'),
@@ -335,6 +374,7 @@ export const blockSchema = z.discriminatedUnion('type', [
   listBlockSchema,
   keyValueBlockSchema,
   tableBlockSchema,
+  teamBlockSchema,
   pricingTableBlockSchema,
   imageBlockSchema,
   dividerBlockSchema,
@@ -476,6 +516,13 @@ export const BLOCK_DEFINITIONS: BlockDefinition[] = [
           ['', ''],
         ],
       }),
+  },
+  {
+    type: 'team',
+    label: 'Team',
+    description: 'Bios for the people on this job. Edited once, in the Design Center.',
+    kinds: ['proposal', 'marketing'],
+    create: (id) => teamBlockSchema.parse({ id, type: 'team' }),
   },
   {
     type: 'pricingTable',

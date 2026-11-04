@@ -158,9 +158,16 @@ describe('the retention policy', () => {
   // the asset and the client both in place, which is the shape of a record that
   // no longer explains itself.
   //
+  // 184 since Phase 183 added `team_members`, also `NEVER_SWEPT` — and the
+  // argument is the sharpest one on this list, because the table already makes
+  // it in the other direction. `is_active` exists so that retiring somebody
+  // does not change the proposals that named them; a sweep would change them.
+  // The flag and a retention policy would be two answers to one question, and
+  // one of them would be wrong.
+  //
   // Decided here rather than discovered two phases later, which is what Phase
   // 177 did and Phase 179 found.
-  const TABLE_COUNT = 183
+  const TABLE_COUNT = 184
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

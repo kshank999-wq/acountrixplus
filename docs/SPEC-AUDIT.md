@@ -170,7 +170,7 @@ suppression (`modules/crm/intake`, `modules/notify`), and security review gating
 **Strong tenant isolation** is the partial, and it is partial in a precise way
 rather than vaguely: the application layer is complete and measured — 111 writes
 and 911 reads, every one guarded (Phases 149–150, counted again in 179) — and
-the database layer is installed, forced on 163 tables, proven against a restricted role, and **not
+the database layer is installed, forced on 164 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.
@@ -211,15 +211,26 @@ otherwise.
 | 7 | **Crop/mask on images** | Nothing. An image block places a whole asset. |
 | 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
-| 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 17 block types. |
+| 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 18 block types. |
 | 7 | ~~**`deliverables` and `assumptions`**~~ | **Built in Phase 182**, and the measurement here understated it: of the ten said to have a home, **four had a column that nothing rendered** — `executive_summary`, `scope`, `exclusions` and `terms` were written, snapshotted into versions, and reached no document. All six narrative sections are merge fields now, and `PROPOSAL_COMPONENTS` makes "has a home" mean "a client can read it". See ADR 0182. |
 | 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` uses — see ADR 0180 for why the precedent was not followed. Four of the five kinds have no attach control yet. |
-| 15 | **Team bios** | Nothing. `company_profiles.credentials` covers licences, certifications and insurance; bios have no home. |
+| 15 | ~~**Team bios**~~ | **Built in Phase 183.** A `team_members` table — not a `jsonb` array beside `credentials`, because a document has to *point at* one person and a reference into an array has no key — plus a `team` block that holds ids and a Design Center screen that writes bios. Retired rather than deleted, so a proposal sent last year still names who was going to do the work. See ADR 0183. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
-rows are one piece of work. **Three are struck through: asset association (Phase
-180), the generic table block (Phase 181), and `deliverables`/`assumptions`
-(Phase 182).** Six capabilities remain, five of them §7's design engine.
+rows are one piece of work. **Four are struck through: asset association (Phase
+180), the generic table block (Phase 181), `deliverables`/`assumptions` (Phase
+182), and team bios (Phase 183).** Five capabilities remain, and all five are
+§7's design engine — the client-link comment thread, crop/mask, SVG, artboard
+affordances and vector primitives.
+
+**The correction of Phase 182, confirmed again in Phase 183.** `team bios` was
+measured here as having *nothing* behind it, and that was right. But the
+`professional-engagement` template's own description read *"Approach,
+deliverables, team, fees, and terms"* and had no team section of any kind — a
+sentence shipped to users with nothing behind it, which this audit does not
+look for at all. Nor did it find that `isolation-guards.test.ts` had never
+counted four tenant writes, including the one that moves every opportunity in
+the system. Both were found by doing the nominated work, not by auditing.
 
 **A correction to this audit's method, from Phase 182.** The
 `deliverables`/`assumptions` row said *"10 of the 12 components have a dedicated

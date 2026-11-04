@@ -207,10 +207,22 @@ describe('every read from a company-scoped table', () => {
       the scan counts separately. Every one goes through `scoped()`, which is
       what the distribution moving in exactly one place says.
     */
-    expect(READS.length).toBe(916)
+    /*
+      921 since Phase 183 and the team directory. Four on `scoped-read` — the
+      headcount `addTeamMember` checks the limit against, the id list
+      `reorderTeamMembers` validates an order against, `loadMember`, and
+      `listTeamMembers` — and one on `explicit-company`: `teamForDocument`,
+      which takes a bare `companyId` rather than an actor because the public
+      proposal page renders for somebody with no session at all.
+
+      That last one is the distribution saying something true. A read with no
+      actor behind it is the shape that has to be looked at hardest, and it is
+      the shape the client-facing document necessarily has.
+    */
+    expect(READS.length).toBe(921)
     expect(by).toEqual({
-      'scoped-read': 562,
-      'explicit-company': 262,
+      'scoped-read': 566,
+      'explicit-company': 263,
       'established-above': 31,
       'id-from-fetched-row': 17,
       'join-inherited': 13,

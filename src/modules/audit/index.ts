@@ -56,6 +56,11 @@ export type AuditAction =
    * is "where has this gone" — and the five subject kinds would otherwise need
    * five entity types to say one thing.
    */
+  /** §15's team bios (Phase 183). Retire rather than delete — see the module. */
+  | 'team_member.create'
+  | 'team_member.update'
+  | 'team_member.retire'
+  | 'team_member.restore'
   | 'asset.associate'
   | 'asset.disassociate'
   | 'account.create'

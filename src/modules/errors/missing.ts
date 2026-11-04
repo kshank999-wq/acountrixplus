@@ -148,6 +148,8 @@ export const RECORD_KINDS: readonly RecordKind[] = [
   // An asset's association with a record (Phase 180). "association" and not
   // "link", which in this product means a client-facing proposal URL.
   scoped('assetLink', 'association'),
+  // One of the firm's people, for §15's team bios (Phase 183).
+  scoped('teamMember', 'team member'),
   open('company', 'company'),
   open('user', 'user'),
 ]

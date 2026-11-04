@@ -8,6 +8,7 @@ import {
   listServiceItems,
 } from '@/modules/studio/service'
 import { listAssets } from '@/modules/studio/assets'
+import { listTeamMembers } from '@/modules/studio/team'
 import { categorizableAccounts } from '@/modules/coa/service'
 import { StudioWorkspace } from './studio-workspace'
 
@@ -29,12 +30,15 @@ export default async function StudioPage() {
     )
   }
 
-  const [profile, kits, assets, services, clauses, accounts] = await Promise.all([
+  const [profile, kits, assets, services, clauses, team, accounts] = await Promise.all([
     getProfile(actor),
     listBrandKits(actor),
     listAssets(actor),
     listServiceItems(actor),
     listClauses(actor),
+    // Retired people included: this is the one screen that can restore them,
+    // and a directory that hid them would make retiring look like a delete.
+    listTeamMembers(actor, { includeRetired: true }),
     can(actor, 'bookkeeping:view') ? categorizableAccounts(actor) : Promise.resolve([]),
   ])
 
@@ -100,6 +104,16 @@ export default async function StudioPage() {
           body: clause.body ?? '',
           versionNumber: clause.versionNumber ?? 1,
           approved: Boolean(clause.approvedAt),
+        }))}
+        team={team.map((member) => ({
+          id: member.id,
+          name: member.name,
+          title: member.title,
+          bio: member.bio,
+          qualifications: member.qualifications,
+          email: member.email,
+          phone: member.phone,
+          isActive: member.isActive,
         }))}
         revenueAccounts={accounts
           .filter((account) => account.type === 'revenue')

@@ -1,4 +1,5 @@
 import { normalizeTable, type Block } from '@/modules/design/blocks'
+import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { safeUrl } from '@/modules/design/urls'
 
@@ -111,7 +112,12 @@ export type LinkWrapper = (url: string) => string
 const NO_TRACKING: LinkWrapper = (url) => url
 
 /** Renders one block as email-safe HTML. */
-function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string {
+function blockHtml(
+  block: Block,
+  brand: EmailBrand,
+  track: LinkWrapper,
+  team: RenderedTeamMember[],
+): string {
   switch (block.type) {
     case 'cover':
       return `
@@ -261,6 +267,52 @@ function blockHtml(block: Block, brand: EmailBrand, track: LinkWrapper): string 
           ${paragraphs(block.body).map((p) => `<p style="margin:0 0 6px;font-size:13px;line-height:1.5;color:${styleValue(brand.mutedColor)};">${escapeHtml(p)}</p>`).join('')}
         </td></tr>`
 
+    case 'team': {
+      /*
+        The firm's people (Phase 183, §15).
+
+        Not a proposal-only block: §15 ends *"brand assets feed both the Proposal
+        Designer and Marketing Creative Studio"*, and "meet the people you would
+        be working with" is a newsletter section as much as a capability
+        statement's. So the palette offers it in both kinds and this surface has
+        to mean it.
+
+        Stacked `<tr>`s rather than the block's `grid` layout, for the reason
+        `columns` gives above: Outlook does not do grid and a phone shows one
+        column anyway. `layout` is therefore honoured on the page and in the
+        designer and ignored here — the same shape as `showPhotos` below.
+
+        Headshots are not emitted, exactly as `image` emits nothing: this
+        renderer has no absolute asset URL to put in a `src`, and a broken image
+        icon beside somebody's name is worse than their name set plainly. The
+        difference from `image` is that the rest of the block still carries its
+        content, so this is a degraded section rather than a dropped one.
+      */
+      const members = selectTeam(team, block.memberIds)
+      if (members.length === 0) return ''
+
+      return `
+        <tr><td style="padding:10px 24px;">
+          ${block.title ? `<p style="margin:0 0 10px;font-family:${styleValue(brand.headingFont)};font-size:17px;color:${styleValue(brand.primaryColor)};">${escapeHtml(block.title)}</p>` : ''}
+          <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+            ${members
+              .map(
+                (member) => `
+            <tr><td style="padding:0 0 14px;">
+              <p style="margin:0;font-size:15px;font-weight:600;color:${styleValue(brand.textColor)};">${escapeHtml(member.name)}${
+                block.showQualifications && member.qualifications
+                  ? `<span style="font-weight:400;color:${styleValue(brand.mutedColor)};">, ${escapeHtml(member.qualifications)}</span>`
+                  : ''
+              }</p>
+              ${member.title ? `<p style="margin:2px 0 0;font-size:13px;color:${styleValue(brand.mutedColor)};">${escapeHtml(member.title)}</p>` : ''}
+              ${member.bio ? paragraphs(member.bio).map((paragraph) => `<p style="margin:6px 0 0;font-size:14px;line-height:1.6;color:${styleValue(brand.textColor)};">${escapeHtml(paragraph)}</p>`).join('') : ''}
+            </td></tr>`,
+              )
+              .join('')}
+          </table>
+        </td></tr>`
+    }
+
     // Proposal-only blocks never appear in a marketing document, but a
     // document could in principle carry one — render nothing rather than
     // leaking a fee table into a newsletter.
@@ -287,10 +339,19 @@ export function renderEmailHtml(input: {
   footer?: string | null
   brand?: EmailBrand
   trackLink?: LinkWrapper
+  /**
+   * The firm's people, for a `team` block (Phase 183).
+   *
+   * The document's pool, as `teamForDocument` reads it. Optional because most
+   * campaigns carry no team block — and a campaign that does and is sent without
+   * this gets a section with no people in it rather than a wrong one.
+   */
+  team?: RenderedTeamMember[]
 }): string {
   const brand = input.brand ?? DEFAULT_EMAIL_BRAND
   const track = input.trackLink ?? NO_TRACKING
-  const body = input.blocks.map((block) => blockHtml(block, brand, track)).join('')
+  const team = input.team ?? []
+  const body = input.blocks.map((block) => blockHtml(block, brand, track, team)).join('')
 
   return `<!doctype html>
 <html>
@@ -337,9 +398,12 @@ export function renderEmailText(input: {
   blocks: Block[]
   unsubscribeUrl: string
   trackLink?: LinkWrapper
+  /** The pool a `team` block selects from, as in `renderEmailHtml`. */
+  team?: RenderedTeamMember[]
 }): string {
   const lines: string[] = []
   const track = input.trackLink ?? NO_TRACKING
+  const team = input.team ?? []
 
   for (const block of input.blocks) {
     switch (block.type) {
@@ -404,6 +468,27 @@ export function renderEmailText(input: {
       case 'video':
         lines.push(`${block.caption || 'Watch the video'}: ${track(safeUrl(block.url))}`, '')
         break
+      case 'team': {
+        /*
+          Name, qualifications and role on one line, bio under it. No photograph
+          to lose here, so this part is not degraded the way the HTML's is — the
+          plain-text alternative carries everything the block actually says.
+        */
+        const members = selectTeam(team, block.memberIds)
+        if (members.length === 0) break
+
+        if (block.title) lines.push(block.title, '')
+        for (const member of members) {
+          const qualified =
+            block.showQualifications && member.qualifications
+              ? `${member.name}, ${member.qualifications}`
+              : member.name
+          lines.push(member.title ? `${qualified} — ${member.title}` : qualified)
+          if (member.bio) lines.push(...paragraphs(member.bio))
+          lines.push('')
+        }
+        break
+      }
       case 'clause':
         if (block.title) lines.push(block.title)
         lines.push(...paragraphs(block.body), '')

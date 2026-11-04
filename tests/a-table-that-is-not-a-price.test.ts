@@ -351,16 +351,17 @@ describe('the surfaces a block type has to reach', () => {
      * The scan above walks `BLOCK_DEFINITIONS`, which is the palette — so a
      * type in the union with no palette entry would be checked at no surface
      * at all and the scan would pass. This is the other end of that: the union
-     * and the palette hold the same seventeen.
+     * and the palette hold the same eighteen.
      *
-     * Seventeen since Phase 181. Sixteen from Phase 5 to 180.
+     * Eighteen since Phase 183 and the `team` block. Seventeen in Phase 181,
+     * sixteen from Phase 5 to 180.
      */
     const inUnion = blockSchema.options.map(
       (option) => option.shape.type.value as BlockType,
     )
     const inPalette = BLOCK_DEFINITIONS.map((definition) => definition.type)
 
-    expect(inUnion).toHaveLength(17)
+    expect(inUnion).toHaveLength(18)
     expect([...inPalette].sort()).toEqual([...inUnion].sort())
   })
 
@@ -388,16 +389,21 @@ describe('the surfaces a block type has to reach', () => {
 describe('what a document with one of everything does', () => {
   it('renders every block type on every renderer without throwing', () => {
     /**
-     * Seventeen blocks, one of each, through all three renderers. Not a
+     * Eighteen blocks, one of each, through all three renderers. Not a
      * coverage check — the scan above is that — but the thing a coverage check
      * cannot do: prove the handlers run on real block data rather than merely
      * existing.
+     *
+     * The `team` block's default is `memberIds: []` and no team is supplied
+     * here, so it renders as nothing — which is the correct behaviour and is
+     * asserted where it belongs, in `the-people-on-the-proposal.test.ts`. What
+     * this proves about it is that the handler runs on real block data.
      */
     const blocks: Block[] = BLOCK_DEFINITIONS.map((definition, index) =>
       definition.create(`block-${index}`),
     )
 
-    expect(blocks).toHaveLength(17)
+    expect(blocks).toHaveLength(18)
 
     const html = renderEmailHtml({
       blocks,

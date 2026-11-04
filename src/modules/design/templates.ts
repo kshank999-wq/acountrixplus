@@ -312,6 +312,31 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
         ordered: false,
       }),
       block({
+        /*
+          The one template whose own description already promised this
+          (Phase 183).
+
+          It reads *"Approach, deliverables, team, fees, and terms"* and had no
+          team section of any kind — the §7 shape ADR 0182 found, one level up:
+          not a column with no reader but a **sentence** with nothing behind it.
+          Advisory work is bought on who will do it, so this is the template the
+          §15 block belongs in.
+
+          `memberIds: []` on purpose. A template cannot name people, because the
+          ids belong to one company and a template is shared across all of them
+          — so the empty default (every active member, in the firm's own order)
+          is both the only correct value and the useful one. An author narrows it
+          in the designer.
+        */
+        id: 'team',
+        type: 'team',
+        title: 'Who you will be working with',
+        memberIds: [],
+        showPhotos: true,
+        showQualifications: true,
+        layout: 'list',
+      }),
+      block({
         id: 'pricing',
         type: 'pricingTable',
         title: 'Fees',

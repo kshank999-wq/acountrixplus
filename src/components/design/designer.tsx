@@ -21,6 +21,7 @@ import {
 } from '@/modules/design/blocks'
 import { MERGE_FIELD_GROUPS, resolveBlocks, type MergeContext } from '@/modules/design/merge-fields'
 import { DocumentPage } from '@/components/design/document-page'
+import type { RenderedTeamMember } from '@/modules/studio/team'
 import { BlockEditor } from './block-editor'
 
 type Brand = {
@@ -76,6 +77,8 @@ export function Designer({
   templates,
   clauses,
   assets,
+  team = [],
+  teamPool = [],
   aiEnabled = false,
 }: {
   documentId: string
@@ -113,6 +116,21 @@ export function Designer({
   }>
   clauses: Array<{ id: string; title: string; body: string; approved: boolean }>
   assets: Array<{ id: string; filename: string }>
+  /**
+   * The active team directory, for the `team` block's picker (Phase 183).
+   *
+   * Two props rather than one, deliberately. This is what the author may
+   * **choose** — active people only, because retiring is how somebody leaves
+   * the directory without leaving the proposals that named them.
+   */
+  team?: Array<{ id: string; name: string; title: string | null }>
+  /**
+   * What the preview **renders** — the pool `teamForDocument` read, which also
+   * holds a retired person this document already names. A document being edited
+   * must preview as the client will see it, and that includes the principal who
+   * left after it was drafted.
+   */
+  teamPool?: RenderedTeamMember[]
   /**
    * Whether the AI module is on for this company.
    *
@@ -468,6 +486,7 @@ export function Designer({
               block={selected}
               clauses={clauses}
               assets={assets}
+              team={team}
               onChange={(next) =>
                 update(blocks.map((block) => (block.id === next.id ? next : block)))
               }
@@ -522,6 +541,7 @@ export function Designer({
                 taxCents,
                 logoUrl: brand?.logoAssetId ? assetUrl(brand.logoAssetId) : null,
                 assetUrl,
+                teamMembers: teamPool,
               }}
             />
           </div>
@@ -557,6 +577,12 @@ function labelFor(block: Block): string {
       return `List — ${block.items.length} item${block.items.length === 1 ? '' : 's'}`
     case 'table':
       return `Table — ${truncate(block.title) || `${block.rows.length} rows`}`
+    case 'team':
+      return `Team — ${
+        block.memberIds.length === 0
+          ? 'everyone'
+          : `${block.memberIds.length} ${block.memberIds.length === 1 ? 'person' : 'people'}`
+      }`
     case 'keyValue':
       return `Details — ${truncate(block.title) || `${block.rows.length} rows`}`
     case 'pricingTable':

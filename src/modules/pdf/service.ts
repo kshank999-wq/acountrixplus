@@ -9,6 +9,7 @@ import {
 } from '@/db/schema'
 import { parseBlocks } from '@/modules/design/blocks'
 import { disclosureForDocument, proposalRenderContext } from '@/modules/design/documents'
+import { teamForDocument } from '@/modules/studio/team'
 import { storeDocument, attachDocument } from '@/modules/evidence/service'
 import { scoped, requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
@@ -108,10 +109,12 @@ export async function proposalRenderInput(
   const items = rendered?.items ?? []
   const brand = await brandFor(companyId, document.brandKitId, exec)
 
+  // Forgiving on read, as `parseBlocks` is everywhere else: a single
+  // malformed block should not stop a client receiving their proposal.
+  const blocks = parseBlocks(document.blocks)
+
   return {
-    // Forgiving on read, as `parseBlocks` is everywhere else: a single
-    // malformed block should not stop a client receiving their proposal.
-    blocks: parseBlocks(document.blocks),
+    blocks,
     brand,
     merge: rendered?.context ?? {},
     pageSize: document.pageSize as 'letter' | 'a4' | 'legal',
@@ -130,6 +133,15 @@ export async function proposalRenderInput(
     */
     disclosureText: await disclosureForDocument(companyId, document.id, exec),
     showPageNumbers: document.showPageNumbers,
+    /*
+      The firm's people this document names (Phase 183, §15).
+
+      Read from the same `exec` as everything else here, which matters for the
+      send path: a proposal's PDF is rendered inside the transaction that writes
+      its version, so the names on the paper are the names at the moment it was
+      sent.
+    */
+    team: await teamForDocument(companyId, blocks, exec),
     lines: items.map((item) => ({
       description: item.description,
       quantityMilli: item.quantityMilli,

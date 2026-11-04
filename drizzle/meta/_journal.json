@@ -708,6 +708,13 @@
       "when": 1793100000000,
       "tag": "0100_phase182_the_two_sections_with_no_home",
       "breakpoints": true
+    },
+    {
+      "idx": 101,
+      "version": "7",
+      "when": 1793200000000,
+      "tag": "0101_phase183_the_people_on_the_proposal",
+      "breakpoints": true
     }
   ]
 }

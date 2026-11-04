@@ -1,6 +1,7 @@
 import { formatCents } from '@/lib/money'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { normalizeTable, type Block } from '@/modules/design/blocks'
+import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import { safeUrl } from '@/modules/design/urls'
 
 /**
@@ -58,6 +59,18 @@ export type RenderData = {
    */
   assetUrl: (assetId: string) => string
   /**
+   * The firm's people, for a `team` block (Phase 183).
+   *
+   * Supplied rather than held in the block, the same decision `pricingTable`
+   * makes: a bio copied into a document is a second copy of a paragraph that
+   * will be edited once, and the stale one is what the client reads.
+   *
+   * The whole **pool** `teamForDocument` read, not one block's selection —
+   * `selectTeam` does the choosing in the renderer, so a document with two team
+   * blocks is still one query and the two blocks cannot be served the same list.
+   */
+  teamMembers?: RenderedTeamMember[]
+  /**
    * Pre-rendered QR SVG markup, keyed by block id. Encoding happens on the
    * server so the same markup works in the browser, in print, and in email.
    */
@@ -111,6 +124,8 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
       return <KeyValueBlock block={block} />
     case 'table':
       return <TableBlock block={block} />
+    case 'team':
+      return <TeamBlock block={block} pool={data.teamMembers ?? []} data={data} />
     case 'pricingTable':
       return <PricingBlock block={block} data={data} />
     case 'image':
@@ -151,6 +166,68 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
  * ragged renders padded here exactly as it does in the PDF and the email. Three
  * renderers reading the raw rows is how one document becomes three documents.
  */
+/**
+ * The firm's people (Phase 183, §15).
+ *
+ * `data.teamMembers` is the document's **pool** — the active directory plus any
+ * retired person a block names — and `selectTeam` picks this block's people out
+ * of it. Shared with the PDF and the email, so a block cannot name three people
+ * and show two of them on paper.
+ */
+function TeamBlock({
+  block,
+  pool,
+  data,
+}: {
+  block: Extract<Block, { type: 'team' }>
+  pool: RenderedTeamMember[]
+  data: RenderData
+}) {
+  const members = selectTeam(pool, block.memberIds)
+
+  // Nothing rather than an empty heading: a "Who you will be working with"
+  // section with no people under it reads as a rendering fault.
+  if (members.length === 0) return null
+
+  return (
+    <div className="doc-block doc-team-block">
+      {block.title && <p className="doc-team-title">{block.title}</p>}
+      <ul className={block.layout === 'grid' ? 'doc-team-grid' : 'doc-team-list'}>
+        {members.map((member) => (
+          <li key={member.id} className="doc-team-member">
+            {block.showPhotos && member.headshotAssetId && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                src={data.assetUrl(member.headshotAssetId)}
+                alt={member.name}
+                className="doc-team-photo"
+              />
+            )}
+            <div>
+              <p className="doc-team-name">
+                {member.name}
+                {block.showQualifications && member.qualifications && (
+                  <span className="doc-team-quals">, {member.qualifications}</span>
+                )}
+              </p>
+              {member.title && <p className="doc-team-role">{member.title}</p>}
+              {member.bio &&
+                member.bio
+                  .split(/\n{2,}/)
+                  .filter((paragraph) => paragraph.trim())
+                  .map((paragraph, index) => (
+                    <p key={index} className="doc-team-bio">
+                      {paragraph}
+                    </p>
+                  ))}
+            </div>
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
 function TableBlock({ block }: { block: Extract<Block, { type: 'table' }> }) {
   const { width, header, rows, align } = normalizeTable(block)
   if (width === 0) return null

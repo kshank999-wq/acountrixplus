@@ -9,6 +9,7 @@ import { AppShell } from '@/components/app-shell'
 import { getProposal } from '@/modules/crm/proposals'
 import { documentForProposal, listTemplates, proposalRenderContext } from '@/modules/design/documents'
 import { listClauses } from '@/modules/studio/service'
+import { listTeamMembers, teamForDocument } from '@/modules/studio/team'
 import { listAssets } from '@/modules/studio/assets'
 import { aiAvailable } from '@/modules/ai/settings'
 import { parseBlocks } from '@/modules/design/blocks'
@@ -44,11 +45,17 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
   const { proposal, items } = proposalData
   const document = await documentForProposal(actor, id)
 
-  const [templates, clauses, assets, render, aiEnabled] = await Promise.all([
+  const blocks = parseBlocks(document.blocks)
+
+  const [templates, clauses, assets, render, team, teamPool, aiEnabled] = await Promise.all([
     listTemplates(actor),
     listClauses(actor),
     listAssets(actor),
     proposalRenderContext(actor.companyId, id),
+    listTeamMembers(actor),
+    // The pool the preview renders, which is not the directory the picker
+    // offers: a retired person this document already names still appears on it.
+    teamForDocument(actor.companyId, blocks),
     aiAvailable(actor),
   ])
 
@@ -57,7 +64,7 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
     : []
 
   const context = render?.context ?? {}
-  const unresolved = unresolvedInBlocks(parseBlocks(document.blocks), context)
+  const unresolved = unresolvedInBlocks(blocks, context)
 
   return (
     <AppShell
@@ -77,7 +84,7 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
         title={proposal.title}
         isEditable={proposal.status === 'draft' && can(actor, 'proposals:manage')}
         statusNote={`This proposal is ${proposal.status.replace('_', ' ')} — its sent version is locked.`}
-        initialBlocks={parseBlocks(document.blocks)}
+        initialBlocks={blocks}
         setup={{
           pageSize: document.pageSize,
           orientation: document.orientation,
@@ -104,6 +111,8 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
             : null
         }
         context={context}
+        team={team.map((member) => ({ id: member.id, name: member.name, title: member.title }))}
+        teamPool={teamPool}
         unresolvedFields={unresolved}
         items={items.map((item) => ({
           id: item.id,

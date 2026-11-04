@@ -143,7 +143,7 @@ describe('the queue the policies had taken out', () => {
     ])
   })
 
-  it('leaves them unpoliced in the database, and the count at 163', async () => {
+  it('leaves them unpoliced in the database, and the count at 164', async () => {
     const rows = (await db.execute(sql`
       select
         (select count(*)::int from pg_class where relrowsecurity) as policed,
@@ -165,7 +165,13 @@ describe('the queue the policies had taken out', () => {
       for running the suite again after fixing it, rather than reasoning that
       the fixes were obviously sufficient.
     */
-    expect(rows[0].policed).toBe(163)
+    /*
+      164 since Phase 183 and `team_members`, policed in the migration that
+      created it. Three phases in a row have now moved this number *in* the
+      phase that moved the schema, which is the habit Phase 179 was arguing for
+      and the only reason this line is still a count rather than a range.
+    */
+    expect(rows[0].policed).toBe(164)
   })
 
   it('names what policing them would have done, because it would have been silent', () => {

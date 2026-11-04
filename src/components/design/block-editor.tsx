@@ -14,11 +14,21 @@ export function BlockEditor({
   block,
   clauses,
   assets,
+  team,
   onChange,
 }: {
   block: Block
   clauses: Array<{ id: string; title: string; body: string; approved: boolean }>
   assets: Array<{ id: string; filename: string }>
+  /**
+   * The active team directory, for a `team` block (Phase 183).
+   *
+   * Active only: retiring somebody is how a firm takes them out of the
+   * directory without taking them off the proposals that named them, so a
+   * retired member keeps rendering where they are already chosen and cannot be
+   * newly added.
+   */
+  team: Array<{ id: string; name: string; title: string | null }>
   onChange: (block: Block) => void
 }) {
   const set = (patch: Partial<Block>) => onChange({ ...block, ...patch } as Block)
@@ -447,6 +457,96 @@ export function BlockEditor({
               cannot rely on an embedded player.
             </span>
           </label>
+        </div>
+      )}
+
+      {block.type === 'team' && (
+        <div className="space-y-2">
+          <Field label="Title" value={block.title} onChange={(title) => set({ title })} />
+
+          {team.length === 0 ? (
+            /*
+              A refusal a person can act on (Phase 119) rather than an empty
+              list: the block is in the palette before anybody has filled the
+              directory, and "no options" does not say where the options come
+              from.
+            */
+            <p className="text-xs text-muted">
+              Nobody is in the team directory yet. Add people in the Design Center and they
+              become available here.
+            </p>
+          ) : (
+            <>
+              <fieldset className="space-y-1">
+                <legend className="mb-1 text-xs text-muted">People</legend>
+                {team.map((member) => {
+                  const chosen = block.memberIds.indexOf(member.id)
+                  return (
+                    <label
+                      key={member.id}
+                      className="flex items-center gap-2 text-xs text-muted"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={chosen >= 0}
+                        onChange={(event) =>
+                          /*
+                            Appended on tick and removed on untick, so the order
+                            in the block is the order the author chose them —
+                            which is the order the document renders. A list that
+                            re-sorted itself to the directory's order would throw
+                            away the one thing a named selection says.
+                          */
+                          set({
+                            memberIds: event.target.checked
+                              ? [...block.memberIds, member.id]
+                              : block.memberIds.filter((id) => id !== member.id),
+                          })
+                        }
+                        className="rounded border-line"
+                      />
+                      <span>
+                        {chosen >= 0 && (
+                          <span className="mr-1 text-faint">{chosen + 1}.</span>
+                        )}
+                        {member.name}
+                        {member.title && <span className="text-faint"> — {member.title}</span>}
+                      </span>
+                    </label>
+                  )
+                })}
+              </fieldset>
+              <p className="text-xs text-faint">
+                {block.memberIds.length === 0
+                  ? 'Nobody ticked, so the document shows everybody in the directory order.'
+                  : 'They appear in the order you ticked them.'}
+              </p>
+            </>
+          )}
+
+          <Toggle
+            label="Show headshots"
+            checked={block.showPhotos}
+            onChange={(showPhotos) => set({ showPhotos })}
+          />
+          <Toggle
+            label="Show qualifications after the name"
+            checked={block.showQualifications}
+            onChange={(showQualifications) => set({ showQualifications })}
+          />
+          <Select
+            label="Layout"
+            value={block.layout}
+            options={[
+              { value: 'list', label: 'List — one per row' },
+              { value: 'grid', label: 'Grid — cards' },
+            ]}
+            onChange={(value) => set({ layout: value as 'list' | 'grid' })}
+          />
+          <p className="text-xs text-faint">
+            Headshots and the grid layout apply on the page. The PDF sets the names and bios as
+            text, and an email is stacked — see the block&rsquo;s own note.
+          </p>
         </div>
       )}
 

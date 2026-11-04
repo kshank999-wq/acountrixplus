@@ -12,6 +12,8 @@ import { proposalByToken, recordView } from '@/modules/crm/proposals'
 import { isAcceptable } from '@/modules/crm/acceptance'
 import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
+import { parseBlocks } from '@/modules/design/blocks'
+import { teamForDocument } from '@/modules/studio/team'
 import { truncateIp } from '@/modules/crm/intake'
 import { DocumentPage, brandTokens } from '@/components/design/document-page'
 import { AcceptancePanel } from './acceptance-panel'
@@ -76,6 +78,17 @@ export default async function PublicProposalPage({
   ])
 
   const document = documents[0]
+
+  /*
+    The firm's people this document names (Phase 183, §15).
+
+    Read after the document, because the ids are in its blocks — so a proposal
+    with no team block costs one query that returns the active directory and a
+    proposal with one gets the retired principal it named as well. The client
+    sees who was going to do the work, which is what retiring rather than
+    deleting is for.
+  */
+  const teamPool = await teamForDocument(proposal.companyId, parseBlocks(document?.blocks ?? []))
 
   const [kit] = document?.brandKitId
     ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
@@ -154,6 +167,7 @@ export default async function PublicProposalPage({
             taxCents: proposal.taxCents,
             logoUrl: logoAssetId ? assetUrl(logoAssetId) : null,
             assetUrl,
+            teamMembers: teamPool,
             signatureSlot: (
               <AcceptancePanel
                 token={token}

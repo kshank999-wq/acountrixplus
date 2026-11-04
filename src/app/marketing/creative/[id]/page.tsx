@@ -13,6 +13,7 @@ import {
   marketingRenderContext,
 } from '@/modules/design/documents'
 import { listClauses } from '@/modules/studio/service'
+import { listTeamMembers, teamForDocument } from '@/modules/studio/team'
 import { listAssets } from '@/modules/studio/assets'
 import { aiAvailable } from '@/modules/ai/settings'
 import { parseBlocks } from '@/modules/design/blocks'
@@ -47,11 +48,17 @@ export default async function CreativeDesignPage({
     notFound()
   }
 
-  const [templates, clauses, assets, context, aiEnabled] = await Promise.all([
+  const blocks = parseBlocks(document.blocks)
+
+  const [templates, clauses, assets, context, team, teamPool, aiEnabled] = await Promise.all([
     listTemplates(actor),
     listClauses(actor),
     listAssets(actor),
     marketingRenderContext(actor.companyId),
+    listTeamMembers(actor),
+    // The pool the preview renders, which is not the directory the picker
+    // offers: a retired person this document already names still appears on it.
+    teamForDocument(actor.companyId, blocks),
     aiAvailable(actor),
   ])
 
@@ -75,7 +82,7 @@ export default async function CreativeDesignPage({
         kind="marketing"
         title={document.name}
         isEditable={can(actor, 'marketing:manage')}
-        initialBlocks={parseBlocks(document.blocks)}
+        initialBlocks={blocks}
         setup={{
           pageSize: document.pageSize,
           orientation: document.orientation,
@@ -102,6 +109,8 @@ export default async function CreativeDesignPage({
             : null
         }
         context={context}
+        team={team.map((member) => ({ id: member.id, name: member.name, title: member.title }))}
+        teamPool={teamPool}
         // Merge fields are filled per recipient at send time, so an unresolved
         // field here is expected rather than a warning worth showing.
         unresolvedFields={[]}

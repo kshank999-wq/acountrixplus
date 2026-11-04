@@ -22,6 +22,7 @@ import { trackedLink } from './click-links'
 import { listUnsubscribeHeaders } from './list-headers'
 import { emailBrand, renderEmailHtml, renderEmailText, type EmailBrand } from './render-email'
 import { defaultBrandKit } from '@/modules/studio/service'
+import { teamForDocument, type RenderedTeamMember } from '@/modules/studio/team'
 import { evaluateSegment, parseDefinition, suppressedEmails } from './audience'
 import { getEmailProvider, publicBaseUrl, type OutboundMessage } from './email-provider'
 import { Refusal } from '@/modules/errors'
@@ -207,6 +208,22 @@ export async function sendStep(
   */
   const kit = await defaultBrandKit(ctx.companyId)
 
+  /*
+    The firm's people, for a `team` block (Phase 183, §15).
+
+    Loaded once per run rather than per recipient, for the reason the brand kit
+    gives above — a send to four thousand contacts is one row read. Resolved
+    from the creative's own blocks, so a campaign with no team block pays for
+    nothing it will not render.
+
+    §15 ends *"brand assets feed both the Proposal Designer and Marketing
+    Creative Studio"*, which is why this is here at all: a team block is offered
+    in the marketing palette, and a block the palette offers and the send drops
+    is Phase 160's shape — installed and inert.
+  */
+  const creativeBlocks = creative ? parseBlocks(creative.blocks) : []
+  const team = await teamForDocument(ctx.companyId, creativeBlocks)
+
   // The company's own name, which this module never loaded (Phase 74). The
   // profile is optional and its legal name is nullable; `companies.name` is
   // NOT NULL and exists from the moment a tenant registers, so it is the end
@@ -289,6 +306,7 @@ export async function sendStep(
       baseUrl,
       contactName: await contactDisplayName(member.contactId),
       organizationName: member.organizationName,
+      team,
     })
 
     const result = await provider.send(message)
@@ -411,6 +429,8 @@ async function buildMessage(input: {
   baseUrl: string
   contactName: string | null
   organizationName: string | null
+  /** The pool a `team` block selects from, read once for the whole run. */
+  team: RenderedTeamMember[]
 }): Promise<OutboundMessage> {
   const { recipient, campaign, step, creative, profile, brand, companyName, baseUrl } = input
 
@@ -459,8 +479,9 @@ async function buildMessage(input: {
       trackUrl,
       trackLink,
       footer: profile?.documentFooter ?? null,
+      team: input.team,
     }),
-    text: renderEmailText({ blocks, unsubscribeUrl, trackLink }),
+    text: renderEmailText({ blocks, unsubscribeUrl, trackLink, team: input.team }),
     unsubscribeUrl,
     unsubscribePostUrl,
     /*

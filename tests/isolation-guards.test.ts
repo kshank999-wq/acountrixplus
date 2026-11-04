@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { withoutComments } from '@/modules/source/enclosing'
+import { enclosingQuery, withoutComments } from '@/modules/source/enclosing'
 import { RegistryError } from '@/modules/errors/registry'
 import {
   companyScopedTablesIn,
@@ -80,13 +80,37 @@ function guardedWrites(): Write[] {
     for (const file of sourceFiles(dir)) {
       const src = readable(file)
 
-      for (const m of src.matchAll(
-        /\.(update|delete)\(\s*(\w+)\s*\)([\s\S]{0,600}?)\bwhere\(([\s\S]{0,300}?)\)\s*(?:\n|;|\.returning)/g,
-      )) {
-        const [, op, table, mid, where] = m
+      for (const m of src.matchAll(/\.(update|delete)\(\s*(\w+)\s*\)/g)) {
+        const [, op, table] = m
         if (!tables.has(table)) continue
 
-        const statement = mid + where
+        /*
+          The query's own span, not a fixed number of characters (Phase 183).
+
+          This read `[\s\S]{0,600}?` between the table and its `where(`, and a
+          `.set({ … })` longer than six hundred characters pushed the `where`
+          out of reach — so the statement did not match the pattern at all and
+          the scan **did not count the write**. Not a misclassification: a
+          silent omission, in the scan whose one job is to prove no write can be
+          aimed at another tenant's row.
+
+          Four were in that state. `updateTeamMember` is this phase's, and the
+          other three are Phase 154's `billStage`, Phase 102's `issueToken` and
+          Phase 6's `changeStage` — which moves every opportunity in the system
+          and had never been looked at by this file. All four are in fact
+          guarded, which is the only reason this is a measurement defect rather
+          than a disclosure; the point is that the scan was not what said so.
+
+          `enclosingQuery` is Phase 152's boundary and exists for exactly this —
+          its own docstring records ADR 0134 replacing a fixed-line window
+          "because the window leaked and excused a real defect". The reads scan
+          has used it since Phase 150. This half was still counting characters.
+        */
+        const span = enclosingQuery(src, m.index)
+        const statement = src.slice(span.from, span.to)
+        const where = /\bwhere\(([\s\S]*)/.exec(statement)?.[1] ?? ''
+        if (!where) continue
+
         const keyed = [...where.matchAll(/eq\(\s*\w+\.\w+\s*,\s*(input\.\w+|\w+Id)\s*\)/g)]
         if (keyed.length === 0) continue
 
@@ -192,20 +216,32 @@ describe('every write that can be aimed at a row', () => {
     // tests near the code that changed — the second tripwire to go red for
     // exactly that reason, after `refusal-audience` in Phase 167.
     //
-    // **A hundred and twelve since Phase 180** and `unlinkAsset`, which removes
-    // an asset's association with a record. `explicit-company` at 63: the
-    // delete is keyed by the link id a caller hands in *and* filtered on the
-    // acting company, which is what stops one tenant detaching another's
-    // association by guessing a uuid.
+    // **A hundred and eighteen since Phase 183**, and six of those are not new
+    // code. Four are the writes the fixed 600-character window never reached
+    // (see the scanner above): `changeStage`, `billStage`, `issueToken` and
+    // this phase's `updateTeamMember`. Two more are `retireTeamMember` and
+    // `restoreTeamMember`, which are new.
     //
-    // Counted in the phase that added it this time. The three counts Phase 177
-    // moved went unnoticed for two phases and Phase 179's full run found them,
-    // which is the argument for running this file in the phase rather than
-    // after it.
-    expect(WRITES.length).toBe(112)
+    // So the honest reading of this number moving by six is "one write added,
+    // one write added, and four that have been there for up to a hundred and
+    // seventy phases without this file looking at them". Every one of the four
+    // is guarded — none of them is a disclosure — and a scan that cannot see a
+    // write cannot say that, which is Phase 160's shape: a control that does
+    // not fire.
+    //
+    // `explicit-company` at 68 and `scoped-write` at 29: the five writes the
+    // team directory makes are keyed by an id a caller hands in *and* filtered
+    // on the acting company, which is what stops one tenant retiring another's
+    // principal by guessing a uuid.
+    //
+    // Counted in the phase that added it, as Phase 180 started doing. The three
+    // counts Phase 177 moved went unnoticed for two phases and Phase 179's full
+    // run found them, which is the argument for running this file in the phase
+    // rather than after it.
+    expect(WRITES.length).toBe(118)
     expect(by).toEqual({
-      'explicit-company': 63,
-      'scoped-write': 28,
+      'explicit-company': 68,
+      'scoped-write': 29,
       'read-then-refuse': 9,
       'owner-helper': 4,
       'system-actor': 4,

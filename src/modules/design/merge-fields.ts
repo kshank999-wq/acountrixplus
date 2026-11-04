@@ -151,6 +151,14 @@ export function resolveBlock(block: Block, context: MergeContext): Block {
         title: fill(block.title),
         rows: block.rows.map((row) => ({ label: fill(row.label), value: fill(row.value) })),
       }
+    /*
+      The block holds ids, not bios, so there is no text of its own to fill —
+      only the title an author wrote, which may say "{{client.name}}'s team".
+      The bios themselves are resolved from `team_members` at render time and
+      are the company's own copy rather than per-document text.
+    */
+    case 'team':
+      return { ...block, title: fill(block.title) }
     case 'table':
       // Header as well as body: a column headed `{{client.name}}` is a
       // comparison table, which is a real document and the reason the header
@@ -233,6 +241,8 @@ function textsOf(block: Block): string[] {
       return [block.title, ...block.rows.flatMap((row) => [row.label, row.value])]
     case 'table':
       return [block.title, ...block.header, ...block.rows.flat()]
+    case 'team':
+      return [block.title]
     case 'columns':
       return block.columns.flatMap((column) => [column.heading, column.body])
     case 'clause':

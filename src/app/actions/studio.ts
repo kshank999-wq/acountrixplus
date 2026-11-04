@@ -14,6 +14,13 @@ import {
 } from '@/modules/studio/service'
 import { deleteAsset, uploadAsset } from '@/modules/studio/assets'
 import {
+  addTeamMember,
+  reorderTeamMembers,
+  restoreTeamMember,
+  retireTeamMember,
+  updateTeamMember,
+} from '@/modules/studio/team'
+import {
   assetsForSubject,
   linkAsset,
   unlinkAsset,
@@ -333,5 +340,86 @@ export async function disassociateAssetAction(linkId: string): Promise<ActionRes
     const actor = await requireActor()
     await unlinkAsset(actor, linkId)
     return 'Removed.'
+  })
+}
+
+// --- The people on the proposal (Phase 183, §15) ---------------------------
+
+const teamMemberSchema = z.object({
+  name: z.string().trim().min(1).max(200),
+  title: z.string().trim().max(200).optional(),
+  bio: z.string().trim().max(4000).optional(),
+  qualifications: z.string().trim().max(300).optional(),
+  email: z.string().trim().max(320).optional(),
+  phone: z.string().trim().max(60).optional(),
+  headshotAssetId: z.string().uuid().nullable().optional(),
+})
+
+/*
+  `/studio` and the two designer paths. A bio edited in the Design Center
+  changes what a `team` block renders, and the designer's picker reads the
+  directory — so revalidating only `/studio` would leave an author looking at a
+  stale list of their own colleagues.
+*/
+const TEAM_PATHS = ['/studio', ...DOCUMENT_PATHS]
+
+export async function addTeamMemberAction(input: unknown): Promise<ActionResult> {
+  return run(TEAM_PATHS, async () => {
+    const parsed = teamMemberSchema.safeParse(input)
+    if (!parsed.success) {
+      throw new Refusal('A team member needs a name, and the other fields have length limits.')
+    }
+
+    const actor = await requireActor()
+    await addTeamMember(actor, parsed.data)
+    return `${parsed.data.name} added to the team directory.`
+  })
+}
+
+export async function updateTeamMemberAction(
+  memberId: string,
+  input: unknown,
+): Promise<ActionResult> {
+  return run(TEAM_PATHS, async () => {
+    const parsed = teamMemberSchema.partial().safeParse(input)
+    if (!parsed.success) {
+      throw new Refusal('Those details are longer than the directory holds.')
+    }
+
+    const actor = await requireActor()
+    await updateTeamMember(actor, memberId, parsed.data)
+    return 'Saved.'
+  })
+}
+
+/**
+ * Retire, not delete.
+ *
+ * The only removal offered. A proposal sent last year named the people who were
+ * going to do the work and the block holds their ids, so deleting the row would
+ * change what a client was shown — which is the argument the clause library
+ * already makes about revising wording.
+ */
+export async function retireTeamMemberAction(memberId: string): Promise<ActionResult> {
+  return run(TEAM_PATHS, async () => {
+    const actor = await requireActor()
+    await retireTeamMember(actor, memberId)
+    return 'Retired. Proposals that named them still do.'
+  })
+}
+
+export async function restoreTeamMemberAction(memberId: string): Promise<ActionResult> {
+  return run(TEAM_PATHS, async () => {
+    const actor = await requireActor()
+    await restoreTeamMember(actor, memberId)
+    return 'Back in the directory.'
+  })
+}
+
+export async function reorderTeamMembersAction(orderedIds: string[]): Promise<ActionResult> {
+  return run(TEAM_PATHS, async () => {
+    const actor = await requireActor()
+    await reorderTeamMembers(actor, orderedIds)
+    return 'Order saved.'
   })
 }

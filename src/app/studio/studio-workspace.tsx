@@ -6,12 +6,17 @@ import { formatCents } from '@/lib/money'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { BRAND_STYLE_FIELDS } from '@/modules/design/style-values'
 import {
+  addTeamMemberAction,
   createClauseAction,
   createServiceItemAction,
   deleteAssetAction,
+  reorderTeamMembersAction,
+  restoreTeamMemberAction,
+  retireTeamMemberAction,
   reviseClauseAction,
   saveBrandKitAction,
   saveProfileAction,
+  updateTeamMemberAction,
   uploadAssetAction,
 } from '@/app/actions/studio'
 
@@ -31,10 +36,29 @@ type Kit = {
   logoAssetId: string | null
 }
 
+export type TeamMemberRow = {
+  id: string
+  name: string
+  title: string | null
+  bio: string | null
+  qualifications: string | null
+  email: string | null
+  phone: string | null
+  isActive: boolean
+}
+
+/*
+  Tab order is §15's bullet order: *"Logo library, brand colors, fonts,
+  imagery, company description, service catalog, team bios, certifications,
+  licenses, insurance information."* `Team` sits after `Services` because
+  `team bios` sits after `service catalog`, which is a small thing and the kind
+  of small thing that makes a screen findable from the specification.
+*/
 const TABS = [
   { key: 'profile', label: 'Profile' },
   { key: 'brand', label: 'Brand' },
   { key: 'catalog', label: 'Services' },
+  { key: 'team', label: 'Team' },
   { key: 'clauses', label: 'Legal clauses' },
 ] as const
 
@@ -48,6 +72,7 @@ export function StudioWorkspace({
   assets,
   services,
   clauses,
+  team,
   revenueAccounts,
 }: {
   canManage: boolean
@@ -70,6 +95,8 @@ export function StudioWorkspace({
     versionNumber: number
     approved: boolean
   }>
+  /** The directory, retired members included — the tab shows and restores them. */
+  team: TeamMemberRow[]
   revenueAccounts: Array<{ id: string; number: string; name: string }>
 }) {
   const [tab, setTab] = useState<Tab>('profile')
@@ -119,6 +146,7 @@ export function StudioWorkspace({
           onResult={notify}
         />
       )}
+      {tab === 'team' && <TeamTab team={team} canManage={canManage} onResult={notify} />}
       {tab === 'clauses' && (
         <ClausesTab clauses={clauses} canManage={canManage} onResult={notify} />
       )}
@@ -757,6 +785,306 @@ function ClausesTab({
               )}
             </li>
           ))}
+        </ul>
+      )}
+    </section>
+  )
+}
+
+/**
+ * The firm's people (Phase 183, §15).
+ *
+ * The one screen where a bio is written, and the only place a member is
+ * retired. There is no delete: a proposal sent last year named the people who
+ * were going to do the work, the `team` block holds their ids, and the row
+ * surviving is what keeps that document true. The button says so, because a
+ * control whose consequence is invisible is a control somebody is surprised by.
+ */
+function TeamTab({
+  team,
+  canManage,
+  onResult,
+}: {
+  team: TeamMemberRow[]
+  canManage: boolean
+  onResult: Notify
+}) {
+  const router = useRouter()
+  const [pending, startTransition] = useTransition()
+  const [form, setForm] = useState({
+    name: '',
+    title: '',
+    qualifications: '',
+    bio: '',
+    email: '',
+    phone: '',
+  })
+  const [editing, setEditing] = useState<TeamMemberRow | null>(null)
+  const [showRetired, setShowRetired] = useState(false)
+
+  const active = team.filter((member) => member.isActive)
+  const retired = team.filter((member) => !member.isActive)
+  const shown = showRetired ? team : active
+
+  /** Moves one member and sends the whole order, which is what the core takes. */
+  function move(index: number, direction: -1 | 1) {
+    const ids = active.map((member) => member.id)
+    const target = index + direction
+    if (target < 0 || target >= ids.length) return
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+
+    startTransition(async () => {
+      const result = await reorderTeamMembersAction(ids)
+      onResult(result)
+      if (result.ok) router.refresh()
+    })
+  }
+
+  return (
+    <section className="card overflow-hidden">
+      <header className="border-b border-line px-4 py-3">
+        <h2 className="text-sm font-semibold">Team</h2>
+        <p className="text-xs text-muted">
+          Who goes on a capability statement or a proposal. A <code>Team</code> block in the
+          designer picks from this list; leaving it empty shows everybody in this order.
+        </p>
+      </header>
+
+      {canManage && (
+        <div className="space-y-2 border-b border-line p-4">
+          <div className="flex flex-wrap gap-2">
+            <input
+              value={form.name}
+              onChange={(event) => setForm({ ...form, name: event.target.value })}
+              placeholder="Name"
+              className="field flex-1 py-1.5 text-sm"
+            />
+            <input
+              value={form.title}
+              onChange={(event) => setForm({ ...form, title: event.target.value })}
+              placeholder="Title — Principal, Lead estimator"
+              className="field flex-1 py-1.5 text-sm"
+            />
+            <input
+              value={form.qualifications}
+              onChange={(event) => setForm({ ...form, qualifications: event.target.value })}
+              placeholder="Letters — PE, LEED AP"
+              className="field w-44 py-1.5 text-sm"
+            />
+          </div>
+          <textarea
+            value={form.bio}
+            onChange={(event) => setForm({ ...form, bio: event.target.value })}
+            rows={3}
+            placeholder="The bio a client reads. A blank line starts a new paragraph."
+            className="field text-sm"
+          />
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              value={form.email}
+              onChange={(event) => setForm({ ...form, email: event.target.value })}
+              placeholder="Email (optional)"
+              className="field w-56 py-1.5 text-sm"
+            />
+            <input
+              value={form.phone}
+              onChange={(event) => setForm({ ...form, phone: event.target.value })}
+              placeholder="Phone (optional)"
+              className="field w-44 py-1.5 text-sm"
+            />
+            <button
+              onClick={() =>
+                startTransition(async () => {
+                  const result = await addTeamMemberAction(form)
+                  onResult(result)
+                  if (result.ok) {
+                    setForm({
+                      name: '',
+                      title: '',
+                      qualifications: '',
+                      bio: '',
+                      email: '',
+                      phone: '',
+                    })
+                    router.refresh()
+                  }
+                })
+              }
+              disabled={!form.name.trim() || pending}
+              className="btn btn-primary ml-auto text-xs"
+            >
+              Add person
+            </button>
+          </div>
+        </div>
+      )}
+
+      {retired.length > 0 && (
+        <label className="flex items-center gap-2 border-b border-line px-4 py-2 text-xs text-muted">
+          <input
+            type="checkbox"
+            checked={showRetired}
+            onChange={(event) => setShowRetired(event.target.checked)}
+            className="rounded border-line"
+          />
+          Show {retired.length} retired {retired.length === 1 ? 'person' : 'people'}
+        </label>
+      )}
+
+      {shown.length === 0 ? (
+        <p className="px-4 py-8 text-center text-sm text-muted">
+          Nobody in the directory yet.
+        </p>
+      ) : (
+        <ul className="divide-y divide-line">
+          {shown.map((member) => {
+            const index = active.findIndex((row) => row.id === member.id)
+            return (
+              <li key={member.id} className="px-4 py-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-2">
+                  <p className="text-sm font-medium">
+                    {member.name}
+                    {member.qualifications && (
+                      <span className="font-normal text-muted">, {member.qualifications}</span>
+                    )}
+                  </p>
+                  <div className="flex items-center gap-1.5">
+                    {member.title && (
+                      <span className="chip bg-raised text-muted">{member.title}</span>
+                    )}
+                    {!member.isActive && (
+                      <span className="chip bg-raised text-faint">retired</span>
+                    )}
+                  </div>
+                </div>
+
+                {editing?.id === member.id ? (
+                  <div className="mt-2 space-y-2">
+                    <div className="flex flex-wrap gap-2">
+                      <input
+                        value={editing.name}
+                        onChange={(event) => setEditing({ ...editing, name: event.target.value })}
+                        className="field flex-1 py-1.5 text-sm"
+                      />
+                      <input
+                        value={editing.title ?? ''}
+                        onChange={(event) =>
+                          setEditing({ ...editing, title: event.target.value })
+                        }
+                        placeholder="Title"
+                        className="field flex-1 py-1.5 text-sm"
+                      />
+                      <input
+                        value={editing.qualifications ?? ''}
+                        onChange={(event) =>
+                          setEditing({ ...editing, qualifications: event.target.value })
+                        }
+                        placeholder="Letters"
+                        className="field w-44 py-1.5 text-sm"
+                      />
+                    </div>
+                    <textarea
+                      value={editing.bio ?? ''}
+                      onChange={(event) => setEditing({ ...editing, bio: event.target.value })}
+                      rows={4}
+                      className="field text-sm"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() =>
+                          startTransition(async () => {
+                            const result = await updateTeamMemberAction(member.id, {
+                              name: editing.name,
+                              title: editing.title ?? '',
+                              qualifications: editing.qualifications ?? '',
+                              bio: editing.bio ?? '',
+                            })
+                            onResult(result)
+                            if (result.ok) {
+                              setEditing(null)
+                              router.refresh()
+                            }
+                          })
+                        }
+                        disabled={!editing.name.trim() || pending}
+                        className="btn btn-primary px-3 py-1 text-xs"
+                      >
+                        Save
+                      </button>
+                      <button onClick={() => setEditing(null)} className="btn px-3 py-1 text-xs">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {member.bio && (
+                      <p className="mt-1 whitespace-pre-line text-xs text-muted">{member.bio}</p>
+                    )}
+                    {canManage && (
+                      <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <button
+                          onClick={() => setEditing(member)}
+                          className="btn px-2 py-1 text-xs"
+                        >
+                          Edit
+                        </button>
+
+                        {member.isActive ? (
+                          <>
+                            <button
+                              onClick={() => move(index, -1)}
+                              disabled={index <= 0 || pending}
+                              className="btn px-2 py-1 text-xs"
+                              aria-label={`Move ${member.name} up`}
+                            >
+                              ↑
+                            </button>
+                            <button
+                              onClick={() => move(index, 1)}
+                              disabled={index < 0 || index >= active.length - 1 || pending}
+                              className="btn px-2 py-1 text-xs"
+                              aria-label={`Move ${member.name} down`}
+                            >
+                              ↓
+                            </button>
+                            <button
+                              onClick={() =>
+                                startTransition(async () => {
+                                  const result = await retireTeamMemberAction(member.id)
+                                  onResult(result)
+                                  if (result.ok) router.refresh()
+                                })
+                              }
+                              disabled={pending}
+                              className="btn ml-auto px-2 py-1 text-xs"
+                              title="Takes them out of the directory. Proposals that named them keep naming them."
+                            >
+                              Retire
+                            </button>
+                          </>
+                        ) : (
+                          <button
+                            onClick={() =>
+                              startTransition(async () => {
+                                const result = await restoreTeamMemberAction(member.id)
+                                onResult(result)
+                                if (result.ok) router.refresh()
+                              })
+                            }
+                            disabled={pending}
+                            className="btn ml-auto px-2 py-1 text-xs"
+                          >
+                            Restore
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </li>
+            )
+          })}
         </ul>
       )}
     </section>

@@ -1,4 +1,5 @@
 import { normalizeTable, type Block } from '@/modules/design/blocks'
+import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { resolveMergeFields, type MergeContext } from '@/modules/design/merge-fields'
 import {
@@ -82,6 +83,16 @@ export type RenderInput = {
   /** Supplied by the caller so the figures cannot drift from the record. */
   lines?: PricingLine[]
   totals?: DocumentTotals
+  /**
+   * The firm's people, for a `team` block (Phase 183, §15).
+   *
+   * Supplied for the same reason as the lines above: the block holds ids, so a
+   * bio cannot drift from the one copy in `team_members`.
+   *
+   * The document's whole pool; `selectTeam` picks each block's people out of it,
+   * which is the same function the page and the email use.
+   */
+  team?: RenderedTeamMember[]
   title: string
   author: string
   /** Stamped into the file. The send time, never `new Date()`. */
@@ -547,6 +558,66 @@ class Composer {
         })
 
         this.gap(base * 0.6)
+        return
+      }
+
+      case 'team': {
+        /*
+          The firm's people (Phase 183, §15). One piece per person, so a long
+          team breaks across pages where the engine already knows how — and the
+          title is `keepWithNext` so "Who you will be working with" never sits
+          alone at the foot of a page.
+
+          Headshots are deliberately not drawn. The PDF writer places text and
+          rectangles; embedding an image means decoding it, and a photograph
+          dropped into a print-quality document at whatever resolution it
+          happens to be is worse than a name set properly. Stated here rather
+          than discovered: `showPhotos` is honoured on the page and in the
+          email, and ignored here.
+        */
+        const members = selectTeam(this.input.team ?? [], block.memberIds)
+        if (members.length === 0) return
+
+        if (block.title) {
+          this.paragraph(block.title, {
+            font: this.headingBold,
+            size: base * 1.15,
+            spaceAfter: base * 0.3,
+          })
+          const last = this.pieces[this.pieces.length - 1]
+          if (last) last.keepWithNext = true
+        }
+
+        for (const member of members) {
+          const heading = block.showQualifications && member.qualifications
+            ? `${member.name}, ${member.qualifications}`
+            : member.name
+
+          this.paragraph(heading, {
+            font: this.headingBold,
+            size: base,
+            spaceAfter: 0,
+          })
+          const nameePiece = this.pieces[this.pieces.length - 1]
+          if (nameePiece) nameePiece.keepWithNext = true
+
+          if (member.title) {
+            this.paragraph(member.title, {
+              font: this.body,
+              size: base * 0.9,
+              color: this.muted,
+              spaceAfter: base * 0.2,
+            })
+            const titlePiece = this.pieces[this.pieces.length - 1]
+            if (titlePiece) titlePiece.keepWithNext = Boolean(member.bio)
+          }
+
+          if (member.bio) {
+            this.paragraph(member.bio, { font: this.body, size: base, spaceAfter: base * 0.5 })
+          }
+        }
+
+        this.gap(base * 0.4)
         return
       }
 

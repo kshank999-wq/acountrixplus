@@ -209,12 +209,15 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 542 of ' +
-      'the 911 reads, against 28 of the 111 writes. The two halves of this system are guarded ' +
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 566 of ' +
+      'the 921 reads, against 29 of the 118 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
-      'All four of these numbers were a phase or more out until Phase 179 measured them — and ' +
-      'they are the one entry in `PINNED_CLAIMS` with no measure, because the scans that produce ' +
-      'them live inside two test files rather than in a module.',
+      'All four were a phase or more out until Phase 179 measured them, and then **drifted twice ' +
+      'more** — Phase 180 moved them and did not move this sentence, and Phase 183 found it ' +
+      'reading 542 of 911 against a measured 562 of 916. It is the one entry in `PINNED_CLAIMS` ' +
+      'with no measure, because the scans that produce these numbers live inside two test files ' +
+      'rather than in a module, and a declaration that has now watched itself go stale twice is ' +
+      'the argument for moving them rather than a reason to stop declaring it (Phase 157).',
   },
   {
     kind: 'join-inherited',
