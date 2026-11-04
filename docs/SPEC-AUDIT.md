@@ -170,7 +170,7 @@ suppression (`modules/crm/intake`, `modules/notify`), and security review gating
 **Strong tenant isolation** is the partial, and it is partial in a precise way
 rather than vaguely: the application layer is complete and measured — 111 writes
 and 911 reads, every one guarded (Phases 149–150, counted again in 179) — and
-the database layer is installed, forced on 164 tables, proven against a restricted role, and **not
+the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.
@@ -213,7 +213,7 @@ otherwise.
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
 | 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 18 block types. |
 | 7 | ~~**`deliverables` and `assumptions`**~~ | **Built in Phase 182**, and the measurement here understated it: of the ten said to have a home, **four had a column that nothing rendered** — `executive_summary`, `scope`, `exclusions` and `terms` were written, snapshotted into versions, and reached no document. All six narrative sections are merge fields now, and `PROPOSAL_COMPONENTS` makes "has a home" mean "a client can read it". See ADR 0182. |
-| 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` uses — see ADR 0180 for why the precedent was not followed. Four of the five kinds have no attach control yet. |
+| 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` used — see ADR 0180 for why the precedent was not followed, and ADR 0184 for `document_links` being converted too. Four of the five kinds have no attach control yet. |
 | 15 | ~~**Team bios**~~ | **Built in Phase 183.** A `team_members` table — not a `jsonb` array beside `credentials`, because a document has to *point at* one person and a reference into an array has no key — plus a `team` block that holds ids and a Design Center screen that writes bios. Retired rather than deleted, so a proposal sent last year still names who was going to do the work. See ADR 0183. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
@@ -222,6 +222,17 @@ rows are one piece of work. **Four are struck through: asset association (Phase
 182), and team bios (Phase 183).** Five capabilities remain, and all five are
 §7's design engine — the client-link comment thread, crop/mask, SVG, artboard
 affordances and vector primitives.
+
+**What Phase 184 found that this audit cannot look for.** The nominated work —
+converting `document_links` away from a keyless polymorphic reference — was a
+schema-shape job with no §-number. Doing it found that discarding a draft
+journal entry left an unanswerable question on an accountant's work list
+forever, that `tests/party-merge.test.ts` had been failing since Phase 180, and
+that **merging two records of one business had never moved their evidence**, in
+any phase, because the reference the merge needed to see had no foreign key to
+see it by. None of the three is a missing capability. This audit measures what
+the specification asks for against what exists; it has no column for *works, and
+wrongly*.
 
 **The correction of Phase 182, confirmed again in Phase 183.** `team bios` was
 measured here as having *nothing* behind it, and that was right. But the

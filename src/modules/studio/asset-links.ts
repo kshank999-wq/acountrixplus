@@ -34,11 +34,18 @@ import {
  * which Phase 116's device says is the thing to avoid rather than the thing to
  * add.
  *
- * It is worth being precise about the difference from `modules/evidence`, which
- * *does* carry that proof in `requireSubject`. There the reference is
- * polymorphic and has no key, so the code is the only thing that can check. The
- * check is not duplicated here because here it is not needed, and that
- * asymmetry is the whole argument of the migration.
+ * This used to say the difference from `modules/evidence` was that there the
+ * reference is polymorphic and has no key, *"so the code is the only thing that
+ * can check"*. Phase 184 converted that side too, and the asymmetry it
+ * described is gone: `evidence_subjects` carries twelve composite keys and the
+ * two evidence tables reference it.
+ *
+ * `requireSubject` survives there and nothing like it is needed here, for a
+ * reason that is now about **sentences** rather than about checks. Evidence
+ * hangs on twelve kinds of record, so the refusal has to say which — *"That
+ * payroll run does not exist"* — and a constraint name cannot. Here there are
+ * five kinds and `explain()` reads the constraint name to say the same thing
+ * from the failure, which is the same job done one step later.
  *
  * What is left is the two things the database cannot do: refuse the act to
  * somebody without the permission, and turn the driver's constraint violation

@@ -121,9 +121,14 @@ export const documents = pgTable(
  *
  * An enum rather than free text, because a typo in a subject type is a document
  * that is attached to nothing and displayed nowhere, and nothing would ever
- * report it. Adding a kind means adding it here *and* to the registry in
- * `src/modules/evidence/subjects.ts`, which is the point: the registry names
- * the permission that guards it, so a new kind cannot arrive unguarded.
+ * report it. Adding a kind means adding it here, to the registry in
+ * `src/modules/evidence/subjects.ts`, *and* to `evidence_subjects` as a column
+ * with a foreign key — which is the point three times over: the registry names
+ * the permission that guards it, and the column is what stops the evidence
+ * outliving the record (Phase 184).
+ *
+ * The three lists are asserted against each other, so a kind cannot be added
+ * in one of them.
  */
 export const evidenceSubjectEnum = pgEnum('evidence_subject', [
   'bank_transaction',
@@ -162,13 +167,30 @@ export const documentLinks = pgTable(
       .notNull()
       .references(() => documents.id, { onDelete: 'cascade' }),
 
-    subjectType: evidenceSubjectEnum('subject_type').notNull(),
     /**
-     * No foreign key, because there is no one table to point at. The registry
-     * checks existence under the tenant filter before a link is written, which
-     * is the same guarantee a constraint would give and the only one available
-     * for a polymorphic reference.
+     * The record this hangs on, as a real composite reference (Phase 184).
+     *
+     * `document_links_subject_fkey` points the pair at `evidence_subjects`,
+     * whose own twelve foreign keys point at the records — so a link cannot
+     * name a record that does not exist, cannot name one belonging to another
+     * company, cannot name the **wrong kind** for a real id, and cannot outlive
+     * the record it is evidence of.
+     *
+     * This used to say *"No foreign key, because there is no one table to point
+     * at,"* and that the registry's existence check was *"the same guarantee a
+     * constraint would give."* It was the same guarantee minus the one that
+     * matters on a delete: discarding a draft journal entry left the working
+     * paper's link, and the accountant's question, pointing at nothing.
+     *
+     * The key is declared in migration 0102 and **not mirrored here**, stated
+     * rather than quietly omitted: `evidence_subjects` imports this file for the
+     * enum, so declaring the reference on this side would be a circular import.
+     * The migration is the source of truth for DDL in this project either way;
+     * what is lost is that a reader of this file alone does not see the
+     * reference, and `tests/the-record-that-was-deleted.test.ts` asserts it
+     * against the database's own catalogue so the gap cannot widen.
      */
+    subjectType: evidenceSubjectEnum('subject_type').notNull(),
     subjectId: uuid('subject_id').notNull(),
 
     attachedBy: uuid('attached_by').references(() => users.id, { onDelete: 'set null' }),
@@ -211,6 +233,7 @@ export const recordNotes = pgTable(
       .notNull()
       .references(() => companies.id, { onDelete: 'cascade' }),
 
+    /** As `document_links`: `record_notes_subject_fkey` (Phase 184). */
     subjectType: evidenceSubjectEnum('subject_type').notNull(),
     subjectId: uuid('subject_id').notNull(),
 

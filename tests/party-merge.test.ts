@@ -19,6 +19,7 @@ import {
   describeMerge,
   EXCLUSIVE_REFERENCES,
   mergeCheck,
+  EVIDENCE_PARTY_REFERENCES,
   PARTY_REFERENCES,
 } from '@/modules/parties/merge'
 import { correction, mustSayWhy } from '@/modules/corrections/vocabulary'
@@ -295,15 +296,34 @@ describe('against the database', () => {
  */
 describe('every reference is registered', () => {
   it('names exactly the foreign keys the database has', async () => {
+    /*
+      Paired by position, so a composite key names one column (Phase 184).
+
+      This used to `unnest(conkey)` alone, which lists **every** column of a
+      key — so `(company_id, customer_id) → customers (company_id, id)` arrived
+      as two references, one of them `company_id`, which is not a party
+      reference and never will be. Pairing `conkey` with `confkey` and keeping
+      the column that points at `customers.id` is the same question asked
+      correctly.
+
+      It mattered. `asset_links` has had that composite key since Phase 180 and
+      is not in `PARTY_REFERENCES`, so **this test was red for four phases** —
+      180 through 183 — and nobody ran it. ADR 0178's prediction, holding again:
+      a scan that reads the whole catalogue cannot be checked by running the
+      tests near the code that changed. While it was red, merging two records of
+      one business left the collateral on the losing record.
+    */
     const rows = (await db.execute(
       sql`select c.confrelid::regclass::text as target,
                  c.conrelid::regclass::text as tbl,
                  a.attname::text as col
           from pg_constraint c
-          join unnest(c.conkey) k on true
-          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = k
+          join generate_subscripts(c.conkey, 1) as i on true
+          join pg_attribute a on a.attrelid = c.conrelid and a.attnum = c.conkey[i]
+          join pg_attribute f on f.attrelid = c.confrelid and f.attnum = c.confkey[i]
           where c.contype = 'f'
-            and c.confrelid::regclass::text in ('customers', 'vendors')`,
+            and c.confrelid::regclass::text in ('customers', 'vendors')
+            and f.attname = 'id'`,
     )) as unknown as Array<{ target: string; tbl: string; col: string }>
 
     for (const side of ['customer', 'vendor'] as const) {
@@ -315,7 +335,14 @@ describe('every reference is registered', () => {
         .map((row) => `${row.tbl}.${row.col}`)
         .sort()
 
-      const registered = PARTY_REFERENCES[side]
+      /*
+        The evidence arc is registered separately and is still registered:
+        `evidence_subjects` has no `id` for the repoint loop to return and one
+        row per party, so it has its own function. Included here because the
+        question this test asks is "does the merge know about this key", not
+        "is it in that one list".
+      */
+      const registered = [...PARTY_REFERENCES[side], EVIDENCE_PARTY_REFERENCES[side]]
         .map((ref) => `${ref.table}.${ref.column}`)
         .sort()
 

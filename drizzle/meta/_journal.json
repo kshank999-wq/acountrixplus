@@ -715,6 +715,13 @@
       "when": 1793200000000,
       "tag": "0101_phase183_the_people_on_the_proposal",
       "breakpoints": true
+    },
+    {
+      "idx": 102,
+      "version": "7",
+      "when": 1793300000000,
+      "tag": "0102_phase184_the_record_that_was_deleted",
+      "breakpoints": true
     }
   ]
 }

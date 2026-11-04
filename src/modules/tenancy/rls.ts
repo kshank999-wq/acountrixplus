@@ -10,7 +10,7 @@
  * ## What measuring found before a line of it was written
  *
  * The application connects to Postgres as `postgres`. That role is a
- * **superuser** and it **owns all 184 tables**.
+ * **superuser** and it **owns all 185 tables**.
  *
  * Row level security does not apply to superusers at all, and does not apply to
  * a table's owner unless `FORCE ROW LEVEL SECURITY` is also set. So the obvious
@@ -344,7 +344,7 @@ export const RLS_BYPASSES: readonly Bypass[] = [
       'this one, and the symptoms are identical.',
     because:
       'A table’s owner is exempt from its own policies unless `FORCE ROW LEVEL SECURITY` is set. ' +
-      '`postgres` owns all 184 tables here, and a deployment that creates its app role as the ' +
+      '`postgres` owns all 185 tables here, and a deployment that creates its app role as the ' +
       'migration runner would own them too.',
     remedy:
       '`ALTER TABLE … FORCE ROW LEVEL SECURITY`, which `policyStatementsFor` emits as its second ' +
@@ -367,7 +367,7 @@ export const RLS_BYPASSES: readonly Bypass[] = [
     reason: 'policy-without-enable',
     appearance:
       '`pg_policies` is full. Somebody auditing this database by listing policies — which is what ' +
-      'an auditor does — reads 164 of them and concludes the tenants are separated.',
+      'an auditor does — reads 165 of them and concludes the tenants are separated.',
     because:
       '`CREATE POLICY` succeeds on a table whose row level security is not enabled. The policy is ' +
       'stored, listed, and never consulted. The two statements are independent and only one of ' +
@@ -541,7 +541,7 @@ export type RolloutEntry = {
  *
  * Phase 139's device: a staged core gets a register and an acceptance test, so
  * nobody has to guess how far it got. The honest summary is that the mechanism
- * is installed on all 164 policed tables and the application does not yet
+ * is installed on all 165 policed tables and the application does not yet
  * connect as a
  * role it applies to — and saying that in a register beats saying it in a commit
  * message nobody re-reads.

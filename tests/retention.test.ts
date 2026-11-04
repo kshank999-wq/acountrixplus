@@ -167,7 +167,11 @@ describe('the retention policy', () => {
   //
   // Decided here rather than discovered two phases later, which is what Phase
   // 177 did and Phase 179 found.
-  const TABLE_COUNT = 184
+  // 185 since Phase 184 added `evidence_subjects`, also `NEVER_SWEPT` — and
+  // this one's argument is a constraint rather than a sentence: the two tables
+  // that reference it do so `ON DELETE CASCADE`, so a sweep of this table would
+  // delete the receipts and notes that are themselves never swept.
+  const TABLE_COUNT = 185
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

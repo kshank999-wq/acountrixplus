@@ -23,8 +23,8 @@ import { customers } from './receivables'
  *
  * ## Five columns rather than a `subject_type` enum
  *
- * `document_links` is the precedent and this deliberately departs from it.
- * That table's own docstring says why:
+ * `document_links` was the precedent and this deliberately departed from it.
+ * That table's docstring said why, until Phase 184 removed the sentence:
  *
  * > A polymorphic reference has no foreign key, so nothing in the database
  * > stops a link pointing at a uuid that belongs to another company — or to
@@ -38,6 +38,14 @@ import { customers } from './receivables'
  *
  * The price, stated rather than discovered: a sixth kind of subject is a
  * migration. §8 names five.
+ *
+ * ## And the shape `document_links` took instead
+ *
+ * Phase 184 converted it, and not by copying this file. Twelve kinds across two
+ * consumers is twenty-four columns of this shape; there the arc lives in one
+ * table, `evidence_subjects`, which both link tables reference by a single
+ * composite key. Worth reading before adding a sixth subject here: if §8 ever
+ * names ten, this file is on the wrong side of that trade.
  */
 export const assetLinks = pgTable(
   'asset_links',

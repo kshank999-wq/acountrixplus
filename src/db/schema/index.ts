@@ -53,3 +53,8 @@ export * from './exporter'
   a table downstream of four others has to be defined after them (Phase 180).
 */
 export * from './asset-links'
+/*
+  Later still: the exclusive arc for evidence references seven schema files,
+  `evidence` among them, and names twelve tables (Phase 184).
+*/
+export * from './evidence-subjects'

@@ -289,6 +289,18 @@ export const NEVER_SWEPT = [
   // bounded number of people, `MAX_TEAM_MEMBERS` says a hundred, and the rows
   // cascade away with the company.
   'team_members',
+  // The exclusive arc for evidence (Phase 184, §13). Never swept, and the
+  // argument is a foreign key rather than a judgement: `document_links` and
+  // `record_notes` reference this table `ON DELETE CASCADE`, so a sweep here
+  // would delete the receipt on a bank transaction and the accountant's note on
+  // a journal entry — both of which are on this list a dozen lines above. A
+  // retention policy that deleted evidence through a constraint would be the
+  // exact inverse of what a retention policy is for.
+  //
+  // It needs no age policy because it does not grow with traffic on its own: a
+  // row exists only while a record carries evidence, and it cascades away with
+  // that record.
+  'evidence_subjects',
 ] as const
 
 export function policyFor(kind: RetentionKind): RetentionPolicy {

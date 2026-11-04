@@ -15,6 +15,7 @@ import {
   reconciliations,
   vendors,
 } from '@/db/schema'
+import { evidenceSubjects } from '@/db/schema'
 import type { Permission } from '@/modules/permissions'
 import { DomainError } from '@/modules/errors'
 
@@ -23,16 +24,26 @@ import { DomainError } from '@/modules/errors'
  *
  * ## Why a registry rather than a switch in each caller
  *
- * A polymorphic reference has no foreign key, so nothing in the database stops
- * a link pointing at a uuid that belongs to another company — or to nothing at
- * all. The check has to live in code, and if it lives in the *caller* then
- * every new screen that attaches a file is a fresh chance to forget it.
+ * This register used to open by saying a polymorphic reference has no foreign
+ * key, *"so the check has to live in code"*. Since Phase 184 it does not: the
+ * twelve kinds are twelve columns on `evidence_subjects`, each with a composite
+ * foreign key carrying the tenant, and `document_links` and `record_notes`
+ * reference that table's key. A link to another company's record, to a record
+ * that does not exist, or naming the wrong kind for a real id is refused by the
+ * database.
  *
- * So there is one table, and it says three things per subject kind: which
- * table proves the record exists, which permission a person needs to read its
- * evidence, and which to change it. Attaching, detaching, reading, and noting
- * all go through it. Adding a twelfth kind is adding a row here — and the
- * enum in the schema will not compile without it, which is the point.
+ * What the register is still for is the half a constraint cannot express:
+ * **which permission guards each kind**. A read-only auditor may see the
+ * receipt on a transaction and may not remove it; a bookkeeper has no business
+ * near a payroll run, where the evidence is what people are paid. One
+ * permission for the lot would have forced the wrong answer somewhere.
+ *
+ * So it says four things per kind: which table proves the record exists, which
+ * permission a person needs to read its evidence, which to change it, and how
+ * to name one in a list. Attaching, detaching, reading, and noting all go
+ * through it. Adding a thirteenth kind means adding a row here, a value to the
+ * enum, **and** a column with a foreign key to `evidence_subjects` — and a test
+ * asserts the three lists against each other, so it cannot be added to one.
  *
  * ## Read and write are different permissions
  *
@@ -219,9 +230,14 @@ export type SubjectRef = { subjectType: EvidenceSubject; subjectId: string }
 /**
  * Proves a record exists in the caller's company, and describes it.
  *
- * Every path that writes a link or a note calls this first. It is the whole
- * reason a missing foreign key is acceptable: the check that a constraint would
- * do is done here, under the tenant filter, before anything is written.
+ * Kept after Phase 184, and its job changed. It used to be *"the whole reason a
+ * missing foreign key is acceptable"*; the foreign key is there now, so what
+ * this is for is the **sentence**. `evidence_subjects_journal_entry_fkey` is
+ * what a person would otherwise be shown, and *"That journal entry does not
+ * exist"* is what they should read (Phase 119). The constraint is what makes it
+ * true; this is what makes it legible.
+ *
+ * It also still describes the record, which no constraint does.
  *
  * Throws rather than returning null, because every caller's response to "that
  * record is not yours" is identical and turning it into a return value is one
@@ -255,4 +271,68 @@ export async function requireSubject(
   return {
     description: definition.describe ? (row.description as string | null) : null,
   }
+}
+
+/**
+ * The column on `evidence_subjects` that holds each kind.
+ *
+ * Declared beside the register rather than derived from the kind's name,
+ * because a derivation would be a rule with one exception waiting to happen —
+ * `expense` is stored in `expense_id` and its table is `billable_expenses`, so
+ * the names already disagree once.
+ */
+const SUBJECT_COLUMN: Record<EvidenceSubject, keyof typeof evidenceSubjects.$inferInsert> = {
+  bank_transaction: 'bankTransactionId',
+  journal_entry: 'journalEntryId',
+  invoice: 'invoiceId',
+  bill: 'billId',
+  payment: 'paymentId',
+  fixed_asset: 'fixedAssetId',
+  reconciliation: 'reconciliationId',
+  payroll_run: 'payrollRunId',
+  expense: 'expenseId',
+  customer: 'customerId',
+  vendor: 'vendorId',
+  proposal_version: 'proposalVersionId',
+}
+
+export function subjectColumnFor(subject: EvidenceSubject): string {
+  const column = SUBJECT_COLUMN[subject]
+  if (!column) throw new UnknownSubjectError(subject)
+  return column
+}
+
+/**
+ * Proves the record exists and makes sure it is referenceable (Phase 184).
+ *
+ * What every writer of a link or a note calls. Two steps, and they are
+ * deliberately not one function's worth of cleverness:
+ *
+ * 1. `requireSubject`, for the sentence a person reads when the record is not
+ *    theirs or not there.
+ * 2. An upsert into `evidence_subjects`, which is what the link's foreign key
+ *    points at.
+ *
+ * `onConflictDoNothing` rather than a read-then-write: a second attachment to
+ * the same record is the common case, and the mobile outbox replays queued
+ * actions, so two deliveries of one attach must leave one row — the claim
+ * Phase 8 made about every replayed operation.
+ *
+ * Separate from `requireSubject` because the read paths call that one and must
+ * not write. A single `requireSubject` that also inserted would have every
+ * evidence *list* creating rows.
+ */
+export async function ensureSubject(
+  companyId: string,
+  ref: SubjectRef,
+  exec: Executor = db,
+): Promise<{ description: string | null }> {
+  const found = await requireSubject(companyId, ref, exec)
+
+  await exec
+    .insert(evidenceSubjects)
+    .values({ companyId, [subjectColumnFor(ref.subjectType)]: ref.subjectId })
+    .onConflictDoNothing()
+
+  return found
 }

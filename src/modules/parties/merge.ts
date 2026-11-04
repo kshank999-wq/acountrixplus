@@ -63,7 +63,27 @@ import type { Standing } from './duplicates'
  */
 
 /** One place a party is referred to. Table and column, as the database has them. */
-export type Reference = { table: string; column: string }
+export type Reference = {
+  table: string
+  column: string
+  /**
+   * A column that must stay unique *with* the party, so a repoint can duplicate
+   * (Phase 184).
+   *
+   * `asset_links_customer_unique` is `(company_id, asset_id, customer_id)`: one
+   * capability statement sent to both records of one business is two rows, and
+   * repointing makes them the same row twice. The loser's copy is deleted
+   * first.
+   *
+   * Deleting rather than refusing, and the difference from
+   * `EXCLUSIVE_REFERENCES` is what is lost. An asset link is an association and
+   * nothing else — two identical associations collapsed to one lose no fact. A
+   * `subcontractors` row carries insurance expiry and licence numbers, so
+   * choosing one to drop is choosing data to lose, and that one is refused in
+   * words instead.
+   */
+  dedupeOn?: string
+}
 
 /**
  * Every reference a merge must repoint, per side.
@@ -75,6 +95,19 @@ export type Reference = { table: string; column: string }
 export const PARTY_REFERENCES: Record<PartySide, Reference[]> = {
   customer: [
     { table: 'appointments', column: 'customer_id' },
+    /*
+      Phase 180's §8 asset associations, registered in Phase 184 — four phases
+      late, and the tripwire below was red for all four of them.
+
+      Nobody ran `party-merge.test.ts` in Phases 180 to 183, which is ADR 0178's
+      prediction holding for the fifth time: a scan that reads the whole
+      catalogue cannot be checked by running the tests near the code that
+      changed. The consequence while it was red was the exact one this module's
+      docstring describes — merging two records of one business left the
+      collateral on the losing record, so §8's whole question, *"what have we
+      sent this client"*, answered wrong for the merged client.
+    */
+    { table: 'asset_links', column: 'customer_id', dedupeOn: 'asset_id' },
     { table: 'billable_expenses', column: 'customer_id' },
     { table: 'communications', column: 'customer_id' },
     { table: 'contributions', column: 'donor_id' },
@@ -216,4 +249,38 @@ export function describeMerge(input: {
           .join(', ')})`
 
   return `${what} will move to ${input.winnerName}, and ${input.loserName} will be archived. This cannot be undone.`
+}
+
+/**
+ * The evidence arc, per side (Phase 184).
+ *
+ * Not in `PARTY_REFERENCES`, for two reasons that are both about the shape
+ * rather than the policy.
+ *
+ * **It has no `id`.** `evidence_subjects` is keyed by
+ * `(company_id, subject_type, subject_id)` and the generic repoint loop returns
+ * `id` so the trail can say *which* rows moved. A table with no such column
+ * cannot go through that loop, and giving it a surrogate id to satisfy a loop
+ * would be the loop deciding the schema.
+ *
+ * **One row per party, and collapsing is the right answer.** The primary key
+ * allows one identity row per record, so repointing the loser's onto a winner
+ * that already has one collides. Refusing the merge would be wrong — two
+ * customers that both carry a receipt is the ordinary case — so the evidence is
+ * moved and the loser's identity row goes.
+ *
+ * What makes that cheap is `ON UPDATE CASCADE` on the two link tables: in the
+ * common case, where only the loser carries evidence, the merge repoints one row
+ * and the database moves every document link and every note with it. The
+ * by-hand path exists only for the collision.
+ *
+ * Before Phase 184 none of this was expressible. `document_links.subject_id` and
+ * `record_notes.subject_id` held the customer's uuid with no foreign key, so
+ * they were invisible to the catalogue tripwire and to this register — which
+ * means **every customer merge since Phase 20 left the receipts and the notes on
+ * the losing record.** The conversion is what gave the merge somewhere to stand.
+ */
+export const EVIDENCE_PARTY_REFERENCES: Record<PartySide, Reference & { kind: string }> = {
+  customer: { table: 'evidence_subjects', column: 'customer_id', kind: 'customer' },
+  vendor: { table: 'evidence_subjects', column: 'vendor_id', kind: 'vendor' },
 }

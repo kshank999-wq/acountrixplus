@@ -126,8 +126,21 @@ describe('how many references could point at another tenant', () => {
       database agrees — `team_members_headshot_fkey` refusing a cross-tenant
       asset is asserted by name in `the-people-on-the-proposal.test.ts`.
     */
-    expect(measured.total).toBe(281)
-    expect(measured.composite).toBe(26)
+    /*
+      295 and 40 since Phase 184 — fourteen references, every one of them
+      composite, and the largest single move in this programme by some way
+      (Phase 180's six held the record).
+
+      Twelve are `evidence_subjects` to the twelve records that may carry
+      evidence; two are `document_links` and `record_notes` to
+      `evidence_subjects`. The share carrying the tenant goes from 26 of 281 to
+      40 of 295 in one phase, and it came free in the same sense Phase 180's
+      did: the capability needed the references, and the references needed the
+      tenant in the key because the alternative was the shape Phase 170 was
+      written to retire — which is the shape these two tables had.
+    */
+    expect(measured.total).toBe(295)
+    expect(measured.composite).toBe(40)
   })
 
   it('leaves no single-column reference into the catalogue at all', async () => {

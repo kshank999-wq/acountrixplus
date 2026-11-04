@@ -1,5 +1,5 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
-import { db } from '@/db'
+import { db, type Executor } from '@/db'
 import { bills, creditNotes, customers, invoices, payments, vendors } from '@/db/schema'
 import { DomainError } from '@/modules/errors'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
@@ -16,7 +16,9 @@ import {
   describeMerge,
   EXCLUSIVE_REFERENCES,
   mergeCheck,
+  EVIDENCE_PARTY_REFERENCES,
   PARTY_REFERENCES,
+  type Reference,
   type MergeTally,
 } from './merge'
 import { reasonFor } from '@/modules/corrections/vocabulary'
@@ -632,6 +634,34 @@ export async function mergeParties(
     const moved: MovedRecord[] = []
 
     for (const ref of references) {
+      /*
+        A would-be duplicate is dropped before the repoint (Phase 184).
+
+        `asset_links_customer_unique` is `(company_id, asset_id, customer_id)`:
+        one capability statement sent to both records of one business is two
+        rows, and repointing makes them the same row twice. Deleted rather than
+        refused because an asset link is an association and nothing else — two
+        identical associations collapsed to one lose no fact, which is exactly
+        what is *not* true of `subcontractors` and why that one is refused in
+        words instead.
+
+        Not counted in `moved`: nothing moved, one duplicate stopped existing.
+      */
+      if (ref.dedupeOn) {
+        await tx.execute(
+          sql`delete from ${sql.raw(`"${ref.table}"`)} as loser
+              where loser."company_id" = ${ctx.companyId}
+                and loser.${sql.raw(`"${ref.column}"`)} = ${loser.id}
+                and exists (
+                  select 1 from ${sql.raw(`"${ref.table}"`)} as kept
+                  where kept."company_id" = ${ctx.companyId}
+                    and kept.${sql.raw(`"${ref.column}"`)} = ${winner.id}
+                    and kept.${sql.raw(`"${ref.dedupeOn}"`)}
+                        = loser.${sql.raw(`"${ref.dedupeOn}"`)}
+                )`,
+        )
+      }
+
       /**
        * `returning id` rather than a bare row count (Phase 97).
        *
@@ -653,6 +683,13 @@ export async function mergeParties(
         moved.push(movedRecordFor({ table: ref.table, ids: rows.map((row) => row.id) }))
       }
     }
+
+    await moveEvidence(tx, {
+      companyId: ctx.companyId,
+      ref: EVIDENCE_PARTY_REFERENCES[input.side],
+      winnerId: winner.id,
+      loserId: loser.id,
+    })
 
     await tx
       .update(table)
@@ -776,4 +813,108 @@ export async function mergePreview(
       tally,
     }),
   }
+}
+
+/**
+ * Moves a party's evidence to the record that absorbed it (Phase 184).
+ *
+ * Its own function rather than a `PARTY_REFERENCES` entry, because
+ * `evidence_subjects` has no `id` for the repoint loop to return and because
+ * one row per party means the loser's can collide with the winner's. Both are
+ * argued at `EVIDENCE_PARTY_REFERENCES`.
+ *
+ * Two paths, and the first is the one that matters:
+ *
+ * **The loser carries evidence and the winner does not.** One `UPDATE` of one
+ * row. `ON UPDATE CASCADE` on `document_links_subject_fkey` and
+ * `record_notes_subject_fkey` moves every document link and every note with it,
+ * because the key they reference is generated from the column being changed.
+ *
+ * **Both carry evidence.** The update would collide on the primary key, so the
+ * links and notes are moved by hand and the loser's identity row is deleted
+ * after nothing references it. A document attached to *both* records is one
+ * document on one record afterwards — the `document_links_unique` duplicate is
+ * dropped first, for the reason `dedupeOn` gives.
+ *
+ * The order is load-bearing. Deleting the loser's identity row before moving
+ * its links would cascade them away, which is the defect this phase is about,
+ * committed by the function fixing it.
+ *
+ * Returns nothing to the audit tally on purpose: what moved is the *party's*
+ * evidence, and the trail already names the party on both sides of the merge.
+ * A count of links here would be a second number nobody could reconcile with
+ * the first.
+ */
+async function moveEvidence(
+  tx: Executor,
+  input: {
+    companyId: string
+    ref: Reference & { kind: string }
+    winnerId: string
+    loserId: string
+  },
+): Promise<void> {
+  const { companyId, ref, winnerId, loserId } = input
+  const column = sql.raw(`"${ref.column}"`)
+
+  const loserRows = (await tx.execute(
+    sql`select 1 as present from "evidence_subjects"
+        where "company_id" = ${companyId} and ${column} = ${loserId}`,
+  )) as unknown as Array<{ present: number }>
+
+  // Nothing to move. The common case, and it costs one read.
+  if (loserRows.length === 0) return
+
+  const winnerRows = (await tx.execute(
+    sql`select 1 as present from "evidence_subjects"
+        where "company_id" = ${companyId} and ${column} = ${winnerId}`,
+  )) as unknown as Array<{ present: number }>
+
+  if (winnerRows.length === 0) {
+    // One row, and the database moves the evidence.
+    await tx.execute(
+      sql`update "evidence_subjects" set ${column} = ${winnerId}
+          where "company_id" = ${companyId} and ${column} = ${loserId}`,
+    )
+    return
+  }
+
+  const kind = sql.raw(`'${ref.kind}'::evidence_subject`)
+
+  // The same document on both records is one row afterwards, not a constraint
+  // violation that rolls the whole merge back.
+  await tx.execute(
+    sql`delete from "document_links" as loser
+        where loser."company_id" = ${companyId}
+          and loser."subject_type" = ${kind}
+          and loser."subject_id" = ${loserId}
+          and exists (
+            select 1 from "document_links" as kept
+            where kept."company_id" = ${companyId}
+              and kept."subject_type" = ${kind}
+              and kept."subject_id" = ${winnerId}
+              and kept."document_id" = loser."document_id"
+          )`,
+  )
+
+  await tx.execute(
+    sql`update "document_links" set "subject_id" = ${winnerId}
+        where "company_id" = ${companyId}
+          and "subject_type" = ${kind}
+          and "subject_id" = ${loserId}`,
+  )
+
+  // Notes have no uniqueness: two people asking the same question of two
+  // records of one business is two questions, and both deserve an answer.
+  await tx.execute(
+    sql`update "record_notes" set "subject_id" = ${winnerId}
+        where "company_id" = ${companyId}
+          and "subject_type" = ${kind}
+          and "subject_id" = ${loserId}`,
+  )
+
+  await tx.execute(
+    sql`delete from "evidence_subjects"
+        where "company_id" = ${companyId} and ${column} = ${loserId}`,
+  )
 }

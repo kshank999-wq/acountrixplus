@@ -31,7 +31,7 @@ import { RegistryError } from '@/modules/errors/registry'
  * needs this file rather than a migration and a paragraph:
  *
  * **The application connects as `postgres`, which is a superuser and owns all
- * 184 tables.** RLS is never applied to a superuser and is not applied to a
+ * 185 tables.** RLS is never applied to a superuser and is not applied to a
  * table's owner without FORCE, so a migration of ENABLE plus CREATE POLICY
  * would have produced 167 policies, 167 tables reporting `relrowsecurity`, and
  * no isolation at all — while looking, to anybody auditing the database by
@@ -247,8 +247,19 @@ describe('the policies bite', () => {
       another firm's people — `teamForDocument` takes a bare `companyId`, and a
       bare id is exactly what row-level security is for.
     */
-    expect(tenantTables()).toHaveLength(170)
-    expect(expected).toHaveLength(164)
+    /*
+      171 and 165 since Phase 184 added `evidence_subjects`, policed in the
+      migration that created it — the fourth phase in a row to do that in the
+      phase rather than after it, which is what Phase 179 was arguing for.
+
+      Policing it matters more than the count suggests. It is the table the two
+      evidence tables' foreign keys resolve through, so a reader who could see
+      another company's rows here could enumerate which of their records carry
+      a receipt or an unanswered question — the shape of a record without its
+      content, which is still a disclosure.
+    */
+    expect(tenantTables()).toHaveLength(171)
+    expect(expected).toHaveLength(165)
 
     const rows = (await db.execute(sql`
       select c.relname as table_name, c.relrowsecurity as enabled, c.relforcerowsecurity as forced,

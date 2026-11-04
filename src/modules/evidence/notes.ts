@@ -5,7 +5,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import {
   EVIDENCE_SUBJECTS,
-  requireSubject,
+  ensureSubject,
   subjectDefinition,
   type EvidenceSubject,
   type SubjectRef,
@@ -62,7 +62,9 @@ export async function writeNote(
   if (body.length > 4000) throw new NoteError('That note is longer than 4,000 characters.')
 
   const write = async (tx: Executor) => {
-    await requireSubject(ctx.companyId, input, tx)
+    // Writes the `evidence_subjects` row this note's foreign key points at, as
+    // well as proving the record is the caller's (Phase 184).
+    await ensureSubject(ctx.companyId, input, tx)
 
     const [note] = await tx
       .insert(recordNotes)

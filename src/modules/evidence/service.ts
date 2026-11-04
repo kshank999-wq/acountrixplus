@@ -5,7 +5,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { digestOf, freeBlobIfUnused, getObjectStore } from './store'
 import {
-  requireSubject,
+  ensureSubject,
   subjectDefinition,
   type EvidenceSubject,
   type SubjectRef,
@@ -216,7 +216,13 @@ export async function attachDocument(
 
     if (!document) throw new EvidenceError('That document does not exist.')
 
-    await requireSubject(ctx.companyId, input, tx)
+    /*
+      `ensureSubject` rather than `requireSubject` since Phase 184: it still
+      proves the record is the caller's, for the sentence a person reads, and it
+      also writes the `evidence_subjects` row the link's foreign key points at.
+      That row is what makes the link cascade away with the record.
+    */
+    await ensureSubject(ctx.companyId, input, tx)
 
     // The unique index is the arbiter, not a read-then-write: the mobile
     // outbox replays attachments, and two deliveries of one queued action must
