@@ -207,8 +207,18 @@ const proposalSchema = z.object({
   opportunityId: z.string().uuid(),
   title: z.string().trim().min(1),
   expiresOn: z.string().optional(),
+  /*
+    §7's six narrative sections (Phase 182). The form carried two of them; all
+    six are columns now and all six reach the document through merge fields, so
+    a form offering a subset would be a form that silently decides which parts
+    of a proposal are worth keeping.
+  */
   executiveSummary: z.string().optional(),
   scope: z.string().optional(),
+  deliverables: z.string().optional(),
+  exclusions: z.string().optional(),
+  assumptions: z.string().optional(),
+  terms: z.string().optional(),
   items: z
     .array(
       z.object({
@@ -237,6 +247,10 @@ export async function createProposalAction(
       expiresOn: parsed.expiresOn || undefined,
       executiveSummary: parsed.executiveSummary,
       scope: parsed.scope,
+      deliverables: parsed.deliverables,
+      exclusions: parsed.exclusions,
+      assumptions: parsed.assumptions,
+      terms: parsed.terms,
       items: parsed.items.map((item) => ({
         description: item.description,
         // Quantity is entered in whole or fractional units, stored as thousandths.

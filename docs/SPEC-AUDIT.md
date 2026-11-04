@@ -212,14 +212,21 @@ otherwise.
 | 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
 | 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 17 block types. |
-| 7 | **`deliverables` and `assumptions`** | 10 of the 12 components §7 names have a dedicated block or column; these two have neither and would be typed into a `text` or `list` block. |
+| 7 | ~~**`deliverables` and `assumptions`**~~ | **Built in Phase 182**, and the measurement here understated it: of the ten said to have a home, **four had a column that nothing rendered** — `executive_summary`, `scope`, `exclusions` and `terms` were written, snapshotted into versions, and reached no document. All six narrative sections are merge fields now, and `PROPOSAL_COMPONENTS` makes "has a home" mean "a client can read it". See ADR 0182. |
 | 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` uses — see ADR 0180 for why the precedent was not followed. Four of the five kinds have no attach control yet. |
 | 15 | **Team bios** | Nothing. `company_profiles.credentials` covers licences, certifications and insurance; bios have no home. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
-rows are one piece of work. **Two are struck through: asset association (Phase
-180) and the generic table block (Phase 181).** Seven capabilities remain, six of
-them §7's design engine.
+rows are one piece of work. **Three are struck through: asset association (Phase
+180), the generic table block (Phase 181), and `deliverables`/`assumptions`
+(Phase 182).** Six capabilities remain, five of them §7's design engine.
+
+**A correction to this audit's method, from Phase 182.** The
+`deliverables`/`assumptions` row said *"10 of the 12 components have a dedicated
+block or column"*, and checking the other ten found four with a column and no
+reader. "Has a column" is not the same claim as "reaches the client", and this
+audit checked the first one throughout. Where a row below says a capability
+exists because a column or a table exists, that is the weaker reading.
 
 **On §7's own deferral.** The section ends: *"advanced Illustrator-class path
 editing can be phased in after the core proposal workflow is stable."* That

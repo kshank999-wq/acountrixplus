@@ -354,6 +354,20 @@ export const proposals = pgTable(
     executiveSummary: text('executive_summary'),
     scope: text('scope'),
     exclusions: text('exclusions'),
+    /**
+     * §7's `deliverables` and `assumptions` (Phase 182).
+     *
+     * The same shape as the four narrative columns above — `text`, nullable, no
+     * default — because a fifth and sixth section behaving differently from the
+     * first four would be a difference with no reason behind it.
+     *
+     * All six reach the document through merge fields
+     * (`{{proposal.deliverables}}`), which is what the first four did not: they
+     * were written, snapshotted into `proposal_versions`, and rendered nowhere.
+     * `PROPOSAL_COMPONENTS` is the register that now makes that checkable.
+     */
+    deliverables: text('deliverables'),
+    assumptions: text('assumptions'),
     terms: text('terms'),
 
     /**

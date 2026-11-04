@@ -281,7 +281,15 @@ describe('every registry refuses the same way', () => {
     // answering `undefined` would report a surface as covered when nothing
     // checks it, in a register written because three block types went
     // twenty-three phases with no editor and nothing said so.
-    expect(thrown.length).toBe(38)
+    //
+    // Thirty-nine since Phase 182 and `PROPOSAL_COMPONENTS`, §7's twelve
+    // proposal components and how each reaches the page. It earns the throw on
+    // what the register is *for*: four of the twelve had a column, were written
+    // by hand and by the AI draft, were snapshotted into `proposal_versions`,
+    // and reached no document at all — so a lookup answering `undefined` would
+    // report a component as homed when nothing renders it, which is precisely
+    // the state the register was written to make impossible to miss.
+    expect(thrown.length).toBe(39)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

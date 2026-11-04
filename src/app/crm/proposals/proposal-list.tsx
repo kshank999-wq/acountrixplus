@@ -4,6 +4,7 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { formatCents } from '@/lib/money'
+import { narrativeColumn, narrativeComponents } from '@/modules/crm/proposal-components'
 import {
   billStageAction,
   createProposalAction,
@@ -56,6 +57,12 @@ type Service = {
   chartAccountId: string | null
   defaultProposalCopy: string | null
 }
+
+/** §7's six narrative sections, as the form needs them. */
+const NARRATIVE_SECTIONS = narrativeComponents().map((component) => ({
+  column: narrativeColumn(component),
+  label: component.label,
+}))
 
 const BLANK: Line = {
   description: '',
@@ -324,7 +331,17 @@ function NewProposalForm({
   const [opportunityId, setOpportunityId] = useState(opportunities[0]?.id ?? '')
   const [title, setTitle] = useState('')
   const [expiresOn, setExpiresOn] = useState('')
-  const [scope, setScope] = useState('')
+  /*
+    §7's six narrative sections, from the register rather than six pieces of
+    state (Phase 182). The form carried `scope` alone; `executiveSummary` was
+    written only by the AI draft, and `deliverables`, `exclusions`,
+    `assumptions` and `terms` had no writer at all.
+
+    Driven by `narrativeComponents()` so a seventh component added to the
+    register appears here without anybody remembering to add it — which is the
+    failure this phase is about, one level up.
+  */
+  const [sections, setSections] = useState<Record<string, string>>({})
   const [lines, setLines] = useState<Line[]>([{ ...BLANK }])
 
   if (opportunities.length === 0) {
@@ -389,16 +406,21 @@ function NewProposalForm({
         </label>
       </div>
 
-      <label className="mt-3 block text-xs text-muted">
-        <span className="mb-1 block">Scope of work</span>
-        <textarea
-          value={scope}
-          onChange={(event) => setScope(event.target.value)}
-          rows={3}
-          className="field text-sm"
-          placeholder="What is included."
-        />
-      </label>
+      <div className="mt-3 space-y-3">
+        {NARRATIVE_SECTIONS.map((section) => (
+          <label key={section.column} className="block text-xs text-muted">
+            <span className="mb-1 block">{section.label}</span>
+            <textarea
+              value={sections[section.column] ?? ''}
+              onChange={(event) =>
+                setSections((current) => ({ ...current, [section.column]: event.target.value }))
+              }
+              rows={3}
+              className="field text-sm"
+            />
+          </label>
+        ))}
+      </div>
 
       <div className="mt-3 space-y-2">
         {lines.map((line, index) => (
@@ -513,7 +535,7 @@ function NewProposalForm({
                   opportunityId,
                   title,
                   expiresOn,
-                  scope,
+                  ...sections,
                   items: usable.map((line) => ({
                     description: line.description,
                     quantity: line.quantity,

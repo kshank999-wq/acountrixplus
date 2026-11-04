@@ -63,7 +63,18 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
       block({
         id: 'summary',
         type: 'text',
-        text: 'Thank you for the opportunity to work with {{client.name}}. This proposal sets out what we recommend, what it will cost, and how we will get there.',
+        /*
+          The proposal's own executive summary (Phase 182), not a sentence about
+          proposals in general. This block held generic prose while
+          `proposals.executive_summary` held what the author — or the AI draft —
+          had actually written, and nothing rendered the column.
+
+          An author who has not filled the form now sees an empty section in the
+          designer preview, which looks worse and is better: the placeholder made
+          the block look finished and sent the client a paragraph about
+          proposals.
+        */
+        text: '{{proposal.executiveSummary}}',
         align: 'left',
         emphasis: true,
       }),
@@ -82,7 +93,24 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
       block({
         id: 'scope',
         type: 'text',
-        text: 'Describe what is included, in the order the work will happen.',
+        // The instruction this replaced — "describe what is included, in the
+        // order the work will happen" — was addressed to the author and sent to
+        // the client if they skipped it.
+        text: '{{proposal.scope}}',
+        align: 'left',
+        emphasis: false,
+      }),
+      block({
+        id: 'deliverables-heading',
+        type: 'heading',
+        text: 'Deliverables',
+        level: 3,
+        align: 'left',
+      }),
+      block({
+        id: 'deliverables',
+        type: 'text',
+        text: '{{proposal.deliverables}}',
         align: 'left',
         emphasis: false,
       }),
@@ -95,9 +123,27 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
       }),
       block({
         id: 'exclusions',
-        type: 'list',
-        items: ['Permits and municipal fees', 'Work outside the scope described above'],
-        ordered: false,
+        // `text` and not `list`: a merge field in a list item is one bullet
+        // holding every exclusion, where a text block renders the author's
+        // blank lines as paragraphs.
+        type: 'text',
+        text: '{{proposal.exclusions}}',
+        align: 'left',
+        emphasis: false,
+      }),
+      block({
+        id: 'assumptions-heading',
+        type: 'heading',
+        text: 'Assumptions',
+        level: 3,
+        align: 'left',
+      }),
+      block({
+        id: 'assumptions',
+        type: 'text',
+        text: '{{proposal.assumptions}}',
+        align: 'left',
+        emphasis: false,
       }),
       block({ id: 'pagebreak', type: 'pageBreak' }),
       block({
@@ -113,7 +159,13 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
       block({
         id: 'terms',
         type: 'text',
-        text: '{{company.paymentInstructions}}',
+        /*
+          This proposal's terms, then the company's standing payment
+          instructions. Both templates held only the second, which made §7's
+          `terms` component a column nothing read — and meant two proposals with
+          different terms rendered the same page.
+        */
+        text: '{{proposal.terms}}\n\n{{company.paymentInstructions}}',
         align: 'left',
         emphasis: false,
       }),
@@ -271,7 +323,13 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
       block({
         id: 'terms',
         type: 'text',
-        text: '{{company.paymentInstructions}}',
+        /*
+          This proposal's terms, then the company's standing payment
+          instructions. Both templates held only the second, which made §7's
+          `terms` component a column nothing read — and meant two proposals with
+          different terms rendered the same page.
+        */
+        text: '{{proposal.terms}}\n\n{{company.paymentInstructions}}',
         align: 'left',
         emphasis: false,
       }),

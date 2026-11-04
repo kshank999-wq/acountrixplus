@@ -56,6 +56,32 @@ export const MERGE_FIELD_GROUPS: Array<{
     ],
   },
   {
+    /*
+      §7's six narrative sections (Phase 182).
+
+      Four of them — executive summary, scope, exclusions, terms — had columns
+      on `proposals` since the beginning, were written by hand and by the AI
+      draft, were snapshotted into `proposal_versions`, and **reached no
+      document at all**: no renderer read them and no merge field existed. The
+      templates placed a `heading` and a placeholder `text` block with matching
+      ids, so an author typed their scope into the form and then typed it again
+      into the designer.
+
+      Their own group rather than more entries under "Proposal", because the
+      insert menu is the one place an author discovers these exist, and six
+      paragraphs listed among six figures reads as six more figures.
+    */
+    group: 'Proposal sections',
+    fields: [
+      { key: 'proposal.executiveSummary', label: 'Executive summary' },
+      { key: 'proposal.scope', label: 'Scope of work' },
+      { key: 'proposal.deliverables', label: 'Deliverables' },
+      { key: 'proposal.exclusions', label: 'What is not included' },
+      { key: 'proposal.assumptions', label: 'Assumptions' },
+      { key: 'proposal.terms', label: 'Terms' },
+    ],
+  },
+  {
     group: 'Project',
     fields: [
       { key: 'project.code', label: 'Job code' },
@@ -262,6 +288,13 @@ export type MergeSources = {
     subtotalCents?: number | null
     issuedOn?: string | null
     expiresOn?: string | null
+    /** §7's six narrative sections (Phase 182). */
+    executiveSummary?: string | null
+    scope?: string | null
+    deliverables?: string | null
+    exclusions?: string | null
+    assumptions?: string | null
+    terms?: string | null
   } | null
   project?: { code?: string | null; name?: string | null } | null
 }
@@ -310,6 +343,18 @@ export function buildMergeContext(sources: MergeSources): MergeContext {
   }
   set('proposal.date', proposal?.issuedOn)
   set('proposal.expiresOn', proposal?.expiresOn)
+
+  // The six narrative sections (Phase 182). `set` skips an empty string, so a
+  // section the author left blank is "genuinely blank" rather than "no such
+  // field" — which is the distinction `findUnresolvedFields` is built on, and
+  // the reason a template can carry all six without warning about the ones a
+  // particular proposal does not use.
+  set('proposal.executiveSummary', proposal?.executiveSummary)
+  set('proposal.scope', proposal?.scope)
+  set('proposal.deliverables', proposal?.deliverables)
+  set('proposal.exclusions', proposal?.exclusions)
+  set('proposal.assumptions', proposal?.assumptions)
+  set('proposal.terms', proposal?.terms)
 
   set('project.code', project?.code)
   set('project.name', project?.name)

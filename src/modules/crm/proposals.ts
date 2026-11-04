@@ -114,7 +114,9 @@ export async function createProposal(
     taxCents?: number
     executiveSummary?: string
     scope?: string
+    deliverables?: string
     exclusions?: string
+    assumptions?: string
     terms?: string
     expiresOn?: string
     number?: string
@@ -162,7 +164,9 @@ export async function createProposal(
         ...totals,
         executiveSummary: input.executiveSummary ?? null,
         scope: input.scope ?? null,
+        deliverables: input.deliverables ?? null,
         exclusions: input.exclusions ?? null,
+        assumptions: input.assumptions ?? null,
         terms: input.terms ?? null,
         publicToken: newPublicToken(),
         expiresOn: input.expiresOn ?? null,
@@ -244,7 +248,12 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
         number: proposal.number,
         executiveSummary: proposal.executiveSummary,
         scope: proposal.scope,
+        // All six since Phase 182. A version exists so a sent proposal's
+        // wording cannot change under the client, and two sections left out of
+        // the snapshot would be two sections that could.
+        deliverables: proposal.deliverables,
         exclusions: proposal.exclusions,
+        assumptions: proposal.assumptions,
         terms: proposal.terms,
         subtotalCents: proposal.subtotalCents,
         discountCents: proposal.discountCents,

@@ -477,6 +477,18 @@ export async function proposalRenderContext(
       subtotalCents: row.proposal.subtotalCents,
       issuedOn: (row.proposal.sentAt ?? row.proposal.createdAt).toISOString().slice(0, 10),
       expiresOn: row.proposal.expiresOn,
+      /*
+        The six narrative sections (Phase 182). The whole `proposals` row was
+        already selected here — the four that existed were two lines away from
+        the context and never passed, which is the entire shape of the defect:
+        not a missing query, a missing pair of lines.
+      */
+      executiveSummary: row.proposal.executiveSummary,
+      scope: row.proposal.scope,
+      deliverables: row.proposal.deliverables,
+      exclusions: row.proposal.exclusions,
+      assumptions: row.proposal.assumptions,
+      terms: row.proposal.terms,
     },
     project: { code: row.project?.code, name: row.project?.name },
   })
