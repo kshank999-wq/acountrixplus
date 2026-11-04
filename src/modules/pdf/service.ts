@@ -14,6 +14,10 @@ import { storeDocument, attachDocument } from '@/modules/evidence/service'
 import { scoped, requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { renderDocumentPdf, type BrandTokens, type RenderInput } from './layout'
+import { prepareImage, type ImageResult } from './images'
+import { readAsset } from '@/modules/studio/assets'
+import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
+import type { Block } from '@/modules/design/blocks'
 import { DomainError } from '@/modules/errors'
 
 /**
@@ -29,6 +33,66 @@ import { DomainError } from '@/modules/errors'
 
 /** The one default (Phase 79). `surfaceColor` is on the kit and not on a PDF. */
 const DEFAULT_BRAND: BrandTokens = DEFAULT_BRAND_KIT
+
+/**
+ * Reads and prepares every picture a document places (Phase 185).
+ *
+ * The impure half of embedding. `renderDocumentPdf` stays pure and is handed a
+ * map; this is the part that goes to the object store, and it is here rather
+ * than in `layout.ts` for the reason this whole file exists.
+ *
+ * Three sources, and they are the three places a picture had never reached
+ * paper: an `image` block's asset, the brand kit's logo for a `cover` block,
+ * and a `team` block's headshots. Gathered from the blocks rather than from a
+ * list somebody maintains, so a document that places no picture does no reads.
+ *
+ * **A refusal is kept, not dropped.** `prepareImage` answers either an
+ * embeddable image or a sentence naming the remedy, and the map carries both —
+ * because "the author placed no image" and "this WebP cannot be printed" are
+ * different things to say on the page, and a map that held only successes could
+ * not tell them apart.
+ */
+async function imagesFor(
+  companyId: string,
+  input: {
+    blocks: Block[]
+    logoAssetId: string | null
+    team: RenderedTeamMember[]
+  },
+  exec: Executor,
+): Promise<Map<string, ImageResult>> {
+  const wanted = new Set<string>()
+
+  for (const block of input.blocks) {
+    if (block.type === 'image' && block.assetId) wanted.add(block.assetId)
+    if (block.type === 'team' && block.showPhotos) {
+      for (const member of selectTeam(input.team, block.memberIds)) {
+        if (member.headshotAssetId) wanted.add(member.headshotAssetId)
+      }
+    }
+    if (block.type === 'cover' && block.showLogo && input.logoAssetId) {
+      wanted.add(input.logoAssetId)
+    }
+  }
+
+  const prepared = new Map<string, ImageResult>()
+
+  for (const assetId of wanted) {
+    const found = await readAsset(companyId, assetId, exec)
+
+    /*
+      An asset that is gone is simply absent from the map, and the page says so
+      in its own words. Not a refusal: a refusal says "this file cannot be
+      printed, convert it", and the remedy for a deleted asset is to choose
+      another one.
+    */
+    if (!found) continue
+
+    prepared.set(assetId, prepareImage(found.data, found.asset.contentType))
+  }
+
+  return prepared
+}
 
 async function brandFor(
   companyId: string,
@@ -113,9 +177,28 @@ export async function proposalRenderInput(
   // malformed block should not stop a client receiving their proposal.
   const blocks = parseBlocks(document.blocks)
 
+  const team = await teamForDocument(companyId, blocks, exec)
+
+  const [kit] = document.brandKitId
+    ? await exec
+        .select({ logoAssetId: brandKits.logoAssetId })
+        .from(brandKits)
+        .where(and(eq(brandKits.id, document.brandKitId), eq(brandKits.companyId, companyId)))
+        .limit(1)
+    : []
+
+  const logoAssetId = kit?.logoAssetId ?? null
+
   return {
     blocks,
     brand,
+    logoAssetId,
+    /*
+      The pictures (Phase 185). Read through the same `exec`, for the reason the
+      team list below gives: the logo on the paper is the logo at the moment the
+      proposal was sent.
+    */
+    images: await imagesFor(companyId, { blocks, logoAssetId, team }, exec),
     merge: rendered?.context ?? {},
     pageSize: document.pageSize as 'letter' | 'a4' | 'legal',
     orientation: document.orientation as 'portrait' | 'landscape',
@@ -141,7 +224,7 @@ export async function proposalRenderInput(
       its version, so the names on the paper are the names at the moment it was
       sent.
     */
-    team: await teamForDocument(companyId, blocks, exec),
+    team,
     lines: items.map((item) => ({
       description: item.description,
       quantityMilli: item.quantityMilli,

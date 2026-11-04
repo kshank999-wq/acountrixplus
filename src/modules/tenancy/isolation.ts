@@ -210,14 +210,14 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     atLeastCompanyTight: true,
     because:
       'The reading half of `scoped-write`, and by far the most common guard on this side: 566 of ' +
-      'the 921 reads, against 29 of the 118 writes. The two halves of this system are guarded ' +
+      'the 922 reads, against 29 of the 118 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
-      'All four were a phase or more out until Phase 179 measured them, and then **drifted twice ' +
-      'more** — Phase 180 moved them and did not move this sentence, and Phase 183 found it ' +
-      'reading 542 of 911 against a measured 562 of 916. It is the one entry in `PINNED_CLAIMS` ' +
-      'with no measure, because the scans that produce these numbers live inside two test files ' +
-      'rather than in a module, and a declaration that has now watched itself go stale twice is ' +
-      'the argument for moving them rather than a reason to stop declaring it (Phase 157).',
+      'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
+      'needed correcting by hand in **every phase since** that touched a read — 180, 183, 184 ' +
+      'and 185. It is the one entry in `PINNED_CLAIMS` with no measure, because the scans that ' +
+      'produce these numbers live inside two test files rather than in a module, and a ' +
+      'declaration that has now watched itself go stale four times is the argument for moving ' +
+      'them rather than a reason to stop declaring it (Phase 157).',
   },
   {
     kind: 'join-inherited',

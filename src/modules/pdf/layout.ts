@@ -1,5 +1,6 @@
 import { normalizeTable, type Block } from '@/modules/design/blocks'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
+import type { EmbeddableImage, ImageResult } from './images'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { resolveMergeFields, type MergeContext } from '@/modules/design/merge-fields'
 import {
@@ -93,6 +94,31 @@ export type RenderInput = {
    * which is the same function the page and the email use.
    */
   team?: RenderedTeamMember[]
+  /**
+   * The pictures, by asset id, already prepared for embedding (Phase 185).
+   *
+   * Prepared by the caller rather than here, because reading bytes out of the
+   * object store is a database and a network away and this function is pure —
+   * `renderDocumentPdf` takes everything it needs and touches nothing.
+   *
+   * An asset the caller could not prepare is **present with its refusal**
+   * rather than absent: absent means "the author placed no image", and those
+   * two have to look different on the page. See `ImageResult`.
+   */
+  images?: Map<string, ImageResult>
+  /**
+   * The brand kit's logo, for a `cover` block's `showLogo` (Phase 185).
+   *
+   * Not on `BrandTokens`, which is the *style* the web renderer shares — a
+   * colour, a font, a size. An asset id is a thing to fetch, and putting it
+   * there would make every consumer of the tokens carry a reference it cannot
+   * resolve.
+   *
+   * `showLogo` has been a toggle in the editor, honoured on the web page, and
+   * **ignored here** since Phase 5. The same gap the `image` block had, in the
+   * one block that is the first page a client sees.
+   */
+  logoAssetId?: string | null
   title: string
   author: string
   /** Stamped into the file. The send time, never `new Date()`. */
@@ -104,6 +130,16 @@ const PAGE_SIZES: Record<string, { width: number; height: number }> = {
   a4: { width: 595, height: 842 },
   legal: { width: 612, height: 1008 },
 }
+
+/**
+ * How big a headshot prints (Phase 185).
+ *
+ * A square, because a team directory of mixed portrait and landscape
+ * photographs reads as a mistake, and because `object-fit: cover` on the web
+ * page already squares them — two renderers disagreeing about the shape of a
+ * person's face is the kind of difference a client notices.
+ */
+const SQUARE_HEADSHOT = 56
 
 const MARGIN = 54
 const HEADER_BAND = 34
@@ -268,8 +304,13 @@ class Composer {
         const subtitle = this.resolve(block.subtitle)
         const preparedFor = this.resolve(block.preparedFor)
 
-        const bandHeight = 132
         const onBrand = block.useBrandBackground
+
+        // Taller when a logo goes above the title, so the band does not crowd
+        // it. Measured here rather than inside `draw`, because the piece's
+        // height is what the page-breaking pass reads.
+        const logoBand = block.showLogo && !onBrand && logoFor(this.input) ? 34 + base * 0.8 : 0
+        const bandHeight = 132 + logoBand
 
         this.pieces.push({
           height: bandHeight,
@@ -292,6 +333,36 @@ class Composer {
 
             const ink = onBrand ? { r: 1, g: 1, b: 1 } : this.text
             let cursor = y + 8
+
+            /*
+              The logo, since Phase 185.
+
+              Height-bounded rather than width-bounded: logos are wide and
+              short or square, and bounding the width makes a square mark
+              enormous. 34 points is roughly a letterhead's, and the width
+              follows the picture's own ratio so nothing is stretched.
+
+              It is **not** drawn on the brand-coloured band. A logo is almost
+              always one colour with a transparent surround, so a dark mark on
+              a dark band is an invisible logo and a white mark on white is the
+              same problem on the page below. Skipped rather than drawn wrong,
+              and the band itself is the company's colour, which is what the
+              toggle was reaching for.
+            */
+            const logo = logoFor(this.input)
+            if (block.showLogo && logo && !onBrand) {
+              const logoHeight = 34
+              const logoWidth = (logoHeight * logo.widthPx) / logo.heightPx
+
+              page.image({
+                name: imageResourceName(this.input.logoAssetId!),
+                x: MARGIN,
+                y: cursor,
+                width: logoWidth,
+                height: logoHeight,
+              })
+              cursor += logoHeight + base * 0.8
+            }
 
             if (title) {
               for (const line of wrapText(title, {
@@ -568,12 +639,18 @@ class Composer {
           title is `keepWithNext` so "Who you will be working with" never sits
           alone at the foot of a page.
 
-          Headshots are deliberately not drawn. The PDF writer places text and
-          rectangles; embedding an image means decoding it, and a photograph
-          dropped into a print-quality document at whatever resolution it
-          happens to be is worse than a name set properly. Stated here rather
-          than discovered: `showPhotos` is honoured on the page and in the
-          email, and ignored here.
+          **Headshots are drawn, since Phase 185.** Phase 183 said they were
+          not, and gave a reason — *"embedding an image means decoding it"* —
+          which was true of this writer then and is the gap this phase closed.
+          The rest of that sentence, that a photograph at whatever resolution is
+          worse than a name set properly, turned out to be about placement
+          rather than about embedding: a headshot bounded to a square and set
+          beside the name prints like a capability statement, and nothing is
+          resampled because a PDF image carries its own pixels at whatever size
+          it is placed.
+
+          `showPhotos` is now honoured on all three surfaces that can show one.
+          The email still cannot, and says why where it degrades.
         */
         const members = selectTeam(this.input.team ?? [], block.memberIds)
         if (members.length === 0) return
@@ -592,6 +669,99 @@ class Composer {
           const heading = block.showQualifications && member.qualifications
             ? `${member.name}, ${member.qualifications}`
             : member.name
+
+          const headshot =
+            block.showPhotos && member.headshotAssetId
+              ? this.input.images?.get(member.headshotAssetId)
+              : undefined
+
+          /*
+            One piece for the person when there is a photograph, rather than one
+            per paragraph.
+
+            The photograph has to sit beside the name *and* the role *and* the
+            first of the bio, so the group cannot be split across a page — and
+            `keepWithNext` chains three pieces together without guaranteeing
+            they land on one page. A single piece whose height is the taller of
+            the two columns does guarantee it, which is what a headshot needs
+            and what text alone does not.
+          */
+          if (headshot?.ok) {
+            const photo = SQUARE_HEADSHOT
+            const gutter = base * 0.9
+            const textX = MARGIN + photo + gutter
+            const textWidth = this.contentWidth - photo - gutter
+
+            const lines: Array<{ text: string; font: StandardFont; size: number; color: Rgb }> = []
+            for (const line of wrapText(heading, {
+              font: this.headingBold,
+              size: base,
+              maxWidth: textWidth,
+            })) {
+              lines.push({ text: line, font: this.headingBold, size: base, color: this.text })
+            }
+            if (member.title) {
+              for (const line of wrapText(member.title, {
+                font: this.body,
+                size: base * 0.9,
+                maxWidth: textWidth,
+              })) {
+                lines.push({ text: line, font: this.body, size: base * 0.9, color: this.muted })
+              }
+            }
+            if (member.bio) {
+              for (const paragraph of member.bio.split(/\n{2,}/)) {
+                if (!paragraph.trim()) continue
+                for (const line of wrapText(paragraph.trim(), {
+                  font: this.body,
+                  size: base,
+                  maxWidth: textWidth,
+                })) {
+                  lines.push({ text: line, font: this.body, size: base, color: this.text })
+                }
+              }
+            }
+
+            const textHeight = lines.reduce((sum, line) => sum + line.size * 1.35, 0)
+
+            this.pieces.push({
+              height: Math.max(photo, textHeight) + base * 0.6,
+              draw: (page, y) => {
+                /*
+                  Bounded to a square and **clipped**, not squashed. The picture
+                  is scaled so its shorter side fills the square, centred on the
+                  longer one, and the clipping path hides the overflow — which
+                  is `object-fit: cover` done with PDF operators, and the same
+                  answer the page's CSS gives, so the two agree.
+                */
+                const scale = photo / Math.min(headshot.image.widthPx, headshot.image.heightPx)
+                const drawnWidth = headshot.image.widthPx * scale
+                const drawnHeight = headshot.image.heightPx * scale
+
+                page.image({
+                  name: imageResourceName(member.headshotAssetId!),
+                  x: MARGIN - (drawnWidth - photo) / 2,
+                  y: y - (drawnHeight - photo) / 2,
+                  width: drawnWidth,
+                  height: drawnHeight,
+                  clip: { x: MARGIN, y, width: photo, height: photo },
+                })
+
+                let cursor = y
+                for (const line of lines) {
+                  page.text(line.text, {
+                    x: textX,
+                    y: cursor,
+                    font: line.font,
+                    size: line.size,
+                    color: line.color,
+                  })
+                  cursor += line.size * 1.35
+                }
+              },
+            })
+            continue
+          }
 
           this.paragraph(heading, {
             font: this.headingBold,
@@ -630,14 +800,115 @@ class Composer {
         return
       }
 
-      case 'image':
+      case 'image': {
+        /*
+          The picture itself, since Phase 185.
+
+          This used to be a frame reading *"Image — see the online version"*,
+          and `writer.ts` declared it: *"no images beyond a placeholder frame."*
+          Declared rather than hidden, which is why it survived — but the PDF is
+          what a client downloads, prints, signs and files, so the company logo
+          and the product photograph reached the web page and reached paper as a
+          labelled empty box.
+
+          Nothing is decoded here. `prepareImage` has already turned the upload
+          into an XObject's worth of bytes; the piece's height comes from the
+          picture's own aspect ratio so a photograph is not stretched, and the
+          width is the author's `widthPercent` of the content width.
+        */
+        const prepared = block.assetId ? this.input.images?.get(block.assetId) : undefined
+        const caption = this.resolve(block.caption)
+
+        if (prepared?.ok) {
+          const width = (this.contentWidth * block.widthPercent) / 100
+          const height = (width * prepared.image.heightPx) / prepared.image.widthPx
+          const x =
+            block.align === 'center'
+              ? MARGIN + (this.contentWidth - width) / 2
+              : block.align === 'right'
+                ? MARGIN + this.contentWidth - width
+                : MARGIN
+
+          this.pieces.push({
+            height: height + (caption ? base * 1.6 : 0) + base * 0.6,
+            draw: (page, y) => {
+              page.image({ name: imageResourceName(block.assetId!), x, y, width, height })
+              if (caption) {
+                page.text(caption, {
+                  x,
+                  y: y + height + base * 0.4,
+                  font: this.body,
+                  size: base * 0.85,
+                  color: this.muted,
+                })
+              }
+            },
+          })
+          return
+        }
+
+        /*
+          No picture, and the frame now says **which** and **what to do**.
+
+          Three different situations, deliberately worded differently. An
+          author who placed no asset sees that; an author whose PNG is
+          interlaced sees that, and the remedy; and a reader of a document whose
+          asset has gone sees a third thing. The old single sentence told a
+          client holding a printed page to go and look at something else, which
+          is not a remedy and not addressed to them.
+        */
+        const height = 110
+        const message = !block.assetId
+          ? 'No image chosen for this block.'
+          : prepared
+            ? `Cannot print this image — ${prepared.refusal.reason}. ${prepared.refusal.remedy}`
+            : 'This image is no longer in the asset library.'
+
+        this.pieces.push({
+          height: height + (caption ? base * 1.6 : 0) + base * 0.6,
+          draw: (page, y) => {
+            page.frame({
+              x: MARGIN,
+              y,
+              width: this.contentWidth,
+              height,
+              color: this.muted,
+            })
+            for (const [line, at] of wrapText(message, {
+              font: this.body,
+              size: base * 0.9,
+              maxWidth: this.contentWidth - 24,
+            }).entries()) {
+              page.text(at, {
+                x: MARGIN + 12,
+                y: y + height / 2 - base + line * base * 1.3,
+                font: this.body,
+                size: base * 0.9,
+                color: this.muted,
+              })
+            }
+            if (caption) {
+              page.text(caption, {
+                x: MARGIN,
+                y: y + height + base * 0.4,
+                font: this.body,
+                size: base * 0.85,
+                color: this.muted,
+              })
+            }
+          },
+        })
+        return
+      }
+
       case 'video': {
-        // An image is a frame with its filename, not the picture.
-        //
-        // Embedding raster data means decoding JPEG and PNG and writing image
-        // XObjects, which is a phase of its own. A labelled placeholder is
-        // visibly incomplete, which is the right kind of wrong: a silently
-        // missing logo would be discovered by a client.
+        /*
+          A video stays a placeholder, and that is not the same gap.
+
+          An image's absence from paper was a defect; a video's is the medium.
+          There is no frame to print, so the box says where to watch it — which
+          is a remedy, unlike the sentence it used to share with `image`.
+        */
         const height = 110
         const caption = this.resolve(block.caption)
 
@@ -652,7 +923,7 @@ class Composer {
               color: this.muted,
             })
             page.text(
-              block.type === 'video' ? 'Video — see the online version' : 'Image — see the online version',
+              'Video — open this proposal online to watch it',
               {
                 x: MARGIN + 12,
                 y: y + height / 2 - base / 2,
@@ -1137,6 +1408,26 @@ class Composer {
  * here reads a clock, and the only date that reaches the file is
  * `input.createdAt`.
  */
+/**
+ * The PDF resource name an asset is placed under (Phase 185).
+ *
+ * A uuid is not a valid PDF name — `/` names cannot hold hyphens safely across
+ * readers — so the hyphens go and an `Im` prefix is added, which keeps the id
+ * recoverable by eye when reading the file in a text editor. Derived rather
+ * than counted, so the layout pass and the resource dictionary cannot disagree
+ * about which picture is `/Im1`.
+ */
+/** The prepared logo, when there is one and it embedded. */
+function logoFor(input: RenderInput): EmbeddableImage | null {
+  if (!input.logoAssetId) return null
+  const prepared = input.images?.get(input.logoAssetId)
+  return prepared?.ok ? prepared.image : null
+}
+
+export function imageResourceName(assetId: string): string {
+  return `Im${assetId.replace(/-/g, '')}`
+}
+
 export function renderDocumentPdf(input: RenderInput): Buffer {
   const size = PAGE_SIZES[input.pageSize] ?? PAGE_SIZES.letter
   const landscape = input.orientation === 'landscape'
@@ -1295,10 +1586,35 @@ export function renderDocumentPdf(input: RenderInput): Buffer {
       return canvas
     })
 
+  /*
+    Only the pictures a page actually invoked.
+
+    Asked of the canvases rather than worked out from the blocks, and the
+    difference is not pedantry: a block can decline to draw its picture — a
+    logo on a brand-coloured band does — and a map keyed off the blocks would
+    put an XObject in the file that nothing references. Weight in the file, and
+    a reader wondering why it is there.
+
+    The first version of this embedded every *prepared* image and carried a
+    comment saying it embedded only the placed ones. The test caught the
+    comment, which is the only reason this paragraph is accurate.
+  */
+  const invoked = new Set<string>()
+  for (const canvas of canvases) {
+    for (const name of canvas.usedImages()) invoked.add(name)
+  }
+
+  const embedded = new Map<string, EmbeddableImage>()
+  for (const [assetId, result] of input.images ?? []) {
+    const name = imageResourceName(assetId)
+    if (result.ok && invoked.has(name)) embedded.set(name, result.image)
+  }
+
   return writePdf({
     pages: canvases,
     title: input.title,
     author: input.author,
     createdAt: input.createdAt,
+    images: embedded,
   })
 }

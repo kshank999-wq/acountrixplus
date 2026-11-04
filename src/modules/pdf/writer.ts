@@ -26,10 +26,19 @@ import { toWinAnsi, widthOf, type StandardFont } from './metrics'
  *
  * ## What it is not
  *
- * Not a general PDF library. No embedded fonts, no transparency, no images
- * beyond a placeholder frame, no encryption, no tagged/accessible structure.
- * Those are named in the ADR's consequences rather than half-built here.
+ * Not a general PDF library. No embedded fonts, no encryption, no
+ * tagged/accessible structure. Those are named in the ADR's consequences rather
+ * than half-built here.
+ *
+ * It said "no images beyond a placeholder frame" until Phase 185, and that
+ * sentence is why the gap survived: it was a declared limit rather than a
+ * hidden one, so nobody read it as a defect. It was one — the PDF is what a
+ * client prints and files, and the company logo reached it as an empty box.
+ * Images are embedded now, and transparency with them, because PDF speaks JPEG
+ * and PNG natively and neither needed a decoder.
  */
+
+import type { EmbeddableImage } from './images'
 
 export type Rgb = { r: number; g: number; b: number }
 
@@ -84,6 +93,7 @@ const FONT_RESOURCE: Record<StandardFont, string> = {
  */
 export class PageCanvas {
   private readonly ops: string[] = []
+  private readonly placed = new Set<string>()
 
   constructor(
     readonly widthPt: number,
@@ -156,6 +166,69 @@ export class PageCanvas {
     )
   }
 
+  /**
+   * Places an image XObject (Phase 185).
+   *
+   * `name` is the resource key `writePdf` assigned, so this method knows
+   * nothing about pictures — it writes a transform and an invocation, which is
+   * all the content stream ever says about an image.
+   *
+   * The `cm` matrix is `width 0 0 height x y`: a PDF image XObject is defined
+   * on a one-by-one unit square, so the scale *is* the size on the page and
+   * there is no resolution anywhere in here. A 4000-pixel photograph placed at
+   * 200 points is 200 points of 4000 pixels, which is what makes it print well.
+   *
+   * `clip` is a rectangle in page coordinates. Given, the image is drawn to
+   * `width`/`height` as usual and only the clipped part shows — which is how a
+   * crop works in a PDF: `re W n` sets the clipping path and the picture is
+   * never altered.
+   */
+  image(options: {
+    name: string
+    x: number
+    y: number
+    width: number
+    height: number
+    clip?: { x: number; y: number; width: number; height: number }
+  }): void {
+    if (options.width <= 0 || options.height <= 0) return
+
+    this.placed.add(options.name)
+
+    const bottom = this.heightPt - options.y - options.height
+    this.ops.push('q')
+
+    if (options.clip) {
+      const clipBottom = this.heightPt - options.clip.y - options.clip.height
+      this.ops.push(
+        `${fixed(options.clip.x)} ${fixed(clipBottom)} ` +
+          `${fixed(options.clip.width)} ${fixed(options.clip.height)} re`,
+        'W',
+        'n',
+      )
+    }
+
+    this.ops.push(
+      `${fixed(options.width)} 0 0 ${fixed(options.height)} ` +
+        `${fixed(options.x)} ${fixed(bottom)} cm`,
+      `/${options.name} Do`,
+      'Q',
+    )
+  }
+
+  /**
+   * The image resources this page actually invokes.
+   *
+   * Recorded rather than inferred, because the caller's claim is that an
+   * unplaced picture is not in the file and an inferred answer would make that
+   * claim true by assumption. A first version embedded every prepared image
+   * whether or not a block placed it, and the comment above it said otherwise;
+   * the test caught the comment.
+   */
+  usedImages(): ReadonlySet<string> {
+    return this.placed
+  }
+
   content(): string {
     return this.ops.join('\n')
   }
@@ -165,6 +238,15 @@ export type PdfDocumentInput = {
   pages: PageCanvas[]
   title: string
   author: string
+  /**
+   * The images any page places, by the resource name it places them under
+   * (Phase 185).
+   *
+   * A map rather than a list, because a logo on nine pages is one XObject
+   * invoked nine times and a list would need the caller to deduplicate — which
+   * is the caller discovering that a PDF stores pictures once.
+   */
+  images?: Map<string, EmbeddableImage>
   /**
    * Stamped as the creation and modification date.
    *
@@ -180,23 +262,50 @@ export type PdfDocumentInput = {
  *
  * Written by hand because the structure is small: a catalog, a page tree, one
  * content stream per page, seven font objects, an info dictionary, and a
- * cross-reference table. Streams are stored uncompressed — a proposal is a few
- * kilobytes of text, and an uncompressed file is one a person can read in a
- * text editor when something looks wrong, which has already paid for itself.
+ * cross-reference table. Content streams are stored uncompressed — a proposal
+ * is a few kilobytes of text, and an uncompressed file is one a person can read
+ * in a text editor when something looks wrong, which has already paid for
+ * itself.
+ *
+ * **Image streams are the exception and are binary** (Phase 185). The file is
+ * assembled as `latin1`, which maps each code unit 0–255 to exactly one byte,
+ * so arbitrary bytes pass through a string unharmed — the same property the
+ * binary comment line below has always relied on. That is why embedding images
+ * needed no restructuring here.
  */
 export function writePdf(input: PdfDocumentInput): Buffer {
   const fonts = Object.entries(FONT_RESOURCE)
   const objects: string[] = []
 
-  // Object numbering, fixed so the offsets can be computed in one pass:
-  //   1        catalog
-  //   2        page tree
-  //   3        info
-  //   4..10    fonts
-  //   11..     page, content, page, content, …
-  const FIRST_FONT = 4
-  const FIRST_PAGE = FIRST_FONT + fonts.length
+  /*
+    Object numbering, fixed so the offsets can be computed in one pass:
+      1                catalog
+      2                page tree
+      3                info
+      4..10            fonts
+      11..             images, and a soft mask after each that has one
+      then             page, content, page, content, …
 
+    Images come before the pages because a page's `/Resources` has to name
+    them, and the resource dictionary is built once and shared.
+  */
+  const FIRST_FONT = 4
+  const FIRST_IMAGE = FIRST_FONT + fonts.length
+
+  const images = [...(input.images ?? new Map()).entries()]
+
+  // Two objects for an image with transparency: the picture, then its mask.
+  const imageIds = new Map<string, { id: number; maskId: number | null }>()
+  let nextId = FIRST_IMAGE
+  for (const [name, image] of images) {
+    const id = nextId
+    nextId += 1
+    const maskId = image.smask ? nextId : null
+    if (maskId !== null) nextId += 1
+    imageIds.set(name, { id, maskId })
+  }
+
+  const FIRST_PAGE = nextId
   const pageIds = input.pages.map((_, index) => FIRST_PAGE + index * 2)
 
   objects[1] = '<< /Type /Catalog /Pages 2 0 R >>'
@@ -215,10 +324,50 @@ export function writePdf(input: PdfDocumentInput): Buffer {
       `<< /Type /Font /Subtype /Type1 /BaseFont /${name} /Encoding /WinAnsiEncoding >>`
   })
 
+  for (const [name, image] of images) {
+    const { id, maskId } = imageIds.get(name)!
+
+    if (maskId !== null && image.smask) {
+      /*
+        The alpha channel as its own greyscale image. PDF keeps transparency
+        beside the picture rather than inside it, which is why a PNG with alpha
+        is the one format here that is really decoded: the colour and the alpha
+        have to be separated before either can be written.
+      */
+      objects[maskId] = imageObject({
+        widthPx: image.smask.widthPx,
+        heightPx: image.smask.heightPx,
+        colorSpace: '/DeviceGray',
+        bitsPerComponent: image.smask.bitsPerComponent,
+        filter: 'FlateDecode',
+        decodeParms: null,
+        smaskRef: null,
+        data: image.smask.data,
+      })
+    }
+
+    objects[id] = imageObject({
+      widthPx: image.widthPx,
+      heightPx: image.heightPx,
+      colorSpace: image.colorSpace,
+      bitsPerComponent: image.bitsPerComponent,
+      filter: image.filter,
+      decodeParms: image.decodeParms,
+      smaskRef: maskId,
+      data: image.data,
+    })
+  }
+
   const resources =
     `<< /Font << ${fonts
       .map(([, resource], index) => `/${resource} ${FIRST_FONT + index} 0 R`)
-      .join(' ')} >> >>`
+      .join(' ')} >>` +
+    (images.length > 0
+      ? ` /XObject << ${images
+          .map(([name]) => `/${name} ${imageIds.get(name)!.id} 0 R`)
+          .join(' ')} >>`
+      : '') +
+    ` >>`
 
   input.pages.forEach((page, index) => {
     const pageId = pageIds[index]
@@ -235,6 +384,9 @@ export function writePdf(input: PdfDocumentInput): Buffer {
     objects[contentId] =
       `<< /Length ${Buffer.byteLength(stream, 'latin1')} >>\nstream\n${stream}\nendstream`
   })
+
+  const highestUsed = Math.max(nextId - 1, ...pageIds.map((id) => id + 1), 3)
+  objects.length = Math.max(objects.length, highestUsed + 1)
 
   const chunks: string[] = ['%PDF-1.4\n']
   // A binary comment line, so tools that sniff text-versus-binary treat the
@@ -273,6 +425,35 @@ export function writePdf(input: PdfDocumentInput): Buffer {
   )
 
   return Buffer.from(chunks.join(''), 'latin1')
+}
+
+/**
+ * One image XObject, dictionary and stream.
+ *
+ * `latin1` throughout: the stream is binary and the file is assembled as a
+ * `latin1` string, which is byte-for-byte faithful for every value 0–255.
+ */
+function imageObject(input: {
+  widthPx: number
+  heightPx: number
+  colorSpace: string
+  bitsPerComponent: number
+  filter: string
+  decodeParms: string | null
+  smaskRef: number | null
+  data: Buffer
+}): string {
+  const dictionary =
+    `<< /Type /XObject /Subtype /Image ` +
+    `/Width ${input.widthPx} /Height ${input.heightPx} ` +
+    `/ColorSpace ${input.colorSpace} ` +
+    `/BitsPerComponent ${input.bitsPerComponent} ` +
+    `/Filter /${input.filter} ` +
+    (input.decodeParms ? `/DecodeParms ${input.decodeParms} ` : '') +
+    (input.smaskRef !== null ? `/SMask ${input.smaskRef} 0 R ` : '') +
+    `/Length ${input.data.length} >>`
+
+  return `${dictionary}\nstream\n${input.data.toString('latin1')}\nendstream`
 }
 
 /**

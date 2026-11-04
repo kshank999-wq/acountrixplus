@@ -219,10 +219,21 @@ describe('every read from a company-scoped table', () => {
       actor behind it is the shape that has to be looked at hardest, and it is
       the shape the client-facing document necessarily has.
     */
-    expect(READS.length).toBe(921)
+    /*
+      922 since Phase 185, and the one new read is `explicit-company`: the
+      brand kit's `logoAssetId`, read by `proposalRenderInput` so a `cover`
+      block can print the logo. Explicit rather than `scoped()` because the
+      public proposal page renders for somebody with no session, which is the
+      same shape `teamForDocument` has and for the same reason.
+
+      `readAsset` is not a second one. It gained an `Executor` parameter so the
+      send path reads the picture inside the transaction that writes the
+      version — the read itself is the one that was already there.
+    */
+    expect(READS.length).toBe(922)
     expect(by).toEqual({
       'scoped-read': 566,
-      'explicit-company': 263,
+      'explicit-company': 264,
       'established-above': 31,
       'id-from-fetched-row': 17,
       'join-inherited': 13,

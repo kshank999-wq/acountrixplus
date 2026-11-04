@@ -208,7 +208,7 @@ otherwise.
 | --- | --- | --- |
 | 7 | **Comments/questions on the client link** | No table, column or module. The link tracks views and takes an acceptance; a client cannot ask a question through it. |
 | 7 | ~~**Generic `table` block**~~ | **Built in Phase 181.** A `table` block with an optional header, up to six columns, per-column alignment and three border styles, rendered on all eight surfaces. Writing it found that three block types had never reached one of them — see ADR 0181. |
-| 7 | **Crop/mask on images** | Nothing. An image block places a whole asset. |
+| 7 | **Crop/mask on images** | Nothing author-controlled yet. **Phase 185 built the part underneath it**: the PDF contained no images at all, so a crop would have been one the client never saw. The clipping primitive exists and the team headshot uses it; what is missing is the rectangle on the block and the editor to drag it. See ADR 0185. |
 | 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
 | 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 18 block types. |
@@ -222,6 +222,14 @@ rows are one piece of work. **Four are struck through: asset association (Phase
 182), and team bios (Phase 183).** Five capabilities remain, and all five are
 §7's design engine — the client-link comment thread, crop/mask, SVG, artboard
 affordances and vector primitives.
+
+**And what Phase 185 found, which is the same blind spot from the other side.**
+The nominated row below said crop and mask were missing, and they were. It did
+not say that the PDF drew no pictures of any kind — not the logo, not a
+photograph, not a face — because this audit asks what the specification names
+and §7 does not name *"the PDF should contain the images"*. The gap was also
+**declared** in the renderer's own docstring, which is the form a defect takes
+when nobody re-reads a limitation after its reason expires.
 
 **What Phase 184 found that this audit cannot look for.** The nominated work —
 converting `document_links` away from a keyless polymorphic reference — was a

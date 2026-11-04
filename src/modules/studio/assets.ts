@@ -1,6 +1,6 @@
 import { randomUUID, createHash } from 'node:crypto'
 import { and, desc, eq } from 'drizzle-orm'
-import { db } from '@/db'
+import { db, type Executor } from '@/db'
 import { assetBlobs, assets } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -166,8 +166,14 @@ export async function listAssets(ctx: ActorContext, kind?: 'logo' | 'image' | 'd
  * Takes the acting company rather than trusting the id alone, so one tenant
  * cannot fetch another's logo by guessing a uuid.
  */
-export async function readAsset(companyId: string, assetId: string) {
-  const [asset] = await db
+export async function readAsset(companyId: string, assetId: string, exec: Executor = db) {
+  /*
+    `exec` since Phase 185: the PDF embeds pictures, and a proposal's PDF is
+    rendered inside the transaction that writes its version — so the logo on the
+    paper is the logo at the moment it was sent, read through the same executor
+    as the figures beside it.
+  */
+  const [asset] = await exec
     .select()
     .from(assets)
     .where(and(eq(assets.id, assetId), eq(assets.companyId, companyId)))
