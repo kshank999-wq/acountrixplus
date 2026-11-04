@@ -49,6 +49,15 @@ export type AuditAction =
   | 'rule.update'
   | 'rule.delete'
   | 'rule.apply'
+  /**
+   * A creative asset associated with the record it is about (Phase 180, §8).
+   *
+   * On the asset rather than on the subject, because the question asked later
+   * is "where has this gone" — and the five subject kinds would otherwise need
+   * five entity types to say one thing.
+   */
+  | 'asset.associate'
+  | 'asset.disassociate'
   | 'account.create'
   // Retiring an account takes it out of every picker without deleting the
   // heading its own history is filed under (Phase 118).

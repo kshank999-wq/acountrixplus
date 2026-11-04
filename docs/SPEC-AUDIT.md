@@ -170,7 +170,7 @@ suppression (`modules/crm/intake`, `modules/notify`), and security review gating
 **Strong tenant isolation** is the partial, and it is partial in a precise way
 rather than vaguely: the application layer is complete and measured — 111 writes
 and 911 reads, every one guarded (Phases 149–150, counted again in 179) — and
-the database layer is installed, forced on 162 tables, proven against a restricted role, and **not
+the database layer is installed, forced on 163 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.
@@ -213,11 +213,12 @@ otherwise.
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
 | 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 16 block types. |
 | 7 | **`deliverables` and `assumptions`** | 10 of the 12 components §7 names have a dedicated block or column; these two have neither and would be typed into a `text` or `list` block. |
-| 8 | **Asset association** | §8: *"Assets can be associated with campaigns, contacts, companies, opportunities, or client records."* `assets` carries none of those columns. |
+| 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` uses — see ADR 0180 for why the precedent was not followed. Four of the five kinds have no attach control yet. |
 | 15 | **Team bios** | Nothing. `company_profiles.credentials` covers licences, certifications and insurance; bios have no home. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
-rows are one piece of work.
+rows are one piece of work. **One is struck through: asset association, built in
+Phase 180.** Eight capabilities remain, seven of them §7's design engine.
 
 **On §7's own deferral.** The section ends: *"advanced Illustrator-class path
 editing can be phased in after the core proposal workflow is stable."* That

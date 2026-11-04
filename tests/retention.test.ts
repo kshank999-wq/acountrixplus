@@ -151,7 +151,16 @@ describe('the retention policy', () => {
   // This file says the price out loud — "that is the price of the moment where
   // somebody decides" — and Phase 177 added a table and skipped the moment. It
   // was red for two phases, because no full suite ran between them.
-  const TABLE_COUNT = 182
+  // 183 since Phase 180 added `asset_links`, also `NEVER_SWEPT`: an association
+  // is a deliberate human act recording that a piece of collateral went to a
+  // client, and §8's whole question — "what have we sent this client" — is a
+  // question about the past. Sweeping it would delete the answer while leaving
+  // the asset and the client both in place, which is the shape of a record that
+  // no longer explains itself.
+  //
+  // Decided here rather than discovered two phases later, which is what Phase
+  // 177 did and Phase 179 found.
+  const TABLE_COUNT = 183
 
   const HOW_TO_ANSWER = [
     'The number of tables changed, so a table was added or dropped.',

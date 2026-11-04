@@ -50,7 +50,7 @@ an expense for money that never moved. **CSV import is unaffected** either way,
 because a statement row arrives once, already posted, and a file cannot take it
 back.
 
-**Row-level security is installed and not switched on.** 162 tables carry
+**Row-level security is installed and not switched on.** 163 tables carry
 policies; the application connects as the table owner, so they do not apply.
 `RLS_ROLLOUT` records this. The application-layer guards are complete and
 measured — 111 writes and 883 reads, every one accounted for — so for a single
@@ -81,7 +81,7 @@ applies the migrations, **proves the schema landed** rather than trusting an
 exit code, generates your secrets, and prints the environment block to paste
 into Vercel.
 
-Expect `182 tables present, ledger included.`
+Expect `183 tables present, ledger included.`
 
 > No machine to run it from? `npm run db:bundle` flattens every migration into
 > `drizzle/bundle.sql`, wrapped in one transaction, to paste into Supabase's SQL
@@ -211,8 +211,9 @@ impressionistic — for the sections it covered.
   layers, vector primitives, crop/mask or SVG import. Proposals and marketing
   documents work; an Illustrator-class editor is not there.
 - **No generic table block** — `pricingTable` exists, a plain table does not.
-- **No asset association**, so there is no answer to "what have we sent this
-  client".
+- **Asset association is one screen of five.** Built in Phase 180: the client
+  record carries "n things sent", and campaigns, contacts, opportunities and
+  clients have the table and the service but no attach control yet.
 - **No team bios** in the company profile.
 
 None of these touch bookkeeping, invoicing, reconciliation or the ledger.

@@ -150,6 +150,14 @@ export const organizations = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    /**
+     * The target half of a composite tenant key (Phase 170, added in 180).
+     *
+     * `asset_links` references `(company_id, id)` so an association cannot
+     * point at another company's record, and a composite foreign key needs a
+     * unique on exactly those columns to point at.
+     */
+    companyIdKey: unique('organizations_company_id_key').on(t.companyId, t.id),
     companyNameIdx: index('organizations_company_name_idx').on(t.companyId, t.name),
     stageIdx: index('organizations_stage_idx').on(t.companyId, t.lifecycleStage),
   }),
@@ -186,6 +194,14 @@ export const contacts = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    /**
+     * The target half of a composite tenant key (Phase 170, added in 180).
+     *
+     * `asset_links` references `(company_id, id)` so an association cannot
+     * point at another company's record, and a composite foreign key needs a
+     * unique on exactly those columns to point at.
+     */
+    companyIdKey: unique('contacts_company_id_key').on(t.companyId, t.id),
     companyIdx: index('contacts_company_idx').on(t.companyId),
     organizationIdx: index('contacts_organization_idx').on(t.organizationId),
     emailIdx: index('contacts_email_idx').on(t.companyId, t.email),
@@ -254,6 +270,14 @@ export const opportunities = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    /**
+     * The target half of a composite tenant key (Phase 170, added in 180).
+     *
+     * `asset_links` references `(company_id, id)` so an association cannot
+     * point at another company's record, and a composite foreign key needs a
+     * unique on exactly those columns to point at.
+     */
+    companyIdKey: unique('opportunities_company_id_key').on(t.companyId, t.id),
     pipelineIdx: index('opportunities_pipeline_idx').on(t.companyId, t.stage),
     organizationIdx: index('opportunities_organization_idx').on(t.organizationId),
     ownerIdx: index('opportunities_owner_idx').on(t.companyId, t.ownerId),

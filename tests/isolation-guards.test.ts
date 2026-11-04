@@ -191,9 +191,20 @@ describe('every write that can be aimed at a row', () => {
     // file. A scan that counts the whole tree cannot be checked by running the
     // tests near the code that changed — the second tripwire to go red for
     // exactly that reason, after `refusal-audience` in Phase 167.
-    expect(WRITES.length).toBe(111)
+    //
+    // **A hundred and twelve since Phase 180** and `unlinkAsset`, which removes
+    // an asset's association with a record. `explicit-company` at 63: the
+    // delete is keyed by the link id a caller hands in *and* filtered on the
+    // acting company, which is what stops one tenant detaching another's
+    // association by guessing a uuid.
+    //
+    // Counted in the phase that added it this time. The three counts Phase 177
+    // moved went unnoticed for two phases and Phase 179's full run found them,
+    // which is the argument for running this file in the phase rather than
+    // after it.
+    expect(WRITES.length).toBe(112)
     expect(by).toEqual({
-      'explicit-company': 62,
+      'explicit-company': 63,
       'scoped-write': 28,
       'read-then-refuse': 9,
       'owner-helper': 4,

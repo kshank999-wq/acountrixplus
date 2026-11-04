@@ -143,7 +143,7 @@ describe('the queue the policies had taken out', () => {
     ])
   })
 
-  it('leaves them unpoliced in the database, and the count at 162', async () => {
+  it('leaves them unpoliced in the database, and the count at 163', async () => {
     const rows = (await db.execute(sql`
       select
         (select count(*)::int from pg_class where relrowsecurity) as policed,
@@ -165,7 +165,7 @@ describe('the queue the policies had taken out', () => {
       for running the suite again after fixing it, rather than reasoning that
       the fixes were obviously sufficient.
     */
-    expect(rows[0].policed).toBe(162)
+    expect(rows[0].policed).toBe(163)
   })
 
   it('names what policing them would have done, because it would have been silent', () => {

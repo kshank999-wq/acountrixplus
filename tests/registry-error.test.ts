@@ -263,7 +263,17 @@ describe('every registry refuses the same way', () => {
     // time it did so inside the phase that added it rather than one or nine
     // phases later. Worth recording as the device working at full speed for
     // once, because every other entry above is a story about how long it took.
-    expect(thrown.length).toBe(35)
+    //
+    // Thirty-seven since Phase 180 and `ASSET_SUBJECTS`, which throws twice.
+    // The second throw is the interesting one: `subjectOf` refuses a stored
+    // `asset_links` row naming none of §8's five subjects — a state
+    // `asset_links_one_subject_check` makes impossible — and its sentence says
+    // "check the migrations" rather than "this link has no subject", because
+    // the only way to reach it is the constraint being gone.
+    //
+    // A register entry that accuses the schema rather than the caller is new
+    // here, and it is the shape a CHECK and a register produce together.
+    expect(thrown.length).toBe(37)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

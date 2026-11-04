@@ -48,3 +48,8 @@ export * from './budget'
 export * from './billing'
 export * from './payments'
 export * from './exporter'
+/*
+  Last, because it references `studio`, `crm`, `marketing` and `receivables` and
+  a table downstream of four others has to be defined after them (Phase 180).
+*/
+export * from './asset-links'

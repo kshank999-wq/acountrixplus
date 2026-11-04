@@ -14,6 +14,12 @@ import {
 } from '@/modules/studio/service'
 import { deleteAsset, uploadAsset } from '@/modules/studio/assets'
 import {
+  assetsForSubject,
+  linkAsset,
+  unlinkAsset,
+} from '@/modules/studio/asset-links'
+import type { AssetSubjectKind } from '@/modules/studio/asset-subjects'
+import {
   applyTemplate,
   createDocumentForProposal,
   saveAsTemplate,
@@ -251,5 +257,81 @@ export async function saveAsTemplateAction(
     const actor = await requireActor()
     await saveAsTemplate(actor, documentId, { key, name })
     return `Saved "${name}" to your template library.`
+  })
+}
+
+// --- What we sent this client (Phase 180, §8) ------------------------------
+
+/**
+ * Reads back the collateral on one record.
+ *
+ * Its own result type rather than `ActionResult`, because the panel needs the
+ * rows and `run`'s shape carries only a message — and squeezing a list into a
+ * message string is how a screen ends up parsing prose.
+ */
+export type SentAssetsResult =
+  | { ok: true; assets: Array<{ linkId: string; assetId: string; filename: string; note: string | null }> }
+  | { ok: false; error: string }
+
+export async function sentAssetsAction(organizationId: string): Promise<SentAssetsResult> {
+  try {
+    const actor = await requireActor()
+    const rows = await assetsForSubject(actor, { kind: 'organization', id: organizationId })
+
+    return {
+      ok: true,
+      assets: rows.map((row) => ({
+        linkId: row.linkId,
+        assetId: row.assetId,
+        filename: row.filename,
+        note: row.note,
+      })),
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'Could not read what was sent.') }
+  }
+}
+
+const associateSchema = z.object({
+  assetId: z.string().uuid(),
+  /*
+    The five §8 kinds, spelled out rather than taken as a string. The register
+    throws a `RegistryError` for an undeclared kind, which is an operator-facing
+    defect sentence — and a value arriving from a form is a person's input, so
+    it gets a person's refusal instead.
+  */
+  kind: z.enum(['campaign', 'contact', 'organization', 'opportunity', 'customer']),
+  subjectId: z.string().uuid(),
+  note: z.string().trim().max(400).optional(),
+})
+
+export async function associateAssetAction(input: {
+  assetId: string
+  kind: string
+  subjectId: string
+  note?: string
+}): Promise<ActionResult> {
+  return run(['/crm/organizations', '/studio'], async () => {
+    const parsed = associateSchema.safeParse(input)
+    if (!parsed.success) {
+      throw new Refusal('That is not a record an asset can be associated with.')
+    }
+
+    const actor = await requireActor()
+    await linkAsset(actor, {
+      assetId: parsed.data.assetId,
+      subject: { kind: parsed.data.kind as AssetSubjectKind, id: parsed.data.subjectId },
+      note: parsed.data.note,
+    })
+
+    return 'Associated.'
+  })
+}
+
+export async function disassociateAssetAction(linkId: string): Promise<ActionResult> {
+  return run(['/crm/organizations', '/studio'], async () => {
+    const actor = await requireActor()
+    await unlinkAsset(actor, linkId)
+    return 'Removed.'
   })
 }

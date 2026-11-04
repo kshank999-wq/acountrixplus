@@ -126,6 +126,14 @@ export const campaigns = pgTable(
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    /**
+     * The target half of a composite tenant key (Phase 170, added in 180).
+     *
+     * `asset_links` references `(company_id, id)` so an association cannot
+     * point at another company's record, and a composite foreign key needs a
+     * unique on exactly those columns to point at.
+     */
+    companyIdKey: unique('campaigns_company_id_key').on(t.companyId, t.id),
     companyStatusIdx: index('campaigns_company_status_idx').on(t.companyId, t.status),
     calendarIdx: index('campaigns_calendar_idx').on(t.companyId, t.scheduledFor),
   }),

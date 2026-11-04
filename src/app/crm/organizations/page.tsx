@@ -8,9 +8,12 @@ import { CRM_NAV } from '../nav'
 import { lastContactedAt } from '@/modules/engagement/communications'
 import { accountsNeedingAttention } from '@/modules/crm/accounts'
 import { aiAvailable } from '@/modules/ai/settings'
+import { assetCountsForSubjects } from '@/modules/studio/asset-links'
+import { listAssets } from '@/modules/studio/assets'
 import { AttentionPanel } from './attention-panel'
 import { EditOrganization, NewOrganization } from './new-organization'
 import { ClientTimeline } from './client-timeline'
+import { SentAssets } from './sent-assets'
 
 export const dynamic = 'force-dynamic'
 
@@ -60,10 +63,30 @@ export default async function OrganizationsPage() {
   // One query for the whole page. "When did we last speak to these people" is
   // the question a client list is opened to answer, and asking it per row is
   // how it ends up not being shown at all.
+  const canSeeStudio = can(actor, 'marketing:manage')
+
   const spokenTo = await lastContactedAt(
     actor,
     organizations.map((organization) => organization.id),
   )
+
+  /*
+    §8's question, counted for the whole page in one grouped query (Phase 180).
+    The same argument the comment above makes about "when did we last speak to
+    these people": asking per row is how it ends up not being shown at all.
+
+    The asset list itself is fetched per record on demand, because a page that
+    loaded every organisation's collateral to show a number would be slower for
+    everybody to answer a question about one of them.
+  */
+  const [sentCounts, companyAssets] = await Promise.all([
+    assetCountsForSubjects(
+      actor,
+      'organization',
+      organizations.map((organization) => organization.id),
+    ),
+    canSeeStudio ? listAssets(actor) : Promise.resolve([]),
+  ])
 
   const contactsByOrg = new Map<string, typeof contacts>()
   for (const contact of contacts) {
@@ -163,6 +186,16 @@ export default async function OrganizationsPage() {
                     lastContacted={
                       spokenTo.get(organization.id)?.toISOString().slice(0, 10) ?? null
                     }
+                  />
+
+                  <SentAssets
+                    organizationId={organization.id}
+                    count={sentCounts.get(organization.id) ?? 0}
+                    assets={companyAssets.map((asset) => ({
+                      id: asset.id,
+                      filename: asset.filename,
+                    }))}
+                    canManage={can(actor, 'marketing:manage')}
                   />
 
                   {people.length > 0 && (

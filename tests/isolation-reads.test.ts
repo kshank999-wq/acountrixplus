@@ -201,9 +201,15 @@ describe('every read from a company-scoped table', () => {
       reads were written in the shapes already here rather than inventing a new
       guard nobody had argued for.
     */
-    expect(READS.length).toBe(911)
+    /*
+      916 since Phase 180, all five on `scoped-read`: the four reads
+      `asset-links.ts` makes of `asset_links`, plus the one `assets` join that
+      the scan counts separately. Every one goes through `scoped()`, which is
+      what the distribution moving in exactly one place says.
+    */
+    expect(READS.length).toBe(916)
     expect(by).toEqual({
-      'scoped-read': 557,
+      'scoped-read': 562,
       'explicit-company': 262,
       'established-above': 31,
       'id-from-fetched-row': 17,

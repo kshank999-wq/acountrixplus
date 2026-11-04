@@ -108,8 +108,16 @@ describe('how many references could point at another tenant', () => {
       predicted exactly that: a scan that counts the whole tree cannot be checked
       by running the tests near the code that changed.
     */
-    expect(measured.total).toBe(274)
-    expect(measured.composite).toBe(19)
+/*
+      280 and 25 since Phase 180, which added six composite keys in one phase —
+      `asset_links` to `assets` and to each of §8's five subjects. The largest
+      single move in this programme so far, and it came free: the capability
+      needed the references, and the references needed the tenant in the key
+      because the alternative was the polymorphic shape Phase 170 was written to
+      retire.
+    */
+    expect(measured.total).toBe(280)
+    expect(measured.composite).toBe(25)
   })
 
   it('leaves no single-column reference into the catalogue at all', async () => {

@@ -145,6 +145,9 @@ export const RECORD_KINDS: readonly RecordKind[] = [
   // "revision" and not "change", because the inbox calls it one and a refusal
   // naming a different noun than the screen is two names for one thing.
   scoped('revision', 'revision'),
+  // An asset's association with a record (Phase 180). "association" and not
+  // "link", which in this product means a client-facing proposal URL.
+  scoped('assetLink', 'association'),
   open('company', 'company'),
   open('user', 'user'),
 ]

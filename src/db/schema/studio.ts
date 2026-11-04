@@ -188,6 +188,14 @@ export const assets = pgTable(
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
+    /**
+     * The target half of a composite tenant key (Phase 170, added in 180).
+     *
+     * `asset_links` references `(company_id, id)` so an association cannot
+     * point at another company's record, and a composite foreign key needs a
+     * unique on exactly those columns to point at.
+     */
+    companyIdKey: unique('assets_company_id_key').on(t.companyId, t.id),
     companyIdx: index('assets_company_idx').on(t.companyId, t.kind),
     storageKeyUnique: unique('assets_storage_key_unique').on(t.storageKey),
   }),

@@ -232,6 +232,10 @@ export const NEVER_SWEPT = [
   // with the feed. `bank_transactions` is never swept and its explanation must
   // outlive it, not the other way round.
   'bank_transaction_revisions',
+  // What collateral went to which client, campaign, contact, opportunity or
+  // prospect (Phase 180, §8). A deliberate act, not traffic — and the only
+  // record of it, since the asset and the subject survive the link.
+  'asset_links',
   'chart_accounts',
   // Who did what, which is the record §19 exists to protect.
   'audit_events',
