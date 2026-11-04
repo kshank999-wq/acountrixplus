@@ -100,9 +100,9 @@ export const PARTY_REFERENCES: Record<PartySide, Reference[]> = {
       late, and the tripwire below was red for all four of them.
 
       Nobody ran `party-merge.test.ts` in Phases 180 to 183, which is ADR 0178's
-      prediction holding for the fifth time: a scan that reads the whole
-      catalogue cannot be checked by running the tests near the code that
-      changed. The consequence while it was red was the exact one this module's
+      prediction again: a scan that reads the whole catalogue cannot be
+      checked by running the tests near the code that changed, and the last
+      full-suite run before this one predates the breakage. The consequence while it was red was the exact one this module's
       docstring describes — merging two records of one business left the
       collateral on the losing record, so §8's whole question, *"what have we
       sent this client"*, answered wrong for the merged client.
@@ -277,8 +277,10 @@ export function describeMerge(input: {
  * Before Phase 184 none of this was expressible. `document_links.subject_id` and
  * `record_notes.subject_id` held the customer's uuid with no foreign key, so
  * they were invisible to the catalogue tripwire and to this register — which
- * means **every customer merge since Phase 20 left the receipts and the notes on
- * the losing record.** The conversion is what gave the merge somewhere to stand.
+ * means **every customer merge this application has ever performed left the
+ * receipts and the notes on the losing record** — as long as the merge has
+ * existed, which is since Phase 96. The conversion is what gave the merge
+ * somewhere to stand.
  */
 export const EVIDENCE_PARTY_REFERENCES: Record<PartySide, Reference & { kind: string }> = {
   customer: { table: 'evidence_subjects', column: 'customer_id', kind: 'customer' },

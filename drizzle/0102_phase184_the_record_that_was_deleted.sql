@@ -406,8 +406,9 @@ DROP VIEW live_subjects;
 --
 -- Before this phase the question could not even be asked. `subject_id` held the
 -- customer's uuid with no key, so it was invisible to the catalogue tripwire —
--- which is why **every customer merge since Phase 20 left the receipts and the
--- notes on the losing record.**
+-- which is why **every customer merge this application has ever performed left
+-- the receipts and the notes on the losing record** — as long as the merge has
+-- existed, which is since Phase 96.
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE document_links

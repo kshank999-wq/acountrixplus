@@ -523,7 +523,8 @@ describe('merging two records of one business', () => {
    * merge. `document_links.subject_id` and `record_notes.subject_id` held a
    * customer's uuid with **no foreign key**, so the catalogue could not see
    * them and neither could the register — which means every customer merge
-   * since Phase 20 left the receipts and the notes on the losing record.
+   * the application has ever performed left the receipts and the notes on the
+   * losing record — as long as the merge has existed, which is since Phase 96.
    *
    * Registering them was not possible before this phase. It is the clearest
    * answer to "what is a missing foreign key actually costing": not only the
