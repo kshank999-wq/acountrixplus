@@ -296,7 +296,7 @@ describe('the writer', () => {
       { id: '4', type: 'list', items: ['one', 'two'], ordered: true },
       { id: '5', type: 'keyValue', title: 'Facts', rows: [{ label: 'A', value: 'B' }] },
       { id: '6', type: 'pricingTable', title: 'Fees', showQuantity: true, showUnitPrice: true, allowOptionalSelection: true, showTotals: true },
-      { id: '7', type: 'image', assetId: null, caption: 'A picture', widthPercent: 100, align: 'left' },
+      { id: '7', type: 'image', assetId: null, caption: 'A picture', widthPercent: 100, align: 'left', crop: { x: 0, y: 0, width: 1, height: 1 }, maskShape: 'none' },
       { id: '8', type: 'divider' },
       { id: '9', type: 'spacer', heightPt: 24 },
       { id: '10', type: 'columns', columns: [{ heading: 'X', body: 'x' }, { heading: 'Y', body: 'y' }] },

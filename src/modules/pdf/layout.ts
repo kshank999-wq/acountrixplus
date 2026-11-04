@@ -1,4 +1,4 @@
-import { normalizeTable, type Block } from '@/modules/design/blocks'
+import { isWholeImage, normalizeCrop, normalizeTable, type Block } from '@/modules/design/blocks'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import type { EmbeddableImage, ImageResult } from './images'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
@@ -744,7 +744,15 @@ class Composer {
                   y: y - (drawnHeight - photo) / 2,
                   width: drawnWidth,
                   height: drawnHeight,
-                  clip: { x: MARGIN, y, width: photo, height: photo },
+                  clip: {
+                    x: MARGIN,
+                    y,
+                    width: photo,
+                    height: photo,
+                    // Phase 186: the outline the author chose, drawn with the
+                    // same path the `image` block's mask uses.
+                    shape: block.photoShape === 'square' ? 'rect' : block.photoShape,
+                  },
                 })
 
                 let cursor = y
@@ -820,8 +828,22 @@ class Composer {
         const caption = this.resolve(block.caption)
 
         if (prepared?.ok) {
+          /*
+            The crop and the mask (Phase 186, §7's `crop/mask`).
+
+            The box takes the **cropped** shape and the picture is drawn larger
+            than it, offset so the chosen part lands inside, and clipped. The
+            picture is never altered: `1 / crop.width` is a scale and nothing is
+            resampled, which is the whole reason a crop is free here.
+
+            An uncropped, unmasked image takes neither path, so the common case
+            emits exactly what Phase 185 emitted.
+          */
+          const crop = normalizeCrop(block.crop)
           const width = (this.contentWidth * block.widthPercent) / 100
-          const height = (width * prepared.image.heightPx) / prepared.image.widthPx
+          const sourceRatio = prepared.image.heightPx / prepared.image.widthPx
+          const height = (width * crop.height * sourceRatio) / crop.width
+
           const x =
             block.align === 'center'
               ? MARGIN + (this.contentWidth - width) / 2
@@ -829,10 +851,22 @@ class Composer {
                 ? MARGIN + this.contentWidth - width
                 : MARGIN
 
+          const drawnWidth = width / crop.width
+          const drawnHeight = drawnWidth * sourceRatio
+          const shape = block.maskShape === 'none' ? 'rect' : block.maskShape
+          const clipped = !isWholeImage(crop) || block.maskShape !== 'none'
+
           this.pieces.push({
             height: height + (caption ? base * 1.6 : 0) + base * 0.6,
             draw: (page, y) => {
-              page.image({ name: imageResourceName(block.assetId!), x, y, width, height })
+              page.image({
+                name: imageResourceName(block.assetId!),
+                x: clipped ? x - crop.x * drawnWidth : x,
+                y: clipped ? y - crop.y * drawnHeight : y,
+                width: clipped ? drawnWidth : width,
+                height: clipped ? drawnHeight : height,
+                clip: clipped ? { x, y, width, height, shape } : undefined,
+              })
               if (caption) {
                 page.text(caption, {
                   x,

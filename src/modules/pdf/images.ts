@@ -91,6 +91,119 @@ export type ImageResult =
 /** Formats this can embed, as content types. The rest refuse by name. */
 export const EMBEDDABLE_CONTENT_TYPES = ['image/png', 'image/jpeg'] as const
 
+/**
+ * How big a picture is, without preparing it (Phase 186).
+ *
+ * Reads headers and nothing else — an IHDR, an SOF, a VP8 frame header, a GIF
+ * logical screen descriptor — so it is cheap enough to run on every upload and
+ * does not care whether the format can be embedded.
+ *
+ * **It answers for WebP and GIF, which `prepareImage` refuses.** That looks
+ * inconsistent and is the point: a size is a fact about the file, and the web
+ * page can crop a WebP perfectly well even though the PDF cannot print it. Tying
+ * the two together would have made the browser's crop depend on what a printer
+ * can do.
+ *
+ * `assets.width` and `assets.height` have existed since Phase 4 carrying the
+ * comment *"Pixel dimensions when known, so layout can reserve space"*, and
+ * nothing has ever written them or read them — Phase 49's rule twice over. They
+ * are written now because a crop on the web is not expressible without them: the
+ * cropped box has to take the cropped shape, and CSS can only work that out from
+ * the source's aspect ratio.
+ */
+export function imageSize(
+  bytes: Buffer,
+  contentType: string,
+): { width: number; height: number } | null {
+  if (contentType === 'image/png') return pngSize(bytes)
+  if (contentType === 'image/jpeg') return jpegSize(bytes)
+  if (contentType === 'image/webp') return webpSize(bytes)
+  if (contentType === 'image/gif') return gifSize(bytes)
+  return null
+}
+
+function pngSize(bytes: Buffer) {
+  if (bytes.length < 24 || !bytes.subarray(0, 8).equals(PNG_SIGNATURE)) return null
+  if (bytes.subarray(12, 16).toString('latin1') !== 'IHDR') return null
+
+  const width = bytes.readUInt32BE(16)
+  const height = bytes.readUInt32BE(20)
+  return width > 0 && height > 0 ? { width, height } : null
+}
+
+function jpegSize(bytes: Buffer) {
+  if (bytes.length < 4 || bytes[0] !== 0xff || bytes[1] !== 0xd8) return null
+
+  let at = 2
+  while (at + 9 < bytes.length) {
+    if (bytes[at] !== 0xff) {
+      at += 1
+      continue
+    }
+
+    const marker = bytes[at + 1]
+    if (marker === 0xff || marker === 0x01 || (marker >= 0xd0 && marker <= 0xd9)) {
+      at += 2
+      continue
+    }
+
+    // Every SOF carries the size, progressive and arithmetic included. This is
+    // not `prepareImage`'s question — those refuse there and still have a size.
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      const height = bytes.readUInt16BE(at + 5)
+      const width = bytes.readUInt16BE(at + 7)
+      return width > 0 && height > 0 ? { width, height } : null
+    }
+
+    at += 2 + bytes.readUInt16BE(at + 2)
+  }
+
+  return null
+}
+
+function webpSize(bytes: Buffer) {
+  if (bytes.length < 30) return null
+  if (bytes.subarray(0, 4).toString('latin1') !== 'RIFF') return null
+  if (bytes.subarray(8, 12).toString('latin1') !== 'WEBP') return null
+
+  const chunk = bytes.subarray(12, 16).toString('latin1')
+
+  // Three containers, because WebP has three. `VP8X` is the extended header a
+  // browser writes for anything with transparency or animation, which is most
+  // of what a `toDataURL` produces.
+  if (chunk === 'VP8X') {
+    return {
+      width: 1 + bytes.readUIntLE(24, 3),
+      height: 1 + bytes.readUIntLE(27, 3),
+    }
+  }
+
+  if (chunk === 'VP8 ') {
+    return {
+      width: bytes.readUInt16LE(26) & 0x3fff,
+      height: bytes.readUInt16LE(28) & 0x3fff,
+    }
+  }
+
+  if (chunk === 'VP8L') {
+    const packed = bytes.readUInt32LE(21)
+    return {
+      width: (packed & 0x3fff) + 1,
+      height: ((packed >> 14) & 0x3fff) + 1,
+    }
+  }
+
+  return null
+}
+
+function gifSize(bytes: Buffer) {
+  if (bytes.length < 10) return null
+  const magic = bytes.subarray(0, 6).toString('latin1')
+  if (magic !== 'GIF87a' && magic !== 'GIF89a') return null
+
+  return { width: bytes.readUInt16LE(6), height: bytes.readUInt16LE(8) }
+}
+
 export function prepareImage(bytes: Buffer, contentType: string): ImageResult {
   if (contentType === 'image/jpeg') return readJpeg(bytes)
   if (contentType === 'image/png') return readPng(bytes)

@@ -79,6 +79,7 @@ function teamBlock(patch: Partial<Extract<Block, { type: 'team' }>> = {}): Block
     title: 'Who you will be working with',
     memberIds: [],
     showPhotos: true,
+    photoShape: 'square',
     showQualifications: true,
     layout: 'list',
     ...patch,

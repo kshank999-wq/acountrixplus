@@ -333,6 +333,7 @@ export const BUILT_IN_TEMPLATES: TemplateDefinition[] = [
         title: 'Who you will be working with',
         memberIds: [],
         showPhotos: true,
+        photoShape: 'square',
         showQualifications: true,
         layout: 'list',
       }),

@@ -1,6 +1,7 @@
 'use client'
 
-import { MAX_TABLE_COLUMNS, type Block } from '@/modules/design/blocks'
+import { useRef, useState } from 'react'
+import { MAX_TABLE_COLUMNS, normalizeCrop, type Block, type Crop } from '@/modules/design/blocks'
 
 /**
  * Field editor for the selected block.
@@ -15,6 +16,7 @@ export function BlockEditor({
   clauses,
   assets,
   team,
+  assetUrl,
   onChange,
 }: {
   block: Block
@@ -29,6 +31,8 @@ export function BlockEditor({
    * newly added.
    */
   team: Array<{ id: string; name: string; title: string | null }>
+  /** Builds the URL of an asset, for the crop editor's preview (Phase 186). */
+  assetUrl: (assetId: string) => string
   onChange: (block: Block) => void
 }) {
   const set = (patch: Partial<Block>) => onChange({ ...block, ...patch } as Block)
@@ -193,6 +197,28 @@ export function BlockEditor({
             />
           </label>
           <AlignPicker value={block.align} onChange={(align) => set({ align })} />
+
+          <CropEditor
+            crop={block.crop}
+            assetId={block.assetId}
+            assetUrl={assetUrl}
+            onChange={(crop) => set({ crop })}
+          />
+
+          <Select
+            label="Shape"
+            value={block.maskShape}
+            options={[
+              { value: 'none', label: 'Square corners' },
+              { value: 'rounded', label: 'Rounded corners' },
+              { value: 'circle', label: 'Circle' },
+            ]}
+            onChange={(value) => set({ maskShape: value as 'none' | 'rounded' | 'circle' })}
+          />
+          <p className="text-xs text-faint">
+            The crop and the shape both reach the PDF. An email shows no pictures at all, so
+            neither reaches one.
+          </p>
         </div>
       )}
 
@@ -529,6 +555,20 @@ export function BlockEditor({
             checked={block.showPhotos}
             onChange={(showPhotos) => set({ showPhotos })}
           />
+          {block.showPhotos && (
+            <Select
+              label="Headshot shape"
+              value={block.photoShape}
+              options={[
+                { value: 'square', label: 'Square' },
+                { value: 'rounded', label: 'Rounded' },
+                { value: 'circle', label: 'Circle' },
+              ]}
+              onChange={(value) =>
+                set({ photoShape: value as 'square' | 'rounded' | 'circle' })
+              }
+            />
+          )}
           <Toggle
             label="Show qualifications after the name"
             checked={block.showQualifications}
@@ -679,6 +719,175 @@ function AlignPicker({
           </button>
         ))}
       </div>
+    </div>
+  )
+}
+
+/**
+ * Choosing which part of a picture is shown (spec §7, Phase 186).
+ *
+ * ## A preview with a box over it, not four numbers
+ *
+ * A crop is a shape, and four spinners describing a shape is a form somebody
+ * fills in twice and gets wrong once. So the control is the picture with the
+ * kept region drawn on it: the author sees the framing they are choosing, which
+ * is the only way to tell whether a face is in it.
+ *
+ * ## Dragging, with the arithmetic in fractions throughout
+ *
+ * Pointer positions are converted to fractions of the picture immediately and
+ * never stored as pixels, which is the same decision `cropSchema` makes and for
+ * the same reason: the preview is 300 points wide today and the asset may be
+ * replaced by a larger scan tomorrow.
+ *
+ * Two gestures, because they are the two things people do. Dragging inside the
+ * box **moves** it and dragging the corner **resizes** it, and both are clamped
+ * by `normalizeCrop` rather than by arithmetic here — one answer to "where can
+ * this box be", shared with the renderers.
+ *
+ * ## The presets earn their place
+ *
+ * A square and a 16:9 are most of what anybody wants, and dragging to an exact
+ * ratio by hand is the kind of fiddling that makes a feature feel broken. They
+ * centre on what is already chosen rather than resetting to the middle, so
+ * picking "Square" after framing a face keeps the face.
+ */
+function CropEditor({
+  crop,
+  assetId,
+  assetUrl,
+  onChange,
+}: {
+  crop: Crop
+  assetId: string | null
+  assetUrl: (assetId: string) => string
+  onChange: (crop: Crop) => void
+}) {
+  const frame = useRef<HTMLDivElement | null>(null)
+  const [drag, setDrag] = useState<{ mode: 'move' | 'resize'; x: number; y: number } | null>(null)
+
+  if (!assetId) {
+    return (
+      <p className="text-xs text-faint">Choose an image to crop it.</p>
+    )
+  }
+
+  const safe = normalizeCrop(crop)
+
+  /** A pointer position as a fraction of the picture, clamped to it. */
+  function fractionOf(event: React.PointerEvent): { x: number; y: number } | null {
+    const box = frame.current?.getBoundingClientRect()
+    if (!box || box.width === 0 || box.height === 0) return null
+
+    return {
+      x: Math.min(Math.max((event.clientX - box.left) / box.width, 0), 1),
+      y: Math.min(Math.max((event.clientY - box.top) / box.height, 0), 1),
+    }
+  }
+
+  function begin(mode: 'move' | 'resize') {
+    return (event: React.PointerEvent) => {
+      const at = fractionOf(event)
+      if (!at) return
+      event.preventDefault()
+      event.currentTarget.setPointerCapture(event.pointerId)
+      setDrag({ mode, x: at.x - safe.x, y: at.y - safe.y })
+    }
+  }
+
+  function move(event: React.PointerEvent) {
+    if (!drag) return
+    const at = fractionOf(event)
+    if (!at) return
+
+    onChange(
+      normalizeCrop(
+        drag.mode === 'move'
+          ? { ...safe, x: at.x - drag.x, y: at.y - drag.y }
+          : { ...safe, width: at.x - safe.x, height: at.y - safe.y },
+      ),
+    )
+  }
+
+  /** Keeps the centre and takes the largest box of the wanted ratio. */
+  function preset(ratio: number | null) {
+    if (ratio === null) {
+      onChange({ x: 0, y: 0, width: 1, height: 1 })
+      return
+    }
+
+    const width = Math.min(1, ratio)
+    const height = Math.min(1, 1 / ratio)
+    const centreX = safe.x + safe.width / 2
+    const centreY = safe.y + safe.height / 2
+
+    onChange(normalizeCrop({ x: centreX - width / 2, y: centreY - height / 2, width, height }))
+  }
+
+  return (
+    <div className="space-y-2">
+      <span className="block text-xs text-muted">Crop</span>
+
+      <div
+        ref={frame}
+        className="relative select-none overflow-hidden rounded border border-line bg-raised"
+        onPointerMove={move}
+        onPointerUp={() => setDrag(null)}
+        onPointerCancel={() => setDrag(null)}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={assetUrl(assetId)} alt="" className="block w-full opacity-40" draggable={false} />
+
+        <div
+          role="group"
+          aria-label="Kept area"
+          onPointerDown={begin('move')}
+          className="absolute cursor-move border-2 border-brand"
+          style={{
+            left: `${safe.x * 100}%`,
+            top: `${safe.y * 100}%`,
+            width: `${safe.width * 100}%`,
+            height: `${safe.height * 100}%`,
+            // The kept part at full strength over the dimmed whole, so the
+            // framing is visible rather than merely outlined.
+            backgroundImage: `url(${assetUrl(assetId)})`,
+            backgroundSize: `${100 / safe.width}% ${100 / safe.height}%`,
+            backgroundPosition: `${(safe.x / (1 - safe.width || 1)) * 100}% ${
+              (safe.y / (1 - safe.height || 1)) * 100
+            }%`,
+          }}
+        >
+          <span
+            onPointerDown={begin('resize')}
+            className="absolute -bottom-1.5 -right-1.5 h-3 w-3 cursor-se-resize rounded-sm bg-brand"
+            aria-label="Resize the kept area"
+          />
+        </div>
+      </div>
+
+      <div className="flex flex-wrap gap-1">
+        {(
+          [
+            ['Whole picture', null],
+            ['Square', 1],
+            ['16:9', 16 / 9],
+            ['4:3', 4 / 3],
+          ] as const
+        ).map(([label, ratio]) => (
+          <button
+            key={label}
+            onClick={() => preset(ratio)}
+            className="chip bg-raised px-2 py-1 text-xs text-muted hover:text-ink"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <p className="text-xs text-faint">
+        {Math.round(safe.width * 100)}% × {Math.round(safe.height * 100)}% of the picture. Drag
+        the box to move it, or its corner to resize.
+      </p>
     </div>
   )
 }

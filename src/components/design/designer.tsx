@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useState, useTransition } from 'react'
+import { useEffect, useMemo, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   applyTemplateAction,
@@ -196,6 +196,43 @@ export function Designer({
 
   const preview = useMemo(() => resolveBlocks(blocks, context), [blocks, context])
   const assetUrl = (assetId: string) => `/api/assets/${assetId}`
+
+  /**
+   * Picture sizes, measured from the browser's own copy.
+   *
+   * Every asset the library offers, loaded once and remembered, so that
+   * choosing a picture and dragging its crop are both immediate. An `Image()`
+   * that has already been fetched for the preview resolves from cache.
+   */
+  const [measuredSizes, setMeasuredSizes] = useState<
+    Record<string, { width: number; height: number }>
+  >({})
+
+  useEffect(() => {
+    const placed = new Set(
+      blocks.flatMap((block) =>
+        block.type === 'image' && block.assetId ? [block.assetId] : [],
+      ),
+    )
+    const selectedAsset = selected?.type === 'image' ? selected.assetId : null
+    if (selectedAsset) placed.add(selectedAsset)
+
+    for (const assetId of placed) {
+      if (measuredSizes[assetId]) continue
+
+      const probe = new window.Image()
+      probe.onload = () =>
+        setMeasuredSizes((sizes) =>
+          sizes[assetId]
+            ? sizes
+            : { ...sizes, [assetId]: { width: probe.naturalWidth, height: probe.naturalHeight } },
+        )
+      probe.src = assetUrl(assetId)
+    }
+    // `measuredSizes` is read to skip work, not to decide when to run: adding
+    // it would re-run the effect on every measurement it causes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, selected])
 
   return (
     <div className="space-y-4">
@@ -487,6 +524,7 @@ export function Designer({
               clauses={clauses}
               assets={assets}
               team={team}
+              assetUrl={assetUrl}
               onChange={(next) =>
                 update(blocks.map((block) => (block.id === next.id ? next : block)))
               }
@@ -542,6 +580,17 @@ export function Designer({
                 logoUrl: brand?.logoAssetId ? assetUrl(brand.logoAssetId) : null,
                 assetUrl,
                 teamMembers: teamPool,
+                /*
+                  Measured in the browser as the preview loads (Phase 186).
+
+                  The server could supply these — the proposal page does — but
+                  the designer's point is that a crop updates under the author's
+                  hand, and a picture they uploaded a second ago has to crop
+                  immediately rather than after a round trip. `naturalWidth` is
+                  the same number `assets.width` holds, read from the image the
+                  preview already fetched.
+                */
+                assetSizes: measuredSizes,
               }}
             />
           </div>

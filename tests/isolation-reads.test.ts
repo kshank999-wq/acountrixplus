@@ -230,10 +230,20 @@ describe('every read from a company-scoped table', () => {
       send path reads the picture inside the transaction that writes the
       version — the read itself is the one that was already there.
     */
-    expect(READS.length).toBe(922)
+    /*
+      924 since Phase 186 and the two reads a crop needs: `assetSizes`, which
+      is `explicit-company` because the client-facing proposal page has no
+      session behind it, and `measureStoredAssets`, which is `scoped-read`
+      because it is an operation somebody with `company:manage` runs.
+
+      The split is the distribution saying something true again: the read that
+      serves a stranger is explicit, and the one that serves an operator goes
+      through `scoped()`.
+    */
+    expect(READS.length).toBe(924)
     expect(by).toEqual({
-      'scoped-read': 566,
-      'explicit-company': 264,
+      'scoped-read': 567,
+      'explicit-company': 265,
       'established-above': 31,
       'id-from-fetched-row': 17,
       'join-inherited': 13,

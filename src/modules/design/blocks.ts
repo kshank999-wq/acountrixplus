@@ -198,6 +198,58 @@ export function normalizeTable(block: TableBlock): {
  * and the union degrades to `any` without saying so. The first draft of this
  * phase did exactly that and the typecheck caught it in seven places.
  */
+/**
+ * A crop clamped to the picture it is a crop of.
+ *
+ * The same device as `normalizeTable`: three renderers reading the raw numbers
+ * is how one document becomes three documents, so each one asks this instead.
+ *
+ * A crop whose right edge runs past the source is **pulled back rather than
+ * shrunk**, because an author dragging a box off the edge means "as far right
+ * as it goes" and not "make it narrower". Shrinking would change the shape of
+ * the box under their hand, which is the one thing a crop control must not do.
+ */
+export function normalizeCrop(crop: Crop): Crop {
+  const width = Math.min(Math.max(crop.width, 0.05), 1)
+  const height = Math.min(Math.max(crop.height, 0.05), 1)
+
+  return {
+    width,
+    height,
+    x: Math.min(Math.max(crop.x, 0), 1 - width),
+    y: Math.min(Math.max(crop.y, 0), 1 - height),
+  }
+}
+
+/** Whether a crop shows the whole picture, so renderers can skip the work. */
+export function isWholeImage(crop: Crop): boolean {
+  return crop.x === 0 && crop.y === 0 && crop.width === 1 && crop.height === 1
+}
+
+/**
+ * What is wrong with an image block, in sentences.
+ *
+ * Here rather than as a `.superRefine` on the schema, and the reason is Phase
+ * 181's: a refinement inside a `discriminatedUnion` produces a `ZodEffects`,
+ * which is not a `ZodObject`, and the union silently degrades to `any` —
+ * surfacing as implicit-any errors in two unrelated files rather than as the
+ * mistake it is.
+ */
+export function imageProblems(block: Extract<Block, { type: 'image' }>): string[] {
+  const problems: string[] = []
+  const { crop } = block
+
+  if (crop.x + crop.width > 1 || crop.y + crop.height > 1) {
+    problems.push(
+      'The crop runs off the edge of the picture. It is read back clamped, so the document ' +
+        'renders — but the box an author sees and the box a client sees would be different, ' +
+        'which is the one thing a crop must not be.',
+    )
+  }
+
+  return problems
+}
+
 export function tableProblems(block: TableBlock): string[] {
   const problems: string[] = []
   const width = block.header.length > 0 ? block.header.length : (block.rows[0]?.length ?? 0)
@@ -254,10 +306,67 @@ export const teamBlockSchema = z.object({
   /** Empty means every active member, in the firm's own order. */
   memberIds: z.array(z.string()).max(24).default([]),
   showPhotos: z.boolean().default(true),
+  /**
+   * The outline a headshot is seen through (Phase 186).
+   *
+   * The same two shapes as an `image` block's mask, minus `none`: a headshot is
+   * cropped to a square either way, because a directory of mixed portrait and
+   * landscape faces reads as a mistake. So the choice here is the **outline**,
+   * which is the half of §7's `crop/mask` that a capability statement actually
+   * varies — a circular headshot is a style decision firms have opinions about.
+   */
+  photoShape: z.enum(['square', 'rounded', 'circle']).default('square'),
   showQualifications: z.boolean().default(true),
   /** `list` is one per row with the photo beside; `grid` is cards. */
   layout: z.enum(['list', 'grid']).default('list'),
 })
+
+/**
+ * Which part of a picture is shown, in fractions of the source (spec §7,
+ * Phase 186).
+ *
+ * **Fractions and not pixels.** An asset can be replaced by a larger scan of
+ * the same photograph, and a crop stored in pixels would then show a corner of
+ * it. Fractions survive that, and they are also the only form that means
+ * anything before the renderer knows how big the source is.
+ *
+ * The default is the whole picture, so a block written before this phase reads
+ * back uncropped rather than reading back as nothing.
+ */
+export const cropSchema = z.object({
+  x: z.number().min(0).max(1).default(0),
+  y: z.number().min(0).max(1).default(0),
+  /** A floor rather than zero: a crop of nothing is a block that vanished. */
+  width: z.number().min(0.05).max(1).default(1),
+  height: z.number().min(0.05).max(1).default(1),
+})
+
+export type Crop = z.infer<typeof cropSchema>
+
+export const WHOLE_IMAGE: Crop = { x: 0, y: 0, width: 1, height: 1 }
+
+/**
+ * The shape a picture is seen through (spec §7's `crop/mask`).
+ *
+ * Three, and the list is short on purpose. §7 pairs *crop* with *mask* in one
+ * bullet and the two are different operations: a crop chooses pixels, a mask
+ * chooses an outline. An arbitrary mask is a path, which is the vector work §7
+ * defers; a circle and a rounded rectangle are what a capability statement and
+ * a product sheet actually ask for, and both are four Bézier curves in a PDF
+ * and one CSS property on the page.
+ */
+export const MASK_SHAPES = ['none', 'rounded', 'circle'] as const
+
+/**
+ * The corner radius of a `rounded` mask, as a fraction of the shorter side.
+ *
+ * One constant, read by the CSS the page emits and by the Bézier path the PDF
+ * writes — because a corner that is rounder on screen than on paper is two
+ * documents, which is the mistake `normalizeTable` exists to prevent one level
+ * down.
+ */
+export const ROUNDED_MASK_FRACTION = 0.08
+export type MaskShape = (typeof MASK_SHAPES)[number]
 
 export const imageBlockSchema = z.object({
   ...baseBlock,
@@ -267,6 +376,8 @@ export const imageBlockSchema = z.object({
   /** Percentage of the content width. */
   widthPercent: z.number().int().min(10).max(100).default(100),
   align: alignment,
+  crop: cropSchema.default(WHOLE_IMAGE),
+  maskShape: z.enum(MASK_SHAPES).default('none'),
 })
 
 export const dividerBlockSchema = z.object({
@@ -430,6 +541,14 @@ export function validateBlocks(raw: unknown): { blocks: Block[]; errors: string[
       */
       if (parsed.data.type === 'table') {
         for (const problem of tableProblems(parsed.data)) {
+          errors.push(`Block ${index + 1}: ${problem}`)
+        }
+      }
+
+      // Same bargain for a crop (Phase 186): refused on save, clamped on
+      // render by `normalizeCrop`, so an older document still shows a picture.
+      if (parsed.data.type === 'image') {
+        for (const problem of imageProblems(parsed.data)) {
           errors.push(`Block ${index + 1}: ${problem}`)
         }
       }

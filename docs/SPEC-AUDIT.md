@@ -208,7 +208,7 @@ otherwise.
 | --- | --- | --- |
 | 7 | **Comments/questions on the client link** | No table, column or module. The link tracks views and takes an acceptance; a client cannot ask a question through it. |
 | 7 | ~~**Generic `table` block**~~ | **Built in Phase 181.** A `table` block with an optional header, up to six columns, per-column alignment and three border styles, rendered on all eight surfaces. Writing it found that three block types had never reached one of them — see ADR 0181. |
-| 7 | **Crop/mask on images** | Nothing author-controlled yet. **Phase 185 built the part underneath it**: the PDF contained no images at all, so a crop would have been one the client never saw. The clipping primitive exists and the team headshot uses it; what is missing is the rectangle on the block and the editor to drag it. See ADR 0185. |
+| 7 | ~~**Crop/mask on images**~~ | **Built in Phase 186**, two phases after it was nominated: Phase 185 had to put pictures in the PDF first. A crop is fractions of the source with one shared `normalizeCrop`, a mask is a circle or a rounded corner, and neither resamples anything. It needed `assets.width`/`assets.height` — in the schema since Phase 4 with no writer and no reader — because a crop is not expressible in CSS without the source's aspect ratio. See ADR 0186. |
 | 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
 | 7 | **Artboard affordances** | No guides, rulers, snapping, grids, zoom, layers, grouping, align/distribute, lock/hide, or designer undo/redo. `undoLast` is bookkeeping's. |
 | 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 18 block types. |
@@ -217,11 +217,16 @@ otherwise.
 | 15 | ~~**Team bios**~~ | **Built in Phase 183.** A `team_members` table — not a `jsonb` array beside `credentials`, because a document has to *point at* one person and a reference into an array has no key — plus a `team` block that holds ids and a Design Center screen that writes bios. Retired rather than deleted, so a proposal sent last year still names who was going to do the work. See ADR 0183. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
-rows are one piece of work. **Four are struck through: asset association (Phase
+rows are one piece of work. **Five are struck through: asset association (Phase
 180), the generic table block (Phase 181), `deliverables`/`assumptions` (Phase
-182), and team bios (Phase 183).** Five capabilities remain, and all five are
-§7's design engine — the client-link comment thread, crop/mask, SVG, artboard
-affordances and vector primitives.
+182), team bios (Phase 183), and crop/mask (Phase 186).** Four capabilities
+remain, and all four are §7's design engine — the client-link comment thread,
+SVG, artboard affordances and vector primitives.
+
+Phase 185 is not a row here and was the largest of them: **the PDF contained no
+images at all**, which this audit never asked about because §7 does not say
+*"the PDF should contain the pictures"* and the renderer declared the limit in
+its own docstring.
 
 **And what Phase 185 found, which is the same blind spot from the other side.**
 The nominated row below said crop and mask were missing, and they were. It did

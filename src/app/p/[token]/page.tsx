@@ -14,6 +14,7 @@ import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
 import { parseBlocks } from '@/modules/design/blocks'
 import { teamForDocument } from '@/modules/studio/team'
+import { assetSizes } from '@/modules/studio/assets'
 import { truncateIp } from '@/modules/crm/intake'
 import { DocumentPage, brandTokens } from '@/components/design/document-page'
 import { AcceptancePanel } from './acceptance-panel'
@@ -89,6 +90,20 @@ export default async function PublicProposalPage({
     deleting is for.
   */
   const teamPool = await teamForDocument(proposal.companyId, parseBlocks(document?.blocks ?? []))
+
+  /*
+    The pixel size of every picture this document places (Phase 186).
+
+    A crop is not expressible in CSS without the source's aspect ratio — the
+    cropped box has to take the cropped shape — so this is what makes §7's
+    `crop` reach a client at all.
+  */
+  const assetDimensions = await assetSizes(
+    proposal.companyId,
+    parseBlocks(document?.blocks ?? []).flatMap((block) =>
+      block.type === 'image' && block.assetId ? [block.assetId] : [],
+    ),
+  )
 
   const [kit] = document?.brandKitId
     ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
@@ -168,6 +183,7 @@ export default async function PublicProposalPage({
             logoUrl: logoAssetId ? assetUrl(logoAssetId) : null,
             assetUrl,
             teamMembers: teamPool,
+            assetSizes: assetDimensions,
             signatureSlot: (
               <AcceptancePanel
                 token={token}

@@ -1,6 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto'
-import { and, desc, eq } from 'drizzle-orm'
+import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
+import { imageSize } from '@/modules/pdf/images'
 import { assetBlobs, assets } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -114,6 +115,23 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
   const store = getAssetStore()
   await store.put(storageKey, input.data, input.contentType)
 
+  /*
+    The pixel dimensions, measured rather than taken from the caller
+    (Phase 186).
+
+    These two columns have existed since Phase 4 with the comment *"Pixel
+    dimensions when known, so layout can reserve space"*, and until now no
+    caller passed them and nothing read them — Phase 49's rule twice in one
+    row. `input.width` is still honoured where a caller genuinely knows better,
+    but the file itself is the authority, because a caller that is wrong about
+    this crops somebody's photograph in the wrong place.
+
+    Read from headers only, so it costs nothing on a 5 MB upload. It answers for
+    WebP and GIF as well, which the PDF cannot embed: a size is a fact about the
+    file, and the web page can crop a WebP even though a printer cannot have it.
+  */
+  const measured = imageSize(input.data, input.contentType)
+
   const [asset] = await db
     .insert(assets)
     .values({
@@ -122,8 +140,8 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
       filename: input.filename.slice(0, 200),
       contentType: input.contentType,
       sizeBytes: input.data.byteLength,
-      width: input.width ?? null,
-      height: input.height ?? null,
+      width: measured?.width ?? input.width ?? null,
+      height: measured?.height ?? input.height ?? null,
       storageProvider: store.key,
       storageKey,
       uploadedBy: ctx.userId,
@@ -166,6 +184,80 @@ export async function listAssets(ctx: ActorContext, kind?: 'logo' | 'image' | 'd
  * Takes the acting company rather than trusting the id alone, so one tenant
  * cannot fetch another's logo by guessing a uuid.
  */
+/**
+ * The pixel size of every asset a company has, for a crop (Phase 186).
+ *
+ * One read rather than one per block: a flyer with six pictures is six rows
+ * and the table is small. Rows with no measurement are left out, so the caller
+ * sees "unknown" rather than a zero it might divide by — which is how a crop
+ * would become a division by zero in a renderer.
+ */
+export async function assetSizes(
+  companyId: string,
+  assetIds: string[],
+  exec: Executor = db,
+): Promise<Record<string, { width: number; height: number }>> {
+  if (assetIds.length === 0) return {}
+
+  const rows = await exec
+    .select({ id: assets.id, width: assets.width, height: assets.height })
+    .from(assets)
+    .where(and(eq(assets.companyId, companyId), inArray(assets.id, assetIds)))
+
+  const sizes: Record<string, { width: number; height: number }> = {}
+  for (const row of rows) {
+    if (row.width && row.height) sizes[row.id] = { width: row.width, height: row.height }
+  }
+
+  return sizes
+}
+
+/**
+ * Measures the assets uploaded before Phase 186 started measuring them.
+ *
+ * Not a migration, because SQL cannot read a PNG header. Not a lazy fill on
+ * read either: a read that writes is a surprise, and the one that would do it
+ * is on the client-facing proposal page.
+ *
+ * So it is an operation somebody runs, and the renderers degrade honestly
+ * until they do — an unmeasured asset shows the whole picture rather than a
+ * crop guessed from the wrong ratio.
+ */
+export async function measureStoredAssets(
+  ctx: ActorContext,
+  limit = 500,
+): Promise<{ measured: number; unreadable: number }> {
+  requirePermission(ctx, 'company:manage')
+
+  const pending = await db
+    .select({ id: assets.id })
+    .from(assets)
+    .where(scoped(ctx, assets, isNull(assets.width)))
+    .limit(limit)
+
+  let measured = 0
+  let unreadable = 0
+
+  for (const row of pending) {
+    const found = await readAsset(ctx.companyId, row.id)
+    const size = found ? imageSize(found.data, found.asset.contentType) : null
+
+    if (!size) {
+      unreadable += 1
+      continue
+    }
+
+    await db
+      .update(assets)
+      .set({ width: size.width, height: size.height })
+      .where(and(eq(assets.companyId, ctx.companyId), eq(assets.id, row.id)))
+
+    measured += 1
+  }
+
+  return { measured, unreadable }
+}
+
 export async function readAsset(companyId: string, assetId: string, exec: Executor = db) {
   /*
     `exec` since Phase 185: the PDF embeds pictures, and a proposal's PDF is

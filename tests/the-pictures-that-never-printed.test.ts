@@ -414,7 +414,7 @@ describe('what reaches the page', () => {
     }
   }
 
-  const imageBlock = (assetId: string | null): Block =>
+  const imageBlock = (assetId: string | null, patch: Record<string, unknown> = {}): Block =>
     ({
       id: 'i',
       type: 'image',
@@ -422,6 +422,9 @@ describe('what reaches the page', () => {
       caption: '',
       widthPercent: 100,
       align: 'left',
+      crop: { x: 0, y: 0, width: 1, height: 1 },
+      maskShape: 'none',
+      ...patch,
     }) as Block
 
   it('puts the picture in the file and invokes it', () => {
@@ -566,6 +569,7 @@ describe('the two blocks whose pictures were never even reached', () => {
       title: 'Who you will be working with',
       memberIds: [],
       showPhotos: true,
+      photoShape: 'square',
       showQualifications: true,
       layout: 'list',
       ...patch,

@@ -39,6 +39,7 @@ import { toWinAnsi, widthOf, type StandardFont } from './metrics'
  */
 
 import type { EmbeddableImage } from './images'
+import { ROUNDED_MASK_FRACTION } from '@/modules/design/blocks'
 
 export type Rgb = { r: number; g: number; b: number }
 
@@ -178,10 +179,14 @@ export class PageCanvas {
    * there is no resolution anywhere in here. A 4000-pixel photograph placed at
    * 200 points is 200 points of 4000 pixels, which is what makes it print well.
    *
-   * `clip` is a rectangle in page coordinates. Given, the image is drawn to
+   * `clip` is a region in page coordinates. Given, the image is drawn to
    * `width`/`height` as usual and only the clipped part shows — which is how a
-   * crop works in a PDF: `re W n` sets the clipping path and the picture is
-   * never altered.
+   * crop works in a PDF: a path, `W n`, and the picture is never altered.
+   *
+   * Its `shape` is §7's *mask* (Phase 186). A rectangle is the crop on its own;
+   * `rounded` and `circle` are the two outlines a business document asks for,
+   * and both are four Bézier curves. An arbitrary mask is a path, which is the
+   * vector authoring §7 defers.
    */
   image(options: {
     name: string
@@ -189,7 +194,13 @@ export class PageCanvas {
     y: number
     width: number
     height: number
-    clip?: { x: number; y: number; width: number; height: number }
+    clip?: {
+      x: number
+      y: number
+      width: number
+      height: number
+      shape?: 'rect' | 'rounded' | 'circle'
+    }
   }): void {
     if (options.width <= 0 || options.height <= 0) return
 
@@ -201,8 +212,13 @@ export class PageCanvas {
     if (options.clip) {
       const clipBottom = this.heightPt - options.clip.y - options.clip.height
       this.ops.push(
-        `${fixed(options.clip.x)} ${fixed(clipBottom)} ` +
-          `${fixed(options.clip.width)} ${fixed(options.clip.height)} re`,
+        ...clipPath({
+          x: options.clip.x,
+          y: clipBottom,
+          width: options.clip.width,
+          height: options.clip.height,
+          shape: options.clip.shape ?? 'rect',
+        }),
         'W',
         'n',
       )
@@ -425,6 +441,73 @@ export function writePdf(input: PdfDocumentInput): Buffer {
   )
 
   return Buffer.from(chunks.join(''), 'latin1')
+}
+
+/**
+ * How far a Bézier control point sits along the tangent to approximate a
+ * quarter arc.
+ *
+ * `4/3 × (√2 − 1)`. The standard constant, written as the arithmetic rather
+ * than as `0.5523` so a reader can see it is derived and not tuned.
+ */
+const KAPPA = (4 / 3) * (Math.SQRT2 - 1)
+
+/**
+ * The operators for a clipping region, in PDF coordinates (`y` upward).
+ *
+ * A rectangle is one operator. The other two are four curves, and a circle in
+ * a non-square box is an **ellipse** — which is the right generalisation,
+ * because that is what `border-radius: 50%` does on the page and the two
+ * renderers have to agree about the shape.
+ */
+function clipPath(box: {
+  x: number
+  y: number
+  width: number
+  height: number
+  shape: 'rect' | 'rounded' | 'circle'
+}): string[] {
+  const { x, y, width, height } = box
+
+  if (box.shape === 'rect') {
+    return [`${fixed(x)} ${fixed(y)} ${fixed(width)} ${fixed(height)} re`]
+  }
+
+  if (box.shape === 'circle') {
+    const rx = width / 2
+    const ry = height / 2
+    const cx = x + rx
+    const cy = y + ry
+    const kx = rx * KAPPA
+    const ky = ry * KAPPA
+
+    return [
+      `${fixed(cx + rx)} ${fixed(cy)} m`,
+      `${fixed(cx + rx)} ${fixed(cy + ky)} ${fixed(cx + kx)} ${fixed(cy + ry)} ${fixed(cx)} ${fixed(cy + ry)} c`,
+      `${fixed(cx - kx)} ${fixed(cy + ry)} ${fixed(cx - rx)} ${fixed(cy + ky)} ${fixed(cx - rx)} ${fixed(cy)} c`,
+      `${fixed(cx - rx)} ${fixed(cy - ky)} ${fixed(cx - kx)} ${fixed(cy - ry)} ${fixed(cx)} ${fixed(cy - ry)} c`,
+      `${fixed(cx + kx)} ${fixed(cy - ry)} ${fixed(cx + rx)} ${fixed(cy - ky)} ${fixed(cx + rx)} ${fixed(cy)} c`,
+      'h',
+    ]
+  }
+
+  // Rounded: the same fraction of the shorter side that the page's CSS uses,
+  // so a corner is the same corner in both.
+  const r = Math.min(width, height) * ROUNDED_MASK_FRACTION
+  const k = r * KAPPA
+
+  return [
+    `${fixed(x + r)} ${fixed(y)} m`,
+    `${fixed(x + width - r)} ${fixed(y)} l`,
+    `${fixed(x + width - r + k)} ${fixed(y)} ${fixed(x + width)} ${fixed(y + r - k)} ${fixed(x + width)} ${fixed(y + r)} c`,
+    `${fixed(x + width)} ${fixed(y + height - r)} l`,
+    `${fixed(x + width)} ${fixed(y + height - r + k)} ${fixed(x + width - r + k)} ${fixed(y + height)} ${fixed(x + width - r)} ${fixed(y + height)} c`,
+    `${fixed(x + r)} ${fixed(y + height)} l`,
+    `${fixed(x + r - k)} ${fixed(y + height)} ${fixed(x)} ${fixed(y + height - r + k)} ${fixed(x)} ${fixed(y + height - r)} c`,
+    `${fixed(x)} ${fixed(y + r)} l`,
+    `${fixed(x)} ${fixed(y + r - k)} ${fixed(x + r - k)} ${fixed(y)} ${fixed(x + r)} ${fixed(y)} c`,
+    'h',
+  ]
 }
 
 /**

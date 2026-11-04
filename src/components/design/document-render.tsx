@@ -1,6 +1,12 @@
 import { formatCents } from '@/lib/money'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
-import { normalizeTable, type Block } from '@/modules/design/blocks'
+import {
+  ROUNDED_MASK_FRACTION,
+  isWholeImage,
+  normalizeCrop,
+  normalizeTable,
+  type Block,
+} from '@/modules/design/blocks'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import { safeUrl } from '@/modules/design/urls'
 
@@ -71,6 +77,19 @@ export type RenderData = {
    */
   teamMembers?: RenderedTeamMember[]
   /**
+   * The pixel size of each asset a block places, for a crop (Phase 186).
+   *
+   * Needed, not decorative. A cropped box has to take the **cropped** shape,
+   * and CSS can only work that out from the source's aspect ratio — so without
+   * this a crop is not expressible on the page at all. `assets.width` and
+   * `assets.height` have existed since Phase 4 and were never written; Phase
+   * 186 measures them at upload because of this line.
+   *
+   * Absent for an asset uploaded before then, and the renderer shows the whole
+   * picture rather than guessing — stated in `ImageBlock`.
+   */
+  assetSizes?: Record<string, { width: number; height: number }>
+  /**
    * Pre-rendered QR SVG markup, keyed by block id. Encoding happens on the
    * server so the same markup works in the browser, in print, and in email.
    */
@@ -129,7 +148,13 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
     case 'pricingTable':
       return <PricingBlock block={block} data={data} />
     case 'image':
-      return <ImageBlock block={block} assetUrl={data.assetUrl} />
+      return (
+        <ImageBlock
+          block={block}
+          assetUrl={data.assetUrl}
+          size={block.assetId ? data.assetSizes?.[block.assetId] : undefined}
+        />
+      )
     case 'columns':
       return <ColumnsBlock block={block} />
     case 'clause':
@@ -201,6 +226,15 @@ function TeamBlock({
                 src={data.assetUrl(member.headshotAssetId)}
                 alt={member.name}
                 className="doc-team-photo"
+                // The outline, shared with the PDF's clipping path (Phase 186).
+                style={{
+                  borderRadius:
+                    block.photoShape === 'circle'
+                      ? '50%'
+                      : block.photoShape === 'rounded'
+                        ? `${ROUNDED_MASK_FRACTION * 100}%`
+                        : undefined,
+                }}
               />
             )}
             <div>
@@ -557,23 +591,80 @@ export function formatQuantity(quantityMilli: number): string {
   return Number.isInteger(value) ? String(value) : value.toFixed(2).replace(/0$/, '')
 }
 
+/**
+ * A picture, cropped and masked (spec §7, Phase 186).
+ *
+ * The crop is a box with `overflow: hidden` and the **cropped** aspect ratio,
+ * holding an image sized `100 / crop.width` and `100 / crop.height` percent of
+ * that box and offset so the chosen part lands inside. Percentages all the way
+ * down, so the browser does the arithmetic and a resized window keeps the crop.
+ *
+ * The source's own ratio is what makes the box the right shape, which is why
+ * `assetSizes` is required rather than nice to have. Without it the whole
+ * picture is shown: a crop guessed from a wrong ratio is worse than no crop,
+ * because the author would see one framing and the client another.
+ *
+ * The mask is `border-radius`, and `ROUNDED_MASK_FRACTION` is shared with the
+ * Bézier path the PDF writes — a corner that is rounder on screen than on paper
+ * is two documents.
+ */
 function ImageBlock({
   block,
   assetUrl,
+  size,
 }: {
   block: Extract<Block, { type: 'image' }>
   assetUrl: (assetId: string) => string
+  size?: { width: number; height: number }
 }) {
   if (!block.assetId) return null
 
+  const crop = normalizeCrop(block.crop)
+  const radius =
+    block.maskShape === 'circle'
+      ? '50%'
+      : block.maskShape === 'rounded'
+        ? `${ROUNDED_MASK_FRACTION * 100}%`
+        : undefined
+
+  const cropped = size && !isWholeImage(crop)
+
+  if (!cropped) {
+    return (
+      <figure className="doc-figure" style={{ textAlign: block.align }}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={assetUrl(block.assetId)}
+          alt={block.caption || ''}
+          style={{ width: `${block.widthPercent}%`, borderRadius: radius }}
+        />
+        {block.caption && <figcaption>{block.caption}</figcaption>}
+      </figure>
+    )
+  }
+
   return (
     <figure className="doc-figure" style={{ textAlign: block.align }}>
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={assetUrl(block.assetId)}
-        alt={block.caption || ''}
-        style={{ width: `${block.widthPercent}%` }}
-      />
+      <span
+        className="doc-crop"
+        style={{
+          width: `${block.widthPercent}%`,
+          aspectRatio: `${crop.width * size.width} / ${crop.height * size.height}`,
+          borderRadius: radius,
+        }}
+      >
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={assetUrl(block.assetId)}
+          alt={block.caption || ''}
+          style={{
+            width: `${100 / crop.width}%`,
+            height: `${100 / crop.height}%`,
+            left: `${(-crop.x * 100) / crop.width}%`,
+            top: `${(-crop.y * 100) / crop.height}%`,
+          }}
+        />
+      </span>
       {block.caption && <figcaption>{block.caption}</figcaption>}
     </figure>
   )

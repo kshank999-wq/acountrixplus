@@ -299,6 +299,32 @@ ol.doc-list {
   color: var(--doc-muted);
 }
 
+/*
+ * A cropped picture (spec §7, Phase 186).
+ *
+ * The box takes the cropped aspect ratio — set inline, because it comes from
+ * the source's own pixels — and the image inside is sized and offset in
+ * percentages of it. Percentages rather than pixels so the browser does the
+ * arithmetic: a resized window, a phone, and the print box all keep the crop.
+ *
+ * `inline-block` so `text-align` on the figure still places it left, centre or
+ * right, which is how an uncropped image is placed and has to stay true of a
+ * cropped one.
+ */
+.doc-crop {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  max-width: 100%;
+  vertical-align: top;
+}
+
+.doc-crop img {
+  position: absolute;
+  max-width: none;
+  border-radius: 0;
+}
+
 /* --- Clauses and signature ---------------------------------------------- */
 
 .doc-clause {
@@ -730,6 +756,14 @@ ol.doc-list {
   margin-bottom: 1.1em;
 }
 
+/*
+ * A headshot (Phase 183), with the outline the author chose (Phase 186).
+ *
+ * `object-fit: cover` is the crop and it is not optional: a directory of mixed
+ * portrait and landscape faces reads as a mistake. The PDF does the same thing
+ * with a clipping path, so the two renderers agree about the shape of a
+ * person's face.
+ */
 .doc-team-photo {
   width: 5.5em;
   height: 5.5em;
