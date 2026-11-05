@@ -78,6 +78,19 @@ export type MeasuredFacts = {
   references: number
   /** Of those, the ones whose key carries the tenant. */
   compositeReferences: number
+  /**
+   * The four numbers in `isolation.ts`' asymmetry sentence (Phase 187).
+   *
+   * These come from `modules/source/isolation-scan`, which is a source scan
+   * rather than a database read — so unlike the six above, a caller *could*
+   * compute them here. They are still supplied, for the same reason the others
+   * are: one shape for every fact, so a caller cannot be handed a register
+   * that measures half of itself.
+   */
+  reads: number
+  scopedReads: number
+  writes: number
+  scopedWrites: number
 }
 
 export type PinnedClaim = {
@@ -95,10 +108,19 @@ export type PinnedClaim = {
   /** What a reader does with this number, and what the wrong one costs them. */
   because: string
   /**
-   * The fact the sentence is about, or `null` when it cannot be measured from
-   * here yet — see the docstring.
+   * The fact the sentence is about.
+   *
+   * An array when the sentence states several numbers, compared against the
+   * pattern's capture groups in order (Phase 187). One sentence with four
+   * numbers is four claims, and pinning the first and ignoring the rest is how
+   * three of them drift unnoticed — which is what the register did while this
+   * was a single number.
+   *
+   * `null` is still allowed and still means **declared and not wired**, which
+   * is Phase 139's device. It no longer has an occupant: the last one was the
+   * sentence this phase made measurable.
    */
-  measure: ((facts: MeasuredFacts) => number) | null
+  measure: ((facts: MeasuredFacts) => number | number[]) | null
 }
 
 /**
@@ -107,6 +129,13 @@ export type PinnedClaim = {
  * Ordered by who gets hurt: the two documents an operator follows while
  * pointing a production database at this repository come first, then the
  * module that answers a security questionnaire, then the registers.
+ *
+ * **All of them are measured, since Phase 187.** The thirteenth was declared
+ * with `measure: null` for eight phases under Phase 139's rule — a register
+ * that names what is not wired beats one that looks complete and covers twelve
+ * of thirteen. Phase 157 is why it was kept rather than deleted: an unused
+ * declaration is kept when it **accuses**, and this one accused in five
+ * consecutive phases before anybody acted on it.
  */
 export const PINNED_CLAIMS: readonly PinnedClaim[] = [
   {
@@ -246,17 +275,16 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
   {
     key: 'isolation-guard-distribution',
     file: 'src/modules/tenancy/isolation.ts',
-    pattern: /(\d+) of the \d+ reads, against \d+ of the \d+ writes/,
+    pattern: /(\d+) of the (\d+) reads, against (\d+) of the (\d+) writes/,
     because:
       'Four numbers in one sentence and all four had drifted: 531 of 867 reads and 27 of 109 ' +
-      'writes, against a measured 542 of 883 and 28 of 111. **Not pinned**, and the reason is ' +
-      'the finding rather than an excuse: the scans that measure writes and reads live inside ' +
-      '`tests/isolation-guards.test.ts` and `tests/isolation-reads.test.ts`, so nothing outside ' +
-      'those files can ask for the number. Moving them into a module is a phase of its own, and ' +
-      'declaring this here with no measure is Phase 139 — a register and an acceptance test that ' +
-      'names what is not wired, because the alternative is a register that looks complete and ' +
-      'covers eleven of twelve.',
-    measure: null,
+      'writes, against a measured 542 of 883. **It was the one entry with no measure**, because ' +
+      'the scans lived inside two test files and nothing outside them could ask. It then went ' +
+      'stale in every phase that touched a read — 180, 183, 184, 185 and 186 — and was corrected ' +
+      'by hand each time, which is the five-phase receipt Phase 187 moved the scans on. All four ' +
+      'are pinned now, in order, because pinning the first and ignoring three is how three drift ' +
+      'unnoticed.',
+    measure: (facts) => [facts.scopedReads, facts.reads, facts.scopedWrites, facts.writes],
   },
 ]
 
@@ -340,18 +368,35 @@ export function claimStands(
     }
   }
 
-  const stated = Number(matches[0][1])
-  const measured = claim.measure(facts)
+  const measured = [claim.measure(facts)].flat()
+  const stated = matches[0].slice(1, measured.length + 1).map(Number)
 
-  if (stated !== measured) {
+  if (stated.length !== measured.length) {
     return {
       key: claim.key,
       ok: false,
-      why: `${claim.file} says ${stated}; it is ${measured}.`,
+      why:
+        `${claim.key} measures ${measured.length} number(s) and its pattern captures ` +
+        `${stated.length}. A measure and a pattern that disagree about how many numbers a ` +
+        'sentence states would check some of them and silently skip the rest.',
     }
   }
 
-  return { key: claim.key, ok: true, stated }
+  for (const [index, value] of stated.entries()) {
+    if (value !== measured[index]) {
+      return {
+        key: claim.key,
+        ok: false,
+        why:
+          measured.length === 1
+            ? `${claim.file} says ${value}; it is ${measured[index]}.`
+            : `${claim.file} says ${value} where number ${index + 1} of this sentence should be ` +
+              `${measured[index]}.`,
+      }
+    }
+  }
+
+  return { key: claim.key, ok: true, stated: stated[0] }
 }
 
 export function pinnedClaimArgues(claim: PinnedClaim): string[] {

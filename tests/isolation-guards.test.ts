@@ -1,14 +1,16 @@
-import { readFileSync, readdirSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { enclosingQuery, withoutComments } from '@/modules/source/enclosing'
+import {
+  byGuard,
+  readableSource,
+  scanWrites,
+  sourceFiles,
+} from '@/modules/source/isolation-scan'
 import { RegistryError } from '@/modules/errors/registry'
 import {
-  companyScopedTablesIn,
   guardFor,
   ISOLATION_GUARDS,
   isolationGuardFor,
-  type GuardKind,
 } from '@/modules/tenancy/isolation'
 
 /**
@@ -17,143 +19,17 @@ import {
  * No database, no clock — it reads the source.
  *
  * The guards are declared in the module and argued there. Which guard a given
- * write has is measured here, so an entry cannot go on being true after the
- * line that made it true is deleted.
- */
-
-function sourceFiles(dir: string): string[] {
-  return readdirSync(dir).flatMap((entry) => {
-    const path = join(dir, entry)
-    if (statSync(path).isDirectory()) return sourceFiles(path)
-    return /\.tsx?$/.test(path) ? [path] : []
-  })
-}
-
-/** Comments and string literals blanked, so prose about a write is not one. */
-function readable(file: string): string {
-  return withoutComments(readFileSync(file, 'utf8'))
-    .replace(/'(?:[^'\\\n]|\\.)*'/g, (m) => `'${' '.repeat(Math.max(0, m.length - 2))}'`)
-    .replace(/`(?:[^`\\]|\\.)*`/g, (m) => m.replace(/[^\n]/g, ' '))
-}
-
-/**
- * Every table in the schema that carries a companyId.
+ * write has is measured in `modules/source/isolation-scan`, so an entry cannot
+ * go on being true after the line that made it true is deleted.
  *
- * One implementation, in the module, since Phase 150 — this file had its own
- * and it was wrong. The regex ran past a table's closing brace into the next
- * declaration, which falsely called two content-addressed tables tenant-scoped
- * and missed seven that are. The counts below moved because of it.
+ * **The scanner moved out of this file in Phase 187**, after thirty-eight
+ * phases here. Moving it is what let `PINNED_CLAIMS` measure the sentence that
+ * quotes these numbers — and it found that this file's `readable()` had
+ * drifted from the reads scan's and was the wrong one of the two. See the
+ * module.
  */
-function companyScopedTables(): Set<string> {
-  const schema = sourceFiles('src/db/schema')
-    .map((file) => readFileSync(file, 'utf8'))
-    .join('\n\n')
 
-  return new Set(companyScopedTablesIn(schema))
-}
-
-type Write = {
-  file: string
-  line: number
-  symbol: string
-  table: string
-  op: string
-  kind: GuardKind | null
-  why: string
-}
-
-const OWNER_HELPER = /\b(load\w*Own\w*|\w*ForOwner|require\w*Owner\w*|assert\w*Own\w*)\s*\(/
-
-/**
- * Every update or delete on a company-scoped table, keyed by an id argument,
- * with the guard it actually has.
- *
- * Narrowed to writes keyed by an id the function was handed, because that is
- * the shape that can reach another tenant's row: a write whose `where` is a
- * business predicate cannot be aimed.
- */
-function guardedWrites(): Write[] {
-  const tables = companyScopedTables()
-  const writes: Write[] = []
-
-  for (const dir of ['src/modules', 'src/app']) {
-    for (const file of sourceFiles(dir)) {
-      const src = readable(file)
-
-      for (const m of src.matchAll(/\.(update|delete)\(\s*(\w+)\s*\)/g)) {
-        const [, op, table] = m
-        if (!tables.has(table)) continue
-
-        /*
-          The query's own span, not a fixed number of characters (Phase 183).
-
-          This read `[\s\S]{0,600}?` between the table and its `where(`, and a
-          `.set({ … })` longer than six hundred characters pushed the `where`
-          out of reach — so the statement did not match the pattern at all and
-          the scan **did not count the write**. Not a misclassification: a
-          silent omission, in the scan whose one job is to prove no write can be
-          aimed at another tenant's row.
-
-          Four were in that state. `updateTeamMember` is this phase's, and the
-          other three are Phase 154's `billStage`, Phase 102's `issueToken` and
-          Phase 6's `changeStage` — which moves every opportunity in the system
-          and had never been looked at by this file. All four are in fact
-          guarded, which is the only reason this is a measurement defect rather
-          than a disclosure; the point is that the scan was not what said so.
-
-          `enclosingQuery` is Phase 152's boundary and exists for exactly this —
-          its own docstring records ADR 0134 replacing a fixed-line window
-          "because the window leaked and excused a real defect". The reads scan
-          has used it since Phase 150. This half was still counting characters.
-        */
-        const span = enclosingQuery(src, m.index)
-        const statement = src.slice(span.from, span.to)
-        const where = /\bwhere\(([\s\S]*)/.exec(statement)?.[1] ?? ''
-        if (!where) continue
-
-        const keyed = [...where.matchAll(/eq\(\s*\w+\.\w+\s*,\s*(input\.\w+|\w+Id)\s*\)/g)]
-        if (keyed.length === 0) continue
-
-        const before = [...src.slice(0, m.index).matchAll(/^(export )?(?:async )?function (\w+)/gm)]
-        if (before.length === 0) continue
-        const fn = before[before.length - 1]
-        const head = src.slice(fn.index, m.index)
-
-        const verdict = guardFor({
-          scopedInStatement: /scoped\(/.test(statement),
-          companyInStatement: /companyId/.test(statement) || /companyId/.test(head),
-          conditionsArray: /\.\.\.\(?\s*conditions/.test(statement),
-          actorFiltered: /userId\s*,\s*ctx\.userId/.test(where),
-          // The filter is one statement earlier and the refusal is the guard.
-          readThenRefuse:
-            (/userId\s*,\s*ctx\.userId/.test(head) || /scoped\(\s*ctx/.test(head)) &&
-            /\bthrow\s/.test(head),
-          ownerHelper: OWNER_HELPER.test(head) ? (head.match(OWNER_HELPER)?.[1] ?? null) : null,
-          bearerToken: /isNull\(\s*\w+\.redeemedAt\s*\)/.test(where),
-          takesActorContext: /ctx\s*:\s*ActorContext|\(\s*ctx\s*[,)]/.test(
-            src.slice(fn.index, fn.index + 260),
-          ),
-          exported: fn[1] === 'export ',
-          systemPath: /\/worker\//.test(file),
-        })
-
-        writes.push({
-          file,
-          line: src.slice(0, m.index).split('\n').length,
-          symbol: fn[2],
-          table,
-          op,
-          kind: verdict.guarded ? verdict.kind : null,
-          why: verdict.guarded ? '' : verdict.why,
-        })
-      }
-    }
-  }
-
-  return writes
-}
-
-const WRITES = guardedWrites()
+const WRITES = scanWrites()
 
 describe('the guards a write can stand on', () => {
   it('argues each one, and says what the scan looks for', () => {
@@ -196,8 +72,7 @@ describe('every write that can be aimed at a row', () => {
     // to this scan, and the conclusion survived while three of the numbers did
     // not. The tables come from the module now, so both scans count the same
     // thing.
-    const by: Record<string, number> = {}
-    for (const write of WRITES) by[write.kind ?? 'none'] = (by[write.kind ?? 'none'] ?? 0) + 1
+    const by = byGuard(WRITES)
 
     // A hundred and ten since Phase 155, which added one: marking a stage
     // billed. `scoped-write` at 28 — the update is keyed by proposal and sort
@@ -315,7 +190,7 @@ describe('the two the first run of this scan called unguarded', () => {
 
   it('would have reported them as company-scoped if it only looked for companyId', () => {
     // A check seen to disagree (Phase 121), against the version that was wrong.
-    const src = readable('src/modules/mobile/devices.ts')
+    const src = readableSource('src/modules/mobile/devices.ts')
     const rename = src.slice(src.indexOf('function renameDevice'))
 
     expect(/companyId/.test(rename.slice(0, 500))).toBe(false)
@@ -335,10 +210,10 @@ describe('the guards that depend on something further away', () => {
 
     const callers = sourceFiles('src')
       .filter((file) => !file.endsWith('mobile/devices.ts'))
-      .filter((file) => /\btouchDevice\(/.test(readable(file)))
+      .filter((file) => /\btouchDevice\(/.test(readableSource(file)))
 
     expect(callers).toEqual(['src/app/api/mobile/v1/sync/route.ts'])
-    expect(readable(callers[0])).toMatch(/touchDevice\(\s*session\.deviceId/)
+    expect(readableSource(callers[0])).toMatch(/touchDevice\(\s*session\.deviceId/)
   })
 
   it('keeps the system paths out of reach of an actor', () => {

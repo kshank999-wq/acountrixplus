@@ -228,6 +228,13 @@ images at all**, which this audit never asked about because §7 does not say
 *"the PDF should contain the pictures"* and the renderer declared the limit in
 its own docstring.
 
+**Phase 187 is the one row this audit could never have.** It moved two source
+scanners out of test files so a sentence quoting their numbers could be
+checked, and it found that the two files' shared helper had drifted and that
+one copy was wrong. Nothing in the specification asks for any of it. The audit
+measures what §-numbers name against what exists; it has no column for *the
+mechanism that keeps the other measurements honest*.
+
 **And what Phase 185 found, which is the same blind spot from the other side.**
 The nominated row below said crop and mask were missing, and they were. It did
 not say that the PDF drew no pictures of any kind — not the logo, not a

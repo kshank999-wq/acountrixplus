@@ -11,6 +11,7 @@ import {
   readableProse,
   type MeasuredFacts,
 } from '@/modules/source/claims'
+import { isolationCounts } from '@/modules/source/isolation-scan'
 
 /**
  * Numbers in prose that nothing reads (Phase 179).
@@ -73,6 +74,12 @@ async function measure(): Promise<MeasuredFacts> {
     `),
     migrations: journal.entries.length,
     /*
+      The four the thirteenth claim is about (Phase 187). From the source scan
+      rather than the database, which is why this entry could not be measured
+      until the scan left two test files and became a module.
+    */
+    ...isolationCounts(),
+    /*
       Both measured the way `tests/the-id-a-caller-hands-in.test.ts` measures
       them, from `pg_constraint` — a foreign key from one tenant-scoped table to
       another, and the subset whose key carries the tenant.
@@ -120,10 +127,10 @@ describe('the register itself', () => {
     expect(PINNED_CLAIMS.flatMap((claim) => pinnedClaimArgues(claim))).toEqual([])
   })
 
-  it('declares thirteen claims, twelve of them pinned', () => {
+  it('declares thirteen claims, all of them pinned', () => {
     /**
-     * Phase 126, and the second number is the honest one: one entry is declared
-     * with no measure, on Phase 139's rule.
+     * Phase 126, and the second number is no longer the honest half: since
+     * Phase 187 there is no unmeasured entry.
      *
      * Thirteen and not twelve because the first draft had twelve. The audit that
      * produced this register read three operational documents and missed
@@ -134,25 +141,72 @@ describe('the register itself', () => {
      */
     expect(PINNED_CLAIMS).toHaveLength(13)
     expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(13)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(12)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(13)
   })
 
-  it('names the one it cannot pin, and why', () => {
+  it('pins all four numbers of the sentence that states four', () => {
     /**
-     * Phase 139's device. A register that quietly covered eleven of twelve
-     * would be the thing this phase is about, one level up — so the unpinned
-     * entry is a declared entry with a reason, not an omission.
+     * The entry this phase was for. It was declared with `measure: null` for
+     * eight phases on Phase 139's rule — a register that names what is not
+     * wired beats one that looks complete and covers twelve of thirteen — and
+     * it then drifted in **five consecutive phases** that touched a read,
+     * corrected by hand each time.
      *
-     * The reason is specific and fixable: the scans that count writes and reads
-     * live inside `tests/isolation-guards.test.ts` and
-     * `tests/isolation-reads.test.ts`, so nothing outside those files can ask
-     * for the number.
+     * All four, not the first. A pattern capturing one number of four is three
+     * numbers nobody checks, which is the same defect as not pinning the
+     * sentence at all, spread thinner.
      */
-    const unpinned = PINNED_CLAIMS.filter((claim) => claim.measure === null)
+    const claim = pinnedClaimFor('isolation-guard-distribution')
+    const counts = isolationCounts()
 
-    expect(unpinned.map((claim) => claim.key)).toEqual(['isolation-guard-distribution'])
-    expect(unpinned[0].because).toContain('tests/isolation-guards.test.ts')
-    expect(unpinned[0].because).toContain('Not pinned')
+    expect(claim.measure).not.toBeNull()
+    expect(claim.measure!({ ...counts } as MeasuredFacts)).toEqual([
+      counts.scopedReads,
+      counts.reads,
+      counts.scopedWrites,
+      counts.writes,
+    ])
+  })
+
+  it('refuses a measure and a pattern that disagree about how many', () => {
+    /*
+      Phase 121: a rule only ever seen to agree is not a rule. A four-number
+      measure against a one-capture pattern would silently check the first and
+      skip three, which is precisely what the old single-number `measure` did
+      to this sentence.
+    */
+    const verdict = claimStands(
+      {
+        key: 'deliberately-broken',
+        file: 'nowhere',
+        pattern: /(\d+) of the \d+ reads/,
+        because: 'x'.repeat(240),
+        measure: () => [1, 2, 3],
+      },
+      '7 of the 9 reads',
+      { reads: 0 } as MeasuredFacts,
+    )
+
+    expect(verdict.ok).toBe(false)
+    expect((verdict as { why: string }).why).toMatch(/disagree about how many/)
+  })
+
+  it('names which of several numbers drifted', () => {
+    const verdict = claimStands(
+      {
+        key: 'deliberately-wrong',
+        file: 'nowhere',
+        pattern: /(\d+) of the (\d+) reads/,
+        because: 'x'.repeat(240),
+        measure: () => [7, 10],
+      },
+      '7 of the 9 reads',
+      {} as MeasuredFacts,
+    )
+
+    // The second, named as the second — a failure that cannot say which number
+    // moved is a failure somebody fixes by changing the wrong one.
+    expect((verdict as { why: string }).why).toMatch(/number 2 of this sentence should be 10/)
   })
 
   it('throws on a claim nobody declared', () => {
