@@ -14,6 +14,7 @@ import { recordEvent } from '@/modules/worker/outbox'
 import { isParties } from './parties'
 import { OPEN_STAGES } from './pipeline'
 import { computeTotals } from './proposals'
+import { clientFacingProposal } from './client-link'
 
 /**
  * Proposal acceptance and e-signature (spec §7).
@@ -112,13 +113,30 @@ export async function acceptProposal(
     }
   }
 
-  const items = await db
-    .select()
-    .from(proposalItems)
-    .where(eq(proposalItems.proposalId, proposal.id))
+  /*
+    The version the client is looking at, not the record as it stands
+    (Phase 188).
+
+    This read live `proposal_items` and live totals. The comment below is still
+    true and was never the whole story: refusing to trust the browser's total
+    protects against a tampered client, and says nothing about the server's own
+    figures having moved since the send. `updateProposalItems` takes
+    `proposals:manage` and checks no status, so they could — and a client then
+    signed for a number nobody had sent them, filed against a version whose
+    snapshot said something else.
+
+    Measured, not reasoned about: send at £1,000, edit to £1,200, accept, and
+    the acceptance recorded £1,200 against version 1's £1,000.
+  */
+  const sent = await clientFacingProposal(publicToken)
+  if (!sent) {
+    return { ok: false, status: 404, reason: 'not_found', message: 'Proposal not found.' }
+  }
+
+  const items = sent.items
 
   // Recomputed server-side from the client's selection. The browser's idea of
-  // the total is never used.
+  // the total is never used — and nor, since Phase 188, is the record's.
   const selected = new Set(input.selectedItemIds)
   const effective = items.map((item) => ({
     amountCents: item.amountCents,
@@ -127,20 +145,15 @@ export async function acceptProposal(
   }))
 
   const totals = computeTotals(effective, {
-    discountCents: proposal.discountCents,
-    taxCents: proposal.taxCents,
+    discountCents: sent.totals.discountCents,
+    taxCents: sent.totals.taxCents,
   })
 
   // Only ids that belong to this proposal, and only optional ones, are stored.
   const optionalIds = new Set(items.filter((item) => item.isOptional).map((item) => item.id))
   const acceptedSelections = input.selectedItemIds.filter((id) => optionalIds.has(id))
 
-  const [latestVersion] = await db
-    .select({ id: proposalVersions.id })
-    .from(proposalVersions)
-    .where(eq(proposalVersions.proposalId, proposal.id))
-    .orderBy(desc(proposalVersions.versionNumber))
-    .limit(1)
+  const latestVersion = { id: sent.versionId }
 
   try {
     await db.transaction(async (tx) => {

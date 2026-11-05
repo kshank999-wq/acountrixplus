@@ -135,14 +135,26 @@ describe('every read from a company-scoped table', () => {
       serves a stranger is explicit, and the one that serves an operator goes
       through `scoped()`.
     */
-    expect(READS.length).toBe(924)
+    /*
+      929 since Phase 188 and `client-link.ts`, which serves a client the
+      version they were sent rather than the live record.
+
+      The spread is what the module is: two `scoped-read` where the design
+      document and the brand kit are read as a fallback for a version written
+      before the snapshot carried them, two `id-from-fetched-row` where the
+      items and the version hang off a proposal already fetched, and one
+      `derives-tenant-from-row` — the proposal itself, found by a public token
+      with no actor anywhere, which is the guard a client-facing page
+      necessarily stands on.
+    */
+    expect(READS.length).toBe(929)
     expect(by).toEqual({
-      'scoped-read': 567,
+      'scoped-read': 569,
       'explicit-company': 265,
       'established-above': 31,
-      'id-from-fetched-row': 17,
+      'id-from-fetched-row': 19,
       'join-inherited': 13,
-      'derives-tenant-from-row': 12,
+      'derives-tenant-from-row': 13,
       'caller-established': 7,
       'conditions-array': 4,
       'actor-scoped': 3,

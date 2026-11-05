@@ -121,6 +121,13 @@ row in `documents`, one blob. A test asserts it.
 
 ### Decision 7: the public link serves the snapshot, never a live render
 
+> **Phase 188 correction.** This heading claimed more than the paragraph under
+> it, and the paragraph was the true part: the **download** served the issued
+> bytes, and the page did not — it rendered live items, live totals, live
+> blocks and a live brand kit until Phase 188. The heading is left as written,
+> because an ADR is a record of a decision at a date; ADR 0188 records what it
+> was found to be worth.
+
 A client who opens their link a month after the price list moved downloads what
 they were sent. The live record is reachable too, as an explicitly separate
 function called `renderProposalPreview` — and the test that proves immutability

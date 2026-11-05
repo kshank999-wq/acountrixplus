@@ -206,7 +206,7 @@ otherwise.
 
 | § | capability | measured |
 | --- | --- | --- |
-| 7 | **Comments/questions on the client link** | No table, column or module. The link tracks views and takes an acceptance; a client cannot ask a question through it. |
+| 7 | ~~**Comments/questions on the client link**~~ | **Built in Phase 174**, and this row was stale from that day — three later ADRs carried it forward as a nomination without re-measuring. Phase 188 measured §7's whole bullet instead and found four of its five items built; see below. |
 | 7 | ~~**Generic `table` block**~~ | **Built in Phase 181.** A `table` block with an optional header, up to six columns, per-column alignment and three border styles, rendered on all eight surfaces. Writing it found that three block types had never reached one of them — see ADR 0181. |
 | 7 | ~~**Crop/mask on images**~~ | **Built in Phase 186**, two phases after it was nominated: Phase 185 had to put pictures in the PDF first. A crop is fractions of the source with one shared `normalizeCrop`, a mask is a circle or a rounded corner, and neither resamples anything. It needed `assets.width`/`assets.height` — in the schema since Phase 4 with no writer and no reader — because a crop is not expressible in CSS without the source's aspect ratio. See ADR 0186. |
 | 7 | **SVG import/export** | Nothing for designs. The only SVG in the codebase is QR output. |
@@ -217,16 +217,34 @@ otherwise.
 | 15 | ~~**Team bios**~~ | **Built in Phase 183.** A `team_members` table — not a `jsonb` array beside `credentials`, because a document has to *point at* one person and a reference into an array has no key — plus a `team` block that holds ids and a Design Center screen that writes bios. Retired rather than deleted, so a proposal sent last year still names who was going to do the work. See ADR 0183. |
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
-rows are one piece of work. **Five are struck through: asset association (Phase
+rows are one piece of work. **Six are struck through: asset association (Phase
 180), the generic table block (Phase 181), `deliverables`/`assumptions` (Phase
-182), team bios (Phase 183), and crop/mask (Phase 186).** Four capabilities
-remain, and all four are §7's design engine — the client-link comment thread,
-SVG, artboard affordances and vector primitives.
+182), team bios (Phase 183), crop/mask (Phase 186), and the client-link comment
+thread (Phase 174, recorded in Phase 188).** Three capabilities remain, and all
+three are §7's Illustrator-class work, which §7 itself defers: SVG, artboard
+affordances and vector primitives.
+
+One §7 item is unbuilt and has never had a row here, because this audit took
+the bullet as one capability: **version history on the client link**. Phase 188
+measured the bullet item by item and found it the only one of five missing.
 
 Phase 185 is not a row here and was the largest of them: **the PDF contained no
 images at all**, which this audit never asked about because §7 does not say
 *"the PDF should contain the pictures"* and the renderer declared the limit in
 its own docstring.
+
+**A row that was wrong, and what finding out cost.** The comments/questions
+row above was struck through in Phase 188 — by Phase 174. Nobody re-measured it
+for fourteen phases, and ADRs 0185, 0186 and 0187 each repeated it in a
+nomination list. Phase 164's rule is in this file and was not applied to this
+file: a nomination inherited is a nomination unmeasured.
+
+Measuring §7's client-link bullet properly then found what no row here names:
+the page served **live** figures, so a sent proposal could be edited and the
+client would sign for a number nobody had sent them. An audit that asks "does
+this capability exist" cannot see a capability that exists and is wrong, which
+is the same blind spot Phase 185 is recorded under below — twice now in four
+phases, which makes it the method's limit rather than an accident.
 
 **Phase 187 is the one row this audit could never have.** It moved two source
 scanners out of test files so a sentence quoting their numbers could be

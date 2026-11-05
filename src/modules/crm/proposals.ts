@@ -12,6 +12,7 @@ import {
   proposalViews,
   proposals,
 } from '@/db/schema'
+import { brandKits, designDocuments } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { letterheadFor } from '@/modules/brand/letterhead'
 import { partiesFor } from './parties'
@@ -227,6 +228,36 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
   // later read, so renaming either side rewrote agreements already signed.
   const parties = await partiesAtSend(ctx, proposalId)
 
+  // The document and the colours it was sent in (Phase 188). Read before the
+  // transaction, with everything else that is about to be frozen.
+  const [document] = await db
+    .select()
+    .from(designDocuments)
+    .where(scoped(ctx, designDocuments, eq(designDocuments.proposalId, proposalId)))
+    .limit(1)
+
+  const [kitAtSend] = document?.brandKitId
+    ? await db
+        .select()
+        .from(brandKits)
+        .where(scoped(ctx, brandKits, eq(brandKits.id, document.brandKitId)))
+        .limit(1)
+    : []
+
+  const brandAtSend = kitAtSend
+    ? {
+        primaryColor: kitAtSend.primaryColor,
+        accentColor: kitAtSend.accentColor,
+        textColor: kitAtSend.textColor,
+        mutedColor: kitAtSend.mutedColor,
+        surfaceColor: kitAtSend.surfaceColor,
+        headingFont: kitAtSend.headingFont,
+        bodyFont: kitAtSend.bodyFont,
+        baseSizePt: kitAtSend.baseSizePt,
+        logoAssetId: kitAtSend.logoAssetId,
+      }
+    : null
+
   return db.transaction(async (tx) => {
     const [{ nextVersion }] = await tx
       .select({ nextVersion: sql<number>`coalesce(max(${proposalVersions.versionNumber}), 0) + 1` })
@@ -261,6 +292,20 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
         totalCents: proposal.totalCents,
         expiresOn: proposal.expiresOn,
         items: items.map((item) => ({
+          /*
+            The id, since Phase 188.
+
+            A client ticking an optional line sends its id back, and the
+            acceptance has to recognise it. Matching against the **live** rows
+            was the old answer and it is why a figure nobody was sent could be
+            signed for: `updateProposalItems` deletes and reinserts, so after
+            an edit the live ids are different ids for different prices.
+
+            With the ids in here, the whole acceptance — which lines exist,
+            which may be chosen, what each costs — is answered by the version
+            the client is actually looking at.
+          */
+          id: item.id,
           description: item.description,
           quantityMilli: item.quantityMilli,
           unitPriceCents: item.unitPriceCents,
@@ -268,6 +313,34 @@ export async function sendProposal(ctx: ActorContext, proposalId: string) {
           isOptional: item.isOptional,
           isSelected: item.isSelected,
         })),
+        /*
+          The document, since Phase 188 (ADR 0021's seventh decision, finally).
+
+          Its heading read *"the public link serves the snapshot, never a live
+          render"* and the paragraph under it said the client *downloads* what
+          they were sent — which was true of the PDF and of nothing else. The
+          page served live blocks and a live brand kit, so Phase 21's own
+          argument, that *"restyling proposals in June silently restyled every
+          proposal ever sent"*, stayed true of the thing a client opens.
+
+          The blocks are stored resolved-as-stored rather than merge-filled:
+          the merge context is rebuilt at read time from the same frozen
+          figures, so a client's name is current and the numbers are not.
+        */
+        document: document
+          ? {
+              blocks: document.blocks,
+              pageSize: document.pageSize,
+              orientation: document.orientation,
+              marginTopPt: document.marginTopPt,
+              marginRightPt: document.marginRightPt,
+              marginBottomPt: document.marginBottomPt,
+              marginLeftPt: document.marginLeftPt,
+              headerText: document.headerText,
+              footerText: document.footerText,
+              brand: brandAtSend,
+            }
+          : null,
       },
       parties,
       totalCents: proposal.totalCents,

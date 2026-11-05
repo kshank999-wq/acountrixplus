@@ -9,6 +9,7 @@ import {
   proposalVersions,
 } from '@/db/schema'
 import { proposalByToken, recordView } from '@/modules/crm/proposals'
+import { clientFacingProposal } from '@/modules/crm/client-link'
 import { isAcceptable } from '@/modules/crm/acceptance'
 import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
@@ -105,6 +106,21 @@ export default async function PublicProposalPage({
     ),
   )
 
+  /*
+    What this client was sent (Phase 188).
+
+    Everything below that a client may see comes from here rather than from the
+    live record. Until this phase the page rendered live items, live totals,
+    live blocks and a live brand kit, so editing a sent proposal changed what
+    the client was looking at while the PDF in their inbox stayed frozen — and
+    the acceptance recorded the new figure.
+
+    `null` only for a proposal that has never been sent, which is the
+    designer's "Preview client view" on a draft; that falls back to the live
+    render it has always had.
+  */
+  const sent = await clientFacingProposal(proposal.publicToken)
+
   const [kit] = document?.brandKitId
     ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
     : []
@@ -114,15 +130,18 @@ export default async function PublicProposalPage({
   const parties = isParties(acceptedRow?.parties) ? acceptedRow.parties : null
   const acceptable = isAcceptable(proposal) && !accepted
 
-  const items = (render?.items ?? []).map((item) => ({
-    id: item.id,
-    description: item.description,
-    quantityMilli: item.quantityMilli,
-    unitPriceCents: item.unitPriceCents,
-    amountCents: item.amountCents,
-    isOptional: item.isOptional,
-    isSelected: item.isSelected,
-  }))
+  // The lines as they were sent, with the ids a client's selection refers to.
+  const items =
+    sent?.items ??
+    (render?.items ?? []).map((item) => ({
+      id: item.id,
+      description: item.description,
+      quantityMilli: item.quantityMilli,
+      unitPriceCents: item.unitPriceCents,
+      amountCents: item.amountCents,
+      isOptional: item.isOptional,
+      isSelected: item.isSelected,
+    }))
 
   const assetUrl = (assetId: string) =>
     `/api/assets/${assetId}?proposal=${encodeURIComponent(token)}`
@@ -172,14 +191,14 @@ export default async function PublicProposalPage({
 
       <div className="mx-auto max-w-3xl bg-white shadow-sm print:max-w-none print:shadow-none">
         <DocumentPage
-          blocks={document?.blocks ?? []}
-          setup={setup}
-          brand={brandTokens(kit)}
+          blocks={sent?.blocks ?? document?.blocks ?? []}
+          setup={sent?.setup ?? setup}
+          brand={sent?.brand ?? brandTokens(kit)}
           context={render?.context ?? {}}
           data={{
             items,
-            discountCents: proposal.discountCents,
-            taxCents: proposal.taxCents,
+            discountCents: sent?.totals.discountCents ?? proposal.discountCents,
+            taxCents: sent?.totals.taxCents ?? proposal.taxCents,
             logoUrl: logoAssetId ? assetUrl(logoAssetId) : null,
             assetUrl,
             teamMembers: teamPool,
@@ -188,8 +207,8 @@ export default async function PublicProposalPage({
               <AcceptancePanel
                 token={token}
                 items={items}
-                discountCents={proposal.discountCents}
-                taxCents={proposal.taxCents}
+                discountCents={sent?.totals.discountCents ?? proposal.discountCents}
+                taxCents={sent?.totals.taxCents ?? proposal.taxCents}
                 acceptable={acceptable}
                 accepted={
                   accepted
@@ -207,8 +226,9 @@ export default async function PublicProposalPage({
                     : null
                 }
                 expired={
-                  Boolean(proposal.expiresOn) &&
-                  proposal.expiresOn! < new Date().toISOString().slice(0, 10)
+                  Boolean(sent?.expiresOn ?? proposal.expiresOn) &&
+                  (sent?.expiresOn ?? proposal.expiresOn)! <
+                    new Date().toISOString().slice(0, 10)
                 }
               />
             ),
