@@ -147,14 +147,22 @@ describe('every read from a company-scoped table', () => {
       with no actor anywhere, which is the guard a client-facing page
       necessarily stands on.
     */
-    expect(READS.length).toBe(929)
+    /*
+      934 since Phase 189 and the client's version history. Five reads, and
+      the spread says what the feature is: one `derives-tenant-from-row` for
+      the proposal found by a public token with no actor anywhere, two
+      `id-from-fetched-row` for the versions and the views that hang off it,
+      and two `established-above` in `versionForClient`, which re-reads under
+      a tenant the history above it has already settled.
+    */
+    expect(READS.length).toBe(934)
     expect(by).toEqual({
       'scoped-read': 569,
       'explicit-company': 265,
-      'established-above': 31,
-      'id-from-fetched-row': 19,
+      'established-above': 33,
+      'id-from-fetched-row': 21,
       'join-inherited': 13,
-      'derives-tenant-from-row': 13,
+      'derives-tenant-from-row': 14,
       'caller-established': 7,
       'conditions-array': 4,
       'actor-scoped': 3,

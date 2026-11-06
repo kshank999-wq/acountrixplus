@@ -1,10 +1,11 @@
-import { desc, eq } from 'drizzle-orm'
+import { and, desc, eq } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   brandKits,
   designDocuments,
   proposalItems,
   proposalVersions,
+  proposalViews,
   proposals,
 } from '@/db/schema'
 import type { BrandTokens } from '@/components/design/document-render'
@@ -279,5 +280,169 @@ function brandTokensOf(kit: typeof brandKits.$inferSelect): BrandTokens & {
     bodyFont: kit.bodyFont,
     baseSizePt: kit.baseSizePt,
     logoAssetId: kit.logoAssetId,
+  }
+}
+
+/**
+ * One entry of the version history a client may see (Phase 189, spec §7).
+ *
+ * `totalCents` is null for a version they never opened, which is the whole
+ * rule in one field: they learn the document was revised and when, and are not
+ * handed a figure they were never shown.
+ */
+export type ClientVersion = {
+  versionNumber: number
+  sentAt: Date
+  isCurrent: boolean
+  /** A view recorded while this version was the one the link served. */
+  wasOpened: boolean
+  canDownload: boolean
+  totalCents: number | null
+}
+
+/**
+ * The version history, as a client may see it.
+ *
+ * ## The decision
+ *
+ * §7 asks the client link for *"version history"*, and the question it leaves
+ * open is what a client may see of a **superseded** version.
+ *
+ * Serving every earlier PDF is the obvious answer and is wrong in a specific
+ * way: a company that sends a price by mistake and corrects it an hour later
+ * would be handing the client the mistake, on a link the client may never have
+ * opened in that hour. Serving nothing is what the page did before this phase,
+ * and is what §7 asks to change.
+ *
+ * `proposal_views` already records **when the client opened the link**, and
+ * each version is the document that link served between its `sentAt` and the
+ * next one's. So the rule is evidence rather than policy:
+ *
+ * > A client may re-read a version they demonstrably opened.
+ *
+ * Every version is listed with its date, because knowing a document was
+ * revised is what a version history is for and discloses no figures. One they
+ * opened is also downloadable and carries its total.
+ *
+ * ## The window is half-open
+ *
+ * `sentAt <= viewedAt < nextSentAt`. Closed at both ends would let a single
+ * view unlock two versions, and two sends can be milliseconds apart — which is
+ * exactly when that shows.
+ *
+ * A view recorded **before** the first send belongs to no version. That is not
+ * a corner case: it is the author's own *"Preview client view"* on a draft,
+ * which Phase 188 recorded as live behaviour, and attributing it to version 1
+ * would unlock a version on the strength of the seller having looked at it.
+ */
+export async function clientVersionHistory(
+  publicToken: string,
+  exec: Executor = db,
+): Promise<ClientVersion[]> {
+  const [proposal] = await exec
+    .select({ id: proposals.id })
+    .from(proposals)
+    .where(eq(proposals.publicToken, publicToken))
+    .limit(1)
+
+  if (!proposal) return []
+
+  const versions = await exec
+    .select()
+    .from(proposalVersions)
+    .where(eq(proposalVersions.proposalId, proposal.id))
+    .orderBy(proposalVersions.versionNumber)
+
+  if (versions.length === 0) return []
+
+  const views = await exec
+    .select({ viewedAt: proposalViews.viewedAt })
+    .from(proposalViews)
+    .where(eq(proposalViews.proposalId, proposal.id))
+
+  return versions
+    .map((version, index) => {
+      const until = versions[index + 1]?.sentAt ?? null
+      const wasOpened = views.some(
+        (view) =>
+          view.viewedAt >= version.sentAt && (until === null || view.viewedAt < until),
+      )
+      const isCurrent = index === versions.length - 1
+
+      /*
+        The current version is always readable: it is the page the client is
+        looking at, and refusing its PDF because no view is recorded yet would
+        refuse the very visit that is recording one.
+      */
+      const canDownload = isCurrent || wasOpened
+
+      return {
+        versionNumber: version.versionNumber,
+        sentAt: version.sentAt,
+        isCurrent,
+        wasOpened,
+        canDownload,
+        totalCents: canDownload ? version.totalCents : null,
+      }
+    })
+    .reverse()
+}
+
+/**
+ * The version a client may read, by number, or `null`.
+ *
+ * The single answer to "may this client read this version", called by the
+ * download route and by anything else that needs it. One reader, for the
+ * reason Phase 188 exists: the page, the acceptance and the PDF each had their
+ * own idea of what a client was looking at, and two of them disagreed.
+ *
+ * The number is a small integer a client can type, and it is resolved under
+ * the proposal the token names — so guessing one reaches the asker's own
+ * proposal or nothing.
+ */
+export async function versionForClient(
+  publicToken: string,
+  versionNumber: number,
+  exec: Executor = db,
+): Promise<{
+  proposalId: string
+  companyId: string
+  versionId: string
+  versionNumber: number
+  pdfDocumentId: string | null
+} | null> {
+  const allowed = (await clientVersionHistory(publicToken, exec)).find(
+    (entry) => entry.versionNumber === versionNumber && entry.canDownload,
+  )
+
+  if (!allowed) return null
+
+  const [proposal] = await exec
+    .select({ id: proposals.id, companyId: proposals.companyId })
+    .from(proposals)
+    .where(eq(proposals.publicToken, publicToken))
+    .limit(1)
+
+  if (!proposal) return null
+
+  const [version] = await exec
+    .select()
+    .from(proposalVersions)
+    .where(
+      and(
+        eq(proposalVersions.proposalId, proposal.id),
+        eq(proposalVersions.versionNumber, versionNumber),
+      ),
+    )
+    .limit(1)
+
+  if (!version) return null
+
+  return {
+    proposalId: proposal.id,
+    companyId: proposal.companyId,
+    versionId: version.id,
+    versionNumber: version.versionNumber,
+    pdfDocumentId: version.pdfDocumentId,
   }
 }

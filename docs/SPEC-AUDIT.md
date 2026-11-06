@@ -224,9 +224,12 @@ thread (Phase 174, recorded in Phase 188).** Three capabilities remain, and all
 three are §7's Illustrator-class work, which §7 itself defers: SVG, artboard
 affordances and vector primitives.
 
-One §7 item is unbuilt and has never had a row here, because this audit took
-the bullet as one capability: **version history on the client link**. Phase 188
-measured the bullet item by item and found it the only one of five missing.
+One §7 item was unbuilt and never had a row here, because this audit took the
+bullet as one capability: **version history on the client link**. Phase 188
+measured the bullet item by item and found it the only one of five missing;
+**Phase 189 built it**, with the rule that a client may re-read a version they
+demonstrably opened — evidence from `proposal_views` rather than a policy
+somebody has to defend. All five items of that bullet are now built.
 
 Phase 185 is not a row here and was the largest of them: **the PDF contained no
 images at all**, which this audit never asked about because §7 does not say

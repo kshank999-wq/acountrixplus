@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server'
 import { proposalByToken } from '@/modules/crm/proposals'
 import { readDocument } from '@/modules/evidence/service'
 import { latestSentPdf } from '@/modules/pdf/service'
+import { versionForClient } from '@/modules/crm/client-link'
 
 export const dynamic = 'force-dynamic'
 export const runtime = 'nodejs'
@@ -18,11 +19,40 @@ export const runtime = 'nodejs'
  * names the proposal, the proposal names the company, and the document is
  * looked up under that company. No document id is ever taken from the request.
  */
-export async function GET(_request: Request, context: { params: Promise<{ token: string }> }) {
+export async function GET(request: Request, context: { params: Promise<{ token: string }> }) {
   const { token } = await context.params
 
   const view = await proposalByToken(token)
   if (!view) return new NextResponse(null, { status: 404 })
+
+  /*
+    An earlier version, by number (Phase 189, §7's "version history").
+
+    A query parameter and not a second route, deliberately: two routes is two
+    places to get "may this client read this version" right, and one of them
+    would eventually not. `versionForClient` is the single answer, and it
+    refuses a version the client never opened — see its own docstring for why
+    the rule is a view rather than a policy.
+  */
+  const asked = new URL(request.url).searchParams.get('version')
+  if (asked !== null) {
+    const wanted = Number(asked)
+    const allowed = Number.isInteger(wanted)
+      ? await versionForClient(token, wanted)
+      : null
+
+    if (!allowed?.pdfDocumentId) {
+      // The same 404 for "no such version", "not yours" and "you never opened
+      // it". A distinct refusal for the last would confirm that a version
+      // exists, which is the one thing withholding it is for.
+      return new NextResponse(null, { status: 404 })
+    }
+
+    const earlier = await readDocument(allowed.companyId, allowed.pdfDocumentId)
+    if (!earlier) return new NextResponse(null, { status: 404 })
+
+    return pdfResponse(earlier.data, `${view.proposal.number || 'proposal'}-v${wanted}.pdf`)
+  }
 
   const latest = await latestSentPdf(view.proposal.companyId, view.proposal.id)
   if (!latest) {
@@ -39,12 +69,17 @@ export async function GET(_request: Request, context: { params: Promise<{ token:
   const result = await readDocument(view.proposal.companyId, latest.documentId)
   if (!result) return new NextResponse(null, { status: 404 })
 
-  const filename = `${view.proposal.number || 'proposal'}-v${latest.versionNumber}.pdf`
+  return pdfResponse(
+    result.data,
+    `${view.proposal.number || 'proposal'}-v${latest.versionNumber}.pdf`,
+  )
+}
 
-  return new NextResponse(new Uint8Array(result.data), {
+function pdfResponse(data: Buffer, filename: string): NextResponse {
+  return new NextResponse(new Uint8Array(data), {
     headers: {
       'Content-Type': 'application/pdf',
-      'Content-Length': String(result.data.byteLength),
+      'Content-Length': String(data.byteLength),
       'Content-Disposition': `inline; filename="${filename}"`,
       // Private and short: the token is a capability, and a shared cache in
       // front of the app must not hold somebody's pricing.

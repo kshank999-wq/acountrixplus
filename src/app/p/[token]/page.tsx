@@ -9,7 +9,8 @@ import {
   proposalVersions,
 } from '@/db/schema'
 import { proposalByToken, recordView } from '@/modules/crm/proposals'
-import { clientFacingProposal } from '@/modules/crm/client-link'
+import { clientFacingProposal, clientVersionHistory } from '@/modules/crm/client-link'
+import { VersionHistory } from './version-history'
 import { isAcceptable } from '@/modules/crm/acceptance'
 import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
@@ -120,6 +121,11 @@ export default async function PublicProposalPage({
     render it has always had.
   */
   const sent = await clientFacingProposal(proposal.publicToken)
+
+  // §7's "version history", since Phase 189. Every version with its date, and
+  // a download for the ones this client actually opened — the rule is argued
+  // at `clientVersionHistory`.
+  const versions = await clientVersionHistory(proposal.publicToken)
 
   const [kit] = document?.brandKitId
     ? await db.select().from(brandKits).where(eq(brandKits.id, document.brandKitId)).limit(1)
@@ -235,6 +241,8 @@ export default async function PublicProposalPage({
           }}
         />
       </div>
+
+      <VersionHistory token={token} versions={versions} />
 
       <QuestionPanel
         token={token}
