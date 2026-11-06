@@ -92,7 +92,21 @@ describe('the signature block names both parties', () => {
    * back and add it.
    */
   it('needs nothing added to the block to appear', () => {
-    expect(Object.keys(SIGNATURE)).toEqual(['id', 'type', 'prompt', 'agreementText'])
+    /*
+      Measured against a `divider`, which carries the base and nothing else,
+      rather than against a literal key list.
+
+      The literal list was what this test said until Phase 191 added `hidden`
+      and `locked` to every block — and it failed, correctly reporting a change
+      and incorrectly reporting it as a change *here*. The claim was never
+      "a signature block has four keys"; it is "naming the parties cost the
+      block no field of its own", and subtracting the base is how you ask that
+      question without re-listing the base every time it grows.
+    */
+    const base = new Set(Object.keys({ ...SHOWN, id: 'd', type: 'divider' }))
+    const ownFields = Object.keys(SIGNATURE).filter((key) => !base.has(key))
+
+    expect(ownFields).toEqual(['prompt', 'agreementText'])
   })
 
   /** A marketing creative has no company party, and must not grow an empty heading. */
