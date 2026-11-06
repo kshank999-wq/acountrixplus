@@ -21,7 +21,7 @@ import {
 } from '@/modules/design/blocks'
 import { MERGE_FIELD_GROUPS, resolveBlocks, type MergeContext } from '@/modules/design/merge-fields'
 import { DocumentPage } from '@/components/design/document-page'
-import type { RenderedTeamMember } from '@/modules/studio/team'
+import type { RenderedTeamMember } from '@/modules/studio/team-render'
 import { BlockEditor } from './block-editor'
 
 type Brand = {

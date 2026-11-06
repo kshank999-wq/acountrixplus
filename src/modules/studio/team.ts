@@ -7,6 +7,20 @@ import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/
 import { Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
 
+/*
+  The pure half lives in `team-render.ts` and is re-exported here (Phase 192).
+
+  Re-exported rather than moved outright so every existing importer keeps
+  working, and so this file still reads as the whole of "team". The split is
+  load-bearing all the same: `document-render.tsx` imports the pure module
+  directly, because importing *this* one would put `@/db` in the browser
+  bundle — which it did, and broke `npm run build`, from Phase 183 to Phase
+  192.
+*/
+import { selectTeam, teamIdsInBlocks, type RenderedTeamMember } from './team-render'
+
+export { selectTeam, teamIdsInBlocks, type RenderedTeamMember }
+
 /**
  * The firm's people (spec §15, Phase 183).
  *
@@ -261,23 +275,6 @@ export async function listTeamMembers(
 }
 
 /** What a `team` block renders. The block holds ids; this resolves them. */
-export type RenderedTeamMember = {
-  id: string
-  name: string
-  title: string | null
-  bio: string | null
-  qualifications: string | null
-  headshotAssetId: string | null
-  /**
-   * Carried into the renderers, which is not decoration.
-   *
-   * `selectTeam` needs it: a document's pool holds the active directory **and**
-   * any retired person a block names by id, so a block with an empty selection
-   * has to be able to tell those apart. Without this column the default
-   * selection would quietly include somebody who left.
-   */
-  isActive: boolean
-}
 
 const RENDER_COLUMNS = {
   id: teamMembers.id,
@@ -325,41 +322,4 @@ export async function teamForDocument(
   return rows
 }
 
-/**
- * The ids every `team` block in a document names.
- *
- * Deduplicated, because two blocks naming the same principal is one row to
- * read. A block naming nobody contributes nothing here and is served by the
- * active directory the pool always carries.
- */
-export function teamIdsInBlocks(blocks: Block[]): string[] {
-  const ids = new Set<string>()
-  for (const block of blocks) {
-    if (block.type !== 'team') continue
-    for (const id of block.memberIds) ids.add(id)
-  }
-  return [...ids]
-}
 
-/**
- * Who one block means, out of the document's pool.
- *
- * Pure, and shared by the page, the PDF and the email — three renderers reading
- * `memberIds` themselves is how one document becomes three documents, which is
- * the mistake the table block made in Phase 181 and the comment above
- * `TableBlock` already warns about.
- *
- * A named selection comes back **in the block's order**, not the directory's: an
- * author listing two people has said who leads this pitch, and the firm's
- * standing order is a different fact. A member whose row is gone drops out
- * rather than shifting the rest.
- */
-export function selectTeam(pool: RenderedTeamMember[], memberIds: string[]): RenderedTeamMember[] {
-  if (memberIds.length === 0) return pool.filter((member) => member.isActive)
-
-  const byId = new Map(pool.map((member) => [member.id, member]))
-  return memberIds.flatMap((id) => {
-    const member = byId.get(id)
-    return member ? [member] : []
-  })
-}

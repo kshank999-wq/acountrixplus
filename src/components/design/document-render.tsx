@@ -7,7 +7,7 @@ import {
   normalizeTable,
   type Block,
 } from '@/modules/design/blocks'
-import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
+import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team-render'
 import { safeUrl } from '@/modules/design/urls'
 
 /**
