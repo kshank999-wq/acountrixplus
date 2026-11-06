@@ -146,6 +146,27 @@ over `style=`. CSS is now named apart from everything else, because it is the
 refusal a real exporter is most likely to earn and the one with the most exact
 remedy: Illustrator writes presentation attributes when its CSS option says to.
 
+### And one found by reading the loop
+
+`parsePath('M0 0 Z 5 5')` **never returned**. `Z` takes no arguments, so the
+loop pushed it, left the command set and advanced nothing — forever, on a
+string a file chooses.
+
+Every other defect this phase found came from rendering the output and looking
+at it, which is the technique that has paid since Phase 185. This one could not
+have: the output is a hang, and there is nothing to look at. It came from
+re-reading the loop and asking whether every path through it advances.
+
+The fix clears the command after a zero-argument one, which makes the
+termination argument short enough to state: each iteration consumes a letter,
+consumes `needed` arguments, or returns. The test is an `it.each` over eight
+ways to break the grammar, because the property worth holding is that
+`parsePath` *returns* and the only honest way to assert that is to call it.
+
+Worth recording because the module's own docstring argues that refusing is
+safer than stripping, and a hang is the one failure mode where that is not
+automatically true — a reader that refuses has to finish reading first.
+
 ## Transparency is accepted only where it is none
 
 `opacity="1"` and `fill-opacity="1"` are what every exporter writes, so

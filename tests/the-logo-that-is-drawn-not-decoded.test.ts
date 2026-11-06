@@ -122,6 +122,29 @@ describe('what may be stored', () => {
     expect(result.ok).toBe(false)
   })
 
+  /*
+    `M0 0 Z 5 5` **hung** until it was read for this: `Z` takes no arguments,
+    so the loop pushed it, left the command set and advanced nothing, forever.
+    A file chooses that string, so it is a hang an upload can cause.
+
+    Found by reading the loop rather than by any assertion, which is why these
+    are an `it.each` over the shapes that break the grammar rather than one
+    test of the one that bit: the property worth holding is that `parsePath`
+    **returns**, and the only honest way to assert that is to call it.
+  */
+  it.each([
+    ['arguments after a close', 'M0 0 Z 5 5'],
+    ['a close with nothing before it', 'Z'],
+    ['a command with too few arguments', 'M0 0 L5'],
+    ['arguments before any command', '5 5 M0 0'],
+    ['a command this does not know', 'M0 0 B5 5'],
+    ['no leading move', 'L5 5'],
+    ['nothing at all', ''],
+    ['two closes and a stray number', 'M0 0 Z Z 1'],
+  ])('reads or refuses %s, and always returns', (_label, d) => {
+    expect(parsePath(d)).toBeNull()
+  })
+
   it('refuses a DOCTYPE rather than skipping it', () => {
     const result = sanitizeSvg(
       `<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY a "aaaa">]>` +

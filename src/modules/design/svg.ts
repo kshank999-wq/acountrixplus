@@ -396,6 +396,16 @@ export function parsePath(value: string): PathSegment[] | null {
 
     if (needed === 0) {
       segments.push({ command, args: [] })
+
+      /*
+        `Z` takes no arguments, so it cannot repeat — and clearing the command
+        is what makes this loop terminate. Leaving it set meant `M0 0 Z 5 5`
+        re-entered with a zero-argument command and never advanced `at`: a
+        **hang**, on a path an uploaded file chooses, found by reading this
+        loop rather than by any assertion. The next token must now be a
+        command or the path is one this cannot read.
+      */
+      command = null
       continue
     }
 
