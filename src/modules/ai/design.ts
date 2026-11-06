@@ -356,6 +356,16 @@ export async function applyLayoutSuggestion(
     // Last, so the suggestion is only accepted once the document actually moved.
     await markAccepted(ctx, suggestionId, undefined, tx)
 
-    return { ok: true as const, blocks: validated.blocks.length }
+    /*
+      The blocks themselves, not only how many (Phase 192).
+
+      The count was all anybody needed while the caller refreshed the page —
+      and refreshing the page is exactly what did not work: the designer holds
+      its blocks in client state, so §11's Design Assistant reordered the
+      document on the server and the editor went on showing the old order,
+      which the next save wrote back. The accepted suggestion was undone by
+      accepting it.
+    */
+    return { ok: true as const, count: validated.blocks.length, blocks: validated.blocks }
   })
 }

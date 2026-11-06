@@ -33,6 +33,7 @@ import {
   saveDocument,
 } from '@/modules/design/documents'
 import { messageFor, Refusal } from '@/modules/errors'
+import { parseBlocks, type Block } from '@/modules/design/blocks'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -227,15 +228,38 @@ export async function saveDocumentAction(
   })
 }
 
+/**
+ * Applies a template, and **returns the blocks it wrote** (Phase 192).
+ *
+ * Returning them is the fix for a defect measured in a browser: the designer
+ * holds its blocks in `useState(initialBlocks)`, and `router.refresh()`
+ * re-renders the server component without reseeding client state. So the
+ * template landed on the server, the editor went on showing the old document,
+ * and the author's next save put the old document back — proven against the
+ * database, with the applied template gone.
+ *
+ * The client could not have fixed this alone. Re-reading the prop would
+ * clobber unsaved edits on every refresh; remounting would lose the
+ * selection. The only thing that knows the document was replaced *and* by
+ * what is the action that replaced it, so it says so.
+ */
 export async function applyTemplateAction(
   documentId: string,
   templateKey: string,
-): Promise<ActionResult> {
-  return run(DOCUMENT_PATHS, async () => {
+): Promise<ActionResult & { blocks?: Block[] }> {
+  try {
     const actor = await requireActor()
-    await applyTemplate(actor, documentId, templateKey)
-    return 'Template applied. Your previous content was replaced.'
-  })
+    const updated = await applyTemplate(actor, documentId, templateKey)
+    for (const entry of DOCUMENT_PATHS) revalidatePath(entry)
+
+    return {
+      ok: true,
+      message: 'Template applied. Your previous content was replaced.',
+      blocks: parseBlocks(updated.blocks),
+    }
+  } catch (error) {
+    return { ok: false, error: messageFor(error, 'Something went wrong.') }
+  }
 }
 
 export async function createProposalDocumentAction(

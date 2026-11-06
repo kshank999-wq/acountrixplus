@@ -19,6 +19,7 @@ import {
 } from '@/modules/ai/assistants'
 import { adviseOnAccount } from '@/modules/ai/accounts'
 import { applyLayoutSuggestion, suggestLayout } from '@/modules/ai/design'
+import type { Block } from '@/modules/design/blocks'
 import { rejectSuggestion } from '@/modules/ai/suggestions'
 import { updateSettings } from '@/modules/ai/settings'
 import { activatePromptVersion, savePromptVersion } from '@/modules/ai/prompts'
@@ -205,8 +206,12 @@ export async function suggestLayoutAction(documentId: string): Promise<LayoutSug
   }
 }
 
-export async function applyLayoutSuggestionAction(suggestionId: string): Promise<ActionResult> {
-  return run(DESIGN_PATHS, async () => {
+export async function applyLayoutSuggestionAction(
+  suggestionId: string,
+): Promise<ActionResult & { blocks?: Block[] }> {
+  let applied: Block[] | undefined
+
+  const outcome = await run(DESIGN_PATHS, async () => {
     const actor = await requireActor()
     const result = await applyLayoutSuggestion(actor, suggestionId)
 
@@ -219,8 +224,13 @@ export async function applyLayoutSuggestionAction(suggestionId: string): Promise
     */
     if (!result.ok) throw new Refusal(result.message)
 
+    applied = result.blocks
     return 'Layout applied. The document now records that it was laid out with AI assistance.'
   })
+
+  // The blocks ride alongside the result rather than through `run`, which
+  // every action in this file shares and which returns a message or an error.
+  return outcome.ok ? { ...outcome, blocks: applied } : outcome
 }
 
 export type RuleSuggestionResult =

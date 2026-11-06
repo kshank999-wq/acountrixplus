@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useMemo, useState, useTransition } from 'react'
+import { useCallback, useEffect, useMemo, useReducer, useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   applyTemplateAction,
@@ -20,6 +20,14 @@ import {
   type BlockType,
 } from '@/modules/design/blocks'
 import { MERGE_FIELD_GROUPS, resolveBlocks, type MergeContext } from '@/modules/design/merge-fields'
+import {
+  canRedo,
+  canUndo,
+  currentBlocks,
+  initialHistory,
+  isDirty,
+  reduceHistory,
+} from '@/modules/design/history'
 import { DocumentPage } from '@/components/design/document-page'
 import type { RenderedTeamMember } from '@/modules/studio/team-render'
 import { BlockEditor } from './block-editor'
@@ -142,9 +150,26 @@ export function Designer({
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
-  const [blocks, setBlocks] = useState<Block[]>(initialBlocks)
+  /**
+   * The block list and every legal way it moves (Phase 192).
+   *
+   * A reducer rather than `useState` plus a `dirty` boolean, because those
+   * were two answers to one question and both were wrong in a way somebody
+   * met. `useState(initialBlocks)` never re-read its prop, so a template or a
+   * layout suggestion applied on the server never reached the screen and the
+   * next save wrote the stale document back. And `dirty` was set by any edit
+   * and cleared only by a save, so typing a character and deleting it left
+   * the document "unsaved" forever — which also disabled the Design
+   * Assistant, since its button is gated on `dirty`.
+   *
+   * The history knows both answers: `currentBlocks` is what to show, and
+   * `isDirty` is whether it differs from what the server holds.
+   */
+  const [history, dispatch] = useReducer(reduceHistory, initialBlocks, initialHistory)
+  const blocks = currentBlocks(history)
+  const dirty = isDirty(history)
+
   const [selectedId, setSelectedId] = useState<string | null>(initialBlocks[0]?.id ?? null)
-  const [dirty, setDirty] = useState(false)
   const [toast, setToast] = useState<{ text: string; ok: boolean } | null>(null)
   const [showTemplates, setShowTemplates] = useState(false)
   /**
@@ -169,10 +194,22 @@ export function Designer({
     setTimeout(() => setToast(null), 5000)
   }
 
-  function update(next: Block[]) {
-    setBlocks(next)
-    setDirty(true)
-  }
+  const update = useCallback(
+    (next: Block[]) => dispatch({ type: 'edit', blocks: next, at: Date.now() }),
+    [],
+  )
+
+  /**
+   * The document as the server now holds it, after it replaced it.
+   *
+   * Pushed through the history rather than assigned, so applying a template
+   * by accident can be undone — which is when anybody reaches for undo — and
+   * so the saved marker moves with it.
+   */
+  const replaced = useCallback(
+    (next: Block[]) => dispatch({ type: 'replace', blocks: next, at: Date.now() }),
+    [],
+  )
 
   function addBlock(type: BlockType) {
     const definition = definitions.find((item) => item.type === type)
@@ -188,11 +225,41 @@ export function Designer({
       const result = await saveDocumentAction(documentId, blocks)
       notify(result)
       if (result.ok) {
-        setDirty(false)
+        dispatch({ type: 'saved' })
         router.refresh()
       }
     })
   }
+
+  /**
+   * Ctrl/Cmd+Z and Ctrl/Cmd+Shift+Z (Phase 192).
+   *
+   * Bound on the window rather than on the editor pane, because the pointer
+   * is usually in a text field when somebody wants this and a handler scoped
+   * to the block list would never see the key.
+   *
+   * It deliberately does **not** fire while a text input has focus: the
+   * browser's own undo is better there — it knows the caret — and taking the
+   * shortcut away from a half-typed sentence to undo a whole block is the
+   * wrong trade. Structural undo is for when you are not typing.
+   */
+  useEffect(() => {
+    if (!isEditable) return
+
+    function onKey(event: KeyboardEvent) {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== 'z') return
+
+      const target = event.target as HTMLElement | null
+      const tag = target?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || target?.isContentEditable) return
+
+      event.preventDefault()
+      dispatch({ type: event.shiftKey ? 'redo' : 'undo' })
+    }
+
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [isEditable])
 
   const preview = useMemo(() => resolveBlocks(blocks, context), [blocks, context])
   const assetUrl = (assetId: string) => `/api/assets/${assetId}`
@@ -272,6 +339,30 @@ export function Designer({
                 Suggest a layout
               </button>
             )}
+            {/*
+              Undo and redo (§7, Phase 192). Side by side with the editing
+              controls rather than tucked into a menu, because the thing they
+              answer — "I did not mean that" — is answered by seeing that they
+              are there before doing it.
+            */}
+            <button
+              onClick={() => dispatch({ type: 'undo' })}
+              disabled={!canUndo(history)}
+              className="btn text-xs"
+              title="Undo (Ctrl+Z)"
+              aria-label="Undo"
+            >
+              ↶ Undo
+            </button>
+            <button
+              onClick={() => dispatch({ type: 'redo' })}
+              disabled={!canRedo(history)}
+              className="btn text-xs"
+              title="Redo (Ctrl+Shift+Z)"
+              aria-label="Redo"
+            >
+              ↷ Redo
+            </button>
             <button
               onClick={() => setShowTemplates((value) => !value)}
               className="btn text-xs"
@@ -354,6 +445,7 @@ export function Designer({
                   notify(result)
                   if (result.ok) {
                     setProposed(null)
+                    if (result.blocks) replaced(result.blocks)
                     router.refresh()
                   }
                 })
@@ -402,6 +494,7 @@ export function Designer({
                       notify(result)
                       if (result.ok) {
                         setShowTemplates(false)
+                        if (result.blocks) replaced(result.blocks)
                         router.refresh()
                       }
                     })
@@ -501,7 +594,7 @@ export function Designer({
                               ),
                             )
                           }
-                          className="btn px-1.5 py-0.5 text-xs"
+                          className={`btn px-1.5 py-0.5 text-xs ${block.hidden ? '' : 'opacity-40'}`}
                           aria-label={block.hidden ? 'Show this block' : 'Hide this block'}
                           aria-pressed={block.hidden}
                           title={
@@ -520,7 +613,18 @@ export function Designer({
                               ),
                             )
                           }
-                          className="btn px-1.5 py-0.5 text-xs"
+                          /*
+                            Muted when **off**, so the set state is the one
+                            that stands out (Phase 192).
+
+                            Phase 191 shipped 🔓 for unlocked and 🔒 for
+                            locked, which is correct and unreadable: at the
+                            size these render, an open padlock and a closed
+                            one are the same yellow blob, so a row of
+                            unlocked blocks looked like a row of locked ones.
+                            Seen by opening the page, not by any assertion.
+                          */
+                          className={`btn px-1.5 py-0.5 text-xs ${block.locked ? '' : 'opacity-40'}`}
                           aria-label={block.locked ? 'Unlock this block' : 'Lock this block'}
                           aria-pressed={block.locked}
                           title={
