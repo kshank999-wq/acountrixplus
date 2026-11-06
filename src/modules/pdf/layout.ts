@@ -352,10 +352,10 @@ class Composer {
             const logo = logoFor(this.input)
             if (block.showLogo && logo && !onBrand) {
               const logoHeight = 34
-              const logoWidth = (logoHeight * logo.widthPx) / logo.heightPx
+              const shape = sizeOf(logo)
+              const logoWidth = (logoHeight * shape.widthPx) / shape.heightPx
 
-              page.image({
-                name: imageResourceName(this.input.logoAssetId!),
+              drawPrepared(page, logo, this.input.logoAssetId!, {
                 x: MARGIN,
                 y: cursor,
                 width: logoWidth,
@@ -734,12 +734,12 @@ class Composer {
                   is `object-fit: cover` done with PDF operators, and the same
                   answer the page's CSS gives, so the two agree.
                 */
-                const scale = photo / Math.min(headshot.image.widthPx, headshot.image.heightPx)
-                const drawnWidth = headshot.image.widthPx * scale
-                const drawnHeight = headshot.image.heightPx * scale
+                const source = sizeOf(headshot)
+                const scale = photo / Math.min(source.widthPx, source.heightPx)
+                const drawnWidth = source.widthPx * scale
+                const drawnHeight = source.heightPx * scale
 
-                page.image({
-                  name: imageResourceName(member.headshotAssetId!),
+                drawPrepared(page, headshot, member.headshotAssetId!, {
                   x: MARGIN - (drawnWidth - photo) / 2,
                   y: y - (drawnHeight - photo) / 2,
                   width: drawnWidth,
@@ -841,7 +841,8 @@ class Composer {
           */
           const crop = normalizeCrop(block.crop)
           const width = (this.contentWidth * block.widthPercent) / 100
-          const sourceRatio = prepared.image.heightPx / prepared.image.widthPx
+          const source = sizeOf(prepared)
+          const sourceRatio = source.heightPx / source.widthPx
           const height = (width * crop.height * sourceRatio) / crop.width
 
           const x =
@@ -859,8 +860,7 @@ class Composer {
           this.pieces.push({
             height: height + (caption ? base * 1.6 : 0) + base * 0.6,
             draw: (page, y) => {
-              page.image({
-                name: imageResourceName(block.assetId!),
+              drawPrepared(page, prepared, block.assetId!, {
                 x: clipped ? x - crop.x * drawnWidth : x,
                 y: clipped ? y - crop.y * drawnHeight : y,
                 width: clipped ? drawnWidth : width,
@@ -1451,11 +1451,60 @@ class Composer {
  * than counted, so the layout pass and the resource dictionary cannot disagree
  * about which picture is `/Im1`.
  */
-/** The prepared logo, when there is one and it embedded. */
-function logoFor(input: RenderInput): EmbeddableImage | null {
+/**
+ * The shape of a prepared asset, whichever kind it is (Phase 190).
+ *
+ * The layout pass asks for an aspect ratio in five places and a drawing method
+ * in four, and those are different questions — which is why there are two
+ * helpers rather than one. A raster's shape is its pixels and a vector's is its
+ * `viewBox`, and above this line nothing else about them differs.
+ */
+function sizeOf(prepared: Extract<ImageResult, { ok: true }>): {
+  widthPx: number
+  heightPx: number
+} {
+  return prepared.kind === 'vector' ? prepared.vector : prepared.image
+}
+
+/**
+ * Draws a prepared asset into a box, by the kind it is.
+ *
+ * **The single place the two kinds diverge.** Every caller computes the box the
+ * same way for both, because the box is a fact about the layout and not about
+ * the file — and a second place that chose between `image` and `vector` would
+ * eventually choose differently for the crop than for the size.
+ */
+function drawPrepared(
+  page: PageCanvas,
+  prepared: Extract<ImageResult, { ok: true }>,
+  assetId: string,
+  box: {
+    x: number
+    y: number
+    width: number
+    height: number
+    clip?: {
+      x: number
+      y: number
+      width: number
+      height: number
+      shape?: 'rect' | 'rounded' | 'circle'
+    }
+  },
+): void {
+  if (prepared.kind === 'vector') {
+    page.vector({ svg: prepared.vector.svg, ...box })
+    return
+  }
+
+  page.image({ name: imageResourceName(assetId), ...box })
+}
+
+/** The prepared logo, when there is one and it could be drawn. */
+function logoFor(input: RenderInput): Extract<ImageResult, { ok: true }> | null {
   if (!input.logoAssetId) return null
   const prepared = input.images?.get(input.logoAssetId)
-  return prepared?.ok ? prepared.image : null
+  return prepared?.ok ? prepared : null
 }
 
 export function imageResourceName(assetId: string): string {
@@ -1641,7 +1690,16 @@ export function renderDocumentPdf(input: RenderInput): Buffer {
   const embedded = new Map<string, EmbeddableImage>()
   for (const [assetId, result] of input.images ?? []) {
     const name = imageResourceName(assetId)
-    if (result.ok && invoked.has(name)) embedded.set(name, result.image)
+
+    /*
+      A vector is already in the content stream and has no XObject, so it is
+      absent here by construction rather than by a filter (Phase 190). The
+      `invoked` check does the same work it always did: `usedImages` records
+      what `page.image` placed, and `page.vector` places nothing.
+    */
+    if (result.ok && result.kind === 'raster' && invoked.has(name)) {
+      embedded.set(name, result.image)
+    }
   }
 
   return writePdf({

@@ -40,6 +40,8 @@ import { toWinAnsi, widthOf, type StandardFont } from './metrics'
 
 import type { EmbeddableImage } from './images'
 import { ROUNDED_MASK_FRACTION } from '@/modules/design/blocks'
+import { KAPPA, fixed } from './geometry'
+import { vectorOperators } from './vector'
 
 export type Rgb = { r: number; g: number; b: number }
 
@@ -230,6 +232,80 @@ export class PageCanvas {
       `/${options.name} Do`,
       'Q',
     )
+  }
+
+  /**
+   * Draws a sanitised SVG (Phase 190).
+   *
+   * **Not an image XObject.** The drawing becomes path operators in this
+   * page's own content stream, which is what makes an imported logo the one
+   * thing in the PDF that is resolution-independent: it is as sharp at A0 as a
+   * raster logo is at the size it was uploaded. That is the whole reason §7
+   * asks for SVG and the reason this is worth a second code path alongside
+   * `image`.
+   *
+   * `clip` is the same option `image` takes and means the same thing, which is
+   * the part that is load-bearing rather than tidy. Phase 186's crop and mask
+   * are a fraction of a picture's box, and the browser applies them to an
+   * `<img>` whatever the file inside it is — so a vector that ignored them
+   * would be cropped on the page and uncropped on paper. The caller does the
+   * identical arithmetic for both kinds and this method is the only thing that
+   * differs.
+   *
+   * The drawing is fitted inside the box, centred, with its aspect ratio kept,
+   * which is what the browser does with the same file.
+   */
+  vector(options: {
+    svg: string
+    x: number
+    y: number
+    width: number
+    height: number
+    clip?: {
+      x: number
+      y: number
+      width: number
+      height: number
+      shape?: 'rect' | 'rounded' | 'circle'
+    }
+  }): void {
+    if (options.width <= 0 || options.height <= 0) return
+
+    const bottom = this.heightPt - options.y - options.height
+    const drawing = vectorOperators(options.svg, {
+      x: options.x,
+      y: bottom,
+      width: options.width,
+      height: options.height,
+    })
+
+    /*
+      Nothing drawn means nothing written, down to the graphics-state pair.
+      An empty `q … Q` would be harmless and would also make "the writer draws
+      nothing for a document it would not have stored" an untestable claim —
+      and a claim that can only be checked by eye is one that stops being
+      true quietly.
+    */
+    if (drawing.length === 0) return
+
+    this.ops.push('q')
+
+    if (options.clip) {
+      const clipBottom = this.heightPt - options.clip.y - options.clip.height
+      this.ops.push(
+        ...clipPath({
+          x: options.clip.x,
+          y: clipBottom,
+          width: options.clip.width,
+          height: options.clip.height,
+          shape: options.clip.shape ?? 'rect',
+        }),
+        'W',
+        'n',
+      )
+    }
+
+    this.ops.push(...drawing, 'Q')
   }
 
   /**
@@ -444,15 +520,6 @@ export function writePdf(input: PdfDocumentInput): Buffer {
 }
 
 /**
- * How far a Bézier control point sits along the tangent to approximate a
- * quarter arc.
- *
- * `4/3 × (√2 − 1)`. The standard constant, written as the arithmetic rather
- * than as `0.5523` so a reader can see it is derived and not tuned.
- */
-const KAPPA = (4 / 3) * (Math.SQRT2 - 1)
-
-/**
  * The operators for a clipping region, in PDF coordinates (`y` upward).
  *
  * A rectangle is one operator. The other two are four curves, and a circle in
@@ -593,18 +660,6 @@ export function truncateToWidth(
   }
 
   return `${cut.trimEnd()}...`
-}
-
-/**
- * Fixed to three decimals, and `-0` collapsed.
- *
- * The rounding is what makes the output stable: floating-point drift in a
- * layout calculation would otherwise change the bytes without changing the
- * document, and the digest is load-bearing here.
- */
-function fixed(value: number): string {
-  const rounded = Number(value.toFixed(3))
-  return String(rounded === 0 ? 0 : rounded)
 }
 
 /** Escapes the three characters that are special inside a PDF string. */

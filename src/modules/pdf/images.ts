@@ -1,4 +1,5 @@
 import { deflateSync, inflateSync } from 'node:zlib'
+import { readSvg } from '@/modules/design/svg'
 
 /**
  * Turning an uploaded picture into a PDF image XObject (Phase 185, spec §7).
@@ -84,12 +85,41 @@ export type ImageRefusal = {
   remedy: string
 }
 
+/**
+ * A sanitised SVG, which is drawn rather than embedded (Phase 190).
+ *
+ * It carries a pixel size like a raster does, although it has none, because
+ * the layout pass needs an aspect ratio and a `viewBox` is one. Calling the
+ * fields `widthPx`/`heightPx` keeps the two kinds interchangeable where the
+ * layout only wants a shape — and the places that must tell them apart are
+ * exactly the places that call `page.image` or `page.vector`.
+ */
+export type DrawableVector = {
+  widthPx: number
+  heightPx: number
+  /** The sanitised document, as `sanitizeSvg` rewrote it at upload. */
+  svg: string
+}
+
+/**
+ * What a prepared asset turned out to be.
+ *
+ * Two successes rather than one, because a PDF has two unrelated ways to put a
+ * picture on a page: an image XObject with pixels in it, and path operators in
+ * the content stream. An SVG is the second, and a union that pretended
+ * otherwise would make `kind` something each caller guessed from the content
+ * type — which is the same question answered in several places, again.
+ */
 export type ImageResult =
-  | { ok: true; image: EmbeddableImage }
+  | { ok: true; kind: 'raster'; image: EmbeddableImage }
+  | { ok: true; kind: 'vector'; vector: DrawableVector }
   | { ok: false; refusal: ImageRefusal }
 
 /** Formats this can embed, as content types. The rest refuse by name. */
 export const EMBEDDABLE_CONTENT_TYPES = ['image/png', 'image/jpeg'] as const
+
+/** Formats this can draw as paths. One, and it is the point of Phase 190. */
+export const DRAWABLE_CONTENT_TYPES = ['image/svg+xml'] as const
 
 /**
  * How big a picture is, without preparing it (Phase 186).
@@ -119,6 +149,20 @@ export function imageSize(
   if (contentType === 'image/jpeg') return jpegSize(bytes)
   if (contentType === 'image/webp') return webpSize(bytes)
   if (contentType === 'image/gif') return gifSize(bytes)
+
+  /*
+    An SVG has no pixels, and its `viewBox` is the size it is drawn at by
+    default — which is the number every other branch here returns and the
+    number a crop is a fraction of. `readSvg` rather than a regular expression
+    over the markup, because the `viewBox`-then-`width`/`height` fallback is a
+    rule, and two readers of a rule is how they come to disagree.
+  */
+  if (contentType === 'image/svg+xml') {
+    const read = readSvg(bytes.toString('utf8'))
+    if ('refusal' in read) return null
+    return { width: Math.round(read.viewBox[2]), height: Math.round(read.viewBox[3]) }
+  }
+
   return null
 }
 
@@ -209,6 +253,30 @@ export function prepareImage(bytes: Buffer, contentType: string): ImageResult {
   if (contentType === 'image/png') return readPng(bytes)
 
   /*
+    An SVG is not decoded, embedded or rasterised — it is **re-read** (Phase
+    190). The bytes in the store were written by `sanitizeSvg`, so reading them
+    with the same module's reader is the check that they still are what it
+    wrote; an SVG that fails here is one that did not come through the upload
+    path, and it refuses rather than draws.
+  */
+  if (contentType === 'image/svg+xml') {
+    const read = readSvg(bytes.toString('utf8'))
+    if ('refusal' in read) {
+      return { ok: false, refusal: read.refusal }
+    }
+
+    return {
+      ok: true,
+      kind: 'vector',
+      vector: {
+        widthPx: read.viewBox[2],
+        heightPx: read.viewBox[3],
+        svg: bytes.toString('utf8'),
+      },
+    }
+  }
+
+  /*
     WebP and GIF reach here, and the asset library accepts both. Named rather
     than lumped into "unsupported", because the two are different conversions in
     a person's head: a GIF is usually an old logo and a WebP is usually a recent
@@ -296,6 +364,7 @@ function readJpeg(bytes: Buffer): ImageResult {
 
       return {
         ok: true,
+        kind: 'raster',
         image: {
           widthPx,
           heightPx,
@@ -442,6 +511,7 @@ function readPng(bytes: Buffer): ImageResult {
 
     return {
       ok: true,
+      kind: 'raster',
       image: {
         widthPx,
         heightPx,
@@ -508,6 +578,7 @@ function readPng(bytes: Buffer): ImageResult {
 
   return {
     ok: true,
+    kind: 'raster',
     image: {
       widthPx,
       heightPx,

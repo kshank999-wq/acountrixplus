@@ -126,7 +126,7 @@ describe('a JPEG goes in untouched', () => {
     const result = prepareImage(jpeg({ width: 640, height: 480, components: 3 }), 'image/jpeg')
 
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
 
     expect(result.image.widthPx).toBe(640)
     expect(result.image.heightPx).toBe(480)
@@ -139,7 +139,7 @@ describe('a JPEG goes in untouched', () => {
     const result = prepareImage(file, 'image/jpeg')
 
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
 
     /*
       The whole argument for having no image library. A PDF viewer contains a
@@ -180,7 +180,7 @@ describe('a PNG without transparency goes in untouched too', () => {
     const result = prepareImage(file, 'image/png')
 
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
 
     /*
       `/Predictor 15` means "the PNG filter set, chosen per row", which is what
@@ -209,7 +209,7 @@ describe('a PNG without transparency goes in untouched too', () => {
 
     const result = prepareImage(file, 'image/png')
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
 
     // `hival` is the last index, not the count — one of the two numbers in a
     // PDF image dictionary that is off by one on a first attempt.
@@ -224,7 +224,7 @@ describe('a PNG without transparency goes in untouched too', () => {
     )
 
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
     expect(result.image.colorSpace).toBe('/DeviceGray')
   })
 
@@ -269,7 +269,7 @@ describe('transparency is the one thing that is really decoded', () => {
     const result = prepareImage(png({ width: 2, height: 1, colorType: 6, rows }), 'image/png')
 
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
 
     expect(result.image.colorSpace).toBe('/DeviceRGB')
     expect(result.image.smask).not.toBeNull()
@@ -329,7 +329,7 @@ describe('transparency is the one thing that is really decoded', () => {
     const result = prepareImage(file, 'image/png')
 
     expect(result.ok).toBe(true)
-    if (!result.ok) return
+    if (!result.ok || result.kind !== 'raster') return
 
     expect([...inflateSync(result.image.data)]).toEqual(pixels.flatMap((p) => p.slice(0, 3)))
     expect([...inflateSync(result.image.smask!.data)]).toEqual(pixels.map((p) => p[3]))

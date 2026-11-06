@@ -460,7 +460,7 @@ function BrandTab({
               <input
                 type="file"
                 name="file"
-                accept="image/png,image/jpeg,image/webp,image/gif"
+                accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
                 required
                 className="field py-1.5 text-xs"
               />

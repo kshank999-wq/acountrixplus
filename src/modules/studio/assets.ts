@@ -2,6 +2,7 @@ import { randomUUID, createHash } from 'node:crypto'
 import { and, desc, eq, inArray, isNull } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { imageSize } from '@/modules/pdf/images'
+import { sanitizeSvg } from '@/modules/design/svg'
 import { assetBlobs, assets } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -75,11 +76,30 @@ export function getAssetStore(key?: string): AssetStore {
 /**
  * What may be uploaded.
  *
- * SVG is deliberately absent: it can carry script, and these files are served
- * back to browsers on public proposal pages. Accepting it would turn the logo
- * library into a stored-XSS vector.
+ * SVG was deliberately absent from Phase 4 until Phase 190, with this reason:
+ *
+ * > it can carry script, and these files are served back to browsers on public
+ * > proposal pages. Accepting it would turn the logo library into a
+ * > stored-XSS vector.
+ *
+ * That reason was right and is **not** overturned. What changed is that the
+ * bytes stored under an SVG's key are no longer the uploader's: `sanitizeSvg`
+ * parses the file and emits its own document from the allowlisted subset it
+ * understood, so a script element is not filtered out of the stored file — it
+ * never reaches it. The asset route then serves that file with a policy that
+ * would stop a script even if one did (`/api/assets/[id]`).
+ *
+ * Two defences, and the ordering between them is the point: the stored bytes
+ * are the one that has to hold, and the response headers are the one that
+ * catches a bug in it.
  */
-export const ALLOWED_IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'] as const
+export const ALLOWED_IMAGE_TYPES = [
+  'image/png',
+  'image/jpeg',
+  'image/webp',
+  'image/gif',
+  'image/svg+xml',
+] as const
 
 export const MAX_ASSET_BYTES = 5 * 1024 * 1024
 
@@ -97,7 +117,7 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
 
   if (!(ALLOWED_IMAGE_TYPES as readonly string[]).includes(input.contentType)) {
     throw new Refusal(
-      `Unsupported file type ${input.contentType}. Use PNG, JPEG, WebP, or GIF.`,
+      `Unsupported file type ${input.contentType}. Use PNG, JPEG, WebP, GIF, or SVG.`,
     )
   }
   if (input.data.byteLength > MAX_ASSET_BYTES) {
@@ -107,13 +127,37 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
     throw new Refusal('That file is empty.')
   }
 
+  /*
+    An SVG is **rewritten before it is stored** (Phase 190).
+
+    `data` is reassigned rather than merely checked, and that is the whole
+    security argument: every line below this one — the digest, the store, the
+    size, the measurement — operates on the document `sanitizeSvg` emitted,
+    so there is no later step that could reach for the original bytes, and no
+    way to add one by accident.
+
+    The refusal carries the sanitiser's own reason and remedy, because this is
+    the moment a person can act on them: they chose this file and can export
+    another (Phase 119). The alternative is a client discovering it as a blank
+    space in a PDF, which is not a remedy and is not addressed to them.
+  */
+  let data = input.data
+
+  if (input.contentType === 'image/svg+xml') {
+    const sanitized = sanitizeSvg(data.toString('utf8'))
+    if (!sanitized.ok) {
+      throw new Refusal(`${sanitized.refusal.reason}. ${sanitized.refusal.remedy}`)
+    }
+    data = Buffer.from(sanitized.svg, 'utf8')
+  }
+
   // The content hash keeps the key stable for identical bytes, and the tenant
   // prefix means one company's key can never collide with another's.
-  const digest = createHash('sha256').update(input.data).digest('hex').slice(0, 32)
+  const digest = createHash('sha256').update(data).digest('hex').slice(0, 32)
   const storageKey = `${ctx.companyId}/${digest}-${randomUUID().slice(0, 8)}`
 
   const store = getAssetStore()
-  await store.put(storageKey, input.data, input.contentType)
+  await store.put(storageKey, data, input.contentType)
 
   /*
     The pixel dimensions, measured rather than taken from the caller
@@ -130,7 +174,7 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
     WebP and GIF as well, which the PDF cannot embed: a size is a fact about the
     file, and the web page can crop a WebP even though a printer cannot have it.
   */
-  const measured = imageSize(input.data, input.contentType)
+  const measured = imageSize(data, input.contentType)
 
   const [asset] = await db
     .insert(assets)
@@ -139,7 +183,7 @@ export async function uploadAsset(ctx: ActorContext, input: UploadInput) {
       kind: input.kind ?? 'image',
       filename: input.filename.slice(0, 200),
       contentType: input.contentType,
-      sizeBytes: input.data.byteLength,
+      sizeBytes: data.byteLength,
       width: measured?.width ?? input.width ?? null,
       height: measured?.height ?? input.height ?? null,
       storageProvider: store.key,

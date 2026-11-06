@@ -32,9 +32,19 @@ import { DomainError } from '@/modules/errors'
  *
  * Wider than the brand asset library, because evidence is whatever the
  * supplier sent: a PDF invoice, a photographed till receipt, a spreadsheet of
- * hours, an emailed CSV statement. SVG is excluded for the same reason it is
- * excluded from the asset library — it can carry script, and these files are
- * served back to browsers.
+ * hours, an emailed CSV statement.
+ *
+ * **SVG stays excluded here although Phase 190 admitted it to the asset
+ * library**, and the difference is what each list is for. A brand asset is
+ * *drawn*: it is sanitised into a subset the PDF writer can redraw, and a file
+ * outside that subset is refused to the person who chose it. Evidence is
+ * *kept*: it is whatever the supplier sent, stored as sent, and a supplier's
+ * SVG would be rewritten by a sanitiser into something that is no longer the
+ * document they sent — which is the one thing a record must not be.
+ *
+ * So the choice is between altering evidence and serving an unexamined SVG
+ * back to a browser, and neither is acceptable. Excluding it is the third
+ * answer, and it costs nothing: nobody invoices in SVG.
  */
 export const EVIDENCE_CONTENT_TYPES = [
   'image/png',
