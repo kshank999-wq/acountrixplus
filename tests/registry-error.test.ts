@@ -289,7 +289,15 @@ describe('every registry refuses the same way', () => {
     // and reached no document at all — so a lookup answering `undefined` would
     // report a component as homed when nothing renders it, which is precisely
     // the state the register was written to make impossible to miss.
-    expect(thrown.length).toBe(39)
+    //
+    // Forty since Phase 191 and `READER_SURFACES`, the places a block reaches
+    // somebody who is not its author. It earns the throw on what the lookup is
+    // consulted *for*: the register is what a test iterates to decide which
+    // surfaces to render a hidden block through, so a key answering
+    // `undefined` would quietly shrink that list — and the thing it would stop
+    // checking is whether a block an author deliberately held back is being
+    // shown to the one person it was held back from.
+    expect(thrown.length).toBe(40)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

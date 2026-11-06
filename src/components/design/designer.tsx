@@ -473,14 +473,67 @@ export function Designer({
                       onClick={() => setSelectedId(block.id)}
                       className="min-w-0 flex-1 text-left"
                     >
-                      <span className="text-sm">{labelFor(block)}</span>
+                      <span className={`text-sm ${block.hidden ? 'text-muted line-through' : ''}`}>
+                        {labelFor(block)}
+                      </span>
+                      {block.locked && (
+                        <span className="ml-1.5 text-xs text-muted" aria-hidden="true">
+                          🔒
+                        </span>
+                      )}
                     </button>
 
                     {isEditable && (
                       <div className="flex shrink-0 gap-0.5">
+                        {/*
+                          The block list is this engine's answer to §7's
+                          "layers" (Phase 191). In a stack of flowing blocks
+                          there is no z-order to manage, so what a layer panel
+                          is actually *for* — seeing every object at once, and
+                          turning one off without deleting it — is this list
+                          plus these two toggles.
+                        */}
+                        <button
+                          onClick={() =>
+                            update(
+                              blocks.map((item) =>
+                                item.id === block.id ? { ...item, hidden: !item.hidden } : item,
+                              ),
+                            )
+                          }
+                          className="btn px-1.5 py-0.5 text-xs"
+                          aria-label={block.hidden ? 'Show this block' : 'Hide this block'}
+                          aria-pressed={block.hidden}
+                          title={
+                            block.hidden
+                              ? 'Hidden — kept in the document, not sent to the client'
+                              : 'Hide from the client, keeping it in the document'
+                          }
+                        >
+                          {block.hidden ? '🙈' : '👁'}
+                        </button>
+                        <button
+                          onClick={() =>
+                            update(
+                              blocks.map((item) =>
+                                item.id === block.id ? { ...item, locked: !item.locked } : item,
+                              ),
+                            )
+                          }
+                          className="btn px-1.5 py-0.5 text-xs"
+                          aria-label={block.locked ? 'Unlock this block' : 'Lock this block'}
+                          aria-pressed={block.locked}
+                          title={
+                            block.locked
+                              ? 'Locked against edits, moves and the Design Assistant'
+                              : 'Lock against accidental edits and moves'
+                          }
+                        >
+                          {block.locked ? '🔒' : '🔓'}
+                        </button>
                         <button
                           onClick={() => update(moveBlock(blocks, index, index - 1))}
-                          disabled={index === 0}
+                          disabled={index === 0 || block.locked}
                           className="btn px-1.5 py-0.5 text-xs"
                           aria-label="Move up"
                         >
@@ -488,7 +541,7 @@ export function Designer({
                         </button>
                         <button
                           onClick={() => update(moveBlock(blocks, index, index + 1))}
-                          disabled={index === blocks.length - 1}
+                          disabled={index === blocks.length - 1 || block.locked}
                           className="btn px-1.5 py-0.5 text-xs"
                           aria-label="Move down"
                         >
@@ -499,6 +552,7 @@ export function Designer({
                             update(blocks.filter((item) => item.id !== block.id))
                             if (selectedId === block.id) setSelectedId(null)
                           }}
+                          disabled={block.locked}
                           className="btn px-1.5 py-0.5 text-xs"
                           aria-label="Delete block"
                         >
@@ -518,7 +572,20 @@ export function Designer({
             </ul>
           </section>
 
-          {selected && isEditable && (
+          {selected && isEditable && selected.locked && (
+            /*
+              The editor is withheld rather than disabled field by field. A
+              form full of greyed inputs invites somebody to work out which
+              one still responds; one sentence and one button says what the
+              state is and how to leave it.
+            */
+            <p className="card p-3 text-xs text-muted">
+              This block is locked, so its fields cannot be edited and it cannot be moved or
+              deleted. Unlock it with the 🔓 button to make changes.
+            </p>
+          )}
+
+          {selected && isEditable && !selected.locked && (
             <BlockEditor
               block={selected}
               clauses={clauses}
@@ -570,6 +637,7 @@ export function Designer({
           <div className="max-h-[75vh] overflow-y-auto bg-white">
             <DocumentPage
               blocks={preview}
+              audience="author"
               setup={setup}
               brand={brand}
               context={context}

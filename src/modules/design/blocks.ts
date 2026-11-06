@@ -17,7 +17,48 @@ import { z } from 'zod'
  * to data the *renderer* supplies, so a marketing flyer simply never uses them.
  */
 
-const baseBlock = { id: z.string().min(1) }
+/**
+ * What every block carries, whatever type it is (Phase 191, §7's `lock/hide`).
+ *
+ * `hidden` and `locked` are on the base rather than on the types that seemed
+ * to want them, because both are properties of *a block in a document* rather
+ * than of a kind of content: there is no type for which "keep this but do not
+ * show it" is meaningless, and a flag that existed on some types would be a
+ * flag an author has to remember the rules of.
+ *
+ * Both default to false, so every block stored before this phase parses
+ * unchanged and is visible and editable — the same bargain Phase 186's `crop`
+ * struck, and the reason `parseBlocks` can stay forgiving.
+ */
+const baseBlock = {
+  id: z.string().min(1),
+  /**
+   * Kept in the document and shown to **no reader**.
+   *
+   * Not a draft and not a deletion. The case it is for is a section an author
+   * has written and is not ready to send — an optional scope, a price
+   * breakdown held back for the second meeting — which today is either
+   * deleted and retyped or sent by accident.
+   *
+   * Who honours this is not left to each renderer to remember: see
+   * `forReader`.
+   */
+  hidden: z.boolean().default(false),
+  /**
+   * Protected from accidental change, including by the Design Assistant.
+   *
+   * A courtesy against a slip, **not a permission** — anybody who can edit the
+   * document can unlock it, and nothing here is a security boundary. Said
+   * plainly because a lock that looked like a permission would be worse than
+   * no lock: somebody would rely on it.
+   *
+   * It is enforced on the save path rather than only greyed out in the editor,
+   * because a toggle that only the editor respects is Phase 160's shape —
+   * installed and inert — and because the Design Assistant rewrites block
+   * lists without going through the editor at all.
+   */
+  locked: z.boolean().default(false),
+}
 
 /** Horizontal placement, shared by several block types. */
 const alignment = z.enum(['left', 'center', 'right']).default('left')
@@ -499,6 +540,17 @@ export const blockSchema = z.discriminatedUnion('type', [
   videoBlockSchema,
 ])
 
+/**
+ * Visible and unlocked: the state of a block nobody has marked (Phase 191).
+ *
+ * For block lists built in **code** rather than by an author — an invoice's
+ * generated layout, a test's fixture. Spread rather than defaulted away,
+ * because `Block` is the parsed type and the parsed type has both fields: a
+ * constructed literal that omitted them would be a `Block` with two holes in
+ * it, and the compiler is right to say so.
+ */
+export const SHOWN = { hidden: false, locked: false } as const
+
 export type Block = z.infer<typeof blockSchema>
 export type BlockType = Block['type']
 
@@ -518,6 +570,109 @@ export function parseBlocks(raw: unknown): Block[] {
     if (parsed.success) blocks.push(parsed.data)
   }
   return blocks
+}
+
+/**
+ * The blocks a reader may see (Phase 191, §7's `lock/hide`).
+ *
+ * ## Why this is a function and not a filter written five times
+ *
+ * `parseBlocks` is the single door every block list in this application comes
+ * through — twenty-odd call sites, every surface among them. It would be the
+ * obvious place to drop a hidden block, and it is the wrong one, because it
+ * serves **both** audiences: the designer parses to show the author their
+ * document, and the client page parses to show a client theirs. A filter there
+ * would hide the block from the person who hid it.
+ *
+ * So the audiences have to be told apart somewhere, and the danger is that
+ * "somewhere" becomes "wherever each renderer remembered". `BLOCK_SURFACES`
+ * exists because six of eight dispatches handle an unknown block silently; a
+ * renderer that forgot this would fail the same way, except that the block it
+ * shows is one an author deliberately held back — which is worse than a
+ * missing block, because nobody is looking for it.
+ *
+ * One function, named at every reader surface, and `READER_SURFACES` counts
+ * them.
+ */
+export function visibleBlocks(blocks: Block[]): Block[] {
+  return blocks.filter((block) => !block.hidden)
+}
+
+/**
+ * What a locked block forbids, given what it looked like before.
+ *
+ * Returns the problems, so the save path can report all of them at once rather
+ * than the first.
+ *
+ * **Content, existence and position** — the three things the word means
+ * everywhere else, so all three are here. Content-and-existence alone was the
+ * first version and it was wrong in a way worth recording: the Design
+ * Assistant *only ever reorders*, never rewrites, so a lock that permitted
+ * reordering would have been inert against the one caller it most exists to
+ * stop. A toggle that does nothing to the thing it was built for is Phase
+ * 160's shape.
+ *
+ * Position is compared **among the blocks common to both lists**, which is
+ * what makes the rule usable. Inserting a new section above a locked clause is
+ * ordinary editing and is allowed, because a new block is in neither list's
+ * common part. Deleting an unlocked block elsewhere is likewise fine.
+ *
+ * The consequence worth stating: dragging *another* block past a locked one is
+ * refused too. That is deliberate rather than a side effect — "this clause
+ * stays after the scope" is exactly what somebody locking a clause means, and
+ * a rule that let a neighbour hop over it would protect the block and not the
+ * arrangement.
+ *
+ * Unlocking is always allowed, and is the one change a locked block accepts.
+ * A lock nobody can undo is not a lock, it is damage.
+ */
+export function lockProblems(before: Block[], after: Block[]): string[] {
+  const problems: string[] = []
+  const now = new Map(after.map((block) => [block.id, block]))
+  const survived = new Set(after.map((block) => block.id))
+
+  const commonBefore = before.filter((block) => survived.has(block.id)).map((block) => block.id)
+  const commonAfter = after
+    .filter((block) => before.some((earlier) => earlier.id === block.id))
+    .map((block) => block.id)
+
+  for (const locked of before.filter((block) => block.locked)) {
+    const next = now.get(locked.id)
+
+    if (!next) {
+      problems.push(`"${describeBlock(locked)}" is locked and cannot be deleted. Unlock it first.`)
+      continue
+    }
+
+    if (commonBefore.indexOf(locked.id) !== commonAfter.indexOf(locked.id)) {
+      problems.push(`"${describeBlock(locked)}" is locked and cannot be moved. Unlock it first.`)
+      continue
+    }
+
+    /*
+      Compared whole rather than field by field, because a block gains fields
+      and a comparison that listed them would be a comparison that fell behind
+      — the exact shape of Phase 182's columns nothing rendered. `locked` is
+      excluded because clearing it is the permitted change; `hidden` is not,
+      because hiding a locked block changes what a client sees.
+    */
+    const stripLock = ({ locked: _locked, ...rest }: Block) => rest
+    if (JSON.stringify(stripLock(locked)) !== JSON.stringify(stripLock(next))) {
+      problems.push(`"${describeBlock(locked)}" is locked and cannot be changed. Unlock it first.`)
+    }
+  }
+
+  return problems
+}
+
+/** A short name for a block in a message to a person. */
+function describeBlock(block: Block): string {
+  const definition = BLOCK_DEFINITIONS.find((item) => item.type === block.type)
+  const label = definition?.label ?? block.type
+
+  if ('title' in block && block.title) return `${label}: ${block.title}`
+  if ('text' in block && block.text) return `${label}: ${block.text.slice(0, 40)}`
+  return label
 }
 
 /** Validates a block list strictly, for the editor's save path. */

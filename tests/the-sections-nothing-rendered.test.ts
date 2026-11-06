@@ -16,7 +16,7 @@ import { BUILT_IN_TEMPLATES } from '@/modules/design/templates'
 import { createOpportunity, createOrganization } from '@/modules/crm/opportunities'
 import { createProposal, sendProposal } from '@/modules/crm/proposals'
 import { proposalRenderContext } from '@/modules/design/documents'
-import { parseBlocks } from '@/modules/design/blocks'
+import { SHOWN, parseBlocks } from '@/modules/design/blocks'
 
 /**
  * The sections nothing rendered (Phase 182, spec §7).
@@ -189,6 +189,7 @@ describe('the six narrative sections', () => {
     const [block] = resolveBlocks(
       [
         {
+          ...SHOWN,
           id: 'x',
           type: 'text',
           align: 'left',

@@ -800,3 +800,36 @@ ol.doc-list {
   font-size: 0.95em;
   line-height: 1.55;
 }
+
+/*
+  A block the author has hidden (Phase 191, §7's `lock/hide`).
+
+  Only ever rendered for an author — `DocumentPage` takes an explicit
+  `audience` and a reader's list has already had these removed. It is marked
+  rather than dimmed into illegibility, because the author's question is
+  "what have I held back", and a block they cannot read is not an answer.
+
+  Excluded from print along with everything else a reader never sees: an
+  author printing their own preview is making a copy of the document, and the
+  held-back block is not part of it.
+*/
+.doc-hidden-block {
+  position: relative;
+  opacity: 0.45;
+  border-left: 3px dashed var(--doc-muted, #6b7280);
+  padding-left: 0.75rem;
+}
+
+.doc-hidden-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--doc-muted, #6b7280);
+  margin: 0 0 0.25rem;
+}
+
+@media print {
+  .doc-hidden-block {
+    display: none;
+  }
+}

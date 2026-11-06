@@ -1,4 +1,4 @@
-import { normalizeTable, type Block } from '@/modules/design/blocks'
+import { normalizeTable, visibleBlocks, type Block } from '@/modules/design/blocks'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { safeUrl } from '@/modules/design/urls'
@@ -351,7 +351,16 @@ export function renderEmailHtml(input: {
   const brand = input.brand ?? DEFAULT_EMAIL_BRAND
   const track = input.trackLink ?? NO_TRACKING
   const team = input.team ?? []
-  const body = input.blocks.map((block) => blockHtml(block, brand, track, team)).join('')
+  /*
+    A hidden block is not sent (Phase 191, §7's `lock/hide`). There is no
+    author audience for an email: a campaign goes to a list, at once, and
+    cannot be recalled — which makes this the surface where a held-back block
+    costs the most and the one most likely to have one, since a creative being
+    drafted usually sits beside the one going out.
+  */
+  const body = visibleBlocks(input.blocks)
+    .map((block) => blockHtml(block, brand, track, team))
+    .join('')
 
   return `<!doctype html>
 <html>
@@ -405,7 +414,9 @@ export function renderEmailText(input: {
   const track = input.trackLink ?? NO_TRACKING
   const team = input.team ?? []
 
-  for (const block of input.blocks) {
+  // The plain-text alternative of the same message, and a separate switch:
+  // two dispatches, so two calls (Phase 191).
+  for (const block of visibleBlocks(input.blocks)) {
     switch (block.type) {
       case 'cover':
         if (block.title) lines.push(block.title.toUpperCase(), '')

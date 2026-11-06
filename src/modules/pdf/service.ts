@@ -7,7 +7,7 @@ import {
   proposals,
   proposalVersions,
 } from '@/db/schema'
-import { parseBlocks } from '@/modules/design/blocks'
+import { parseBlocks, visibleBlocks } from '@/modules/design/blocks'
 import { disclosureForDocument, proposalRenderContext } from '@/modules/design/documents'
 import { teamForDocument } from '@/modules/studio/team'
 import { storeDocument, attachDocument } from '@/modules/evidence/service'
@@ -173,9 +173,19 @@ export async function proposalRenderInput(
   const items = rendered?.items ?? []
   const brand = await brandFor(companyId, document.brandKitId, exec)
 
-  // Forgiving on read, as `parseBlocks` is everywhere else: a single
-  // malformed block should not stop a client receiving their proposal.
-  const blocks = parseBlocks(document.blocks)
+  /*
+    Forgiving on read, as `parseBlocks` is everywhere else: a single malformed
+    block should not stop a client receiving their proposal.
+
+    Filtered to what a reader sees before anything is **fetched** (Phase 191),
+    not only before anything is drawn. `renderDocumentPdf` would skip a hidden
+    block anyway and `usedImages` would keep its picture out of the file, so
+    this is not what makes the output correct — it is what keeps the claim
+    simple. "Nothing is read for a block no reader sees" needs no second
+    sentence explaining why the thing that was read is harmless, and a claim
+    that needs the second sentence is the one that stops being true.
+  */
+  const blocks = visibleBlocks(parseBlocks(document.blocks))
 
   const team = await teamForDocument(companyId, blocks, exec)
 

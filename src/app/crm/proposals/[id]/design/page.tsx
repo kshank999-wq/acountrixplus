@@ -12,7 +12,7 @@ import { listClauses } from '@/modules/studio/service'
 import { listTeamMembers, teamForDocument } from '@/modules/studio/team'
 import { listAssets } from '@/modules/studio/assets'
 import { aiAvailable } from '@/modules/ai/settings'
-import { parseBlocks } from '@/modules/design/blocks'
+import { parseBlocks, visibleBlocks } from '@/modules/design/blocks'
 import { unresolvedInBlocks } from '@/modules/design/merge-fields'
 import { Designer } from '@/components/design/designer'
 
@@ -64,7 +64,13 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
     : []
 
   const context = render?.context ?? {}
-  const unresolved = unresolvedInBlocks(blocks, context)
+  /*
+    The warning says a field "will render blank", which is a statement about
+    what a reader gets — so a hidden block does not earn one (Phase 191). The
+    author sees it the moment they unhide the block, because the designer
+    re-renders on every change.
+  */
+  const unresolved = unresolvedInBlocks(visibleBlocks(blocks), context)
 
   return (
     <AppShell

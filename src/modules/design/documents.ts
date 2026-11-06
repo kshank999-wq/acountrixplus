@@ -24,7 +24,8 @@ import {
   strongerOf,
   type ProvenanceOrigin,
 } from '@/modules/ai/provenance'
-import { parseBlocks, validateBlocks, type Block } from './blocks'
+import { Refusal } from '@/modules/errors'
+import { lockProblems, parseBlocks, validateBlocks, type Block } from './blocks'
 import { buildMergeContext, type MergeContext } from './merge-fields'
 import { builtInTemplate, templatesForIndustry, type TemplateDefinition } from './templates'
 import { missing } from '@/modules/errors/missing'
@@ -207,6 +208,26 @@ export async function saveDocument(
     if (result.errors.length > 0) {
       throw new Error(`Could not save the document — ${result.errors[0]}`)
     }
+
+    /*
+      A locked block is enforced here, not only greyed out in the editor
+      (Phase 191, §7's `lock/hide`).
+
+      Two reasons it has to be on this path. The Design Assistant rewrites
+      whole block lists through `applyLayoutSuggestion` and never touches the
+      editor's inputs, and the strongest reason to lock a clause is to keep it
+      where legal put it. And a browser tab left open before the lock was set
+      would otherwise save straight over it.
+
+      It is still a courtesy rather than a permission — the same person can
+      unlock and save again, in two steps instead of one. That is the whole
+      claim, and it is worth exactly what an accident costs.
+    */
+    const locks = lockProblems(parseBlocks(document.blocks), result.blocks)
+    if (locks.length > 0) {
+      throw new Refusal(`Could not save the document — ${locks[0]}`)
+    }
+
     blocks = result.blocks
   }
 

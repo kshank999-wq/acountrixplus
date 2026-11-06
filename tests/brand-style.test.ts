@@ -11,6 +11,7 @@ import { createBrandKit, updateBrandKit } from '@/modules/studio/service'
 import { emailBrand, renderEmailHtml } from '@/modules/marketing/render-email'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { DomainError, messageFor } from '@/modules/errors'
+import { SHOWN } from '@/modules/design/blocks'
 
 /**
  * What may be interpolated into a style attribute (Phase 80).
@@ -184,7 +185,7 @@ describe('storing a brand kit', () => {
  */
 describe('a hostile brand cannot reach the wire', () => {
   const blocks = [
-    { id: 'h', type: 'heading' as const, level: 1 as const, text: 'Spring offer', align: 'left' as const },
+    { ...SHOWN, id: 'h', type: 'heading' as const, level: 1 as const, text: 'Spring offer', align: 'left' as const },
   ]
 
   function render(brand: Parameters<typeof renderEmailHtml>[0]['brand']) {
@@ -268,7 +269,7 @@ describe('a campaign goes out in the company’s own colours', () => {
 
     const html = renderEmailHtml({
       blocks: [
-        { id: 'h', type: 'heading', level: 1, text: 'Spring offer', align: 'left' },
+        { ...SHOWN, id: 'h', type: 'heading', level: 1, text: 'Spring offer', align: 'left' },
       ],
       unsubscribeUrl: 'https://example.test/u/abc',
       brand: mine,

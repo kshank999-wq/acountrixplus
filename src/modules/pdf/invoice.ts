@@ -5,6 +5,7 @@ import { contactLines, letterheadFor } from '@/modules/brand/letterhead'
 import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { renderDocumentPdf, type BrandTokens } from './layout'
+import { SHOWN } from '@/modules/design/blocks'
 import type { Block } from '@/modules/design/blocks'
 import { DomainError } from '@/modules/errors'
 
@@ -95,6 +96,7 @@ export async function renderInvoicePdf(
 
   const blocks: Block[] = [
     {
+      ...SHOWN,
       id: 'cover',
       type: 'cover',
       title: 'Invoice',
@@ -106,6 +108,7 @@ export async function renderInvoicePdf(
     ...(identity.length > 0
       ? ([
           {
+            ...SHOWN,
             id: 'letterhead',
             type: 'text',
             // One line each. `wrapText` breaks on newlines before it wraps, so
@@ -117,6 +120,7 @@ export async function renderInvoicePdf(
         ] satisfies Block[])
       : []),
     {
+      ...SHOWN,
       id: 'details',
       type: 'keyValue',
       title: '',
@@ -127,13 +131,13 @@ export async function renderInvoicePdf(
         ...(row.invoice.memo ? [{ label: 'Reference', value: row.invoice.memo }] : []),
       ],
     },
-    { id: 'table', type: 'pricingTable', title: '', showQuantity: true, showUnitPrice: true, allowOptionalSelection: false, showTotals: true },
+    { ...SHOWN, id: 'table', type: 'pricingTable', title: '', showQuantity: true, showUnitPrice: true, allowOptionalSelection: false, showTotals: true },
   ]
 
   if (row.profile?.paymentInstructions) {
     blocks.push(
-      { id: 'pay-heading', type: 'heading', text: 'How to pay', level: 3, align: 'left' },
-      { id: 'pay', type: 'text', text: row.profile.paymentInstructions, align: 'left', emphasis: false },
+      { ...SHOWN, id: 'pay-heading', type: 'heading', text: 'How to pay', level: 3, align: 'left' },
+      { ...SHOWN, id: 'pay', type: 'text', text: row.profile.paymentInstructions, align: 'left', emphasis: false },
     )
   }
 

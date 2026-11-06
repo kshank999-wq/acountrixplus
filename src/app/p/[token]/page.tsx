@@ -14,7 +14,7 @@ import { VersionHistory } from './version-history'
 import { isAcceptable } from '@/modules/crm/acceptance'
 import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
-import { parseBlocks } from '@/modules/design/blocks'
+import { parseBlocks, visibleBlocks } from '@/modules/design/blocks'
 import { teamForDocument } from '@/modules/studio/team'
 import { assetSizes } from '@/modules/studio/assets'
 import { truncateIp } from '@/modules/crm/intake'
@@ -91,7 +91,9 @@ export default async function PublicProposalPage({
     sees who was going to do the work, which is what retiring rather than
     deleting is for.
   */
-  const teamPool = await teamForDocument(proposal.companyId, parseBlocks(document?.blocks ?? []))
+  const readerBlocks = visibleBlocks(parseBlocks(document?.blocks ?? []))
+
+  const teamPool = await teamForDocument(proposal.companyId, readerBlocks)
 
   /*
     The pixel size of every picture this document places (Phase 186).
@@ -102,7 +104,7 @@ export default async function PublicProposalPage({
   */
   const assetDimensions = await assetSizes(
     proposal.companyId,
-    parseBlocks(document?.blocks ?? []).flatMap((block) =>
+    readerBlocks.flatMap((block) =>
       block.type === 'image' && block.assetId ? [block.assetId] : [],
     ),
   )
@@ -198,6 +200,7 @@ export default async function PublicProposalPage({
       <div className="mx-auto max-w-3xl bg-white shadow-sm print:max-w-none print:shadow-none">
         <DocumentPage
           blocks={sent?.blocks ?? document?.blocks ?? []}
+          audience="reader"
           setup={sent?.setup ?? setup}
           brand={sent?.brand ?? brandTokens(kit)}
           context={render?.context ?? {}}

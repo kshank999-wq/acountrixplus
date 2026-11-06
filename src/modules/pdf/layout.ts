@@ -1,4 +1,4 @@
-import { isWholeImage, normalizeCrop, normalizeTable, type Block } from '@/modules/design/blocks'
+import { visibleBlocks, isWholeImage, normalizeCrop, normalizeTable, type Block } from '@/modules/design/blocks'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import type { EmbeddableImage, ImageResult } from './images'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
@@ -1551,7 +1551,24 @@ export function renderDocumentPdf(input: RenderInput): Buffer {
     accent,
   )
 
-  for (const block of input.blocks) composer.add(block)
+  /*
+    A hidden block never reaches paper (Phase 191, §7's `lock/hide`).
+
+    Filtered here, at the single point every page of every PDF flows through,
+    rather than inside `add` — a guard in the composer would be a guard each
+    future caller of `add` has to keep working, and this is one line that
+    cannot be gone round.
+
+    There is no author audience for a PDF. `renderProposalPreview` exists so
+    an author can see **what a client would get**, so a preview that showed
+    held-back blocks would be answering a question nobody asked.
+
+    This is also why no hidden block's picture ends up in the file: Phase
+    185's `usedImages` records what was actually placed rather than what was
+    prepared, so a block that never draws never registers an XObject. That
+    decision was made for a different reason and pays here.
+  */
+  for (const block of visibleBlocks(input.blocks)) composer.add(block)
 
   const hasHeader = Boolean(input.headerText?.trim())
   const hasFooter =

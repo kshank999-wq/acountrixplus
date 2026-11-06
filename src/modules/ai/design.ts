@@ -38,7 +38,7 @@ import { can, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { recordAudit } from '@/modules/audit'
 import { ask } from './gateway'
 import { getSuggestion, markAccepted, recordSuggestion } from './suggestions'
-import { parseBlocks, validateBlocks } from '@/modules/design/blocks'
+import { lockProblems, parseBlocks, validateBlocks } from '@/modules/design/blocks'
 import { permissionFor } from '@/modules/design/documents'
 
 /**
@@ -284,6 +284,28 @@ export async function applyLayoutSuggestion(
       return {
         ok: false as const,
         message: `That suggestion would not produce a valid document — ${validated.errors[0]}`,
+      }
+    }
+
+    /*
+      A locked block is not the model's to move (Phase 191, §7's `lock/hide`).
+
+      This path is the reason the lock covers position at all. It never
+      rewrites and never deletes — "reordered, never rewritten", above — so a
+      lock that only protected content would have let the Design Assistant
+      move a clause legal had pinned, which is the single thing somebody is
+      most likely to lock a block against.
+
+      Refused as a whole rather than applied minus the locked blocks. A
+      suggestion is an arrangement, and honouring the half of it the model did
+      not intend would be a third arrangement nobody chose — the author can
+      unlock and ask again.
+    */
+    const locks = lockProblems(current, validated.blocks)
+    if (locks.length > 0) {
+      return {
+        ok: false as const,
+        message: `That suggestion would move a locked block — ${locks[0]}`,
       }
     }
 

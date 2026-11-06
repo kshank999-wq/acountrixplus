@@ -201,3 +201,102 @@ export function blockSurfaceStands(surface: BlockSurface): string[] {
 
   return problems
 }
+
+// ---------------------------------------------------------------------------
+
+/**
+ * Every place a block reaches somebody who is not its author (Phase 191).
+ *
+ * ## A different question from `BLOCK_SURFACES`
+ *
+ * That register asks *does each block **type** reach each surface*, and is
+ * checked by a scan for a pattern. This one asks *does each surface **skip** a
+ * block the author hid*, which no scan can answer: the absence of a block in
+ * an output is not a string anybody can grep for.
+ *
+ * So this register is checked **behaviourally** — a document with a hidden
+ * block carrying a marker is rendered through each surface named here, and the
+ * marker has to be absent. The register's job is to make the list of surfaces
+ * a thing a test iterates rather than a thing somebody remembers, so a ninth
+ * reader surface fails a test instead of quietly showing held-back content.
+ *
+ * ## Why the failure is worse than a missing block
+ *
+ * A block type missing from a surface is content the author put in and nobody
+ * sees — bad, and visible to the author the moment they look at the output. A
+ * **hidden** block appearing on a surface is content the author deliberately
+ * held back, shown to the one person it was held back from, and the author has
+ * no reason to go looking. The draft scope, the price breakdown kept for the
+ * second meeting, the clause legal has not approved.
+ *
+ * The author surfaces are deliberately **not** listed. The designer, the block
+ * editor, the save path and the Design Assistant's outline all see every
+ * block, because hiding one from its author is how it gets lost.
+ */
+export type ReaderSurface = {
+  key: string
+  /** Repository-relative path of the function that renders for this reader. */
+  file: string
+  /** Who is on the other side of it. */
+  reader: string
+  /** What is lost if a hidden block reaches this reader. */
+  because: string
+}
+
+export const READER_SURFACES: readonly ReaderSurface[] = [
+  {
+    key: 'web',
+    file: 'src/components/design/document-render.tsx',
+    reader: 'A client opening the proposal link.',
+    because:
+      'The page the link opens, and the one surface where the author can be looking at the same ' +
+      'document at the same moment and see something different. It takes an explicit `audience` ' +
+      'rather than filtering unconditionally, because the designer renders its preview through ' +
+      'this same component and an author must see what they have held back — greyed, labelled, ' +
+      'and plainly not part of what is sent.',
+  },
+  {
+    key: 'pdf',
+    file: 'src/modules/pdf/layout.ts',
+    reader: 'Whoever opens the attachment, now or in five years.',
+    because:
+      'The worst place for this to leak, because a PDF is the artifact that gets forwarded, ' +
+      'printed and filed. A page can be corrected by hiding the block properly and reloading; a ' +
+      'PDF that went out cannot be corrected at all, and Phase 21 guarantees it will never ' +
+      'change. There is no author audience here — a preview renders what a client would get, ' +
+      'which is the whole point of a preview.',
+  },
+  {
+    key: 'email-html',
+    file: 'src/modules/marketing/render-email.ts',
+    reader: 'Everybody on the campaign list.',
+    because:
+      'A send reaches an audience at once and cannot be recalled. A marketing creative is ' +
+      'exactly where a held-back block is likely — an offer being drafted alongside the one ' +
+      'going out — and the blast radius is the whole list rather than one client.',
+  },
+  {
+    key: 'email-text',
+    file: 'src/modules/marketing/render-email.ts',
+    reader: 'The same list, in a plain-text client.',
+    because:
+      'The alternative part of the same message, and a separate switch in the same file. Listed ' +
+      'separately for the reason Phase 181 listed `merge-fill` and `merge-detect` separately: ' +
+      'they are two dispatches, and the first draft of a change fills one.',
+  },
+]
+
+export function readerSurfaceFor(key: string): ReaderSurface {
+  const found = READER_SURFACES.find((surface) => surface.key === key)
+  if (found) return found
+
+  throw new RegistryError({
+    registry: 'READER_SURFACES',
+    key,
+    message:
+      `No reader surface is declared as "${key}". This register is the list of places a block ` +
+      'reaches somebody who is not its author, and a lookup answering `undefined` would report ' +
+      'a surface as checked when nothing renders through it. ' +
+      `Declared: ${READER_SURFACES.map((surface) => surface.key).join(', ')}.`,
+  })
+}

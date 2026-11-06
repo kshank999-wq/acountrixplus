@@ -1,4 +1,5 @@
-import type { Block } from './blocks'
+import { z } from 'zod'
+import { blockSchema, type Block } from './blocks'
 
 /**
  * The built-in template gallery (spec §7).
@@ -21,9 +22,17 @@ export type TemplateDefinition = {
   blocks: Block[]
 }
 
-/** Stable ids: a template's blocks are copied, then given fresh ids on use. */
-function block<T extends Block>(value: T): T {
-  return value
+/**
+ * Stable ids: a template's blocks are copied, then given fresh ids on use.
+ *
+ * Parsed rather than merely typed, since Phase 191. The schema fills the
+ * defaults every block now carries — `hidden` and `locked` — so sixty template
+ * literals did not each have to repeat two false values, and the parse is free
+ * besides: a built-in template that stopped matching the schema now fails at
+ * import rather than rendering short on a client's page.
+ */
+function block(value: z.input<typeof blockSchema>): Block {
+  return blockSchema.parse(value)
 }
 
 const STANDARD_COVER: Block = block({

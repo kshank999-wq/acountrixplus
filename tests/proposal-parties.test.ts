@@ -3,6 +3,7 @@ import { buildMergeContext } from '@/modules/design/merge-fields'
 import { letterheadFor } from '@/modules/brand/letterhead'
 import { PageCanvas, writePdf } from '@/modules/pdf/writer'
 import { renderDocumentPdf, type BrandTokens } from '@/modules/pdf/layout'
+import { SHOWN } from '@/modules/design/blocks'
 import type { Block } from '@/modules/design/blocks'
 
 /**
@@ -23,6 +24,7 @@ const BRAND: BrandTokens = {
 }
 
 const SIGNATURE: Block = {
+  ...SHOWN,
   id: 'sig',
   type: 'signature',
   prompt: 'Accept this proposal',

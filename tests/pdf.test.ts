@@ -18,6 +18,7 @@ import { renderInvoicePdf } from '@/modules/pdf/invoice'
 import { createCustomer, createInvoice } from '@/modules/receivables/service'
 import { readDocument, usesOf } from '@/modules/evidence/service'
 import { digestOf } from '@/modules/evidence/store'
+import { SHOWN } from '@/modules/design/blocks'
 import type { Block } from '@/modules/design/blocks'
 
 /**
@@ -290,21 +291,21 @@ describe('the writer', () => {
 
   it('renders every block type without falling over', () => {
     const all: Block[] = [
-      { id: '1', type: 'cover', title: 'Cover', subtitle: 'Sub', preparedFor: 'For', showLogo: true, useBrandBackground: true },
-      { id: '2', type: 'heading', text: 'Heading', level: 1, align: 'center' },
-      { id: '3', type: 'text', text: 'Body.', align: 'right', emphasis: true },
-      { id: '4', type: 'list', items: ['one', 'two'], ordered: true },
-      { id: '5', type: 'keyValue', title: 'Facts', rows: [{ label: 'A', value: 'B' }] },
-      { id: '6', type: 'pricingTable', title: 'Fees', showQuantity: true, showUnitPrice: true, allowOptionalSelection: true, showTotals: true },
-      { id: '7', type: 'image', assetId: null, caption: 'A picture', widthPercent: 100, align: 'left', crop: { x: 0, y: 0, width: 1, height: 1 }, maskShape: 'none' },
-      { id: '8', type: 'divider' },
-      { id: '9', type: 'spacer', heightPt: 24 },
-      { id: '10', type: 'columns', columns: [{ heading: 'X', body: 'x' }, { heading: 'Y', body: 'y' }] },
-      { id: '11', type: 'clause', clauseVersionId: null, title: 'Terms', body: 'Legal wording.' },
-      { id: '12', type: 'signature', prompt: 'Accept', agreementText: 'I agree.' },
-      { id: '13', type: 'button', label: 'Go', url: 'https://example.test', style: 'solid', align: 'center' },
-      { id: '14', type: 'qrCode', value: 'https://example.test', caption: 'Scan', sizePt: 96, align: 'right' },
-      { id: '15', type: 'video', url: 'https://example.test/v', thumbnailAssetId: null, caption: 'Watch', widthPercent: 100 },
+      { ...SHOWN, id: '1', type: 'cover', title: 'Cover', subtitle: 'Sub', preparedFor: 'For', showLogo: true, useBrandBackground: true },
+      { ...SHOWN, id: '2', type: 'heading', text: 'Heading', level: 1, align: 'center' },
+      { ...SHOWN, id: '3', type: 'text', text: 'Body.', align: 'right', emphasis: true },
+      { ...SHOWN, id: '4', type: 'list', items: ['one', 'two'], ordered: true },
+      { ...SHOWN, id: '5', type: 'keyValue', title: 'Facts', rows: [{ label: 'A', value: 'B' }] },
+      { ...SHOWN, id: '6', type: 'pricingTable', title: 'Fees', showQuantity: true, showUnitPrice: true, allowOptionalSelection: true, showTotals: true },
+      { ...SHOWN, id: '7', type: 'image', assetId: null, caption: 'A picture', widthPercent: 100, align: 'left', crop: { x: 0, y: 0, width: 1, height: 1 }, maskShape: 'none' },
+      { ...SHOWN, id: '8', type: 'divider' },
+      { ...SHOWN, id: '9', type: 'spacer', heightPt: 24 },
+      { ...SHOWN, id: '10', type: 'columns', columns: [{ heading: 'X', body: 'x' }, { heading: 'Y', body: 'y' }] },
+      { ...SHOWN, id: '11', type: 'clause', clauseVersionId: null, title: 'Terms', body: 'Legal wording.' },
+      { ...SHOWN, id: '12', type: 'signature', prompt: 'Accept', agreementText: 'I agree.' },
+      { ...SHOWN, id: '13', type: 'button', label: 'Go', url: 'https://example.test', style: 'solid', align: 'center' },
+      { ...SHOWN, id: '14', type: 'qrCode', value: 'https://example.test', caption: 'Scan', sizePt: 96, align: 'right' },
+      { ...SHOWN, id: '15', type: 'video', url: 'https://example.test/v', thumbnailAssetId: null, caption: 'Watch', widthPercent: 100 },
     ]
 
     const pdf = renderDocumentPdf(

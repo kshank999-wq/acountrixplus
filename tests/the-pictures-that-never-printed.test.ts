@@ -3,6 +3,7 @@ import { crc32, deflateSync, inflateSync } from 'node:zlib'
 import { EMBEDDABLE_CONTENT_TYPES, prepareImage } from '@/modules/pdf/images'
 import { imageResourceName, renderDocumentPdf } from '@/modules/pdf/layout'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
+import { SHOWN } from '@/modules/design/blocks'
 import type { Block } from '@/modules/design/blocks'
 import type { ImageResult } from '@/modules/pdf/images'
 import type { RenderedTeamMember } from '@/modules/studio/team'
@@ -564,6 +565,7 @@ describe('the two blocks whose pictures were never even reached', () => {
 
   const teamBlock = (patch: Record<string, unknown> = {}): Block =>
     ({
+      ...SHOWN,
       id: 't',
       type: 'team',
       title: 'Who you will be working with',

@@ -7,7 +7,7 @@ import { createCompanyFixture, addUserWithRole, type Fixture } from './helpers'
 import { DomainError } from '@/modules/errors'
 import { PermissionError } from '@/modules/permissions'
 import { uploadAsset } from '@/modules/studio/assets'
-import { BLOCK_DEFINITIONS, parseBlocks, type Block } from '@/modules/design/blocks'
+import { SHOWN, BLOCK_DEFINITIONS, parseBlocks, type Block } from '@/modules/design/blocks'
 import { BLOCK_SURFACES, coverageMarker } from '@/modules/design/surfaces'
 import { BUILT_IN_TEMPLATES } from '@/modules/design/templates'
 import { resolveBlocks, unresolvedInBlocks } from '@/modules/design/merge-fields'
@@ -74,6 +74,7 @@ async function constraintBrokenBy(write: Promise<unknown>): Promise<string | und
 
 function teamBlock(patch: Partial<Extract<Block, { type: 'team' }>> = {}): Block {
   return {
+    ...SHOWN,
     id: 'team-1',
     type: 'team',
     title: 'Who you will be working with',

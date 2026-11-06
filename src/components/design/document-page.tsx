@@ -1,5 +1,5 @@
 import './document.css'
-import { parseBlocks, type Block } from '@/modules/design/blocks'
+import { parseBlocks, visibleBlocks, type Block } from '@/modules/design/blocks'
 import { resolveBlocks, type MergeContext } from '@/modules/design/merge-fields'
 import {
   BlockView,
@@ -30,19 +30,32 @@ export type DocumentSetup = {
 
 export function DocumentPage({
   blocks,
+  audience,
   setup,
   brand,
   context,
   data,
 }: {
   blocks: unknown
+  /**
+   * Who is looking at this (Phase 191, §7's `lock/hide`).
+   *
+   * Required, with no default, which is the whole mechanism. This component
+   * renders the client's page *and* the designer's preview, and a block the
+   * author hid must vanish from the first and stay — marked — in the second.
+   * A defaulted prop would make one of those two the answer for a caller that
+   * never thought about the question; a required one makes every call site
+   * say which page it is.
+   */
+  audience: 'author' | 'reader'
   setup: DocumentSetup
   brand?: BrandTokens | null
   context: MergeContext
   data: RenderData
 }) {
   const tokens = brand ?? DEFAULT_BRAND
-  const parsed: Block[] = resolveBlocks(parseBlocks(blocks), context)
+  const all: Block[] = resolveBlocks(parseBlocks(blocks), context)
+  const parsed = audience === 'reader' ? visibleBlocks(all) : all
 
   const style: React.CSSProperties = {
     ...documentStyle(tokens),
@@ -69,9 +82,23 @@ export function DocumentPage({
     <article className="doc" style={style}>
       {setup.headerText && <p className="doc-running-header">{setup.headerText}</p>}
 
-      {parsed.map((block) => (
-        <BlockView key={block.id} block={block} data={data} />
-      ))}
+      {parsed.map((block) =>
+        block.hidden ? (
+          /*
+            Only an author reaches this branch, and they have to: a held-back
+            block that simply vanished from the preview would look deleted,
+            and the author would write it again. Marked rather than styled
+            away, so the preview answers "what will the client see" and "what
+            is in this document" at once.
+          */
+          <div key={block.id} className="doc-hidden-block" data-hidden="true">
+            <p className="doc-hidden-label">Hidden — not sent to the client</p>
+            <BlockView block={block} data={data} />
+          </div>
+        ) : (
+          <BlockView key={block.id} block={block} data={data} />
+        ),
+      )}
 
       {setup.footerText && (
         <footer className="doc-running-footer">
