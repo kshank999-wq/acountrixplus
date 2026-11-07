@@ -256,6 +256,20 @@ export function comparabilityStands(input: {
  */
 export const COMPARED_PAIRS: readonly ComparedPair[] = [
   {
+    file: 'src/modules/ai/assistants.ts',
+    symbol: 'businessInsights',
+    comparability: 'home-money',
+    because:
+      'Phase 195 gave the Business Insights prompt the expense figures §11 asks it to explain, ' +
+      'and `varianceBasisPoints(expenseCents, priorExpenseCents)` is the comparison that came ' +
+      'with them. Both operands are `comparativeProfitAndLoss` column totals, which are sums ' +
+      'over `journal_lines` — and `journal_lines` has no currency column and never will, ' +
+      'because a foreign document is converted at the rate it carries before it reaches the ' +
+      'ledger. So neither side can be anything but the company\'s own money. Declared in the ' +
+      'phase that wrote it rather than in a later full run, which is the correction this ' +
+      'register asked for after `heldRevisions` went two phases undeclared.',
+  },
+  {
     file: 'src/modules/properties/deposits.ts',
     symbol: 'applyDeposit',
     comparability: 'home-money',

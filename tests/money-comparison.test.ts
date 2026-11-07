@@ -185,7 +185,14 @@ describe('reading the source for comparisons', () => {
     // this file failed together, which is the device working as designed: the
     // count said a comparison had appeared and the next test said it was
     // undeclared, so neither could be dismissed as a stale number.
-    expect(new Set(sites.map((site) => `${site.file}:${site.symbol}`)).size).toBe(22)
+    //
+    // Twenty-three since Phase 195 and `businessInsights`, which was given the
+    // expense figures §11 asks it to explain and with them
+    // `varianceBasisPoints(expenseCents, priorExpenseCents)`. Both halves failed
+    // together again, in the same hour the comparison was written rather than
+    // two phases later — which is the only difference between this entry and
+    // `heldRevisions`, and the whole of what the register is for.
+    expect(new Set(sites.map((site) => `${site.file}:${site.symbol}`)).size).toBe(23)
 
     const found = new Set(sites.map((site) => site.form))
     expect([...found].sort()).toEqual(['bounded', 'equality', 'handed_over', 'relational'])
