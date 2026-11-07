@@ -330,6 +330,35 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
       'machine can hold.',
     measure: (facts) => facts.promptKeys,
   },
+  {
+    key: 'audit-isolation-census',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /measured — \*\*(\d+)\s*\n?writes\*\* and \*\*(\d+) reads\*\*/,
+    because:
+      "§19's *strong tenant isolation* paragraph, and the two numbers the whole partial rests on: " +
+      'the application layer is complete *and measured*, which is the sentence that makes "not ' +
+      'switched on" at the database layer a low risk rather than a shrug. It read **111 writes ' +
+      'and 911 reads** when Phase 196 looked, against a measured 276 and 935 — the writes stale ' +
+      'by four phases and the reads by two. Phase 179 built this register for exactly this ' +
+      'sentence shape and pinned the one in `isolation.ts` while leaving the two documents a ' +
+      'person actually reads unpinned, which is how both drifted while the pinned copy stayed ' +
+      'right.',
+    measure: (facts) => [facts.writes, facts.reads],
+  },
+  {
+    key: 'runbook-isolation-census',
+    file: 'docs/RUNBOOK-FIRST-COMPANY.md',
+    pattern: /measured — \*\*(\d+) writes and (\d+) reads\*\*/,
+    because:
+      'The same two numbers in the document somebody follows while pointing a production ' +
+      'database at this repository, in the paragraph that tells a first company its row level ' +
+      'security is installed and not switched on. Wrong, it understates how much of the ' +
+      'application has been checked — it said **111 writes and 883 reads** against a measured ' +
+      '276 and 935 — and the reader is deciding whether to accept a risk on the strength of it. ' +
+      'Pinned beside the audit copy rather than instead of it, because a number stated twice in ' +
+      'two documents drifts twice.',
+    measure: (facts) => [facts.writes, facts.reads],
+  },
 ]
 
 export function pinnedClaimFor(key: string): PinnedClaim {

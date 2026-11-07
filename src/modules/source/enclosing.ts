@@ -203,3 +203,78 @@ export function enclosingQuery(src: string, index: number): { from: number; to: 
 
   return { from, to: blanked.length }
 }
+
+/**
+ * The whole template literal starting at a backtick (Phase 196).
+ *
+ * Here rather than in the test that wanted it, for this module's own stated
+ * reason: four copies of `enclosingSymbol` drifted and the thing four callers
+ * share is a module. This is the first caller, and it is in a test — but the
+ * next scan to look at raw SQL will want exactly this, and a regex is what it
+ * will reach for otherwise.
+ *
+ * ## Why a regex cannot do it
+ *
+ * The obvious one is ``/sql`[\s\S]*?`/``, and it is wrong on the first real
+ * case in this repository. The party merge writes
+ *
+ * ```ts
+ * sql`update ${sql.raw(`"${ref.table}"`)} set … where "company_id" = ${ctx.companyId}`
+ * ```
+ *
+ * and a non-greedy match ends at the backtick **inside** `sql.raw(...)`. So
+ * the extracted text stops before `set`, and a check looking for the tenant
+ * predicate concludes there isn't one. Which is what happened: this function
+ * exists because that check reported two false positives on code that was
+ * correct, in the phase whose whole subject is scans that cannot see.
+ *
+ * A greedy match is worse — it runs to the last backtick in the file.
+ *
+ * ## What it does instead
+ *
+ * Walks the text with a stack, because a template literal and an
+ * interpolation nest in each other without limit: a backtick inside `${…}`
+ * opens another template, whose `${…}` may open another. Returns the text from
+ * the opening backtick to its match inclusive, or to the end of the source if
+ * the literal is unterminated — truncating rather than throwing, because the
+ * callers are scanners reading a whole tree and one unparseable file should not
+ * stop the measurement.
+ *
+ * Escapes are skipped as pairs, so a `` \` `` does not close anything.
+ */
+export function templateLiteralAt(src: string, backtickIndex: number): string {
+  if (src[backtickIndex] !== '`') return ''
+
+  // `tpl` means "inside a template's text", `expr` means "inside a `${}` or a
+  // brace nested in one". Only a backtick met in `tpl` can close the literal.
+  const stack: ('tpl' | 'expr')[] = ['tpl']
+  let at = backtickIndex + 1
+
+  while (at < src.length && stack.length > 0) {
+    const char = src[at]
+
+    if (char === '\\') {
+      at += 2
+      continue
+    }
+
+    if (stack[stack.length - 1] === 'tpl') {
+      if (char === '`') {
+        stack.pop()
+      } else if (char === '$' && src[at + 1] === '{') {
+        stack.push('expr')
+        at += 2
+        continue
+      }
+      at++
+      continue
+    }
+
+    if (char === '}') stack.pop()
+    else if (char === '`') stack.push('tpl')
+    else if (char === '{') stack.push('expr')
+    at++
+  }
+
+  return src.slice(backtickIndex, at)
+}

@@ -160,9 +160,9 @@ describe('the register itself', () => {
      * kept the first. Three entries in one file is the register reporting
      * which document it most expects to go stale.
      */
-    expect(PINNED_CLAIMS).toHaveLength(15)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(15)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(15)
+    expect(PINNED_CLAIMS).toHaveLength(17)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(17)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(17)
   })
 
   it('pins all four numbers of the sentence that states four', () => {

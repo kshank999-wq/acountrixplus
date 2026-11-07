@@ -210,7 +210,7 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     atLeastCompanyTight: true,
     because:
       'The reading half of `scoped-write`, and by far the most common guard on this side: 570 of ' +
-      'the 935 reads, against 29 of the 119 writes. The two halves of this system are guarded ' +
+      'the 935 reads, against 48 of the 276 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
       'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
       'needed correcting by hand in every phase that touched a read — 180, 183, 184, 185 and ' +
@@ -219,11 +219,14 @@ const READ_GUARDS: readonly IsolationGuard[] = [
       'and the two phases after it both moved reads: the register reported each drift itself, ' +
       'naming which of the four — number 1 in Phase 188, number 2 in Phase 189 — instead of ' +
       'somebody noticing. Number 2 is one the old single-capture pattern could not have seen. ' +
-      'Phase 195 moved numbers 1, 2 and 4, and found while doing so that the write census has ' +
-      'a blind spot: `scanWrites` counts a write as keyed only when its `where` matches ' +
-      '`eq(x.y, input.z)` or `eq(x.y, zId)`, so a write keyed by a local row’s `.id` is not in ' +
-      'the denominator at all. ADR 0195 nominates it; nothing here is wrong, and the number ' +
-      'this sentence states is a floor rather than a total.',
+      'Phase 195 moved numbers 1, 2 and 4, and found while doing so that the write census had ' +
+      'a blind spot: `scanWrites` counted a write as keyed only when its `where` matched ' +
+      '`eq(x.y, input.z)` or `eq(x.y, zId)`, so a write keyed by a local row’s `.id` was not in ' +
+      'the denominator at all. **Phase 196 measured it at 157 writes and closed it**, which is ' +
+      'why number 4 moves from 119 to 276 with no application code added: the pattern is the ' +
+      'read side’s now. Every one of the 157 classifies, so this sentence was understating its ' +
+      'own denominator rather than overstating the guarding — and the one write that could not ' +
+      'be justified was given a `scoped()` rather than an excuse.',
   },
   {
     kind: 'join-inherited',
@@ -259,14 +262,19 @@ const READ_GUARDS: readonly IsolationGuard[] = [
   },
   {
     kind: 'id-from-fetched-row',
-    appliesTo: 'read',
+    appliesTo: 'both',
     detect: 'The key is a property of a row already fetched, not a bare argument.',
     atLeastCompanyTight: true,
     because:
       'The proposal design page reads a brand kit by `document.brandKitId`, and the document came ' +
       'from a scoped load. An id that is a field of a checked row cannot be aimed by whoever ' +
       'called the function — it is the row that was checked, and this is the difference between ' +
-      'a parameter and a property that makes the whole narrowing of both scans possible.',
+      'a parameter and a property that makes the whole narrowing of both scans possible. ' +
+      '**`both` since Phase 196, and it said `read` while this sentence said "both scans".** ' +
+      'The write classifier had no detector that could ever return this kind, so 138 of the 257 ' +
+      'keyed writes on company-scoped tables were outside the census the §19 paragraph is argued ' +
+      'from — every one of them guarded, and six of them guarded by exactly this, with no word ' +
+      'available to say so.',
   },
   {
     kind: 'derives-tenant-from-row',
@@ -436,6 +444,23 @@ export function guardFor(site: {
   ownerHelper: string | null
   /** The where carries its own precondition and the id is a secret. */
   bearerToken: boolean
+  /**
+   * The key is a property of a row already fetched, not a bare argument
+   * (Phase 196).
+   *
+   * The read classifier has had this since Phase 150 and the write classifier
+   * had no input that could return `id-from-fetched-row`, although that
+   * guard's own prose claimed the distinction *"makes the whole narrowing of
+   * both scans possible"*. Measured, it was the guard six writes stood on with
+   * no word available to say so — and because `scanWrites` recognised a key
+   * only as `input.x` or `xId`, those writes were not in the census at all.
+   *
+   * Placed after the filters and before the structural fallbacks, exactly
+   * where the read side puts it: a write with a real tenant filter *and* a row
+   * property should be reported under the filter, which is what a reader would
+   * rely on.
+   */
+  keyIsRowProperty: boolean
   /** The enclosing function takes an ActorContext. */
   takesActorContext: boolean
   /** The enclosing function is exported. */
@@ -450,6 +475,7 @@ export function guardFor(site: {
   if (site.readThenRefuse) return { guarded: true, kind: 'read-then-refuse' }
   if (site.ownerHelper !== null) return { guarded: true, kind: 'owner-helper' }
   if (site.bearerToken) return { guarded: true, kind: 'bearer-credential' }
+  if (site.keyIsRowProperty) return { guarded: true, kind: 'id-from-fetched-row' }
   if (!site.takesActorContext && site.systemPath) return { guarded: true, kind: 'system-actor' }
   if (!site.takesActorContext) return { guarded: true, kind: 'caller-established' }
 

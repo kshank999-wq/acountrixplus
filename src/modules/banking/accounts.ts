@@ -222,7 +222,20 @@ export async function mintChartAccount(
     await tx
       .update(chartAccounts)
       .set({ name: ledgerNameFor({ name: input.name, mask: input.mask }) })
-      .where(eq(chartAccounts.id, placeholder))
+      /*
+        `scoped` rather than the id alone (Phase 196).
+
+        It was already safe: `unusedPlaceholder` filters on `ctx.companyId`, so
+        the id cannot name another company's account. But the write's safety sat
+        in a helper three lines up rather than in the write, and the widened
+        write census reported it as the one statement in 276 it could not
+        justify — correctly, because the scan can see the statement and not the
+        provenance of a local.
+
+        One word makes the guard the kind that cannot be separated from the
+        write, which is the whole ordering `guardFor` is built on.
+      */
+      .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, placeholder)))
     return placeholder
   }
 

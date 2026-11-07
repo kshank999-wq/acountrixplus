@@ -254,12 +254,44 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — 111 writes
-and 911 reads, every one guarded (Phases 149–150, counted again in 179) — and
+rather than vaguely: the application layer is complete and measured — **276
+writes** and **935 reads**, every one guarded (Phases 149–150, the census
+widened in Phase 196) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.
+
+> **The write half of that measurement was 43% of itself until Phase 196.**
+>
+> *"Every one guarded"* was true and *"complete"* was not. `scanWrites`
+> recognised a key only as `input.something` or a name ending in `Id`, so
+> `eq(proposals.id, proposal.id)`, `eq(x.id, id)` and `eq(x.id, placeholder)`
+> were not reported as unguarded — they were outside the census altogether.
+> Measured: **157 writes**, against the 119 it was counting.
+>
+> The answer that mattered is that **none of them was unguarded**, and it was
+> measured before the scan was changed. All 157 classify; six stood on a guard
+> the write classifier had no word for, and those six were read one at a time
+> rather than counted. `id-from-fetched-row` is that word — the read classifier
+> has had it since Phase 150, and the guard's own prose said the distinction
+> *"makes the whole narrowing of both scans possible"* while it was declared
+> for reads alone.
+>
+> One write could not be justified by the widened census: `mintChartAccount`
+> took its id from a company-filtered helper three lines above rather than from
+> its own statement. It got a `scoped()` rather than a guard entry, because the
+> ordering in `guardFor` exists to prefer the guard that cannot be separated
+> from the write.
+>
+> The read side has no hole of that shape, for a reason worth stating:
+> `scanReads` matches every `.from(` on a company-scoped table and never
+> filters by key, so its denominator was always every read.
+>
+> Both numbers in this paragraph are pinned now (`audit-isolation-census`), as
+> is the copy in `docs/RUNBOOK-FIRST-COMPANY.md`. They had drifted — the writes
+> by four phases, the reads by two — while the pinned copy in `isolation.ts`
+> stayed right, which is what pinning one sentence of three gets you.
 
 ## The bullet-level pass of §12–§19 (Phase 194)
 

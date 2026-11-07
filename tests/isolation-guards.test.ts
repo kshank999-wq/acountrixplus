@@ -116,20 +116,43 @@ describe('every write that can be aimed at a row', () => {
     //
     // 119 since Phase 195 and the proposal expiry sweep — one `update` keyed
     // by the row's own id and filtered on the acting company. Worth saying
-    // where it nearly was not counted: `scanWrites` recognises a keyed write
+    // where it nearly was not counted: `scanWrites` recognised a keyed write
     // from `eq(x.y, input.z)` or `eq(x.y, zId)`, so the same write expressed
-    // as `eq(proposals.id, proposal.id)` is invisible here. ADR 0195
-    // nominates that blind spot; this number is a floor, not a total.
-    expect(WRITES.length).toBe(119)
+    // as `eq(proposals.id, proposal.id)` was invisible here. ADR 0195
+    // nominated that blind spot; this number was a floor, not a total.
+    //
+    // **Two hundred and seventy-six since Phase 196**, and not one line of new
+    // application code. 157 of them were already in the tree and outside this
+    // census: the key pattern is the read side's `[\w.]+` now, so
+    // `eq(proposals.id, proposal.id)`, `eq(x.id, id)` and
+    // `eq(x.id, placeholder)` are all seen. The census had been reporting 119
+    // of 276 — **43%** — under a sentence in `isolation.ts` that read as a
+    // total, and §19's "strong tenant isolation" paragraph is argued from it.
+    //
+    // Measured before it was widened, because the whole question was whether
+    // any of the invisible ones was a disclosure: all 157 classify, and the six
+    // that the write vocabulary had no word for were read one at a time and are
+    // each an id taken from a row the function already fetched under a tenant
+    // or actor scope. `id-from-fetched-row` is that word; the read classifier
+    // has had it since Phase 150 and the write classifier had no input that
+    // could ever return it, although the guard's own prose claimed the
+    // distinction "makes the whole narrowing of both scans possible".
+    //
+    // `explicit-company` carries most of the growth, at 187. The honest reading
+    // is not that this codebase got safer in Phase 196 — it is that 157 writes
+    // which were always guarded can now be *seen* to be, and the one that could
+    // not be justified got a `scoped()` so that it can.
+    expect(WRITES.length).toBe(276)
     expect(by).toEqual({
-      'explicit-company': 69,
-      'scoped-write': 29,
-      'read-then-refuse': 9,
+      'explicit-company': 187,
+      'scoped-write': 48,
+      'read-then-refuse': 16,
+      'id-from-fetched-row': 8,
       'owner-helper': 4,
       'system-actor': 4,
-      'caller-established': 2,
-      'actor-scoped': 1,
-      'bearer-credential': 1,
+      'actor-scoped': 4,
+      'caller-established': 3,
+      'bearer-credential': 2,
     })
   })
 
@@ -150,14 +173,21 @@ describe('every write that can be aimed at a row', () => {
     //
     //   > tenant isolation rests on `scoped()` at every query
     //
-    // It rests on `scoped()` at about a quarter of the writes that can be
-    // aimed at a row. The sentence is corrected rather than the code, because
-    // the code is right — eight guards, every one of them sound, and nothing
-    // that recorded which was which.
+    // It rests on `scoped()` at about a sixth of the writes that can be aimed
+    // at a row — a quarter of them when the census could see only 119. The
+    // sentence is corrected rather than the code, because the code is right:
+    // nine guards now, every one of them sound, and nothing that recorded
+    // which was which.
+    //
+    // Nine since Phase 196, and the ninth is `id-from-fetched-row`. It is not
+    // a guard this phase invented — the read classifier has stood eight reads
+    // on it since Phase 150 — it is a guard the write classifier could not
+    // name, so the eight writes that rely on it were outside the census
+    // altogether rather than reported under something weaker.
     const scoped = WRITES.filter((w) => w.kind === 'scoped-write').length
 
     expect(scoped).toBeLessThan(WRITES.length / 2)
-    expect(new Set(WRITES.map((w) => w.kind)).size).toBe(8)
+    expect(new Set(WRITES.map((w) => w.kind)).size).toBe(9)
   })
 
   it('uses every guard it declares, so none is kept for a case that never arises', () => {
@@ -245,6 +275,7 @@ describe('the verdict on its own', () => {
       ownerHelper: null,
       readThenRefuse: false,
       bearerToken: false,
+      keyIsRowProperty: false,
       takesActorContext: true,
       exported: true,
       systemPath: false,
@@ -267,6 +298,7 @@ describe('the verdict on its own', () => {
         ownerHelper: 'loadOwnEditable',
         readThenRefuse: true,
         bearerToken: false,
+        keyIsRowProperty: false,
         takesActorContext: true,
         exported: true,
         systemPath: false,
@@ -284,6 +316,7 @@ describe('the verdict on its own', () => {
       ownerHelper: null,
       readThenRefuse: false,
       bearerToken: false,
+      keyIsRowProperty: false,
       takesActorContext: true,
       exported: true,
       systemPath: true,

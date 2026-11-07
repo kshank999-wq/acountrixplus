@@ -53,8 +53,8 @@ back.
 **Row-level security is installed and not switched on.** 165 tables carry
 policies; the application connects as the table owner, so they do not apply.
 `RLS_ROLLOUT` records this. The application-layer guards are complete and
-measured — 111 writes and 883 reads, every one accounted for — so for a single
-company this is a low risk. It becomes a real one the day a second company's
+measured — **276 writes and 935 reads**, every one accounted for — so for a
+single company this is a low risk. It becomes a real one the day a second company's
 data lives in the same database.
 
 ---

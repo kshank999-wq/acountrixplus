@@ -5,6 +5,7 @@ import {
   declaresFunction,
   enclosingQuery,
   enclosingSymbol,
+  templateLiteralAt,
   withoutComments,
 } from '@/modules/source/enclosing'
 import { LEDGER_POSTINGS } from '@/modules/fx/ledger'
@@ -289,5 +290,60 @@ describe('the query a site is inside, which is a third boundary (Phase 152)', ()
     const { to } = enclosingQuery(twoQueries, site)
 
     expect(twoQueries.slice(0, to)).not.toContain('uncoded')
+  })
+})
+
+describe('the whole template literal', () => {
+  /**
+   * Added in Phase 196, and the case that forced it is in this repository:
+   *
+   * ```ts
+   * sql`update ${sql.raw(`"${ref.table}"`)} set … where "company_id" = ${ctx.companyId}`
+   * ```
+   *
+   * A non-greedy regex ends at the backtick inside `sql.raw(...)`, so the text
+   * stops before `where` and a check for the tenant predicate concludes there
+   * isn't one. Two correct writes were reported as unfiltered that way, in the
+   * phase whose subject is scans that cannot see.
+   */
+  it('passes through a nested template in an interpolation', () => {
+    const src = 'const q = sql`update ${sql.raw(`"${table}"`)} set x = 1 where y = ${z}`\nconst after = 1'
+    const literal = templateLiteralAt(src, src.indexOf('`'))
+
+    expect(literal).toMatch(/^`update /)
+    expect(literal.endsWith('`')).toBe(true)
+    expect(literal).toContain('where y = ${z}')
+    // Stops at its own close rather than running to the next backtick in the
+    // file, which is what a greedy match does.
+    expect(literal).not.toContain('after')
+  })
+
+  it('nests without limit, because interpolations hold templates that hold interpolations', () => {
+    const src = 'x = `a${`b${`c`}d`}e`; y'
+    expect(templateLiteralAt(src, src.indexOf('`'))).toBe('`a${`b${`c`}d`}e`')
+  })
+
+  it('is not closed by an escaped backtick', () => {
+    const src = 'x = `a\\`b`; y'
+    expect(templateLiteralAt(src, src.indexOf('`'))).toBe('`a\\`b`')
+  })
+
+  it('is not confused by a brace in an interpolation', () => {
+    // An object literal inside `${}` closes with the same character the
+    // interpolation does, so the stack has to count braces too.
+    const src = 'x = `a${fn({ k: 1 })}b`; y'
+    expect(templateLiteralAt(src, src.indexOf('`'))).toBe('`a${fn({ k: 1 })}b`')
+  })
+
+  it('truncates an unterminated literal rather than throwing', () => {
+    // The callers are scanners reading a whole tree, and one unparseable file
+    // must not stop the measurement — the same choice `parsePath` was given in
+    // Phase 190 after an unterminated input hung it for ever.
+    const src = 'x = `never closed'
+    expect(templateLiteralAt(src, src.indexOf('`'))).toBe('`never closed')
+  })
+
+  it('returns nothing when the index is not a backtick', () => {
+    expect(templateLiteralAt('const x = 1', 0)).toBe('')
   })
 })

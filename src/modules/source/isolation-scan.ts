@@ -262,7 +262,26 @@ export function scanWrites(): GuardedWrite[] {
         const where = /\bwhere\(([\s\S]*)/.exec(statement)?.[1] ?? ''
         if (!where) continue
 
-        const keyed = [...where.matchAll(/eq\(\s*\w+\.\w+\s*,\s*(input\.\w+|\w+Id)\s*\)/g)]
+        /*
+          The read side's pattern, since Phase 196 — `[\w.]+` rather than
+          `input\.\w+|\w+Id`.
+
+          The narrow form recognised a key only as `input.something` or a name
+          ending in `Id`, so `eq(proposals.id, proposal.id)`, `eq(x.id, id)`
+          and `eq(x.id, placeholder)` were all invisible: not reported as
+          unguarded, **absent from the census entirely**. Measured in Phase
+          196, that is 138 writes against 119 counted — the census saw 46% of
+          the keyed writes on company-scoped tables, and §19's "strong tenant
+          isolation" paragraph is argued from it.
+
+          Found because Phase 195 added one such write and its count did not
+          move. Two copies of one idea, drifted — which is `enclosing.ts`'
+          finding, one scan over, and the third time this repository has paid
+          for it.
+        */
+        const keyed = [...where.matchAll(/eq\(\s*\w+\.\w+\s*,\s*([\w.]+)\s*\)/g)].map(
+          (k) => k[1],
+        )
         if (keyed.length === 0) continue
 
         const before = [...src.slice(0, m.index).matchAll(/^(export )?(?:async )?function (\w+)/gm)]
@@ -281,6 +300,16 @@ export function scanWrites(): GuardedWrite[] {
             /\bthrow\s/.test(head),
           ownerHelper: OWNER_HELPER.test(head) ? (head.match(OWNER_HELPER)?.[1] ?? null) : null,
           bearerToken: /isNull\(\s*\w+\.redeemedAt\s*\)/.test(where),
+          /*
+            Measured the same way `scanReads` measures it, and the prefixes are
+            the same list for the same reason: `input.practiceId` is a bare
+            argument wearing a dot and the caller chooses it, while
+            `proposal.id` is a field of a row this function already fetched.
+          */
+          keyIsRowProperty: keyed.some(
+            (key) =>
+              key.includes('.') && !/^(input|ctx|opts|args|params|session)\./.test(key),
+          ),
           takesActorContext: /ctx\s*:\s*ActorContext|\(\s*ctx\s*[,)]/.test(
             src.slice(fn.index, fn.index + 260),
           ),
