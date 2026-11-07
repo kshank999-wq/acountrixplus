@@ -201,6 +201,7 @@ export function resolveBlock(block: Block, context: MergeContext): Block {
       declared. `BLOCK_SURFACES` asserts every declared type appears at every
       surface, and these lines are how these three say they were considered.
     */
+    case 'shape':
     case 'divider':
     case 'spacer':
     case 'pageBreak':
@@ -259,7 +260,9 @@ function textsOf(block: Block): string[] {
       return [block.value, block.caption]
     case 'video':
       return [block.url, block.caption]
-    // The same three, for the same reason.
+    // The same four, for the same reason — a shape is paint and geometry,
+    // with nowhere for a merge field to go (Phase 193).
+    case 'shape':
     case 'divider':
     case 'spacer':
     case 'pageBreak':

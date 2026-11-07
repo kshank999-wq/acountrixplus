@@ -1,3 +1,4 @@
+import { shapeSvg } from '@/modules/design/shapes'
 import { visibleBlocks, isWholeImage, normalizeCrop, normalizeTable, type Block } from '@/modules/design/blocks'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import type { EmbeddableImage, ImageResult } from './images'
@@ -988,6 +989,32 @@ class Composer {
               })
             }
           },
+        })
+        return
+      }
+
+      case 'shape': {
+        /*
+          A drawn primitive (Phase 193, §7's *vector primitives*).
+
+          The markup comes from `shapeSvg`, the same function the page
+          renders from, so the two cannot disagree about what was placed —
+          and `page.vector` turns it into path operators, so a panel is a
+          rectangle in the file rather than a picture of one.
+        */
+        const width = (this.contentWidth * block.widthPercent) / 100
+        const x =
+          block.align === 'center'
+            ? MARGIN + (this.contentWidth - width) / 2
+            : block.align === 'right'
+              ? MARGIN + this.contentWidth - width
+              : MARGIN
+
+        const svg = shapeSvg(block, this.input.brand, { width, height: block.heightPt })
+
+        this.pieces.push({
+          height: block.heightPt + base * 0.6,
+          draw: (page, y) => page.vector({ svg, x, y, width, height: block.heightPt }),
         })
         return
       }

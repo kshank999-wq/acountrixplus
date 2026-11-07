@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { SHAPE_KINDS, SHAPE_PAINTS } from './shapes'
 
 /**
  * The block model (spec §7).
@@ -421,6 +422,36 @@ export const imageBlockSchema = z.object({
   maskShape: z.enum(MASK_SHAPES).default('none'),
 })
 
+/**
+ * A drawn primitive — §7's *vector primitives*, in this engine's idiom
+ * (Phase 193).
+ *
+ * Parameters rather than markup. The author chooses which primitive, which
+ * brand role paints it, how tall it is and how wide; `design/shapes.ts` turns
+ * that into the SVG both renderers already draw. So there is no new trust
+ * boundary and no second renderer — which is what makes this small enough to
+ * be worth doing in a block stack at all.
+ *
+ * **Colour is a brand role, not a hex.** No block in this engine has ever
+ * carried a colour, and ADR 0004's fifth decision is why: brand values are
+ * custom properties so one document renders under a different kit without
+ * touching its content. A hex here would be content that outlives the kit.
+ */
+export const shapeBlockSchema = z.object({
+  ...baseBlock,
+  type: z.literal('shape'),
+  shape: z.enum(SHAPE_KINDS).default('rectangle'),
+  fill: z.enum(SHAPE_PAINTS).default('primary'),
+  stroke: z.enum(SHAPE_PAINTS).default('none'),
+  strokeWidthPt: z.number().min(0).max(24).default(1),
+  cornerRadiusPt: z.number().min(0).max(200).default(0),
+  /** How much vertical space it takes, in points. */
+  heightPt: z.number().int().min(2).max(600).default(48),
+  /** Percentage of the content width, as `image` and `table` measure it. */
+  widthPercent: z.number().int().min(5).max(100).default(100),
+  align: alignment,
+})
+
 export const dividerBlockSchema = z.object({
   ...baseBlock,
   type: z.literal('divider'),
@@ -529,6 +560,7 @@ export const blockSchema = z.discriminatedUnion('type', [
   teamBlockSchema,
   pricingTableBlockSchema,
   imageBlockSchema,
+  shapeBlockSchema,
   dividerBlockSchema,
   spacerBlockSchema,
   columnsBlockSchema,
@@ -861,6 +893,15 @@ export const BLOCK_DEFINITIONS: BlockDefinition[] = [
     description: 'A thumbnail that links to the video. Works in print and email.',
     kinds: ['marketing'],
     create: (id) => videoBlockSchema.parse({ id, type: 'video' }),
+  },
+  {
+    type: 'shape',
+    label: 'Shape',
+    description:
+      'A rectangle, ellipse or line in your brand colours — a panel behind a figure, a heavier ' +
+      'rule, a marker beside a step.',
+    kinds: ['proposal', 'marketing'],
+    create: (id) => shapeBlockSchema.parse({ id, type: 'shape' }),
   },
   {
     type: 'divider',

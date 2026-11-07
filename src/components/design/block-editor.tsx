@@ -2,6 +2,7 @@
 
 import { useRef, useState } from 'react'
 import { MAX_TABLE_COLUMNS, normalizeCrop, type Block, type Crop } from '@/modules/design/blocks'
+import { SHAPE_PAINTS } from '@/modules/design/shapes'
 
 /**
  * Field editor for the selected block.
@@ -590,12 +591,120 @@ export function BlockEditor({
         </div>
       )}
 
+      {block.type === 'shape' && (
+        <div className="space-y-3">
+          <Select
+            label="Shape"
+            value={block.shape}
+            options={[
+              { value: 'rectangle', label: 'Rectangle' },
+              { value: 'ellipse', label: 'Ellipse' },
+              { value: 'line', label: 'Line' },
+            ]}
+            onChange={(value) => set({ shape: value as 'rectangle' | 'ellipse' | 'line' })}
+          />
+
+          {/*
+            Brand roles rather than a colour picker (Phase 193). No block in
+            this engine carries a colour: ADR 0004's fifth decision is that
+            the brand kit restyles a document without touching its content,
+            and a hex chosen here would outlive the kit.
+          */}
+          {block.shape !== 'line' && (
+            <Select
+              label="Fill"
+              value={block.fill}
+              options={PAINT_OPTIONS}
+              onChange={(value) => set({ fill: value as typeof block.fill })}
+            />
+          )}
+
+          <Select
+            label={block.shape === 'line' ? 'Line colour' : 'Outline'}
+            value={block.stroke}
+            options={PAINT_OPTIONS}
+            onChange={(value) => set({ stroke: value as typeof block.stroke })}
+          />
+
+          {(block.shape === 'line' || block.stroke !== 'none') && (
+            <label className="block text-xs text-muted">
+              <span className="mb-1 block">
+                {block.shape === 'line' ? 'Thickness' : 'Outline width'} ({block.strokeWidthPt}pt)
+              </span>
+              <input
+                type="range"
+                min={block.shape === 'line' ? 0.5 : 0}
+                max={12}
+                step={0.5}
+                value={block.strokeWidthPt}
+                onChange={(event) => set({ strokeWidthPt: Number(event.target.value) })}
+                className="w-full"
+              />
+            </label>
+          )}
+
+          {block.shape === 'rectangle' && (
+            <label className="block text-xs text-muted">
+              <span className="mb-1 block">Corner radius ({block.cornerRadiusPt}pt)</span>
+              <input
+                type="range"
+                min={0}
+                max={48}
+                step={1}
+                value={block.cornerRadiusPt}
+                onChange={(event) => set({ cornerRadiusPt: Number(event.target.value) })}
+                className="w-full"
+              />
+            </label>
+          )}
+
+          <label className="block text-xs text-muted">
+            <span className="mb-1 block">Height ({block.heightPt}pt)</span>
+            <input
+              type="range"
+              min={2}
+              max={320}
+              step={2}
+              value={block.heightPt}
+              onChange={(event) => set({ heightPt: Number(event.target.value) })}
+              className="w-full"
+            />
+          </label>
+
+          <label className="block text-xs text-muted">
+            <span className="mb-1 block">Width ({block.widthPercent}%)</span>
+            <input
+              type="range"
+              min={5}
+              max={100}
+              step={5}
+              value={block.widthPercent}
+              onChange={(event) => set({ widthPercent: Number(event.target.value) })}
+              className="w-full"
+            />
+          </label>
+
+          <AlignPicker value={block.align} onChange={(align) => set({ align })} />
+        </div>
+      )}
+
       {(block.type === 'divider' || block.type === 'pageBreak') && (
         <p className="text-xs text-muted">Nothing to configure.</p>
       )}
     </section>
   )
 }
+
+/**
+ * What a shape may be painted with, as the editor offers it.
+ *
+ * Derived from `SHAPE_PAINTS` rather than listed, so adding a role to the
+ * vocabulary reaches the picker without anybody remembering this file.
+ */
+const PAINT_OPTIONS = SHAPE_PAINTS.map((paint) => ({
+  value: paint,
+  label: paint === 'none' ? 'None' : paint.charAt(0).toUpperCase() + paint.slice(1),
+}))
 
 function Field({
   label,

@@ -28,6 +28,7 @@ import {
   isDirty,
   reduceHistory,
 } from '@/modules/design/history'
+import { describeShape } from '@/modules/design/shapes'
 import { DocumentPage } from '@/components/design/document-page'
 import type { RenderedTeamMember } from '@/modules/studio/team-render'
 import { BlockEditor } from './block-editor'
@@ -839,6 +840,8 @@ function labelFor(block: Block): string {
       return `Video — ${truncate(block.caption) || truncate(block.url) || 'no link'}`
     case 'signature':
       return 'Acceptance'
+    case 'shape':
+      return describeShape(block)
     case 'divider':
       return 'Divider'
     case 'spacer':

@@ -211,18 +211,28 @@ otherwise.
 | 7 | ~~**Crop/mask on images**~~ | **Built in Phase 186**, two phases after it was nominated: Phase 185 had to put pictures in the PDF first. A crop is fractions of the source with one shared `normalizeCrop`, a mask is a circle or a rounded corner, and neither resamples anything. It needed `assets.width`/`assets.height` — in the schema since Phase 4 with no writer and no reader — because a crop is not expressible in CSS without the source's aspect ratio. See ADR 0186. |
 | 7 | ~~**SVG import/export**~~ | **The import half built in Phase 190**, and the row was true when written — but not through neglect. SVG was refused in three places with a correct argument (*it can carry script, and these files are served back to browsers*), and §7's own qualifier is *where practical*. What makes it practical is that the subset worth importing is tiny: an allowlist of eleven elements that is **both** the security boundary and the printable subset, so what is stored is a document the module rewrote and what the PDF draws is the same function's reading of it. Export is not built and is a different question — see ADR 0190. |
 | 7 | **Artboard affordances** (partly) | **Measured item by item in Phase 191, and this row both understated the capability and overstated the gap.** §7's bullet lists **twelve** things; this row named ten. Two were already built and it named neither — the page system itself and multiple page sizes, since Phase 4. Five of the rest are properties of a vector canvas: guides, rulers, snapping, grids and object distribution, all of which **ADR 0004 decided against by name** (*"A block document engine, not a vector canvas"*), from §7's own instruction and with `canvas` named as the block type to add when they are wanted — a recorded decision with an extension point, re-read in Phase 191 rather than quoted. `lock/hide` **was built in Phase 191** and **undo/redo in Phase 192**, and layers is answered: the block list is the ordered object list and now carries visibility. What is genuinely left is zoom and grouping, both named with their costs in ADR 0191. Measuring undo/redo also found that the application had not built since Phase 183 and that the designer was ignoring every server write — see ADR 0192. |
-| 7 | **Vector primitives** | No lines, rectangles, ellipses, paths, fills, strokes, gradients, shadows, corner controls or transforms. The engine is 18 block types. |
+| 7 | ~~**Vector primitives**~~ | **Built in Phase 193**, and this row named **ten** of §7's **thirteen** — omitting `text`, `opacity` and `reusable components`, two of which were already built. It was also measuring the wrong thing: since Phase 190 `pdf/vector.ts` has drawn rectangles, ellipses, lines, paths, fills, strokes, corner radii and transforms, and the page renders the same markup, so the gap was never a renderer — it was a way to **place** one without uploading a file. A `shape` block holds parameters and one generator turns them into SVG inside the subset both surfaces already draw, so there is no second renderer to disagree. Colour is a brand role rather than a hex, because no block in this engine carries a colour. Gradients, shadows, opacity, arbitrary paths and rotation remain, each refused with a reason — see ADR 0193. |
 | 7 | ~~**`deliverables` and `assumptions`**~~ | **Built in Phase 182**, and the measurement here understated it: of the ten said to have a home, **four had a column that nothing rendered** — `executive_summary`, `scope`, `exclusions` and `terms` were written, snapshotted into versions, and reached no document. All six narrative sections are merge fields now, and `PROPOSAL_COMPONENTS` makes "has a home" mean "a client can read it". See ADR 0182. |
 | 8 | ~~**Asset association**~~ | **Built in Phase 180.** `asset_links` carries all five, each by a composite key holding the tenant rather than the polymorphic `subject_type` `document_links` used — see ADR 0180 for why the precedent was not followed, and ADR 0184 for `document_links` being converted too. Four of the five kinds have no attach control yet. |
 | 15 | ~~**Team bios**~~ | **Built in Phase 183.** A `team_members` table — not a `jsonb` array beside `credentials`, because a document has to *point at* one person and a reference into an array has no key — plus a `team` block that holds ids and a Design Center screen that writes bios. Retired rather than deleted, so a proposal sent last year still names who was going to do the work. See ADR 0183. |
+
+**All nine rows are now struck through**, the last of them in Phase 193.
+Three were not what they said: the comments/questions row was stale by
+fourteen phases, the artboard row listed ten features of which two were built
+and five had been decided against by name in ADR 0004, and the vector row
+listed ten of thirteen and most of them were already drawable. The rows that
+were measured again were the rows that turned out to be wrong — which is an
+argument for re-measuring this file rather than a reason to call it finished.
+
+What follows is the history, left as it was written.
 
 That is nine rows for eight capabilities plus one, because the two §7 vector
 rows are one piece of work. **Seven are struck through: asset association
 (Phase 180), the generic table block (Phase 181), `deliverables`/`assumptions`
 (Phase 182), team bios (Phase 183), crop/mask (Phase 186), the client-link
 comment thread (Phase 174, recorded in Phase 188), and SVG import (Phase
-190).** Two capabilities remain — artboard affordances and vector primitives —
-and both are the Illustrator-class work §7 itself defers.
+190).** *(Later: artboard affordances in Phase 191 and 192, vector primitives
+in Phase 193 — see the note above this paragraph.)*
 
 SVG was struck through with a qualifier rather than outright: §7 says
 *import/export* and Phase 190 built import. The export half is recorded in ADR

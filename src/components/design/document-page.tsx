@@ -57,6 +57,10 @@ export function DocumentPage({
   const all: Block[] = resolveBlocks(parseBlocks(blocks), context)
   const parsed = audience === 'reader' ? visibleBlocks(all) : all
 
+  // The resolved brand travels with the data so a `shape` resolves its paint
+  // the same way the PDF does (Phase 193).
+  const withBrand: RenderData = { ...data, brand: tokens }
+
   const style: React.CSSProperties = {
     ...documentStyle(tokens),
     ['--doc-content-width' as string]: `${contentWidthPt(setup.pageSize, setup.marginLeftPt, setup.marginRightPt)}pt`,
@@ -93,10 +97,10 @@ export function DocumentPage({
           */
           <div key={block.id} className="doc-hidden-block" data-hidden="true">
             <p className="doc-hidden-label">Hidden — not sent to the client</p>
-            <BlockView block={block} data={data} />
+            <BlockView block={block} data={withBrand} />
           </div>
         ) : (
-          <BlockView key={block.id} block={block} data={data} />
+          <BlockView key={block.id} block={block} data={withBrand} />
         ),
       )}
 

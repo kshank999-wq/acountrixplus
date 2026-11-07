@@ -351,17 +351,18 @@ describe('the surfaces a block type has to reach', () => {
      * The scan above walks `BLOCK_DEFINITIONS`, which is the palette — so a
      * type in the union with no palette entry would be checked at no surface
      * at all and the scan would pass. This is the other end of that: the union
-     * and the palette hold the same eighteen.
+     * and the palette hold the same nineteen.
      *
-     * Eighteen since Phase 183 and the `team` block. Seventeen in Phase 181,
-     * sixteen from Phase 5 to 180.
+     * Nineteen since Phase 193 and the `shape` block — §7's vector primitives,
+     * in this engine's idiom. Eighteen since Phase 183 and the `team` block,
+     * seventeen in Phase 181, sixteen from Phase 5 to 180.
      */
     const inUnion = blockSchema.options.map(
       (option) => option.shape.type.value as BlockType,
     )
     const inPalette = BLOCK_DEFINITIONS.map((definition) => definition.type)
 
-    expect(inUnion).toHaveLength(18)
+    expect(inUnion).toHaveLength(19)
     expect([...inPalette].sort()).toEqual([...inUnion].sort())
   })
 
@@ -403,7 +404,7 @@ describe('what a document with one of everything does', () => {
       definition.create(`block-${index}`),
     )
 
-    expect(blocks).toHaveLength(18)
+    expect(blocks).toHaveLength(19)
 
     const html = renderEmailHtml({
       blocks,

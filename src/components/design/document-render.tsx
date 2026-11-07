@@ -7,6 +7,7 @@ import {
   normalizeTable,
   type Block,
 } from '@/modules/design/blocks'
+import { shapeSvg } from '@/modules/design/shapes'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team-render'
 import { safeUrl } from '@/modules/design/urls'
 
@@ -54,6 +55,16 @@ export type RenderItem = {
 }
 
 export type RenderData = {
+  /**
+   * The resolved brand colours (Phase 193).
+   *
+   * Supplied by `DocumentPage`, which already holds them. A `shape` block
+   * needs an actual colour rather than `var(--doc-primary)`, because the PDF
+   * resolves one and the two have to be the same answer — a custom property
+   * on one surface and a lookup on the other is two answers to "what colour
+   * is primary", differing the day somebody renames a variable.
+   */
+  brand?: BrandTokens
   items: RenderItem[]
   discountCents: number
   taxCents: number
@@ -167,6 +178,8 @@ export function BlockView({ block, data }: { block: Block; data: RenderData }) {
       return <QrCodeBlock block={block} data={data} />
     case 'video':
       return <VideoBlock block={block} assetUrl={data.assetUrl} />
+    case 'shape':
+      return <ShapeBlock block={block} brand={data.brand} />
     case 'divider':
       return <hr className="doc-divider" />
     case 'spacer':
@@ -343,6 +356,50 @@ function ButtonBlock({ block }: { block: Extract<Block, { type: 'button' }> }) {
  * happens on the server so the markup is identical in the browser, in print,
  * and in an email where no script runs.
  */
+/**
+ * A drawn primitive (Phase 193, §7's *vector primitives*).
+ *
+ * The markup comes from `shapeSvg`, the same function the PDF draws from, so
+ * the page and the paper cannot disagree about what was placed. It is
+ * generated from the block's parameters — the author never writes markup —
+ * which is why it can be inlined without a sanitiser standing between.
+ */
+function ShapeBlock({
+  block,
+  brand,
+}: {
+  block: Extract<Block, { type: 'shape' }>
+  brand?: BrandTokens
+}) {
+  const colors = brand ?? DEFAULT_BRAND
+  /*
+    The box in CSS, and the same box in the markup's own units. A shape is
+    the one drawing here that should not keep an aspect ratio: a panel is as
+    wide as the author made it, and `preserveAspectRatio="none"` is how the
+    browser is told the viewBox is a box rather than a picture.
+  */
+  const svg = shapeSvg(block, colors, { width: 1000, height: block.heightPt })
+
+  return (
+    <div style={{ textAlign: block.align }}>
+      <div
+        style={{
+          display: 'inline-block',
+          width: `${block.widthPercent}%`,
+          height: `${block.heightPt}pt`,
+          lineHeight: 0,
+        }}
+        aria-hidden="true"
+        // Generated from the block's own fields by `shapeSvg`; never
+        // author-written markup.
+        dangerouslySetInnerHTML={{
+          __html: svg.replace('<svg ', '<svg preserveAspectRatio="none" style="width:100%;height:100%" '),
+        }}
+      />
+    </div>
+  )
+}
+
 function QrCodeBlock({
   block,
   data,

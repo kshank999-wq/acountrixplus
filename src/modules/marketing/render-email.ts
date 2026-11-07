@@ -1,4 +1,5 @@
 import { normalizeTable, visibleBlocks, type Block } from '@/modules/design/blocks'
+import type { ShapePaint } from '@/modules/design/shapes'
 import { selectTeam, type RenderedTeamMember } from '@/modules/studio/team'
 import { DEFAULT_BRAND_KIT } from '@/modules/design/brand'
 import { safeUrl } from '@/modules/design/urls'
@@ -37,6 +38,16 @@ function paragraphs(text: string): string[] {
 
 export type EmailBrand = {
   primaryColor: string
+  /**
+   * Added in Phase 193, when a `shape` block could first be painted with it.
+   *
+   * Until then nothing in an email used the accent, so its absence here cost
+   * nothing. It stopped being free the moment an author could pick "accent"
+   * in the designer: a shape they set to the accent colour would have come
+   * out the primary one in the send, and the page and the email would have
+   * disagreed about a colour somebody chose on purpose.
+   */
+  accentColor: string
   textColor: string
   mutedColor: string
   bodyFont: string
@@ -57,6 +68,7 @@ export type EmailBrand = {
  */
 const DEFAULT_EMAIL_BRAND: EmailBrand = {
   primaryColor: DEFAULT_BRAND_KIT.primaryColor,
+  accentColor: DEFAULT_BRAND_KIT.accentColor,
   textColor: DEFAULT_BRAND_KIT.textColor,
   mutedColor: DEFAULT_BRAND_KIT.mutedColor,
   bodyFont: "-apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif",
@@ -71,12 +83,21 @@ const DEFAULT_EMAIL_BRAND: EmailBrand = {
  * seen and Georgia degrades gracefully wherever the choice does not resolve.
  */
 export function emailBrand(
-  kit: { primaryColor: string; textColor: string; mutedColor: string; headingFont: string } | null,
+  kit: {
+    primaryColor: string
+    accentColor?: string
+    textColor: string
+    mutedColor: string
+    headingFont: string
+  } | null,
 ): EmailBrand {
   if (!kit) return DEFAULT_EMAIL_BRAND
 
   return {
     primaryColor: kit.primaryColor,
+    // Optional on the way in, because a caller holding an older shape of kit
+    // should not stop rendering; the default is a colour, not a blank.
+    accentColor: kit.accentColor ?? DEFAULT_EMAIL_BRAND.accentColor,
     textColor: kit.textColor,
     mutedColor: kit.mutedColor,
     headingFont: kit.headingFont,
@@ -253,6 +274,69 @@ function blockHtml(
       // A QR code in an email is pointless — the reader is already on a device
       // that can follow a link. Dropped rather than shipped as a blank box.
       return ''
+
+    case 'shape': {
+      /*
+        A shape in an email is a styled table cell, not the SVG the page and
+        the PDF draw (Phase 193).
+
+        The one place this engine renders a block differently rather than
+        from the shared markup, and it is the medium's doing: Gmail strips
+        inline SVG, so a shape drawn that way would be a gap in the message
+        for most of a list. A rectangle *is* a background colour with a
+        border radius, and that is as well supported as anything in email.
+
+        It degrades, and predictably: an ellipse is `border-radius:50%`,
+        which Outlook's renderer squares off, and a line is a bordered row.
+        Named rather than hidden, because a marketing creative is laid out by
+        somebody who should know what the least capable client will show.
+      */
+      const colour = (paint: ShapePaint) =>
+        paint === 'primary'
+          ? brand.primaryColor
+          : paint === 'accent'
+            ? brand.accentColor
+            : paint === 'text'
+              ? brand.textColor
+              : paint === 'muted'
+                ? brand.mutedColor
+                : 'transparent'
+
+      /*
+        `align` and `widthPercent` are honoured here, which the first version
+        was not — seen by rendering the three surfaces side by side and
+        noticing that a centred shape sat left in the email and a 40% line ran
+        the full width. `text-align` on the cell with `display:inline-block`
+        on the box, rather than `margin:0 auto`, because Outlook ignores auto
+        margins and respects the cell.
+      */
+      const cell = `padding:6px 24px;text-align:${block.align};`
+
+      if (block.shape === 'line') {
+        const thickness = Math.max(0.5, block.strokeWidthPt)
+        return (
+          `<tr><td style="${cell}">` +
+          `<div style="display:inline-block;width:${block.widthPercent}%;height:${thickness}px;` +
+          `background:${styleValue(colour(block.stroke === 'none' ? 'text' : block.stroke))};` +
+          `font-size:0;line-height:0;">&nbsp;</div>` +
+          `</td></tr>`
+        )
+      }
+
+      const radius = block.shape === 'ellipse' ? '50%' : `${block.cornerRadiusPt}px`
+      const border =
+        block.stroke === 'none' || block.strokeWidthPt <= 0
+          ? ''
+          : `border:${block.strokeWidthPt}px solid ${styleValue(colour(block.stroke))};`
+
+      return (
+        `<tr><td style="${cell}">` +
+        `<div style="display:inline-block;box-sizing:border-box;width:${block.widthPercent}%;` +
+        `height:${block.heightPt}px;background:${styleValue(colour(block.fill))};` +
+        `border-radius:${radius};${border}font-size:0;line-height:0;">&nbsp;</div>` +
+        `</td></tr>`
+      )
+    }
 
     case 'divider':
       return `<tr><td style="padding:12px 24px;"><hr style="border:0;border-top:1px solid #e2e8f0;margin:0;" /></td></tr>`
