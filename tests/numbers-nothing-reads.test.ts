@@ -127,7 +127,7 @@ describe('the register itself', () => {
     expect(PINNED_CLAIMS.flatMap((claim) => pinnedClaimArgues(claim))).toEqual([])
   })
 
-  it('declares thirteen claims, all of them pinned', () => {
+  it('declares fourteen claims, all of them pinned', () => {
     /**
      * Phase 126, and the second number is no longer the honest half: since
      * Phase 187 there is no unmeasured entry.
@@ -138,10 +138,18 @@ describe('the register itself', () => {
      * and the verification run caught it still carrying the old figure. A
      * register assembled by grepping the documents somebody thought of is this
      * phase's own subject one level up.
+     *
+     * Fourteen since Phase 194, and the fourteenth is a *second* claim in
+     * `docs/SPEC-AUDIT.md` — the file the paragraph above records this
+     * register having missed the first time. Re-measuring that audit bullet by
+     * bullet found exactly one number in it that had moved, its table count,
+     * 181 to 185. Pinned for what the sentence stands for rather than for its
+     * size: "done — 181 tables" reads as a section somebody counted, and the
+     * count is the only part of it a machine can keep honest.
      */
-    expect(PINNED_CLAIMS).toHaveLength(13)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(13)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(13)
+    expect(PINNED_CLAIMS).toHaveLength(14)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(14)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(14)
   })
 
   it('pins all four numbers of the sentence that states four', () => {

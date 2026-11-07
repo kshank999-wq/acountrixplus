@@ -22,6 +22,37 @@ import type {
 const DEFAULT_MODEL = 'claude-opus-5'
 
 /**
+ * Why `cachedInputTokens` is always zero, and why that is not a defect
+ * (Phase 194).
+ *
+ * §12 asks for *"caching where safe"*. `provider.ts` prices a cache read, the
+ * gateway records it and the usage ledger carries it — and
+ * `response.usage.cache_read_input_tokens` has never been anything but zero,
+ * because **nothing sets `cache_control`**. That looks exactly like Phase
+ * 160's shape: a capability installed and inert, waiting for one line.
+ *
+ * It is not, and the measurement is the reason. Prompt caching needs a stable
+ * prefix of at least the model's minimum — 1024 tokens on this family — and
+ * **below it the request silently does not cache**. Measured:
+ *
+ * | | tokens |
+ * | --- | --- |
+ * | every system prompt in `prompts.ts` | 230–631 |
+ * | the minimum for `claude-opus-5` | 1024 |
+ *
+ * So a `cache_control` on the system prompt would cache nothing and read
+ * zero, which is what it reads now — the no-op would be indistinguishable
+ * from the absence, and the next person to measure would find the same zero
+ * with a line of code claiming otherwise. The retrieval context is no help
+ * either: it is rendered into the *user* message and differs per request, so
+ * there is no stable prefix to cache.
+ *
+ * The pricing path is therefore correct, correctly reads zero, and starts
+ * paying the moment a prompt grows past the threshold. **The thing to measure
+ * before adding `cache_control` is the prompt length, not the code.**
+ */
+
+/**
  * Published prices per million tokens, in millionths of a dollar.
  *
  * Cost is an *estimate* recorded for metering, not an invoice. If a price
@@ -34,10 +65,26 @@ const PRICING: Record<string, ModelPricing> = {
     outputPerMillionMicros: 25_000_000,
     cachedInputPerMillionMicros: 500_000,
   },
+  /*
+    Corrected in Phase 194, against the published price list rather than
+    against memory.
+
+    These were $3 / $15 with a $0.30 cache read, which is **the increase that
+    was cancelled**. The pricing page says it plainly: the $2 / $10 announced
+    at launch as introductory pricing through 31 August 2026 *"is now the
+    standard price. The previously scheduled increase to $3/$15 per million
+    input/output tokens on September 1, 2026 will not occur."*
+
+    So every Sonnet request this application metered recorded a cost estimate
+    half again as large as the real one — in the ledger §12 asks for *"for
+    billing and monitoring"*, which is the one number here whose only job is
+    to be right. Nothing errored and nothing looked wrong, because a price is
+    a constant nobody re-reads.
+  */
   'claude-sonnet-5': {
-    inputPerMillionMicros: 3_000_000,
-    outputPerMillionMicros: 15_000_000,
-    cachedInputPerMillionMicros: 300_000,
+    inputPerMillionMicros: 2_000_000,
+    outputPerMillionMicros: 10_000_000,
+    cachedInputPerMillionMicros: 200_000,
   },
   'claude-haiku-4-5': {
     inputPerMillionMicros: 1_000_000,

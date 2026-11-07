@@ -60,7 +60,7 @@ same failure to re-measure, and ADR 0164 states it as a rule.
 | 13 | Professional Accounting Workspace | **done** — every bullet, checked individually |
 | 14 | Roles, Permissions & Accountant Access | **done** — `modules/permissions`, `modules/practice` |
 | 15 | Company Studio / Brand Profile | **done** — `modules/brand` |
-| 16 | Core Data Model | **done** — 181 tables |
+| 16 | Core Data Model | **done** — 185 tables |
 | 17 | Recommended Service Boundaries | **done** — modular monolith, `src/modules/<domain>` |
 | 18 | Technology Direction | **done** |
 | 19 | Security & Financial Integrity | **one partial** — below |
@@ -174,6 +174,44 @@ the database layer is installed, forced on 165 tables, proven against a restrict
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
 otherwise.
+
+## The bullet-level pass of §12–§19 (Phase 194)
+
+> ADR 0193 nominated this file. The Phase 173 pass below covered **§1–§11
+> only**; §12 onward had never been measured below the section heading, and
+> this file's own closing claim is that *"the other sections hold up"*, with
+> §12–§18 said to *"would likely find more"*. Three §7 rows re-opened since
+> had each turned out wrong, so the question was whether the rest did too.
+
+**It largely holds.** Measured bullet by bullet, §13's eleven are built —
+fixed assets and depreciation included, although §13 makes them optional;
+§14's roles and six requirements have `user_mfa`, `sessions`, `devices`,
+`login_attempts`, `audit_events` and practice mode behind them; §15's five are
+`service_items`, `clauses`, `team_members` and the brand kit; §16's
+thirty-four entities all resolve (`Project/Job` is `projects`, `Lead` is
+`lead_submissions`, `MarketingEvent` is `campaign_events`); §18's seven
+include a real outbox (`modules/worker/outbox.ts`, `domain_events`,
+`relayPendingEvents`) and server-side PDF; §19's nine are in place.
+
+Three things came out of it.
+
+| | finding |
+| --- | --- |
+| §12 | **Tool/function layer — nothing.** No tool registry, no `tool_use`, no `tool_choice`. Recorded as a **decision** rather than a gap: every consequential AI action in this application goes through a suggestion a human applies, which is *more* restrictive than the bullet asks and is what §12's own next bullet requires. Building tool-calling would add a path around the approval gate. |
+| §12 | **"Caching where safe" is not achievable with these prompts**, and `cachedInputTokens` correctly reads zero. Caching needs a stable prefix of at least 1024 tokens on this model family; every system prompt is 230–631. A `cache_control` would have cached nothing — the no-op was nearly written. A test now fails if a prompt grows past the threshold. |
+| §16 | **181 tables → 185.** The only number in this file that had moved, now pinned in `PINNED_CLAIMS` so it cannot move again unnoticed. |
+
+One modelling choice to record alongside §16's three, so nobody counts it as a
+gap: **§17's "Reporting/Analytics Service" has no module of its own.** Sales
+analytics is `crm/analytics.ts` and the financial reports are `ledger/*` —
+reporting sits inside the domain that owns the data, which is defensible and
+arguably better than a reporting service reaching into everything.
+
+So the sentence this pass was sent to test — *"the other sections hold up"* —
+is **true**, and is now true by measurement rather than by assertion. The
+prediction beside it, that §12–§18 *"would likely find more"*, was wrong: it
+found less than §7 did, which is the opposite of what twenty phases of
+re-measurement had taught this process to expect.
 
 ## The bullet-level pass (Phase 173)
 

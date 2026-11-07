@@ -162,6 +162,21 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
     measure: (facts) => facts.tables,
   },
   {
+    key: 'audit-table-count',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /\*\*done\*\* — (\d+) tables/,
+    because:
+      'The audit is the document this process reads to decide what to build next, and it was ' +
+      'written in Phase 173 against a tree that has grown twenty phases since — so it is the ' +
+      'file in this repository most exposed to going quietly stale, and the one where stale ' +
+      'costs the most. Phase 194 re-measured it bullet by bullet and this was the only number ' +
+      'in it that had moved: 181 when written, 185 when checked. Small, and pinned for what it ' +
+      'stands for rather than for its size — a section marked "done — 181 tables" is a section ' +
+      'somebody believes was counted, and the count is the only part of that sentence a machine ' +
+      'can keep honest.',
+    measure: (facts) => facts.tables,
+  },
+  {
     key: 'runbook-policed-tables',
     file: 'docs/RUNBOOK-FIRST-COMPANY.md',
     pattern: /(\d+) tables carry\s+policies/,
