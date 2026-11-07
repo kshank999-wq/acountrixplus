@@ -254,9 +254,9 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **276
-writes** and **935 reads**, every one guarded (Phases 149–150, the census
-widened in Phase 196) — and
+rather than vaguely: the application layer is complete and measured — **284
+writes** and **950 reads**, every one guarded (Phases 149–150, the census
+widened in Phases 196 and 197) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
@@ -292,6 +292,27 @@ otherwise.
 > is the copy in `docs/RUNBOOK-FIRST-COMPANY.md`. They had drifted — the writes
 > by four phases, the reads by two — while the pinned copy in `isolation.ts`
 > stayed right, which is what pinning one sentence of three gets you.
+>
+> **Phase 197 found two more layers of the same defect.** The census recognised
+> a query by three separate names and each hid some: the key's value (157
+> writes, Phase 196), the **table** — a name in the schema, so a query through
+> a variable was not reported as unguarded but *was not a query*: 5 writes and
+> 15 reads — and the key's **predicate**, an `eq`, so 3 writes keyed only by
+> `inArray(table.id, ids)` were missed, which is a bulk write by a
+> caller-supplied list and the most aimable shape there is. Two of the
+> variable-table writes are in `importing/reversal.ts`, which deletes the rows
+> an import created, so the census had never looked at a destructive generic
+> helper.
+>
+> All twenty are guarded, read site by site before anything was widened. Two
+> queries remain unresolvable — `retention/sweep.ts` takes its table from
+> `RETENTION_POLICIES` at runtime — and are **declared** in
+> `scanUnresolvedTables()` with the count pinned at two, rather than skipped.
+>
+> Still outside the census, and still counted here as a known shortfall: the
+> **nine raw-SQL queries** in the party merge, which carry a `company_id`
+> predicate and are asserted to, but in a test of their own rather than in
+> these numbers.
 
 ## The bullet-level pass of §12–§19 (Phase 194)
 

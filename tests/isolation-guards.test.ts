@@ -142,10 +142,24 @@ describe('every write that can be aimed at a row', () => {
     // is not that this codebase got safer in Phase 196 — it is that 157 writes
     // which were always guarded can now be *seen* to be, and the one that could
     // not be justified got a `scoped()` so that it can.
-    expect(WRITES.length).toBe(276)
+    //
+    // **Two hundred and eighty-four since Phase 197**, and again no new
+    // application code. Two more layers of the same defect: the census
+    // recognised a table by its *name*, so 5 writes through a variable
+    // (`kind === 'customer' ? customers : vendors`) were invisible; and it
+    // recognised a key as an `eq`, so 3 keyed only by `inArray` were too. Both
+    // are the shape Phase 196 fixed in the key *value*, one argument to the
+    // left and one function to the right, and both were missed by Phase 196
+    // for the reason it gave for the 157: the scan was asked what the scan
+    // could see.
+    //
+    // Two of the variable-table writes are in `importing/reversal.ts`, which
+    // deletes the rows an import created — so the census had never looked at
+    // a destructive generic helper.
+    expect(WRITES.length).toBe(284)
     expect(by).toEqual({
-      'explicit-company': 187,
-      'scoped-write': 48,
+      'explicit-company': 191,
+      'scoped-write': 52,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       'owner-helper': 4,

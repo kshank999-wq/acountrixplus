@@ -2,6 +2,7 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import {
+  declarationOf,
   declaresFunction,
   enclosingQuery,
   enclosingSymbol,
@@ -345,5 +346,100 @@ describe('the whole template literal', () => {
 
   it('returns nothing when the index is not a backtick', () => {
     expect(templateLiteralAt('const x = 1', 0)).toBe('')
+  })
+})
+
+describe('what declares an identifier', () => {
+  /**
+   * Added in Phase 197, for the gap that both isolation scans had: they
+   * recognised a table by its **name**, so `.from(invoices)` counted and
+   * `.from(table)` did not — 5 writes and 15 reads invisible, two of the
+   * writes in a generic helper that deletes.
+   *
+   * It returns the declaring *text* rather than the names in it, because this
+   * module knows nothing about the schema and must not learn: it is shared by
+   * scans that each define "a table" their own way.
+   */
+  const ternary = [
+    'async function refuseNamesake(ctx: ActorContext, kind: Kind) {',
+    "  const table = kind === 'customer' ? customers : vendors",
+    '  const rows = await db.select().from(table).where(scoped(ctx, table))',
+    '}',
+  ].join('\n')
+
+  it('finds a local declaration and keeps both branches of it', () => {
+    const at = ternary.indexOf('.from(table)')
+    const declaration = declarationOf(ternary, at, 'table')
+
+    expect(declaration).toContain('customers')
+    expect(declaration).toContain('vendors')
+  })
+
+  it('finds a parameter annotation', () => {
+    const src = [
+      'async function requireOwn(ctx: Ctx, table: typeof invoices | typeof bills, id: string) {',
+      '  const [row] = await exec.select().from(table).where(eq(table.id, id))',
+      '}',
+    ].join('\n')
+
+    const declaration = declarationOf(src, src.indexOf('.from(table)'), 'table')
+    expect(declaration).toContain('invoices')
+    expect(declaration).toContain('bills')
+  })
+
+  it('follows one type alias, because an annotation naming one declares nothing yet', () => {
+    const src = [
+      'type OwnedTable = typeof organizations | typeof contacts',
+      'async function requireOwn(ctx: Ctx, table: OwnedTable, id: string) {',
+      '  const [row] = await exec.select().from(table).where(eq(table.id, id))',
+      '}',
+    ].join('\n')
+
+    const declaration = declarationOf(src, src.indexOf('.from(table)'), 'table')
+    expect(declaration).toContain('organizations')
+    expect(declaration).toContain('contacts')
+  })
+
+  it('reads a destructuring loop to the end of what it iterates', () => {
+    /*
+      The case the reversal's two deletes needed. The array literal spans
+      lines and is the part that names the tables, so this one is taken to the
+      matching bracket rather than to the end of the line — a line-bounded
+      version resolves `for (const [table, ids] of [` and finds nothing.
+    */
+    const src = [
+      'async function revertImport(ctx: Ctx) {',
+      '  for (const [table, documentIds, label] of [',
+      "    [invoices, invoiceIds, 'invoice'],",
+      "    [bills, billIds, 'bill'],",
+      '  ] as const) {',
+      '    await tx.delete(table).where(scoped(ctx, table, inArray(table.id, documentIds)))',
+      '  }',
+      '}',
+    ].join('\n')
+
+    const declaration = declarationOf(src, src.indexOf('.delete(table)'), 'table')
+    expect(declaration).toContain('invoices')
+    expect(declaration).toContain('bills')
+  })
+
+  it('returns nothing for an identifier the source does not declare', () => {
+    /**
+     * A real answer, not an absence. `retention/sweep.ts` has
+     * `const table = sweep.table as never`, whose table comes from
+     * `RETENTION_POLICIES` at runtime — so the declaration is found and names
+     * no table, and the caller has to treat that as *unresolved* rather than
+     * as "no tables" and skip it silently. `scanUnresolvedTables()` is where
+     * those two sites are declared.
+     */
+    const src = 'function f(ctx: Ctx) {\n  return db.select().from(mystery)\n}'
+    expect(declarationOf(src, src.indexOf('.from(mystery)'), 'mystery')).toBe('')
+  })
+
+  it('refuses an identifier that is not one, rather than building a regex from it', () => {
+    // The input comes from a regex capture over a whole tree, so a caller can
+    // reach here with something that would be injected into a pattern.
+    expect(declarationOf('const a = 1', 0, 'a.b(')).toBe('')
+    expect(declarationOf('const a = 1', 0, '.*')).toBe('')
   })
 })

@@ -161,10 +161,21 @@ describe('every read from a company-scoped table', () => {
       from. One read, `scoped-read`, and the write beside it is the hundred
       and nineteenth.
     */
-    expect(READS.length).toBe(935)
+    /*
+      950 since Phase 197, and all fifteen are the same thing: a read whose
+      table is held in a variable. `.from(invoices)` counted and `.from(table)`
+      did not, because `table` is not in the schema — so fifteen reads through
+      generic helpers were not reported as unguarded, they were not reads. The
+      key-pattern defect Phase 196 fixed, one argument to the left.
+
+      Every one is guarded, and the spread says what the helpers are: nine
+      `explicit-company` where the where writes the filter out, and six
+      `scoped-read` where it goes through `scoped(ctx, table, …)`.
+    */
+    expect(READS.length).toBe(950)
     expect(by).toEqual({
-      'scoped-read': 570,
-      'explicit-company': 265,
+      'scoped-read': 577,
+      'explicit-company': 273,
       'established-above': 33,
       'id-from-fetched-row': 21,
       'join-inherited': 13,

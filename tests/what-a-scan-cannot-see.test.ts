@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   readableSource,
   scanReads,
+  scanUnresolvedTables,
   scanWrites,
   sourceFiles,
 } from '@/modules/source/isolation-scan'
@@ -69,9 +70,47 @@ function scopedTables(): Set<string> {
   return names
 }
 
-/** Every `update`/`delete` on a company-scoped table whose where names a row. */
+/** Every table in the schema, scoped or not — what "is a table name" means. */
+function knownTables(): Set<string> {
+  const names = new Set<string>()
+  for (const file of sourceFiles('src/db/schema')) {
+    for (const m of readFileSync(file, 'utf8').matchAll(/export const (\w+) = pgTable\(/g)) {
+      names.add(m[1])
+    }
+  }
+  return names
+}
+
+/**
+ * Every `update`/`delete` that could reach a company-scoped table and name a
+ * row in it.
+ *
+ * ## Independent along every axis, since Phase 197
+ *
+ * Phase 196 wrote this derivation to be independent of the scan's **key
+ * value** pattern, which is what let it find that gap. It still shared two of
+ * the scan's other assumptions, and Phase 197 found a gap behind each:
+ *
+ * | assumption shared | what it hid |
+ * | --- | --- |
+ * | a table is a name in the schema | 5 writes through a variable table |
+ * | a key is an `eq` | 3 writes keyed only by `inArray` |
+ *
+ * So an independent derivation that shares one of the scan's assumptions is
+ * only independent along one axis, which is this phase's lesson applied to
+ * this phase's own predecessor.
+ *
+ * It is broad on purpose now: a table is anything that **is** a scoped schema
+ * name, or is not a schema name at all and so might be a variable holding one.
+ * A key is an `eq` or an `inArray` on a column that names a row. That
+ * over-collects, and over-collecting is the right direction — the assertion is
+ * that every site it finds is *accounted for*, in the census or in the
+ * declared-unresolved register, and a site this misses is a site nothing
+ * checks.
+ */
 function keyedWriteSites(): string[] {
-  const tables = scopedTables()
+  const scoped = scopedTables()
+  const known = knownTables()
   const sites: string[] = []
 
   for (const dir of SCANNED) {
@@ -79,20 +118,32 @@ function keyedWriteSites(): string[] {
       const src = readableSource(file)
 
       for (const m of src.matchAll(/\.(update|delete)\(\s*(\w+)\s*\)/g)) {
-        if (!tables.has(m[2])) continue
+        const name = m[2]
+        // A scoped table, or something that is not a table name at all and
+        // could therefore be a variable holding one.
+        if (!scoped.has(name) && known.has(name)) continue
 
         const span = enclosingQuery(src, m.index)
         const where = /\bwhere\(([\s\S]*)/.exec(src.slice(span.from, span.to))?.[1] ?? ''
         if (!where) continue
 
         /*
-          An `eq` on a column that names a row rather than a business fact, with
-          a value the acting context did not supply. That is the shape that can
-          be aimed at another tenant, stated independently of how `scanWrites`
-          happens to recognise it — which is the point: a test written in the
-          scan's own vocabulary could not have found the scan's blind spot.
+          Over-collecting means collecting things that are not queries:
+          `cookieStore.delete(CHALLENGE_COOKIE)` and `map.delete(key)` match
+          the same text, and `enclosingQuery` then finds a `where` belonging to
+          the next statement down and makes one look like a keyed write.
+
+          A drizzle write through a variable always names that variable's
+          columns — `eq(table.id, …)`, `set({ … })` — so requiring the where to
+          mention `name.` tells a query from a cookie without asking the scan
+          what it thinks. Two false positives in `app/actions/auth.ts` found
+          this, which is the over-collection working as intended.
         */
-        const aimable = [...where.matchAll(/eq\(\s*\w+\.(\w+)\s*,\s*([\w.]+)\s*\)/g)].filter(
+        if (!scoped.has(name) && !new RegExp(String.raw`\b${name}\.\w`).test(where)) continue
+
+        const aimable = [
+          ...where.matchAll(/(?:eq|inArray)\(\s*\w+\.(\w+)\s*,\s*([\w.]+)\s*\)/g),
+        ].filter(
           ([, column, value]) =>
             (column === 'id' || /Id$/.test(column)) && !/^(ctx|actor|session)\./.test(value),
         )
@@ -120,7 +171,27 @@ describe('the write census reaches every write that can be aimed', () => {
      * would have passed in every phase from 149 to 195.
      */
     const counted = new Set(scanWrites().map((write) => `${write.file}:${write.line}`))
-    const missing = keyedWriteSites().filter((site) => !counted.has(site))
+
+    /*
+      Or declared unresolvable, which is Phase 139's device rather than an
+      escape hatch: `retention/sweep.ts` takes its table from
+      `RETENTION_POLICIES` at runtime and no reading of the source resolves
+      that. A site may be in the census or in that register; being in neither
+      is the failure.
+
+      Accounted-for rather than counted is also what keeps this assertion
+      honest about the resolver: if `declarationOf` stopped resolving a
+      variable table, those sites would move from the census into the register
+      and this would still pass — so the register's own length is asserted
+      below, where a move shows up.
+    */
+    const declared = new Set(
+      scanUnresolvedTables().map((site) => `${site.file}:${site.line}`),
+    )
+
+    const missing = keyedWriteSites().filter(
+      (site) => !counted.has(site) && !declared.has(site),
+    )
 
     expect(missing).toEqual([])
   })
@@ -155,6 +226,88 @@ describe('the write census reaches every write that can be aimed', () => {
       .map((write) => `${write.file}:${write.line} ${write.symbol} — ${write.why}`)
 
     expect(unguarded).toEqual([])
+  })
+})
+
+describe('the table held in a variable', () => {
+  /**
+   * Phase 197. Both scans asked `tables.has(name)` and skipped everything
+   * else, so a query through a variable was not reported as unguarded — it was
+   * **not a query**. 5 writes and 15 reads, and the generic helper that
+   * `delete`s an import's rows was two of the writes.
+   *
+   * The same defect Phase 196 found in the key value, one argument to the
+   * left, and missed by Phase 196 for the reason everything here gets missed:
+   * the scan was asked what the scan could see.
+   */
+  it('resolves a ternary to both of its tables', () => {
+    /*
+      `const table = kind === 'customer' ? customers : vendors` — the site
+      counts if either branch is company-scoped, because the scan cannot know
+      which runs and the guard has to hold for both. Reported under both names
+      joined, so one site is one entry however many tables it could be.
+    */
+    const resolved = scanWrites().filter((write) => write.table.includes('|'))
+
+    expect(resolved.length).toBeGreaterThan(0)
+    for (const write of resolved) {
+      expect(write.kind, `${write.file}:${write.line}`).not.toBeNull()
+    }
+
+    // The reads too, which is where most of them are.
+    expect(scanReads().filter((read) => read.table.includes('|')).length).toBeGreaterThan(10)
+  })
+
+  it('resolves a loop that destructures one, which is where the deletes are', () => {
+    /*
+      `for (const [table, ids, label] of [[invoices, …], [bills, …]] as const)`
+      in `importing/reversal.ts`, which deletes the rows an import created.
+      Those two deletes were outside the census and are the reason
+      `declarationOf` reads the whole iterated expression rather than the first
+      line of the declaration.
+    */
+    const reversal = scanWrites().filter((write) => write.file.includes('importing/reversal'))
+
+    expect(reversal.filter((write) => write.op === 'delete').length).toBeGreaterThan(1)
+    for (const write of reversal) {
+      expect(write.kind, `${write.file}:${write.line}`).not.toBeNull()
+    }
+  })
+
+  it('names the ones it cannot resolve rather than dropping them', () => {
+    /**
+     * Phase 139's device. `retention/sweep.ts` takes its table from
+     * `RETENTION_POLICIES` — chosen at runtime, so no reading of the source
+     * resolves it — and a scan that skipped those silently would be making
+     * exactly the claim this phase exists to disprove.
+     *
+     * Measured exactly (Phase 126), so the register cannot quietly grow: a
+     * third unresolvable site means somebody added a runtime-chosen table and
+     * should either declare it or make it resolvable.
+     */
+    const unresolved = scanUnresolvedTables()
+
+    expect(unresolved).toHaveLength(2)
+    for (const site of unresolved) {
+      expect(site.file).toBe('src/modules/retention/sweep.ts')
+      expect(site.op).toBe('read')
+    }
+  })
+
+  it('is stateless, so two scans do not double-count it', () => {
+    /*
+      The first version pushed unresolved sites into a module-level array from
+      inside the resolver, so calling `scanReads()` and `scanWrites()` in one
+      process reported each site twice. A scan whose answer depends on what was
+      called before it is worse than one that misses something — and this
+      repository's whole argument for these registers is that the number can be
+      trusted.
+    */
+    const once = scanUnresolvedTables()
+    scanReads()
+    scanWrites()
+
+    expect(scanUnresolvedTables()).toEqual(once)
   })
 })
 

@@ -209,8 +209,8 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 570 of ' +
-      'the 935 reads, against 48 of the 276 writes. The two halves of this system are guarded ' +
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 577 of ' +
+      'the 950 reads, against 52 of the 284 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
       'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
       'needed correcting by hand in every phase that touched a read — 180, 183, 184, 185 and ' +
@@ -226,7 +226,12 @@ const READ_GUARDS: readonly IsolationGuard[] = [
       'why number 4 moves from 119 to 276 with no application code added: the pattern is the ' +
       'read side’s now. Every one of the 157 classifies, so this sentence was understating its ' +
       'own denominator rather than overstating the guarding — and the one write that could not ' +
-      'be justified was given a `scoped()` rather than an excuse.',
+      'be justified was given a `scoped()` rather than an excuse. **Phase 197 found two more ' +
+      'layers of the same defect** and took the writes to 284 and the reads to 950: the census ' +
+      'recognised a table by its name, so a query through a variable was invisible, and a key ' +
+      'as an `eq`, so one keyed by `inArray` was too. Three names, each hiding some, which is ' +
+      'the argument for measuring a scan against the thing it claims to cover rather than ' +
+      'reading it.',
   },
   {
     kind: 'join-inherited',

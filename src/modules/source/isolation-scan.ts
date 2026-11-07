@@ -1,6 +1,6 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { withoutComments, enclosingQuery } from './enclosing'
+import { declarationOf, withoutComments, enclosingQuery } from './enclosing'
 import {
   companyScopedTablesIn,
   guardFor,
@@ -159,6 +159,106 @@ export function statementAt(src: string, from: number): string {
 
 const OWNER_HELPER = /\b(load\w*Own\w*|\w*ForOwner|require\w*Owner\w*|assert\w*Own\w*)\s*\(/
 
+/** A site whose table is held in a variable nothing in the source resolves. */
+export type UnresolvedTable = {
+  file: string
+  line: number
+  symbol: string
+  /** The identifier that stood where a table name should be. */
+  identifier: string
+  op: 'read' | 'update' | 'delete'
+}
+
+/**
+ * Identifiers worth reporting when they resolve to nothing.
+ *
+ * `.delete(key)` on a Map and `.update(hash)` on a digest are not queries, and
+ * a scan that reported them would bury the sites that matter under them. These
+ * three are what this codebase calls a table it chose at runtime.
+ */
+const TABLE_ISH = /^(table|target|entity)$/
+
+/**
+ * Which company-scoped tables a query's table expression can be (Phase 197).
+ *
+ * Both scans asked `tables.has(name)` and skipped everything else, so a query
+ * through a variable was not reported as unguarded — it was **not a query**.
+ * Measured: 7 writes and 17 reads, two of the writes in a generic helper that
+ * `delete`s. The same defect Phase 196 found in the key pattern, one argument
+ * to the left, and missed by Phase 196 for the reason everything here is
+ * missed — the scan was asked what the scan could see.
+ *
+ * A name in the schema resolves to itself. Anything else goes to
+ * `declarationOf`, and the table names in whatever declares it are the
+ * candidates: `kind === 'customer' ? customers : vendors` is two, and a site
+ * counts if **any** is company-scoped, because the scan cannot know which
+ * branch runs and the guard has to hold for both.
+ *
+ * Pure, and deliberately so: the first version pushed unresolved sites into a
+ * module-level array, which double-counted the moment both scans ran in one
+ * process. A scan that reports a different number depending on what was called
+ * before it is worse than one that misses something.
+ */
+function candidateTables(
+  src: string,
+  index: number,
+  name: string,
+  tables: Set<string>,
+): string[] {
+  if (tables.has(name)) return [name]
+
+  const declaration = declarationOf(src, index, name)
+  if (!declaration) return []
+
+  return [
+    ...new Set(
+      [...declaration.matchAll(/\b(\w+)\b/g)].map((m) => m[1]).filter((word) => tables.has(word)),
+    ),
+  ]
+}
+
+/**
+ * Sites whose table nothing in the source resolves (Phase 197).
+ *
+ * Phase 139's device rather than a silent skip: a register that names what it
+ * does not cover beats one that looks complete. `retention/sweep.ts` takes its
+ * table from `RETENTION_POLICIES` and `importing/reversal.ts` from its own
+ * reversal plan — both at runtime, and no reading of the source resolves
+ * either.
+ *
+ * Its own pass over the tree, so it owes nothing to whether a scan ran first.
+ */
+export function scanUnresolvedTables(): UnresolvedTable[] {
+  const tables = companyScopedTables()
+  const found: UnresolvedTable[] = []
+
+  for (const dir of SCANNED) {
+    for (const file of sourceFiles(dir)) {
+      const src = readableSource(file)
+
+      for (const m of src.matchAll(/\.(from|update|delete)\(\s*(\w+)\s*\)/g)) {
+        const [, call, name] = m
+        if (!TABLE_ISH.test(name)) continue
+        if (candidateTables(src, m.index, name, tables).length > 0) continue
+
+        const before = [
+          ...src.slice(0, m.index).matchAll(/^(export )?(?:async )?function (\w+)/gm),
+        ]
+
+        found.push({
+          file,
+          line: src.slice(0, m.index).split('\n').length,
+          symbol: before.length > 0 ? before[before.length - 1][2] : '(top level)',
+          identifier: name,
+          op: call === 'from' ? 'read' : (call as 'update' | 'delete'),
+        })
+      }
+    }
+  }
+
+  return found
+}
+
 /**
  * Every read from a company-scoped table, with the guard it actually has.
  *
@@ -175,16 +275,24 @@ export function scanReads(): GuardedRead[] {
       const src = readableSource(file)
 
       for (const m of src.matchAll(/\.from\(\s*(\w+)\s*\)/g)) {
-        if (!tables.has(m[1])) continue
-
         const statement = statementAt(src, m.index)
         const before = [...src.slice(0, m.index).matchAll(/^(export )?(?:async )?function (\w+)/gm)]
         const fn = before.length > 0 ? before[before.length - 1] : null
+
+        const candidates = candidateTables(src, m.index, m[1], tables)
+        if (candidates.length === 0) continue
         const head = fn ? src.slice(fn.index, m.index) : ''
         const signature = fn ? src.slice(fn.index, fn.index + 300) : ''
 
         const where = /where\(([\s\S]*)/.exec(statement)?.[1] ?? ''
-        const keys = [...where.matchAll(/eq\(\s*\w+\.\w+\s*,\s*([\w.]+)\s*\)/g)].map((k) => k[1])
+        /*
+          `inArray` beside `eq` since Phase 197, on both sides and in the same
+          shape — because the whole finding of Phases 196 and 197 is that these
+          two patterns drift when they are written twice.
+        */
+        const keys = [
+          ...where.matchAll(/(?:eq|inArray)\(\s*\w+\.\w+\s*,\s*([\w.]+)\s*\)/g),
+        ].map((k) => k[1])
 
         const verdict = readGuardFor({
           scopedInStatement: /scoped\(/.test(statement),
@@ -219,7 +327,13 @@ export function scanReads(): GuardedRead[] {
           file,
           line: src.slice(0, m.index).split('\n').length,
           symbol: fn?.[2] ?? '(top level)',
-          table: m[1],
+          /*
+            One site, one entry, however many tables the variable could be.
+            Reported under the candidates joined, because "which table" is not
+            knowable here and a site counted twice would inflate a denominator
+            that §19 quotes.
+          */
+          table: candidates.join('|'),
           kind: verdict.guarded ? verdict.kind : null,
         })
       }
@@ -254,8 +368,12 @@ export function scanWrites(): GuardedWrite[] {
       const src = readableSource(file)
 
       for (const m of src.matchAll(/\.(update|delete)\(\s*(\w+)\s*\)/g)) {
-        const [, op, table] = m
-        if (!tables.has(table)) continue
+        const [, op, name] = m
+
+        const candidates = candidateTables(src, m.index, name, tables)
+        if (candidates.length === 0) continue
+
+        const table = candidates.join('|')
 
         const span = enclosingQuery(src, m.index)
         const statement = src.slice(span.from, span.to)
@@ -264,7 +382,7 @@ export function scanWrites(): GuardedWrite[] {
 
         /*
           The read side's pattern, since Phase 196 — `[\w.]+` rather than
-          `input\.\w+|\w+Id`.
+          `input\.\w+|\w+Id` — and `inArray` beside `eq` since Phase 197.
 
           The narrow form recognised a key only as `input.something` or a name
           ending in `Id`, so `eq(proposals.id, proposal.id)`, `eq(x.id, id)`
@@ -279,9 +397,9 @@ export function scanWrites(): GuardedWrite[] {
           finding, one scan over, and the third time this repository has paid
           for it.
         */
-        const keyed = [...where.matchAll(/eq\(\s*\w+\.\w+\s*,\s*([\w.]+)\s*\)/g)].map(
-          (k) => k[1],
-        )
+        const keyed = [
+          ...where.matchAll(/(?:eq|inArray)\(\s*\w+\.\w+\s*,\s*([\w.]+)\s*\)/g),
+        ].map((k) => k[1])
         if (keyed.length === 0) continue
 
         const before = [...src.slice(0, m.index).matchAll(/^(export )?(?:async )?function (\w+)/gm)]

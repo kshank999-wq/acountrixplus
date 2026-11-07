@@ -278,3 +278,127 @@ export function templateLiteralAt(src: string, backtickIndex: number): string {
 
   return src.slice(backtickIndex, at)
 }
+
+/**
+ * The text that declares an identifier, as seen from a point inside a function
+ * (Phase 197).
+ *
+ * ## The gap this closes
+ *
+ * Both isolation scans recognise a table by its **name**: `.from(invoices)`
+ * counts and `.from(table)` does not, because `table` is not in the schema.
+ * That is not a narrowing anybody chose — it is the same defect Phase 196
+ * found in the key pattern, one argument to the left, and it hides 7 writes
+ * and 17 reads including two generic helpers that **delete**.
+ *
+ * The idiom in this repository is uniform, which is why resolving it is worth
+ * doing rather than declaring:
+ *
+ * ```ts
+ * const table = kind === 'customer' ? customers : vendors   // a local
+ * function requireOwn(exec, ctx, table: OwnedTable, …)       // a parameter
+ * type OwnedTable = typeof organizations | typeof contacts   // its alias
+ * const table = sweep.table as never                        // unresolvable
+ * ```
+ *
+ * ## What it returns
+ *
+ * The declaring text, for the caller to read table names out of — not the
+ * names themselves, because this module knows nothing about the schema and
+ * must not learn: it is shared by scans that each define "a table" their own
+ * way.
+ *
+ * Searched in the order a reader would: the nearest local declaration above
+ * the point, then the enclosing signature's annotation, then — once, never
+ * recursively — a `type X = …` alias anywhere in the same file, because an
+ * annotation naming an alias has not finished declaring anything.
+ *
+ * Returns `''` when nothing declares it, which is a real answer:
+ * `sweep.table as never` comes from a registry and no amount of reading the
+ * source resolves it. A caller that treats `''` as "no tables" would silently
+ * skip those sites, so the callers here treat it as **unresolved** and say so.
+ */
+export function declarationOf(src: string, index: number, identifier: string): string {
+  if (!/^[A-Za-z_]\w*$/.test(identifier)) return ''
+
+  const { from } = enclosingSpan(src, index)
+  const head = src.slice(from, index)
+
+  // The nearest local declaration, to the end of its line. Every one of these
+  // in this repository is a single-line ternary; a declaration spanning lines
+  // would resolve to its first line, which yields fewer tables rather than
+  // wrong ones.
+  const locals = [
+    ...head.matchAll(new RegExp(String.raw`\b(?:const|let|var)\s+${identifier}\b[^\n]*`, 'g')),
+  ]
+  if (locals.length > 0) return locals[locals.length - 1][0]
+
+  /*
+    A loop that destructures it, with the whole iterated expression.
+
+    `for (const [table, ids, label] of [[invoices, …], [bills, …]] as const)`
+    declares `table` as much as a `const` does, and the three sites in
+    `importing/reversal.ts` that **delete** through one are exactly this shape.
+    Taken to the matching bracket rather than to the end of the line, because
+    the array literal is the part that names the tables and it spans lines.
+  */
+  const loops = [
+    ...head.matchAll(
+      new RegExp(
+        String.raw`for\s*\(\s*(?:const|let|var)\s*\[[^\]]*\b${identifier}\b[^\]]*\]\s*of\s*`,
+        'g',
+      ),
+    ),
+  ]
+  if (loops.length > 0) {
+    const last = loops[loops.length - 1]
+    /*
+      The iterated expression starts where the match ends, so its length is
+      measured from there and added to there — not to the match's own start,
+      which is the bug the unit test for this caught. On the real tree it
+      passed anyway: the truncated text still reached `invoices`, and one
+      candidate table is enough for a site to count. A test that only drives
+      real input would have agreed with it.
+    */
+    const expression = last.index + last[0].length
+    return head.slice(last.index, expression + balancedLength(head, expression))
+  }
+
+  // Otherwise an annotation: `table: typeof invoices | typeof bills` or
+  // `table: OwnedTable`, in the signature this point sits inside.
+  const annotation = new RegExp(String.raw`\b${identifier}\s*:\s*([^,)\n][^,)\n]*)`).exec(head)
+  if (!annotation) return ''
+
+  const annotated = annotation[0]
+  if (/\btypeof\s+\w+/.test(annotated)) return annotated
+
+  // One alias hop. `type OwnedTable = typeof organizations | typeof contacts`
+  // declares the parameter as much as the parameter does.
+  const alias = /:\s*(\w+)\s*$/.exec(annotated.trim())
+  if (!alias) return annotated
+
+  const declared = new RegExp(String.raw`\btype\s+${alias[1]}\s*=\s*([^\n]*)`).exec(src)
+  return declared ? declared[0] : annotated
+}
+
+/**
+ * How far from `start` the brackets opened there stay balanced.
+ *
+ * Used by `declarationOf` for a `for … of [ … ]` whose iterated expression
+ * spans lines. Bounded, like `statementAt`'s walk, so one unterminated
+ * expression cannot make a whole-tree scan walk the rest of the file.
+ */
+function balancedLength(src: string, start: number): number {
+  let depth = 0
+
+  for (let at = start; at < src.length && at < start + 4_000; at++) {
+    const char = src[at]
+    if (char === '(' || char === '[' || char === '{') depth += 1
+    else if (char === ')' || char === ']' || char === '}') {
+      depth -= 1
+      if (depth <= 0) return at - start + 1
+    }
+  }
+
+  return Math.min(4_000, src.length - start)
+}
