@@ -11,6 +11,7 @@ import {
 } from '@/modules/fx/on-screen'
 import { FACE_COLUMNS } from '@/modules/fx/comparable'
 import { INHERITED_CURRENCY, denominatedProperties } from '@/modules/fx/inherited'
+import { withoutComments } from '@/modules/source/enclosing'
 
 /**
  * Money reaching a screen says what it is denominated in (Phase 124).
@@ -89,7 +90,29 @@ function documentsBehind(page: string): string[] {
   for (const mod of modules) {
     const path = [`${mod}.ts`, `${mod}/index.ts`].find((p) => existsSync(p))
     if (!path) continue
-    const src = readFileSync(path, 'utf8')
+    /*
+      Comments stripped, since Phase 195 — and found the way these things are
+      found, which is by somebody writing prose and watching a count move.
+
+      `lapseExpiredProposals` acquired a docstring citing the precedent it was
+      built on, `payments.sweep_checkouts`. `payments` is a denominated
+      carrier, so that sentence registered as `crm/proposals.ts` reading the
+      payments table, which gave the public proposal page a document behind it
+      and pulled `p/[token]/acceptance-panel.tsx` into the scan. Measured both
+      ways: raw, the page's only hit in any module is that comment; stripped,
+      it reaches no document table at all.
+
+      Every sibling scan already did this — `money-comparison`'s `readable`,
+      `isolation-scan`'s `readableSource` — on the rule `enclosing.ts` states:
+      prose about a query must not be counted as one. This was the copy that
+      did not, which is that module's own finding about copies drifting.
+
+      It matters in the dangerous direction too. A scan whose answer depends on
+      the comments can be **quieted** by editing them: deleting a sentence
+      could drop a screen out of the scan, and the test would go green while
+      the money went unlabelled.
+    */
+    const src = withoutComments(readFileSync(path, 'utf8'))
     for (const table of DOCUMENT_TABLES) {
       if (new RegExp(`\\b${table}\\.[a-zA-Z]`).test(src)) seen.add(table)
     }
@@ -260,6 +283,30 @@ describe('the honest remainder', () => {
     for (const row of NAME_COLLISIONS) {
       expect(row.because.length, row.expression).toBeGreaterThan(140)
     }
+  })
+
+  it('does not read a comment as a document', () => {
+    /**
+     * The scan's own tripwire, added in Phase 195 because that is how the hole
+     * was found: a docstring in `crm/proposals.ts` citing
+     * `payments.sweep_checkouts` as a precedent made the public proposal page
+     * look like a page that reads the payments table, and pulled a screen into
+     * the scan on the strength of a sentence.
+     *
+     * Asserted on a synthetic page rather than on the real tree, so it keeps
+     * failing if somebody drops the `withoutComments` call — a tree where no
+     * comment currently mentions a carrier would make the real-tree version of
+     * this check pass either way, which is Phase 121's "a check only ever seen
+     * to agree".
+     */
+    const page = "import { x } from '@/modules/crm/proposals'"
+
+    expect(documentsBehind(page)).toEqual([])
+
+    // And the same page against a module that really reads one, so the check
+    // is not passing because `documentsBehind` returns nothing at all.
+    const real = "import { y } from '@/modules/receivables/service'"
+    expect(documentsBehind(real).length).toBeGreaterThan(0)
   })
 
   it('measures the unclassified remainder rather than taking its word for it', () => {

@@ -389,8 +389,47 @@ export const SCREEN_MONEY: readonly ScreenMoney[] = [
  * instruction above — "it must never grow without somebody saying why" — turns
  * out to need a complete suite to enforce, because growing is invisible to any
  * run that does not reach this file.
+ *
+ * ## Nineteen in Phase 195: ten of them were reached by a comment
+ *
+ * `documentsBehind` read each module's **raw** source, so a sentence naming a
+ * table counted as a query against it. Every sibling scan already stripped
+ * comments — `money-comparison`'s `readable`, `isolation-scan`'s
+ * `readableSource` — on `enclosing.ts`' own rule that prose about a query must
+ * not be counted as one. This was the copy that did not, which is that
+ * module's own finding about copies drifting, one scan over.
+ *
+ * Found the way it had to be: Phase 195 gave `lapseExpiredProposals` a
+ * docstring citing the precedent it was built on, the checkout sweep, written
+ * as a dotted job name. `payments` is a denominated carrier, so that sentence
+ * made `crm/proposals.ts` look like a module reading the payments table — and
+ * the public proposal page, whose only hit in any module was that comment,
+ * acquired a document and brought `p/[token]/acceptance-panel.tsx` into the
+ * scan. A register moved because somebody wrote prose.
+ *
+ * Measured both ways, the remainder is **29 raw and 19 stripped**. Ten screens
+ * were in this list only because a comment somewhere mentioned a table:
+ * `assets:Due`, `budgets:BudgetRow`, `budgets:Grid`, `dimensions:Row`,
+ * `dimensions:UnassignedLine`, `proposals:Proposal`, `proposals:Service`,
+ * `manufacturing:Props`, `settings/chart:Account` and `takings:Day`.
+ *
+ * **Nothing is lost by their going**, and that is argued rather than assumed:
+ * every one of the ten is the company's own money on a screen that shows it —
+ * a depreciation schedule, a budget, a dimension roll-up, a trial balance, a
+ * day's till, a proposal and a catalogue price. `proposals` and
+ * `service_items` have no currency column at all, so those four cannot be
+ * foreign by construction; the rest are ledger figures, and `journal_lines`
+ * has no currency column either. The prose above said as much about them when
+ * they arrived — *"a ledger balance is the ledger's money"* — which is why
+ * they were counted instead of declared. They are now not reached, which is
+ * the more honest version of the same answer: this remainder is meant to be
+ * the screens somebody should look at, and ten of twenty-nine were in it by
+ * accident of punctuation.
+ *
+ * The scan is reach-based, so none of the ten is hidden rather than excluded:
+ * the day one of those pages really reads a document table, it comes back.
  */
-export const UNCLASSIFIED_CARRIERS = 29
+export const UNCLASSIFIED_CARRIERS = 19
 
 /**
  * Call sites where a face-column *name* appears on something that is not one.

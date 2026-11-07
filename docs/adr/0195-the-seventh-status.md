@@ -202,6 +202,54 @@ That is nominated below. It is deliberately not fixed here: widening the regex
 reclassifies writes tree-wide, and doing it in the same phase as two spec
 findings would mean nobody could tell which change moved which number.
 
+### And a register that moved because somebody wrote prose
+
+The full suite found two more, and the second is the phase's best finding by
+some distance.
+
+`money-comparison` caught `varianceBasisPoints(expenseCents,
+priorExpenseCents)` as a new comparison site, undeclared. Registered as
+`home-money`, argued from the schema: both operands are
+`comparativeProfitAndLoss` column totals, which are sums over `journal_lines`,
+and `journal_lines` has no currency column and never will. Same shape as
+`heldRevisions`, which went two phases undeclared; the difference is that this
+one was declared in the hour the comparison was written, which is all the
+register is for.
+
+`money-on-screen` caught something else. Its `documentsBehind` read each
+module's **raw** source, so a sentence naming a table counted as a query
+against it. `lapseExpiredProposals`' docstring cites the precedent it was built
+on — the checkout sweep, written as a dotted job name — and `payments` is a
+denominated carrier, so that sentence made `crm/proposals.ts` look like a
+module reading the payments table. The public proposal page, whose only hit in
+any module was that comment, acquired a document and pulled
+`p/[token]/acceptance-panel.tsx` into the scan.
+
+**A register moved because somebody wrote prose.** Every sibling scan already
+strips comments — `money-comparison`'s `readable`, `isolation-scan`'s
+`readableSource` — on `enclosing.ts`' own rule that prose about a query must
+not be counted as one. This was the copy that did not, which is that module's
+finding about copies drifting, one scan over. And the dangerous direction is
+the other one: a scan whose answer depends on the comments can be *quieted* by
+editing them, so deleting a sentence could drop a screen out of the scan while
+the test went green.
+
+Measured both ways, the remainder is **29 raw and 19 stripped**. Ten screens
+were in that list only by accident of punctuation, and nothing is lost by their
+going: every one is the company's own money on a screen that shows it — a
+depreciation schedule, a budget, a dimension roll-up, a trial balance, a day's
+till, a proposal, a catalogue price. `proposals` and `service_items` have no
+currency column at all, so four of them cannot be foreign by construction, and
+the rest are ledger figures. The file's own prose had said as much when they
+arrived — *"a ledger balance is the ledger's money"* — which is why they were
+counted rather than declared. Not being reached is the more honest version of
+the same answer: this remainder is meant to be the screens somebody should
+look at.
+
+A tripwire goes with the fix, on a synthetic page rather than the real tree,
+because a tree where no comment happens to mention a carrier would let the
+real-tree version pass either way. Phase 121's rule, applied to the repair.
+
 ## What this does not do
 
 **It does not expire an opportunity, or close one.** Only the proposal.
@@ -225,6 +273,23 @@ message is the last thing to edit in a phase that is relying on it.
 work"* as the last unmeasured sentence in the audit, and it still is.
 
 ## Nominated for Phase 196
+
+**The source scans, audited as a set.**
+
+Three of them reported this phase, and two reported a hole in themselves:
+`money-on-screen` had been reading comments as code since Phase 124, and
+`scanWrites` cannot see a write keyed by a fetched row's own id. Both were
+found the same way — by a change moving a count the wrong amount — and neither
+would have been found by reading the scan.
+
+So the question for 196 is not either one of them, it is: **what else do the
+scans not see?** There are five or six reading the same tree with five or six
+private copies of "readable source", and `enclosing.ts` already exists because
+two of those copies had drifted and one was wrong. This phase found a third.
+The work is to measure each scan's reach against the thing it claims to cover,
+and the cheapest honest start is the one below.
+
+### Starting with the write census
 
 **`scanWrites`' blind spot, and the census denominator.**
 

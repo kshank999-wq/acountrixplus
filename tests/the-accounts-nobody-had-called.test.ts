@@ -493,7 +493,32 @@ describe('the assistant, which starts after the finding', () => {
 
     expect(keys).toContain('account.strategy')
     expect(keys).toContain('design.layout')
-    expect(new Set(keys).size).toBe(keys.length)
+
+    /*
+      This asserted `new Set(keys).size === keys.length` — one entry per key —
+      and **Phase 195 broke it on purpose**, which is the finding rather than
+      the inconvenience. `insights.business` has a version 2 and keeps its
+      version 1, because the gateway writes `promptVersion` into every
+      `ai_requests` row and a version that can be rewritten is not a version.
+
+      The old assertion was a check that had only ever agreed (Phase 121): it
+      read as "no duplicate keys" and was really "nothing has ever been
+      versioned". The invariant that was always meant is one entry per
+      (key, version) — two entries sharing both would make `resolvePrompt`'s
+      highest-version pick ambiguous, and it sorts rather than refuses.
+    */
+    const pairs = BUILT_IN_PROMPTS.map((entry) => `${entry.key}@${entry.version}`)
+    expect(new Set(pairs).size).toBe(pairs.length)
+
+    // And every key's versions are contiguous from 1, so a gap cannot hide a
+    // version somebody deleted while `ai_requests` rows still cite it.
+    for (const key of new Set(keys)) {
+      const versions = BUILT_IN_PROMPTS.filter((entry) => entry.key === key)
+        .map((entry) => entry.version)
+        .sort((a, b) => a - b)
+
+      expect(versions, key).toEqual(versions.map((_, index) => index + 1))
+    }
   })
 
   it('refuses before the gateway when nothing is outstanding', async () => {
