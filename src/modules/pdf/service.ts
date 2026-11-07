@@ -8,6 +8,7 @@ import {
   proposalVersions,
 } from '@/db/schema'
 import { parseBlocks, visibleBlocks } from '@/modules/design/blocks'
+import { renderQrCodes } from '@/modules/design/qr'
 import { disclosureForDocument, proposalRenderContext } from '@/modules/design/documents'
 import { teamForDocument } from '@/modules/studio/team'
 import { storeDocument, attachDocument } from '@/modules/evidence/service'
@@ -209,6 +210,16 @@ export async function proposalRenderInput(
       proposal was sent.
     */
     images: await imagesFor(companyId, { blocks, logoAssetId, team }, exec),
+    /*
+      The QR codes (Phase 193). Encoded from the blocks this document holds,
+      which is why it happens here and not in the pure renderer.
+
+      `renderQrCodes` had **no caller anywhere in the application** until this
+      phase — not in `src`, not in a test — so §8's "QR codes" produced a
+      labelled placeholder on every surface that drew one, with the raw URL
+      printed under it on the client's own page.
+    */
+    qrCodes: await renderQrCodes(blocks),
     merge: rendered?.context ?? {},
     pageSize: document.pageSize as 'letter' | 'a4' | 'legal',
     orientation: document.orientation as 'portrait' | 'landscape',

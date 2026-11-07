@@ -13,6 +13,7 @@ import { listTeamMembers, teamForDocument } from '@/modules/studio/team'
 import { listAssets } from '@/modules/studio/assets'
 import { aiAvailable } from '@/modules/ai/settings'
 import { parseBlocks, visibleBlocks } from '@/modules/design/blocks'
+import { renderQrCodes } from '@/modules/design/qr'
 import { unresolvedInBlocks } from '@/modules/design/merge-fields'
 import { Designer } from '@/components/design/designer'
 
@@ -91,6 +92,7 @@ export default async function DesignPage({ params }: { params: Promise<{ id: str
         isEditable={proposal.status === 'draft' && can(actor, 'proposals:manage')}
         statusNote={`This proposal is ${proposal.status.replace('_', ' ')} — its sent version is locked.`}
         initialBlocks={blocks}
+        qrCodes={await renderQrCodes(blocks)}
         setup={{
           pageSize: document.pageSize,
           orientation: document.orientation,

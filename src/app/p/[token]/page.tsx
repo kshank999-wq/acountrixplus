@@ -15,6 +15,7 @@ import { isAcceptable } from '@/modules/crm/acceptance'
 import { isParties } from '@/modules/crm/parties'
 import { proposalRenderContext } from '@/modules/design/documents'
 import { parseBlocks, visibleBlocks } from '@/modules/design/blocks'
+import { renderQrCodes } from '@/modules/design/qr'
 import { teamForDocument } from '@/modules/studio/team'
 import { assetSizes } from '@/modules/studio/assets'
 import { truncateIp } from '@/modules/crm/intake'
@@ -212,6 +213,17 @@ export default async function PublicProposalPage({
             assetUrl,
             teamMembers: teamPool,
             assetSizes: assetDimensions,
+            /*
+              The QR codes (Phase 193). Encoded server-side from the blocks
+              this client was sent, so the markup is the same in the browser,
+              in print and in the PDF.
+
+              Nothing supplied this until now, so every QR block on a
+              client-facing page drew a dashed box labelled "QR" with the raw
+              URL printed under it — which on the one page a client reads is
+              worse than drawing nothing.
+            */
+            qrCodes: await renderQrCodes(readerBlocks),
             signatureSlot: (
               <AcceptancePanel
                 token={token}

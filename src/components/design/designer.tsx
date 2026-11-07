@@ -86,6 +86,7 @@ export function Designer({
   clauses,
   assets,
   team = [],
+  qrCodes,
   teamPool = [],
   aiEnabled = false,
 }: {
@@ -123,6 +124,21 @@ export function Designer({
     industry: string | null
   }>
   clauses: Array<{ id: string; title: string; body: string; approved: boolean }>
+  /**
+   * QR codes for the blocks as they were **loaded**, keyed by block id
+   * (Phase 193).
+   *
+   * Encoded on the server, because the encoder is, and passed down rather
+   * than fetched: the preview renders through the same component the client's
+   * page does, and that component takes the markup ready-made.
+   *
+   * A block the author has just added, or whose value they have just changed,
+   * is not in here and falls back to the labelled placeholder until the
+   * document is saved and the page refreshes. That is the honest answer
+   * rather than a gap — the placeholder shows what *will* be encoded — and it
+   * is the one thing the author sees that a reader never does.
+   */
+  qrCodes?: Record<string, string>
   assets: Array<{ id: string; filename: string }>
   /**
    * The active team directory, for the `team` block's picker (Phase 183).
@@ -752,6 +768,7 @@ export function Designer({
                 logoUrl: brand?.logoAssetId ? assetUrl(brand.logoAssetId) : null,
                 assetUrl,
                 teamMembers: teamPool,
+                qrCodes,
                 /*
                   Measured in the browser as the preview loads (Phase 186).
 

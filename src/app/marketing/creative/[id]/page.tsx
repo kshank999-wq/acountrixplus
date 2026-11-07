@@ -17,6 +17,7 @@ import { listTeamMembers, teamForDocument } from '@/modules/studio/team'
 import { listAssets } from '@/modules/studio/assets'
 import { aiAvailable } from '@/modules/ai/settings'
 import { parseBlocks } from '@/modules/design/blocks'
+import { renderQrCodes } from '@/modules/design/qr'
 import { NoAccess } from '../../ui'
 
 export const dynamic = 'force-dynamic'
@@ -83,6 +84,7 @@ export default async function CreativeDesignPage({
         title={document.name}
         isEditable={can(actor, 'marketing:manage')}
         initialBlocks={blocks}
+        qrCodes={await renderQrCodes(blocks)}
         setup={{
           pageSize: document.pageSize,
           orientation: document.orientation,

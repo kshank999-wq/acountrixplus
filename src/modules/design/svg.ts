@@ -110,8 +110,21 @@ const SHARED_ATTRIBUTES = [
  * there is nothing for a reference to reach and nothing for `id` to be the
  * target of. **If a referencing element is ever allowed, dropping `id` stops
  * being safe**, and that is the sentence to read before adding one.
+ *
+ * The `*-rendering` hints joined them in Phase 193, for a measured reason
+ * rather than a felt one: **this application's own QR generator emits
+ * `shape-rendering="crispEdges"`**, and that one attribute was the only thing
+ * standing between a QR code and the PDF — which had been printing an empty
+ * box labelled "QR" since Phase 5.
+ *
+ * They qualify on the same test as the rest. A rendering hint asks for sharper
+ * edges or smoother text; it changes no coordinate and no colour, so a drawing
+ * without it is the same drawing. `vector-effect` is deliberately **not** here
+ * and is refused: `non-scaling-stroke` changes a stroke's width under a
+ * transform, which is geometry wearing a hint's name.
  */
-const IGNORED_ATTRIBUTE = /^(?:id|class|role|aria-[\w-]+|data-[\w-]+|xmlns:[\w.-]+|[\w.-]+:[\w.-]+)$/
+const IGNORED_ATTRIBUTE =
+  /^(?:id|class|role|aria-[\w-]+|data-[\w-]+|xmlns:[\w.-]+|[\w.-]+:[\w.-]+|(?:shape|text|image|color)-rendering)$/
 
 const ELEMENT_ATTRIBUTES: Record<SvgElement, readonly string[]> = {
   /*

@@ -95,6 +95,18 @@ export type RenderInput = {
    */
   team?: RenderedTeamMember[]
   /**
+   * Pre-rendered QR codes as SVG, by block id (Phase 193).
+   *
+   * Supplied rather than encoded here, for the reason every other heavy input
+   * to this function is: `renderDocumentPdf` is pure and synchronous, and
+   * `QRCode.toString` is neither.
+   *
+   * Absent means the placeholder, which is still the right answer for a value
+   * too long to encode — but it stopped being the right answer for every QR
+   * block in the application, which is what it was until this phase.
+   */
+  qrCodes?: Record<string, string>
+  /**
    * The pictures, by asset id, already prepared for embedding (Phase 185).
    *
    * Prepared by the caller rather than here, because reading bytes out of the
@@ -1218,14 +1230,38 @@ class Composer {
                   ? MARGIN + this.contentWidth - size
                   : MARGIN
 
-            page.frame({ x, y, width: size, height: size, color: this.muted })
-            page.text('QR', {
-              x: x + size / 2 - 8,
-              y: y + size / 2 - base / 2,
-              font: this.body,
-              size: base,
-              color: this.muted,
-            })
+            /*
+              The code itself, since Phase 193.
+
+              This drew an empty box with the letters "QR" in it from Phase 5
+              until now — Phase 185's placeholder-frame defect, surviving in
+              the one block type that had always produced real vector output.
+              ADR 0189 noticed it in passing (*"that QR output is the thing to
+              look at first, because it already produces SVG the page renders
+              and the PDF does not"*) and Phase 190 built the converter that
+              draws it without wiring this up.
+
+              Nothing is rasterised: `page.vector` turns the encoder's own
+              paths into PDF path operators, so a code printed on a
+              capability statement is as sharp as the printer can make it,
+              which is why `qr.ts` encodes to SVG in the first place.
+            */
+            const svg = this.input.qrCodes?.[block.id]
+
+            if (svg) {
+              page.vector({ svg, x, y, width: size, height: size })
+            } else {
+              // Still the right answer for a value too long to encode, which
+              // is the case `renderQrCodes` drops rather than throwing on.
+              page.frame({ x, y, width: size, height: size, color: this.muted })
+              page.text('QR', {
+                x: x + size / 2 - 8,
+                y: y + size / 2 - base / 2,
+                font: this.body,
+                size: base,
+                color: this.muted,
+              })
+            }
 
             if (caption) {
               page.text(caption, {
