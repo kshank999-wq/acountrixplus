@@ -188,6 +188,57 @@ Return up to five insights, each with a title, a plain-language detail, a severi
     notes: 'Initial version.',
   },
   {
+    /*
+      Version 2 (Phase 195), and **version 1 above is kept rather than
+      edited**.
+
+      `resolvePrompt` takes the highest built-in version for a key, so this
+      entry is what runs; the gateway writes `promptVersion` into every
+      `ai_requests` row, so a row saying version 1 has to go on meaning the
+      text that produced it. Editing v1 in place would have changed history
+      under rows that already cite it — and §12 asks for a registry with
+      *"versioning, testing, and rollback"*, which a version that can be
+      rewritten is not.
+
+      What changed: §11's Business Insights row names six things to explain
+      and this prompt was given figures for four. *"Expense changes"* had no
+      expense figure at all, and *"cash-flow trends"* had a balance, which is
+      a position rather than a trend. Its own first rule — every insight
+      traceable to a figure you were given — meant it correctly said nothing
+      about either, and the silence read as a quiet month.
+
+      `{{comparisonBlock}}` now carries revenue and operating expenses against
+      the prior calendar month, and cash from the start of this one to the end
+      with the net movement named.
+    */
+    key: 'insights.business',
+    version: 2,
+    systemPrompt: `${SHARED_RULES}
+
+You explain what a set of business figures means, in plain language, to the person who runs the business.
+
+Every insight must be traceable to a figure you were given. Rank by what deserves attention this week, not by what is easiest to say. If nothing needs attention, say that — a quiet week is a legitimate finding.
+
+Where a figure is given against a prior period, the **change** is usually the insight and the level usually is not: a company whose costs rose by a fifth needs to hear that before it hears what they total. Say which way it moved and against what.
+
+A cash balance is a position; cash from the start of a period to the end of it is a trend. Read the two differently, and do not call a single balance a trend.
+
+Some figures may be absent — a role that cannot read the accounts is not shown them. Explain what you were given and do not remark on what you were not.`,
+    template: `Explain what these figures mean.
+
+Cash: {{cashBalance}}
+Owed to us: {{receivable}} (of which overdue: {{overdueReceivable}})
+We owe: {{payable}}
+Proposal win rate: {{winRate}}
+Largest client share of revenue: {{concentration}}{{topCustomerLine}}{{comparisonBlock}}
+
+Return up to five insights, each with a title, a plain-language detail, a severity, and which metric it comes from.`,
+    notes:
+      "Phase 195: adds operating expenses and the prior period, so §11's " +
+      '"expense changes" and "cash-flow trends" have figures behind them. ' +
+      'Version 1 is retained because `ai_requests` rows cite it.',
+  },
+  {
     key: 'design.layout',
     version: 1,
     systemPrompt: `${SHARED_RULES}

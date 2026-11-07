@@ -4,6 +4,7 @@ import { memberships } from '@/db/schema'
 import { hasPermission, type Permission, type Role } from '@/modules/permissions'
 import { notify } from '@/modules/mobile/notifications'
 import { openWork } from '@/modules/engagement/tasks'
+import { lapseExpiredProposals } from '@/modules/crm/proposals'
 import { moduleEnabled } from '@/modules/industry/modules'
 import { runRent } from '@/modules/properties/billing'
 import { registerHandler, type JobContext } from '../registry'
@@ -159,6 +160,44 @@ registerHandler({
       month: result.period.periodStart,
       invoicesRaised: result.invoicesRaised,
       totalCents: result.totalCents,
+    }
+  },
+})
+
+/**
+ * Lapses proposals whose validity date has passed (Phase 195, spec §9).
+ *
+ * The seventh of §9's seven statuses had no writer: `expired` was in the enum
+ * from Phase 3, read by the analytics and by the client-facing page, and set
+ * by nothing. `lapseExpiredProposals` carries the measurement; this is the
+ * schedule that makes it happen without somebody remembering to.
+ *
+ * Reports a skip when it found nothing, for the reason the checkout sweep
+ * gives: a job announcing "0 lapsed" every day is one nobody reads on the day
+ * it matters (ADR 0024).
+ *
+ * Running twice lapses once. The second pass finds no proposal in `sent` or
+ * `viewed` with a past date, because the first already moved them — the
+ * precondition is in the query rather than in this handler, which is what
+ * makes it safe to retry.
+ */
+registerHandler({
+  kind: 'proposals.lapse_expired',
+  label: 'Mark proposals that ran out of time',
+  handler: async (context: JobContext) => {
+    const actor = context.actor!
+    const asOf = String(context.payload.asOf ?? new Date().toISOString().slice(0, 10))
+
+    const result = await lapseExpiredProposals(actor, { asOf })
+    if (result.lapsed === 0) return { skipped: `Nothing had expired as of ${asOf}.` }
+
+    return {
+      asOf,
+      lapsed: result.lapsed,
+      summary:
+        result.lapsed === 1
+          ? `Proposal ${result.numbers[0]} expired without a decision.`
+          : `${result.lapsed} proposals expired without a decision.`,
     }
   },
 })

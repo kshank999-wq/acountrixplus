@@ -1,5 +1,5 @@
 import { randomBytes } from 'node:crypto'
-import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import {
   companies,
@@ -488,11 +488,25 @@ export async function recordView(
   return proposal
 }
 
-/** Records the client's decision on a proposal (spec §9). */
+/**
+ * Records the client's decision on a proposal (spec §9).
+ *
+ * **`expired` is deliberately not one of the statuses this accepts** (Phase
+ * 195). Expiry is a function of the clock rather than a judgement somebody
+ * makes, and `lapseExpiredProposals` below is its only writer. Leaving it here
+ * would have meant two writers of one status with different side effects: this
+ * function stamps `decided_at`, and a lapse must not, because §9's *"average
+ * time to decision"* counts every proposal carrying both timestamps and a
+ * deadline passing is the absence of a decision rather than a fast one.
+ *
+ * Somebody who wants to close a lapsed proposal by hand has `no_decision`,
+ * which is what that is. The buttons on the proposal list have always offered
+ * exactly the three this accepts.
+ */
 export async function decideProposal(
   ctx: ActorContext,
   proposalId: string,
-  status: 'won' | 'lost' | 'expired' | 'no_decision',
+  status: 'won' | 'lost' | 'no_decision',
 ) {
   requirePermission(ctx, 'proposals:manage')
 
@@ -529,6 +543,131 @@ export async function decideProposal(
 
     return updated
   })
+}
+
+/**
+ * Moves proposals past their validity date to `expired` (Phase 195, spec §9).
+ *
+ * ## The status nobody wrote
+ *
+ * §9's first bullet asks for *"proposal counts and value by Draft, Sent,
+ * Viewed, Won, Lost, Expired, and No Decision"*, and `proposalStatusEnum` has
+ * carried all seven since Phase 3. Measured in Phase 195, **six were
+ * reachable**: nothing in the application ever set `expired`.
+ *
+ * Every part of the answer was already here. `proposals.expires_on` is
+ * recorded, the client-facing page has refused a lapsed proposal by comparing
+ * it against today since Phase 3 (`acceptance.ts`), and `serviceBreakdown`
+ * already classifies `expired` alongside `lost`. What was missing is the one
+ * write that makes the company's own reporting agree with what its client is
+ * already being told — the dashboard counted a lapsed proposal as `sent`, open
+ * and awaiting a reply, while the link it was sent on said it had expired.
+ *
+ * That is this project's two-documents defect in its usual shape, and the
+ * usual shape of the last six phases besides: Phase 192's build nobody ran,
+ * Phase 193's function nobody called, Phase 194's price nobody re-read, and
+ * now a status nobody wrote.
+ *
+ * ## Why a sweep rather than a derived read
+ *
+ * Deriving it at every reader would mean each one remembering the comparison,
+ * and `byStatus` is a `group by` — it cannot apply a per-row predicate without
+ * becoming a different query. The project already answers this exact question
+ * for payments: `payments.sweep_checkouts` writes `status = 'expired'` on
+ * checkouts nobody came back from, and the service re-checks the date on read
+ * anyway. `isAcceptable` is that re-check here, and it stays, because a client
+ * can open the link in the hour before a sweep runs.
+ *
+ * `decided_at` is left alone, for the reason given on `decideProposal`.
+ *
+ * The opportunity is **not** moved. A proposal lapsing is not a deal lost: a
+ * revised proposal on the same opportunity is the ordinary next step, and
+ * `sendProposal` already advances the stage when one goes out. Closing the
+ * opportunity is a judgement, and §9 has `lossReasons` for recording it.
+ */
+export async function lapseExpiredProposals(
+  ctx: ActorContext,
+  opts: { asOf?: string } = {},
+): Promise<{ lapsed: number; numbers: string[] }> {
+  requirePermission(ctx, 'proposals:manage')
+
+  const asOf = opts.asOf ?? new Date().toISOString().slice(0, 10)
+
+  /*
+    `lt` rather than `lte`: `expires_on` is the last day the proposal is good
+    for, which is how `isAcceptable` reads it. A proposal expiring today is
+    still acceptable today, and the two must not disagree by a day.
+  */
+  const candidates = await db
+    .select({
+      id: proposals.id,
+      number: proposals.number,
+      status: proposals.status,
+      opportunityId: proposals.opportunityId,
+    })
+    .from(proposals)
+    .where(
+      scoped(
+        ctx,
+        proposals,
+        inArray(proposals.status, ['sent', 'viewed']),
+        isNotNull(proposals.expiresOn),
+        lt(proposals.expiresOn, asOf),
+      ),
+    )
+
+  const numbers: string[] = []
+
+  for (const { id: proposalId, number, status, opportunityId } of candidates) {
+    /*
+      Read first and then written one row at a time, so the audit trail can
+      say which status each proposal came *from* — `viewed` and `sent` are
+      different facts about whether the client ever opened it, and a
+      before/after record that guessed would be worse than none.
+
+      The status guard is repeated on the write, as the checkout sweep does:
+      if a decision landed between the read and here, that write wins and the
+      database arbitrates.
+
+      Destructured to `proposalId` rather than written as `proposal.id`, and
+      not only for the reading: `modules/source/isolation-scan` counts a write
+      as keyed when its `where` matches `eq(x.y, input.z)` or `eq(x.y, zId)`,
+      so a write keyed by a local row's `.id` is **absent from the census**
+      that §19's isolation claim is argued from. This one is tenant-filtered
+      either way; the naming is what makes it visible. The scanner's blind spot
+      is a finding in its own right and ADR 0195 nominates it.
+    */
+    const [updated] = await db
+      .update(proposals)
+      .set({ status: 'expired', updatedAt: new Date() })
+      .where(
+        and(
+          eq(proposals.id, proposalId),
+          eq(proposals.companyId, ctx.companyId),
+          eq(proposals.status, status),
+        ),
+      )
+      .returning({ id: proposals.id })
+
+    if (!updated) continue
+
+    await logActivity(ctx, opportunityId, {
+      kind: 'proposal_decided',
+      summary: `Proposal ${number} expired without a decision`,
+    })
+
+    await recordAudit(ctx, {
+      action: 'proposal.expire',
+      entityType: 'proposal',
+      entityId: proposalId,
+      before: { status },
+      after: { status: 'expired', asOf },
+    })
+
+    numbers.push(number)
+  }
+
+  return { lapsed: numbers.length, numbers }
 }
 
 /** Replaces a draft proposal's line items and recomputes its totals. */

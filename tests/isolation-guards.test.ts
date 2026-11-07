@@ -113,9 +113,16 @@ describe('every write that can be aimed at a row', () => {
     // counts Phase 177 moved went unnoticed for two phases and Phase 179's full
     // run found them, which is the argument for running this file in the phase
     // rather than after it.
-    expect(WRITES.length).toBe(118)
+    //
+    // 119 since Phase 195 and the proposal expiry sweep — one `update` keyed
+    // by the row's own id and filtered on the acting company. Worth saying
+    // where it nearly was not counted: `scanWrites` recognises a keyed write
+    // from `eq(x.y, input.z)` or `eq(x.y, zId)`, so the same write expressed
+    // as `eq(proposals.id, proposal.id)` is invisible here. ADR 0195
+    // nominates that blind spot; this number is a floor, not a total.
+    expect(WRITES.length).toBe(119)
     expect(by).toEqual({
-      'explicit-company': 68,
+      'explicit-company': 69,
       'scoped-write': 29,
       'read-then-refuse': 9,
       'owner-helper': 4,

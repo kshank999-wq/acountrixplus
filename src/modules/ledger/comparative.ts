@@ -234,6 +234,31 @@ export const COMPARISON_LABELS: Record<ComparisonKind, string> = {
 }
 
 /**
+ * The calendar month a date falls in, as a window (Phase 195).
+ *
+ * Here rather than at the caller because this module already owns period
+ * arithmetic and already exports `comparisonWindows` *"so the UI offers the
+ * same three comparisons an accountant would ask for by name rather than
+ * making somebody type four dates"*. A caller computing month boundaries by
+ * hand would be a second answer to a question this file exists to answer, and
+ * the one that got the last day of February wrong.
+ *
+ * Read in UTC, deliberately: every date in the ledger is a `date` column with
+ * no zone, and reading `at` in the server's local zone would put a
+ * transaction posted on the first into the previous month for half the world.
+ */
+export function calendarMonth(at: Date): { startDate: string; endDate: string } {
+  const year = at.getUTCFullYear()
+  const month = at.getUTCMonth() + 1
+  const pad = (value: number) => String(value).padStart(2, '0')
+
+  return {
+    startDate: `${year}-${pad(month)}-01`,
+    endDate: `${year}-${pad(month)}-${pad(lastDayOfMonth(year, month))}`,
+  }
+}
+
+/**
  * Builds the two windows for a comparison.
  *
  * `prior_period` shifts back a whole calendar period when the window is one —

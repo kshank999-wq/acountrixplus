@@ -145,6 +145,17 @@ export const COMPANY_SCHEDULES: ScheduleDefault[] = [
       'morning reads the summary of their account before the demand about one invoice. Does ' +
       'nothing at all unless somebody has switched statement runs on.',
   },
+  // --- Phase 195 ------------------------------------------------------------
+  {
+    kind: 'proposals.lapse_expired',
+    cadence: 'daily',
+    hourUtc: 1,
+    why:
+      'Daily and early, because the client-facing link already refuses a lapsed proposal from ' +
+      'the moment the date passes and the dashboard should not go on calling it open pipeline ' +
+      'for a working day. Before the morning digests, so what they count is already true. ' +
+      'Running twice lapses once — the status guard on the write decides.',
+  },
 ]
 
 /** Housekeeping that spans every tenant. */

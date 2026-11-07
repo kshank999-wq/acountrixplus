@@ -6,6 +6,7 @@ import {
   opportunities,
   organizations,
   proposalItems,
+  proposalStatusEnum,
   proposals,
   serviceItems,
   users,
@@ -411,12 +412,29 @@ export async function proposalStats(
     .from(proposals)
     .where(scoped(ctx, proposals, ...conditions))
 
+  /*
+    Seeded with every status the enum has, in the enum's order, so the map
+    carries all seven §9 names and reads in pipeline order (Phase 195).
+
+    Built from the rows alone it held only the statuses that happened to have
+    a proposal, in whatever order the query returned them — and a status
+    missing from a table of counts is ambiguous between "none" and "not
+    reported". That ambiguity is how `expired` stayed invisible: it had no
+    writer for a hundred and ninety phases, and the dashboard showed exactly
+    what it shows for a status with no rows, which is nothing.
+  */
   const byStatus: Record<string, { count: number; valueCents: number }> = {}
+  for (const status of proposalStatusEnum.enumValues) {
+    byStatus[status] = { count: 0, valueCents: 0 }
+  }
+
+  // No fallback, because the seeding above is what guarantees the key: a
+  // status reaching here that the enum does not have would be a status the
+  // database could not have stored.
   for (const row of rows) {
-    const entry = byStatus[row.status] ?? { count: 0, valueCents: 0 }
+    const entry = byStatus[row.status]
     entry.count++
     entry.valueCents += row.totalCents
-    byStatus[row.status] = entry
   }
 
   // Only proposals that actually reached a client can be viewed.

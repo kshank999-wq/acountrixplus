@@ -12,6 +12,7 @@ import {
   type MeasuredFacts,
 } from '@/modules/source/claims'
 import { isolationCounts } from '@/modules/source/isolation-scan'
+import { BUILT_IN_PROMPTS } from '@/modules/ai/prompts'
 
 /**
  * Numbers in prose that nothing reads (Phase 179).
@@ -80,6 +81,12 @@ async function measure(): Promise<MeasuredFacts> {
     */
     ...isolationCounts(),
     /*
+      Distinct keys, not entries (Phase 195). `insights.business` has two
+      versions and one capability, so counting entries would report eleven
+      things the AI module can be asked to do when there are ten.
+    */
+    promptKeys: new Set(BUILT_IN_PROMPTS.map((prompt) => prompt.key)).size,
+    /*
       Both measured the way `tests/the-id-a-caller-hands-in.test.ts` measures
       them, from `pg_constraint` — a foreign key from one tenant-scoped table to
       another, and the subset whose key carries the tenant.
@@ -127,7 +134,7 @@ describe('the register itself', () => {
     expect(PINNED_CLAIMS.flatMap((claim) => pinnedClaimArgues(claim))).toEqual([])
   })
 
-  it('declares fourteen claims, all of them pinned', () => {
+  it('declares fifteen claims, all of them pinned', () => {
     /**
      * Phase 126, and the second number is no longer the honest half: since
      * Phase 187 there is no unmeasured entry.
@@ -146,10 +153,16 @@ describe('the register itself', () => {
      * 181 to 185. Pinned for what the sentence stands for rather than for its
      * size: "done — 181 tables" reads as a section somebody counted, and the
      * count is the only part of it a machine can keep honest.
+     *
+     * Fifteen since Phase 195, and the fifteenth is a *third* claim in the
+     * same audit — its §11 prompt count, pinned on distinct keys rather than
+     * on entries, because that phase added a second version of one prompt and
+     * kept the first. Three entries in one file is the register reporting
+     * which document it most expects to go stale.
      */
-    expect(PINNED_CLAIMS).toHaveLength(14)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(14)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(14)
+    expect(PINNED_CLAIMS).toHaveLength(15)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(15)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(15)
   })
 
   it('pins all four numbers of the sentence that states four', () => {

@@ -91,6 +91,19 @@ export type MeasuredFacts = {
   scopedReads: number
   writes: number
   scopedWrites: number
+  /**
+   * Distinct keys in `BUILT_IN_PROMPTS` (Phase 195).
+   *
+   * **Keys, not entries.** The two parted company in Phase 195, when
+   * `insights.business` gained a version 2 and version 1 stayed where it was
+   * — eleven entries for ten capabilities. The audit's sentence is about how
+   * many things the AI module can be asked to do, so a new version of an
+   * existing prompt must not move it and a new capability must.
+   *
+   * A source fact rather than a database one, like the four above, and
+   * supplied for the same reason: one shape for every fact.
+   */
+  promptKeys: number
 }
 
 export type PinnedClaim = {
@@ -300,6 +313,22 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
       'are pinned now, in order, because pinning the first and ignoring three is how three drift ' +
       'unnoticed.',
     measure: (facts) => [facts.scopedReads, facts.reads, facts.scopedWrites, facts.writes],
+  },
+  {
+    key: 'audit-prompt-key-count',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /holds \*\*(\d+) prompt keys\*\*/,
+    because:
+      "The second number in this audit's §11 section, and the one its headline claim rests on: " +
+      '*"seven of seven AI capabilities"* is argued from the prompts behind them. It read ' +
+      '*"ten prompts"* when Phase 195 re-measured it, which was true of the keys and about to ' +
+      'stop being true of the entries — that phase added a second version of ' +
+      '`insights.business` and kept the first, so the list holds eleven entries for ten ' +
+      'capabilities. Pinned on **keys**, which is what the sentence is about: a new version of ' +
+      'an existing prompt must not move it and a new capability must. The §11 row itself is ' +
+      'the other half of Phase 195 and is prose a person has to re-read; this is the part a ' +
+      'machine can hold.',
+    measure: (facts) => facts.promptKeys,
   },
 ]
 

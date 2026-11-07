@@ -209,8 +209,8 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 569 of ' +
-      'the 934 reads, against 29 of the 118 writes. The two halves of this system are guarded ' +
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 570 of ' +
+      'the 935 reads, against 29 of the 119 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
       'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
       'needed correcting by hand in every phase that touched a read — 180, 183, 184, 185 and ' +
@@ -218,7 +218,12 @@ const READ_GUARDS: readonly IsolationGuard[] = [
       'number. Phase 187 moved them into `modules/source/isolation-scan` and pinned all four, ' +
       'and the two phases after it both moved reads: the register reported each drift itself, ' +
       'naming which of the four — number 1 in Phase 188, number 2 in Phase 189 — instead of ' +
-      'somebody noticing. Number 2 is one the old single-capture pattern could not have seen.',
+      'somebody noticing. Number 2 is one the old single-capture pattern could not have seen. ' +
+      'Phase 195 moved numbers 1, 2 and 4, and found while doing so that the write census has ' +
+      'a blind spot: `scanWrites` counts a write as keyed only when its `where` matches ' +
+      '`eq(x.y, input.z)` or `eq(x.y, zId)`, so a write keyed by a local row’s `.id` is not in ' +
+      'the denominator at all. ADR 0195 nominates it; nothing here is wrong, and the number ' +
+      'this sentence states is a floor rather than a total.',
   },
   {
     kind: 'join-inherited',

@@ -9,7 +9,12 @@ import {
   winLossSummary,
 } from '@/modules/crm/analytics'
 import { createOpportunity, createOrganization } from '@/modules/crm/opportunities'
-import { createProposal, decideProposal, sendProposal } from '@/modules/crm/proposals'
+import {
+  createProposal,
+  decideProposal,
+  lapseExpiredProposals,
+  sendProposal,
+} from '@/modules/crm/proposals'
 import { createServiceItem } from '@/modules/studio/service'
 import { createCompanyFixture, type Fixture } from './helpers'
 
@@ -64,7 +69,12 @@ async function aProposal(opts: {
     isSelected?: boolean
   }>
   send?: boolean
-  decide?: 'won' | 'lost' | 'expired' | 'no_decision'
+  // `expired` left out in Phase 195: `decideProposal` no longer takes it,
+  // because a lapse has no author. Use `expire` below, which goes through the
+  // one path that writes that status.
+  decide?: 'won' | 'lost' | 'no_decision'
+  /** Sends it, dates it yesterday, and runs the sweep (Phase 195). */
+  expire?: boolean
   /** Days between sending and deciding, backdated on the row. */
   decidedAfterDays?: number
 }) {
@@ -75,8 +85,20 @@ async function aProposal(opts: {
     items: opts.items,
   })
 
-  if (opts.send || opts.decide) await sendProposal(fixture.ctx, proposal.id)
+  if (opts.send || opts.decide || opts.expire) await sendProposal(fixture.ctx, proposal.id)
   if (opts.decide) await decideProposal(fixture.ctx, proposal.id, opts.decide)
+
+  if (opts.expire) {
+    /*
+      Through `lapseExpiredProposals` rather than by writing the status, which
+      is the whole point of Phase 195: before it, nothing in the application
+      could produce this status at all, and a test that set the column by hand
+      would have gone on passing against that.
+    */
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10)
+    await db.update(proposals).set({ expiresOn: yesterday }).where(eq(proposals.id, proposal.id))
+    await lapseExpiredProposals(fixture.ctx)
+  }
 
   if (opts.decidedAfterDays !== undefined) {
     /*
@@ -364,7 +386,7 @@ describe('performance by service, which is a different grain', () => {
     await aProposal({
       title: 'Expired',
       items: [{ description: 'Framing', unitPriceCents: 100_000, itemId: framing.id }],
-      decide: 'expired',
+      expire: true,
     })
 
     const [row] = await serviceBreakdown(fixture.ctx)

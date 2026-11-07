@@ -14,6 +14,13 @@ import {
 } from '@/db/schema'
 import { formatCents } from '@/lib/money'
 import { formatBasisPoints } from '@/modules/crm/analytics'
+import { cashFlowStatement } from '@/modules/ledger/cash-flow'
+import {
+  calendarMonth,
+  comparativeProfitAndLoss,
+  comparisonWindows,
+  varianceBasisPoints,
+} from '@/modules/ledger/comparative'
 import { can, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { ask } from './gateway'
 import { companyContext, renderServices, renderTransactions } from './retrieval'
@@ -282,7 +289,7 @@ export async function draftCampaignCopy(
  * an insight built from whatever else it can see — or nothing, which is the
  * honest answer rather than a fabricated one.
  */
-export async function businessInsights(ctx: ActorContext) {
+export async function businessInsights(ctx: ActorContext, at: Date = new Date()) {
   if (!can(ctx, 'reports:view')) {
     return {
       ok: false as const,
@@ -366,6 +373,68 @@ export async function businessInsights(ctx: ActorContext) {
     winRateBp = closed === 0 ? 0 : Math.round((Number(outcomes?.won ?? 0) / closed) * 10_000)
   }
 
+  /*
+    Expenses, cash movement, and the period before this one (Phase 195).
+
+    §11's Business Insights row names six things to explain, and two of them —
+    *"expense changes"* and *"cash-flow trends"* — had no figure behind them.
+    There was no expense figure at all, and for cash a single balance, which
+    is a position rather than a trend. The prompt's own first rule is that
+    *"every insight must be traceable to a figure you were given"*, so it did
+    the right thing with what it had: it stayed silent on both, and the silence
+    looked like a quiet month rather than a missing input.
+
+    Nothing new is computed here. `comparativeProfitAndLoss` has run two
+    columns of a real P&L since §13's comparative periods were built, and
+    `cashFlowStatement` has stated where cash started and finished since Phase
+    33. These are the calls that were never made.
+
+    Gated on `reports:financial`, the same way the win rate above is gated on
+    `crm:view` — a role that may not read the accounts does not get them back
+    narrated. Both reads require that permission themselves, so the gate is
+    also what keeps this from throwing.
+  */
+  let expenseCents = 0
+  let priorExpenseCents = 0
+  let revenueCents = 0
+  let priorRevenueCents = 0
+  let expenseVarianceBp: number | null = null
+  let openingCashCents = 0
+  let closingCashCents = 0
+  let netCashChangeCents = 0
+  let comparedTo = ''
+  let periodLabel = ''
+
+  if (can(ctx, 'reports:financial')) {
+    const month = calendarMonth(at)
+    const periods = comparisonWindows(month, 'prior_period')
+    const pnl = await comparativeProfitAndLoss(ctx, { periods })
+
+    const expenses = pnl.operatingExpenses.totalsCents
+    const revenue = pnl.revenue.totalsCents
+
+    expenseCents = expenses[0] ?? 0
+    priorExpenseCents = expenses[1] ?? 0
+    revenueCents = revenue[0] ?? 0
+    priorRevenueCents = revenue[1] ?? 0
+    expenseVarianceBp = varianceBasisPoints(expenseCents, priorExpenseCents)
+    comparedTo = periods[1]?.label ?? ''
+    periodLabel = periods[0]?.label ?? ''
+
+    /*
+      The current month only, rather than a second comparative column. A
+      statement that says where cash started, where it finished and what moved
+      it between is already a trend; the prior month's movement would be a
+      second one, and it costs two more passes over the whole ledger for a
+      sentence the revenue and expense columns above substantially already
+      give.
+    */
+    const flow = await cashFlowStatement(ctx, month)
+    openingCashCents = flow.openingCashCents
+    closingCashCents = flow.closingCashCents
+    netCashChangeCents = flow.netChangeInCashCents
+  }
+
   const figures = {
     cashBalanceCents: Number(cash?.total ?? 0),
     receivableCents: Number(receivable?.total ?? 0),
@@ -374,6 +443,16 @@ export async function businessInsights(ctx: ActorContext) {
     winRateBp,
     revenueConcentrationBp: concentrationBp,
     topCustomerName: topCustomer?.name ?? '',
+    expenseCents,
+    priorExpenseCents,
+    revenueCents,
+    priorRevenueCents,
+    expenseVarianceBp,
+    openingCashCents,
+    closingCashCents,
+    netCashChangeCents,
+    comparedTo,
+    periodLabel,
   }
 
   const result = await ask(ctx, {
@@ -387,6 +466,20 @@ export async function businessInsights(ctx: ActorContext) {
       winRate: winRateBp > 0 ? formatBasisPoints(winRateBp) : 'not enough closed deals',
       concentration: concentrationBp > 0 ? formatBasisPoints(concentrationBp) : 'no invoices yet',
       topCustomerLine: topCustomer ? `\nLargest client: ${topCustomer.name}` : '',
+      /*
+        One blank line of values rather than several keys, so a company that
+        cannot read the accounts gets a prompt with the section absent instead
+        of a prompt full of zeroes — which the model would have had to explain.
+      */
+      comparisonBlock: comparedTo
+        ? `\n\nThis period against ${comparedTo}:\n` +
+          `Revenue: ${formatCents(revenueCents)} (was ${formatCents(priorRevenueCents)})\n` +
+          `Operating expenses: ${formatCents(expenseCents)} ` +
+          `(was ${formatCents(priorExpenseCents)}` +
+          `${expenseVarianceBp === null ? '' : `, ${formatBasisPoints(Math.abs(expenseVarianceBp))} ${expenseVarianceBp >= 0 ? 'higher' : 'lower'}`})\n` +
+          `Cash over ${periodLabel}: ${formatCents(openingCashCents)} to ` +
+          `${formatCents(closingCashCents)} (net ${formatCents(netCashChangeCents)})`
+        : '',
     },
     input: figures,
     schema: insightsSchema,

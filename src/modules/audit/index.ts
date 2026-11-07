@@ -318,6 +318,15 @@ export type AuditAction =
   /** A question a client asked through the public link, answered (Phase 174). */
   | 'proposal.question_answered'
   | 'proposal.decide'
+  /**
+   * A proposal lapsed because its validity date passed (Phase 195).
+   *
+   * Separate from `proposal.decide` because it is a different kind of fact: a
+   * decision has an author and a lapse does not. The trail says which status
+   * the proposal lapsed *from*, since `sent` and `viewed` differ on whether
+   * the client ever opened it.
+   */
+  | 'proposal.expire'
   | 'lead.intake'
   | 'intake_key.create'
   | 'intake_key.revoke'

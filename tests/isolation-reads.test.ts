@@ -155,9 +155,15 @@ describe('every read from a company-scoped table', () => {
       and two `established-above` in `versionForClient`, which re-reads under
       a tenant the history above it has already settled.
     */
-    expect(READS.length).toBe(934)
+    /*
+      935 since Phase 195 and the expiry sweep, which reads the proposals it
+      is about to lapse so the audit trail can say which status each came
+      from. One read, `scoped-read`, and the write beside it is the hundred
+      and nineteenth.
+    */
+    expect(READS.length).toBe(935)
     expect(by).toEqual({
-      'scoped-read': 569,
+      'scoped-read': 570,
       'explicit-company': 265,
       'established-above': 33,
       'id-from-fetched-row': 21,

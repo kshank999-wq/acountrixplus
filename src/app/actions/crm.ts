@@ -294,7 +294,9 @@ export async function sendProposalAction(proposalId: string): Promise<ActionResu
 
 export async function decideProposalAction(
   proposalId: string,
-  status: 'won' | 'lost' | 'expired' | 'no_decision',
+  // `expired` is not here on purpose (Phase 195): a lapse is the clock's doing
+  // and `lapseExpiredProposals` is its only writer. See `decideProposal`.
+  status: 'won' | 'lost' | 'no_decision',
 ): Promise<ActionResult> {
   return run('/crm/proposals', async () => {
     const actor = await requireActor()

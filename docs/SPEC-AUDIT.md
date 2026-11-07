@@ -53,9 +53,9 @@ same failure to re-measure, and ADR 0164 states it as a rule.
 | 6 | Clients, Leads & Opportunity Pipeline | **done** — `modules/crm` |
 | 7 | Proposal / Estimate / Document Designer | **done** — `modules/design`, `modules/studio` |
 | 8 | Shared Marketing Creative Studio | **done** — `modules/marketing`, `modules/brand` |
-| 9 | Proposal Analytics & Sales Dashboard | **four gaps** — below |
+| 9 | Proposal Analytics & Sales Dashboard | **one status had no writer** — below |
 | 10 | Marketing & Strategic Prospecting | **done** — `modules/marketing/segments`, `campaigns` |
-| 11 | Optional AI Module | **five of seven** — below |
+| 11 | Optional AI Module | **seven rows, 25 of 33 functions** — below |
 | 12 | AI Technical Architecture | **done** — `modules/ai/gateway`, metering, provider registry |
 | 13 | Professional Accounting Workspace | **done** — every bullet, checked individually |
 | 14 | Roles, Permissions & Accountant Access | **done** — `modules/permissions`, `modules/practice` |
@@ -67,7 +67,7 @@ same failure to re-measure, and ADR 0164 states it as a rule.
 | 20 | Development Phases | Phases 0–8 all have shipped work |
 | 21–24 | Assignments, DoD, rules, next steps | — process |
 
-### §9 — the four real gaps (all four built in Phase 168)
+### §9 — the four real gaps (all four built in Phase 168), and a fifth found in Phase 195
 
 `modules/crm/analytics.ts` provides `winLossSummary`, `breakdownBy`,
 `lossReasons`, `proposalStats` and `pipelineValue`. Against §9's own list:
@@ -112,9 +112,33 @@ dimensions that exist. Worth noting that *"average time to decision"* is the onl
 one needing a fact nothing currently records per proposal — the others are
 re-groupings of data already there.
 
-### §11 — seven of seven AI capabilities (was five)
+> **Re-measured in Phase 195, and the row was claiming too much.** The four
+> gaps are built. What this row never said is that §9's **first** bullet asks
+> for *"counts and value by Draft, Sent, Viewed, Won, Lost, Expired, and No
+> Decision"* — and of those seven, **six were reachable**. Nothing in the
+> application ever set `expired`.
+>
+> Every other part of it was here. `proposals.expires_on` is recorded, the
+> client-facing page has refused a lapsed proposal by comparing it against
+> today since Phase 3, and `serviceBreakdown` already classified `expired`
+> beside `lost`. So the company's dashboard counted a lapsed proposal as sent
+> and awaiting a reply while the link it was sent on told the client it had
+> expired — two documents disagreeing, which is the defect this project names
+> most often.
+>
+> `lapseExpiredProposals` and the daily `proposals.lapse_expired` schedule are
+> the one write that was missing. `decided_at` is deliberately left alone, so a
+> deadline passing does not enter §9's *"average time to decision"*, and
+> `decideProposal` no longer accepts `expired` at all — one status, one writer.
+>
+> `proposalStats.byStatus` is now seeded from the enum, so all seven appear in
+> pipeline order with their zeros. A status missing from a table of counts is
+> ambiguous between "none" and "not reported", and that ambiguity is how this
+> one stayed invisible for a hundred and ninety phases.
 
-`BUILT_IN_PROMPTS` holds ten prompts covering all seven of §11's rows. It held eight
+### §11 — seven of seven rows, and 25 of 33 functions (Phase 195)
+
+`BUILT_IN_PROMPTS` holds **10 prompt keys** covering all seven of §11's rows. It held eight
 covering five when this audit was written:
 
 | §11 capability | prompt |
@@ -157,6 +181,68 @@ data requirement rather than a prompt — which held: Phase 165 settled
 `assets.provenance_origin` before a prompt was written, and Phase 166 found that
 rule had been applied one level short of where an accepted layout suggestion
 actually writes.
+
+#### Counted by function rather than by row (Phase 195)
+
+ADR 0194 nominated this row because it had been revised *upward*, five to
+seven, which is the one direction a stale row had not yet been wrong in here.
+Re-measured, the seven are right and **the unit is not**. §11 is a table whose
+*Function* cell lists several things per row, and counted that way it asks for
+**thirty-three**:
+
+| §11 row | functions | behind them |
+| --- | --- | --- |
+| Bookkeeping | 5 | 5 |
+| Reconciliation | 3 | 3 |
+| Proposal Writer | 5 | 4 — no reusable proposal content |
+| Design Assistant | 5 | 3 — no brand variations, no logo ideation; its two imagery bullets are served by one feature |
+| Marketing | 5 | 1 — no segment suggestion, timing, or nurture sequence, and no voice input reaches the prompt |
+| Strategic Account | 4 | 4 |
+| Business Insights | 6 | **5** — was 3; no operational figure is supplied |
+| **total** | **33** | **25** |
+
+So *"seven of seven"* was true of the rows and said nothing about eight
+functions §11 asks for and nothing produces. Both numbers are worth having: a row with a prompt behind it is a
+capability a company can switch on, and a function with nothing behind it is
+something §11 asked for.
+
+**Business Insights was the one that mattered**, because two of its three
+missing functions were not absent so much as starved. That prompt's own first rule is
+*"every insight must be traceable to a figure you were given"*, and §11 asks it
+to explain *"expense changes"* and *"cash-flow trends"*. It had been given no
+expense figure at all, and for cash a single balance — which is a position, not
+a trend. So it correctly said nothing about either, and the silence read as a
+quiet month rather than a missing input.
+
+Nothing new had to be computed. `comparativeProfitAndLoss` has produced two
+columns of a real profit and loss since §13's comparative periods were built,
+and `cashFlowStatement` has stated opening, closing and net movement since
+Phase 33. The calls were never made.
+
+That change is `insights.business` **version 2**, with version 1 left in place:
+the gateway writes `promptVersion` into every `ai_requests` row, so editing v1
+would rewrite history under rows that already cite it — and §12 asks for a
+registry with *"versioning, testing, and rollback"*, which a version that can
+be rewritten is not.
+
+Its sixth, *"operational trends"*, is left as a gap and named as one: nothing
+operational reaches that prompt — not the uncategorized backlog `inboxShape`
+already counts, not unreconciled accounts, not overdue follow-ups. It is the
+next thing to put behind this row, and unlike the two above it needs a figure
+chosen rather than a call made.
+
+The other seven are recorded as gaps rather than built. Two are counted
+generously and the generosity is stated: the Design row's *"background/graphic
+concepts"* and *"image prompts"* are one feature answering two of §11's words —
+`design.layout` returns short textual descriptions of imagery — so counting
+both would double-count it and counting neither would misreport it.
+
+The Marketing row is the weakest at one of five, and the cheapest of its four
+gaps is *"adapt content to company voice"*: `draftCampaignCopy` passes the
+company name, the segment, the audience size and the goal, and **no voice**.
+The proposal writer's prompt already says *"write in the company's voice"* and
+is given the catalogue to infer it from; the marketing prompt says neither.
+Segment suggestion and nurture sequences are §10 work wearing an §11 label.
 
 ### §19 — one partial
 
