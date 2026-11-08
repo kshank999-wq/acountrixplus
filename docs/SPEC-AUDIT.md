@@ -237,12 +237,33 @@ concepts"* and *"image prompts"* are one feature answering two of §11's words �
 `design.layout` returns short textual descriptions of imagery — so counting
 both would double-count it and counting neither would misreport it.
 
-The Marketing row is the weakest at one of five, and the cheapest of its four
-gaps is *"adapt content to company voice"*: `draftCampaignCopy` passes the
-company name, the segment, the audience size and the goal, and **no voice**.
-The proposal writer's prompt already says *"write in the company's voice"* and
-is given the catalogue to infer it from; the marketing prompt says neither.
-Segment suggestion and nurture sequences are §10 work wearing an §11 label.
+> **Phase 200 built the Marketing row's cheapest gap, and found three defects
+> behind it.**
+>
+> *"Adapt content to company voice"* had nothing behind it, and the reason was
+> a chain where each link hid the next: `companyProfiles.description` had a
+> column, a service that accepted it and **no field on the Design Center form**,
+> so there was no material; `companyContext` exposed a `tagline` **no caller
+> had ever read** and never loaded the description, so what material there was
+> did not reach the module; and `marketing.draft` never asked.
+>
+> Building from the nomination alone would have fed the prompt an empty string.
+>
+> `proposal.draft` turned out to be the sharper half: its v1 **already said**
+> *"write in the company's voice"* while being given the name, the industry and
+> a price list — inferring voice from a catalogue. Both prompts are at v2 now
+> with their v1s retained, and both are given the company's own words.
+>
+> And the tripwire written for this — `PROFILE_FIELDS` asserted against the
+> profile's own columns — named two more on its first run:
+> **`addressLine2` and `country`, which `letterhead.ts` reads** and puts on
+> every document a client sees. A column with a reader and no writer, so a
+> company with a second address line or an address abroad could not put it on
+> its own letterhead. Both have fields now.
+
+Segment suggestion and nurture sequences are §10 work wearing an §11 label, and
+with voice built the Marketing row's three remaining gaps are all of that kind
+or Phase 195's *follow-up timing*.
 
 ### §19 — one partial
 

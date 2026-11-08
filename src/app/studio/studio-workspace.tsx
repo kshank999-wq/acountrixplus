@@ -173,10 +173,41 @@ const PROFILE_FIELDS: Array<{ key: string; label: string; wide?: boolean; multil
   { key: 'legalName', label: 'Legal name' },
   { key: 'dba', label: 'Trading as' },
   { key: 'tagline', label: 'Tagline', wide: true },
+  /*
+    `description` had a column, a service that accepted it and **no field here**
+    until Phase 200, so nobody could fill it in — while the paragraph at the top
+    of this file listed "company description" among what the Studio covers.
+    Prose describing a form that did not have it, which is Phase 199's mobile
+    comment one phase later in a different file.
+
+    It is the longest thing a business writes about itself in its own words, and
+    §11 asks the marketing assistant to *adapt content to company voice*. There
+    was no voice to adapt to: this field, the tagline nothing read, and a prompt
+    that was never told to.
+  */
+  {
+    key: 'description',
+    label: 'How you describe the business',
+    wide: true,
+    multiline: true,
+  },
   { key: 'addressLine1', label: 'Address', wide: true },
+  /*
+    `addressLine2` and `country` since Phase 200, and they are a worse case
+    than the description above: `letterhead.ts` **reads both** and puts them on
+    every document a client sees, so a company with a second address line or an
+    address outside its own country could not put it on its own letterhead. A
+    column with a reader and no writer (Phase 49's shape).
+
+    Both were found by the test that asserts this list covers the profile's
+    columns — written for `description` and immediately naming two more, which
+    is the argument for a register-shaped check over fixing the one you noticed.
+  */
+  { key: 'addressLine2', label: 'Address line 2', wide: true },
   { key: 'city', label: 'City' },
   { key: 'region', label: 'State or region' },
   { key: 'postalCode', label: 'Postal code' },
+  { key: 'country', label: 'Country' },
   { key: 'phone', label: 'Phone' },
   { key: 'email', label: 'Email' },
   { key: 'website', label: 'Website' },

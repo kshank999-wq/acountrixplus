@@ -199,6 +199,20 @@ export type CompanyContext = {
   name: string
   industry: string | null
   tagline: string | null
+  /**
+   * How the business describes itself, in its own words (Phase 200).
+   *
+   * `companyProfiles.description` was loaded by nothing and editable nowhere —
+   * a column with a schema definition, a service that accepted it and no field
+   * on the Design Center form. Phase 200 added the field and this line.
+   *
+   * It is here beside `tagline` because the two together are the only prose a
+   * company writes about itself, and §11 asks the marketing assistant to
+   * *adapt content to company voice*. `tagline` had been on this type since
+   * Phase 6 and **no caller had ever read it**, which is why adding the data
+   * was not enough on its own.
+   */
+  description: string | null
   services: Array<{ name: string; description: string | null; unitPriceCents: number }>
 }
 
@@ -235,6 +249,7 @@ export async function companyContext(ctx: ActorContext): Promise<CompanyContext 
     name: row.profile?.legalName || row.company.name,
     industry: row.company.industry,
     tagline: row.profile?.tagline ?? null,
+    description: row.profile?.description ?? null,
     services: services.map((service) => ({
       name: service.name,
       description: service.description,
@@ -263,6 +278,53 @@ export function renderTransactions(rows: TransactionContext[]): string {
         `${row.id} | ${row.postedDate} | ${row.merchantName ?? row.description} | ${(row.amountCents / 100).toFixed(2)}`,
     )
     .join('\n')
+}
+
+/**
+ * The company's own words, as the lines a prompt wants (Phase 200).
+ *
+ * §11's *adapt content to company voice*, and the material to adapt to. Three
+ * facts a business stated about itself: what it does, what it says it is, and
+ * which industry it is in.
+ *
+ * ## Why this is a block and not three placeholders
+ *
+ * Empty is the common case — a company that has not opened the Design Center
+ * has none of it — and three placeholders would render as three blank labelled
+ * lines, which a model then has to explain. One block that is **absent when
+ * there is nothing in it** is the same choice Phase 195 made for the
+ * comparison figures, for the same reason.
+ *
+ * The services catalogue is deliberately **not** in here. It is a price list,
+ * it already has its own placeholder in the proposal prompt, and voice is what
+ * a business says about itself rather than what it sells — the conflation is
+ * why `proposal.draft` v1 could say *"write in the company's voice"* while
+ * being given nothing but a catalogue.
+ */
+export function renderVoice(context: CompanyContext | null): string {
+  if (!context) return ''
+
+  /*
+    The company's own *words*, and `industry` is deliberately not one of them.
+
+    An industry is picked from a list at registration — by us, to choose a
+    chart of accounts — so it is a classification rather than something the
+    business said. Including it made this block never empty, because every
+    company has one, which defeated the whole point of a section that is absent
+    when there is nothing in it. The proposal prompt already has its own
+    `{{industryLine}}`.
+
+    Found by the assertion that this is empty for a company which has written
+    nothing: it failed, and the reason was a field nobody typed.
+  */
+  const lines = [
+    context.tagline ? `They describe themselves as: ${context.tagline}` : null,
+    context.description ? `In their own words: ${context.description}` : null,
+  ].filter((line): line is string => line !== null)
+
+  if (lines.length === 0) return ''
+
+  return `\n\nHow this business talks about itself:\n${lines.join('\n')}`
 }
 
 export function renderServices(services: CompanyContext['services']): string {

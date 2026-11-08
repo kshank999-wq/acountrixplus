@@ -23,7 +23,7 @@ import {
 } from '@/modules/ledger/comparative'
 import { can, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { ask } from './gateway'
-import { companyContext, renderServices, renderTransactions } from './retrieval'
+import { companyContext, renderServices, renderTransactions, renderVoice } from './retrieval'
 import {
   campaignDraftJsonSchema,
   campaignDraftSchema,
@@ -167,6 +167,8 @@ export async function draftProposalSections(ctx: ActorContext, opportunityId: st
     values: {
       companyName: company?.name ?? 'our company',
       industryLine: company?.industry ? ` (${company.industry})` : '',
+      // The material v1's "write in the company's voice" already assumed.
+      voice: renderVoice(company),
       clientName: row.organization.name,
       opportunityTitle: row.opportunity.title,
       expectedValue: formatCents(row.opportunity.expectedValueCents ?? 0),
@@ -255,11 +257,25 @@ export async function draftCampaignCopy(
     promptKey: 'marketing.draft',
     values: {
       companyName: company?.name ?? 'our company',
+      /*
+        §11's *adapt content to company voice* (Phase 200). This call already
+        loaded the whole `CompanyContext` and passed only the name — two
+        queries' worth of the company's own words fetched and discarded,
+        including a tagline no caller anywhere had ever read.
+      */
+      voice: renderVoice(company),
       segmentName,
       audienceSize: String(audienceSize),
       goal: input.goal,
     },
-    input: { companyName: company?.name, segmentName, audienceSize, goal: input.goal },
+    input: {
+      companyName: company?.name,
+      tagline: company?.tagline,
+      description: company?.description,
+      segmentName,
+      audienceSize,
+      goal: input.goal,
+    },
     schema: campaignDraftSchema,
     jsonSchema: campaignDraftJsonSchema,
     maxOutputTokens: 3000,

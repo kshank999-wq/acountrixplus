@@ -152,6 +152,44 @@ Return an executive summary, a scope section, an exclusions section, and a short
     notes: 'Initial version. Explicitly forbidden from inventing prices.',
   },
   {
+    /*
+      Version 2 (Phase 200), with version 1 kept — `resolvePrompt` takes the
+      highest and the gateway writes `promptVersion` into every `ai_requests`
+      row, so editing v1 would change history under rows that cite it (the rule
+      Phase 195 set when `insights.business` gained a v2).
+
+      What changed is not the instruction. **v1 already said "write in the
+      company's voice"** and was given the company's name, its industry and its
+      price list — so it was inferring voice from a catalogue. v2 is given
+      `{{voice}}`: the tagline and the description a business wrote about
+      itself, neither of which had ever reached a prompt. The tagline had been
+      on `CompanyContext` since Phase 6 with no reader at all.
+    */
+    key: 'proposal.draft',
+    version: 2,
+    systemPrompt: `${SHARED_RULES}
+
+You draft proposal sections from a company's own service catalog and the details of one opportunity.
+
+Write in the company's voice, not a marketing voice: plain, specific, and free of superlatives. Where you are shown how the business talks about itself, follow it — their words for what they do are better than yours, and a proposal that sounds like somebody else wrote it is one the sender has to rewrite.
+
+Never invent a price, a date, or a credential. The person sending this has to stand behind every sentence.`,
+    template: `Draft proposal sections.
+
+Our company: {{companyName}}{{industryLine}}{{voice}}
+Client: {{clientName}}
+Opportunity: {{opportunityTitle}}
+Expected value: {{expectedValue}}
+
+Our services:
+{{services}}
+
+Return an executive summary, a scope section, an exclusions section, and a short follow-up message to send with the proposal.`,
+    notes:
+      'Phase 200: given the tagline and description its v1 instruction already assumed. ' +
+      'Version 1 is retained because `ai_requests` rows cite it.',
+  },
+  {
     key: 'marketing.draft',
     version: 1,
     systemPrompt: `${SHARED_RULES}
@@ -167,6 +205,44 @@ Goal: {{goal}}
 
 Return a subject line, preview text, a headline, a body of two or three short paragraphs, a call to action, and one sentence explaining the approach you took.`,
     notes: 'Initial version.',
+  },
+  {
+    /*
+      Version 2 (Phase 200), with version 1 kept, for the reason above.
+
+      §11's Marketing row asks for *adapt content to company voice* and this
+      was the one of its five functions with nothing at all behind it — not a
+      prompt that tried and failed, a prompt that was never told. v1 says
+      "write something a person would actually finish reading" and nothing
+      about whose voice, and `draftCampaignCopy` loaded the whole
+      `CompanyContext` and passed only the name.
+
+      So three things were missing and each hid the next: the description had no
+      editor, so there was no material; `companyContext` did not load it and
+      nobody read the tagline, so the material did not reach the module; and
+      this prompt did not ask. Phase 200 closes all three, which is why §11's
+      Marketing row goes from one of five to two of five rather than from four
+      to five — the other three are §10 work.
+    */
+    key: 'marketing.draft',
+    version: 2,
+    systemPrompt: `${SHARED_RULES}
+
+You draft a marketing email for a chosen audience.
+
+Write something a person would actually finish reading: short, specific, and low-pressure. No urgency manufactured out of nothing, no false scarcity, and no claim the company has not told you is true.
+
+Where you are shown how the business talks about itself, **write as that business** — their words for what they do, their level of formality, their claims and no others. A company that calls itself a small family firm does not send an email about enterprise-grade solutions. Where you are shown nothing, write plainly and invent no character for them.`,
+    template: `Draft a campaign email.
+
+From: {{companyName}}{{voice}}
+Audience: {{segmentName}} ({{audienceSize}} contactable)
+Goal: {{goal}}
+
+Return a subject line, preview text, a headline, a body of two or three short paragraphs, a call to action, and one sentence explaining the approach you took.`,
+    notes:
+      "Phase 200: §11's *adapt content to company voice*, which had nothing behind it. " +
+      'Version 1 is retained because `ai_requests` rows cite it.',
   },
   {
     key: 'insights.business',
