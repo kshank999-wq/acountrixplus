@@ -13,6 +13,7 @@ import {
 } from '@/modules/source/claims'
 import { isolationCounts } from '@/modules/source/isolation-scan'
 import { BUILT_IN_PROMPTS } from '@/modules/ai/prompts'
+import { PHASE_DELIVERABLES } from '@/modules/source/phases'
 
 /**
  * Numbers in prose that nothing reads (Phase 179).
@@ -87,6 +88,12 @@ async function measure(): Promise<MeasuredFacts> {
     */
     promptKeys: new Set(BUILT_IN_PROMPTS.map((prompt) => prompt.key)).size,
     /*
+      The register that replaced §20's last unmeasured sentence (Phase 199).
+      Its own test holds it to §20's wording; this holds the audit's number to
+      the register.
+    */
+    phaseDeliverables: PHASE_DELIVERABLES.length,
+    /*
       Both measured the way `tests/the-id-a-caller-hands-in.test.ts` measures
       them, from `pg_constraint` — a foreign key from one tenant-scoped table to
       another, and the subset whose key carries the tenant.
@@ -159,10 +166,16 @@ describe('the register itself', () => {
      * on entries, because that phase added a second version of one prompt and
      * kept the first. Three entries in one file is the register reporting
      * which document it most expects to go stale.
+     *
+     * Eighteen since Phase 199, and the eighteenth is a *fourth* claim in the
+     * same audit — §20's deliverable count, which replaced the file's last
+     * unmeasured sentence. Four of eighteen entries in one document is this
+     * register's own answer to which file it most expects to go stale, and
+     * that document is the one this process reads to decide what to build.
      */
-    expect(PINNED_CLAIMS).toHaveLength(17)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(17)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(17)
+    expect(PINNED_CLAIMS).toHaveLength(18)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(18)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(18)
   })
 
   it('pins all four numbers of the sentence that states four', () => {

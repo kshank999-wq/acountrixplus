@@ -97,9 +97,29 @@ async function execute(
         {
           projectId: input.projectId ?? undefined,
           costCodeId: input.costCodeId ?? undefined,
-          // Rule creation is deliberately not replayed from the queue: it
-          // writes outside this transaction and creating the same rule twice
-          // is a mess to undo. The phone offers the checkbox only when online.
+          /*
+            Rule creation is deliberately not replayed from the queue: it
+            writes outside this transaction, `categorization_rules` has no
+            uniqueness constraint, and creating the same vendor-memory rule
+            twice is a mess to undo.
+
+            This said "the phone offers the checkbox only when online" until
+            Phase 199, which was **false**: `m/review/deck.tsx` always goes
+            through the outbox, online or not, so the phone has never offered
+            it at all. A sentence excusing a hardcoded value by describing a UI
+            that does not exist — ADR 0134's rule, in a comment rather than a
+            register.
+
+            Recorded as a decision now rather than quietly corrected. A phone
+            review deck is triage: one tap per card, with the four accounts
+            just used to hand. A second decision per transaction is what that
+            screen exists not to ask, and the rule can be made on the desktop
+            afterwards — `applyToExisting` catches up whatever was categorized
+            here. Whoever wants it on the phone needs a unique index on a
+            vendor-memory rule first, and then replay is safe; that is the
+            order, and it is the constraint that is missing rather than the
+            checkbox.
+          */
           rememberVendor: false,
         },
         tx,

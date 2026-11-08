@@ -104,6 +104,16 @@ export type MeasuredFacts = {
    * supplied for the same reason: one shape for every fact.
    */
   promptKeys: number
+  /**
+   * Entries in `PHASE_DELIVERABLES` (Phase 199).
+   *
+   * A source fact, like the four scan counts and the prompt keys. The register
+   * is what replaced §20's *"Phases 0–8 all have shipped work"*, and the
+   * number in the audit is the one a reader compares against §20's own table —
+   * so it has to move when a cell is reworded and somebody registers the
+   * deliverable that appeared.
+   */
+  phaseDeliverables: number
 }
 
 export type PinnedClaim = {
@@ -358,6 +368,21 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
       'Pinned beside the audit copy rather than instead of it, because a number stated twice in ' +
       'two documents drifts twice.',
     measure: (facts) => [facts.writes, facts.reads],
+  },
+  {
+    key: 'audit-phase-deliverables',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /\*\*done\*\* — all (\d+) deliverables/,
+    because:
+      "§20's row, and the number that replaced the last unmeasured sentence in this file. It " +
+      'read *"Phases 0–8 all have shipped work"* for thirty-five phases — true, and the ' +
+      'weakest reading of a table whose nine cells list fifty-one things, which is the shape ' +
+      'Phase 195 found §11 overstating itself in. Wrong, it misreports how much of the ' +
+      "specification's own plan is argued for, in the row somebody checks to decide whether " +
+      'there is anything left to build. Pinned to `PHASE_DELIVERABLES`, so rewording a §20 ' +
+      'cell moves the register, the register moves this number, and the sentence cannot go ' +
+      'quietly stale the way the one it replaced did.',
+    measure: (facts) => facts.phaseDeliverables,
   },
 ]
 

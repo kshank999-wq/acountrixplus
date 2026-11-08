@@ -64,7 +64,7 @@ same failure to re-measure, and ADR 0164 states it as a rule.
 | 17 | Recommended Service Boundaries | **done** — modular monolith, `src/modules/<domain>` |
 | 18 | Technology Direction | **done** |
 | 19 | Security & Financial Integrity | **one partial** — below |
-| 20 | Development Phases | Phases 0–8 all have shipped work |
+| 20 | Development Phases | **done** — all 51 deliverables, measured — below |
 | 21–24 | Assignments, DoD, rules, next steps | — process |
 
 ### §9 — the four real gaps (all four built in Phase 168), and a fifth found in Phase 195
@@ -327,6 +327,68 @@ otherwise.
 > There is no known shortfall in these two numbers now. A statement whose table
 > is chosen at runtime is counted as `(dynamic)` and still has to be guarded,
 > which is the conservative direction.
+
+### §20 — all fifty-one deliverables, measured (Phase 199)
+
+This row read *"Phases 0–8 all have shipped work"* from Phase 164 to Phase
+199, and it was **the last unmeasured sentence in this file**. ADR 0194 named
+it; Phases 195, 196, 197 and 198 each put something ahead of it. Four
+deferrals.
+
+It was also the weakest reading of §20 available. *"Has shipped work"* is true
+of a phase if **anything** in it shipped, and §20 is a table of nine cells each
+listing several deliverables — the same shape in which Phase 195 found §11 had
+seven of seven *rows* and twenty-five of thirty-three *functions*.
+
+Counted per deliverable there are **fifty-one**, and all fifty-one are built:
+
+| phase | deliverables |
+| --- | --- |
+| 0 — Foundation | 8 |
+| 1 — Bookkeeping MVP | 8 |
+| 2 — Reconciliation + Accounting Core | 6 |
+| 3 — CRM + Proposal Pipeline | 6 |
+| 4 — Proposal Designer + Company Studio | 7 |
+| 5 — Marketing | 6 |
+| 6 — AI Add-on | 6 |
+| 7 — Industry Modules | 2 |
+| 8 — Payroll/Tax/Advanced | 2 |
+| **total** | **51** |
+
+So the sentence holds in its strong reading as well as its weak one. That is a
+result rather than a formality — the alternative was to go on deferring §20 on
+the strength of nobody having looked.
+
+`PHASE_DELIVERABLES` is what replaces the sentence. Each entry carries §20's
+own words, the files that ship it, and an argument for why those files are that
+deliverable; a test holds the keys to §20's wording, asserts that **no word of
+any cell is unaccounted for**, and checks all sixty-nine paths exist. ADR 0194
+said this file could not be made self-measuring because *"all 12 have a module"
+is a judgement* — right about integers, and the way round it is to write the
+judgement down once and check everything around it.
+
+Three Phase 0 entries ship no code and say so: *repository audit*,
+*architecture* and *database conventions* are acts whose product is a decision,
+and their evidence is the document that records it.
+
+> **Two things the measurement found, neither of them a missing deliverable.**
+>
+> `modules/mobile/operations.ts` hardcoded `rememberVendor: false` on the
+> offline queue — correctly, since rule creation writes outside the operation's
+> transaction and `categorization_rules` has no uniqueness constraint — and
+> excused it with *"the phone offers the checkbox only when online"*. That was
+> **false**: the mobile review deck always goes through the outbox, so the
+> phone has never offered vendor memory at all. A sentence justifying a
+> hardcoded value by describing a UI that does not exist, which is ADR 0134's
+> rule in a comment rather than a register. Recorded as a decision now, with a
+> test that asserts the flag is dropped even when the payload sets it.
+>
+> And the register's own first draft named four files that do not exist —
+> `modules/tax`, `ai/layout.ts`, `brand/brand.ts`,
+> `db/schema/bookkeeping.ts` — every one written from what I expected the tree
+> to look like. Sales tax lives under `payroll/`, which that entry now says out
+> loud. The path check caught all four on its first run, which is the argument
+> for naming files rather than describing them.
 
 ## The bullet-level pass of §12–§19 (Phase 194)
 

@@ -21,6 +21,7 @@ import {
   runOnce,
 } from '@/modules/mobile/idempotency'
 import { applyOperation } from '@/modules/mobile/operations'
+import { listRules } from '@/modules/bookkeeping/rules-engine'
 import {
   applyOutcome,
   backoffFor,
@@ -70,6 +71,47 @@ const mockPush = getPushProvider('mock') as MockPushProvider
 
 beforeEach(() => {
   mockPush.reset()
+})
+
+describe('what the queue will not replay', () => {
+  it('creates no vendor-memory rule, whatever the payload says', async () => {
+    /**
+     * `operations.ts` passes `rememberVendor: false` because rule creation
+     * writes outside the operation's transaction, `categorization_rules` has
+     * no uniqueness constraint, and replaying would make the same rule twice.
+     *
+     * The comment used to excuse that by saying *"the phone offers the
+     * checkbox only when online"* — **false**, and Phase 199 found it:
+     * `m/review/deck.tsx` always goes through the outbox, so the phone has
+     * never offered vendor memory at all. A sentence that justifies a
+     * hardcoded value by describing a UI that does not exist.
+     *
+     * So the decision is asserted instead of described. The payload is given
+     * the flag deliberately, to prove the schema drops it rather than the
+     * phone merely not sending it — the two are indistinguishable from the
+     * desktop and only one of them survives somebody adding the checkbox.
+     */
+    const fixture = await createCompanyFixture()
+    const account = await fixture.account('6350')
+    const transaction = await insertTransaction(fixture, {
+      amountCents: -2_400,
+      description: 'CAFE NERO 88',
+    })
+
+    const before = await listRules(fixture.ctx)
+
+    await applyOperation(fixture.ctx, {
+      key: crypto.randomUUID(),
+      operation: 'transaction.categorize',
+      payload: {
+        transactionId: transaction.id,
+        chartAccountId: account.id,
+        rememberVendor: true,
+      },
+    })
+
+    expect(await listRules(fixture.ctx)).toHaveLength(before.length)
+  })
 })
 
 describe('replaying an operation', () => {
