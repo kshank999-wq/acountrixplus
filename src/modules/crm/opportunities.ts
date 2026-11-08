@@ -453,6 +453,13 @@ export async function createOrganization(
      * marketer could build an audience on company size and get nothing back.
      */
     sizeBand?: string
+    /**
+     * Phase 202. The third column of this table with a reader and no writer,
+     * after the six addresses Phase 78 found and `sizeBand` Phase 201 did —
+     * and the one Phase 201's scan could not see, because `tags` carries
+     * `.default([])` and that scan excluded any column the database supplies.
+     */
+    tags?: string[]
     source?: string
     /**
      * The whole address, since Phase 78. `organizations` has had all six
@@ -484,6 +491,7 @@ export async function createOrganization(
       website: input.website ?? null,
       industry: input.industry ?? null,
       sizeBand: input.sizeBand ?? null,
+      tags: input.tags ?? [],
       source: input.source ?? null,
       addressLine1: input.addressLine1 ?? null,
       addressLine2: input.addressLine2 ?? null,
@@ -564,6 +572,7 @@ export async function updateOrganization(
     country: string | null
     industry: string | null
     sizeBand: string | null
+    tags: string[]
     lifecycleStage: (typeof organizations.$inferSelect)['lifecycleStage']
     source: string | null
     isStrategicAccount: boolean

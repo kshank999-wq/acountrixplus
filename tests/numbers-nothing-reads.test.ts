@@ -14,7 +14,11 @@ import {
 import { isolationCounts } from '@/modules/source/isolation-scan'
 import { BUILT_IN_PROMPTS } from '@/modules/ai/prompts'
 import { PHASE_DELIVERABLES } from '@/modules/source/phases'
-import { columnsScanned, writerCandidates } from '@/modules/source/column-writers'
+import {
+  columnsScanned,
+  insertOnlyColumns,
+  writerCandidates,
+} from '@/modules/source/column-writers'
 
 /**
  * Numbers in prose that nothing reads (Phase 179).
@@ -102,6 +106,7 @@ async function measure(): Promise<MeasuredFacts> {
     scannedTables: columnsScanned().tables,
     scannedColumns: columnsScanned().columns,
     columnCandidates: writerCandidates().length,
+    insertOnlyColumns: insertOnlyColumns(),
     /*
       Both measured the way `tests/the-id-a-caller-hands-in.test.ts` measures
       them, from `pg_constraint` — a foreign key from one tenant-scoped table to
@@ -150,7 +155,7 @@ describe('the register itself', () => {
     expect(PINNED_CLAIMS.flatMap((claim) => pinnedClaimArgues(claim))).toEqual([])
   })
 
-  it('declares nineteen claims, all of them pinned', () => {
+  it('declares twenty claims, all of them pinned', () => {
     /**
      * Phase 126, and the second number is no longer the honest half: since
      * Phase 187 there is no unmeasured entry.
@@ -188,10 +193,17 @@ describe('the register itself', () => {
      * 196–198 written into the register rather than into an ADR: each of those
      * found a scan quoting a subset as a total, and in every case the answer
      * looked tidy while the question had been asked of half the tree.
+     *
+     * Twenty since Phase 202, and the twentieth is the first to pin a
+     * **limitation** rather than a finding: the number of columns the newest
+     * census cannot see, because they are written once at insert and never
+     * updated. Phase 185's rule is that a declared limitation keeps its
+     * reason, and the reason outlives the figure unless something holds them
+     * together.
      */
-    expect(PINNED_CLAIMS).toHaveLength(19)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(19)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(19)
+    expect(PINNED_CLAIMS).toHaveLength(20)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(20)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(20)
   })
 
   it('pins all four numbers of the sentence that states four', () => {

@@ -42,12 +42,21 @@ export class InvitationError extends DomainError {
   }
 }
 
-/** Invites somebody to a company. Creates no user and grants nothing. */
+/**
+ * Invites somebody to a company. Creates no user and grants nothing.
+ *
+ * Gated on `users:manage` since Phase 202, where `updateMembership` arrived
+ * and *"who may change an individual's standing on this company"* needed one
+ * answer rather than two. Only `owner` holds either permission today, so no
+ * role's behaviour changed; what changed is that a company can grant
+ * `users:manage` alone and get somebody who invites, promotes and revokes
+ * without the Studio, the module switches or the billing.
+ */
 export async function inviteToCompany(
   ctx: ActorContext,
   input: { email: string; name?: string; role: Role },
 ): Promise<{ tokenId: string; alreadyMember: boolean }> {
-  requirePermission(ctx, 'company:manage')
+  requirePermission(ctx, 'users:manage')
 
   const email = input.email.trim().toLowerCase()
   if (!email.includes('@')) throw new InvitationError('That is not an email address.')
@@ -363,11 +372,16 @@ export async function companyInvitations(ctx: ActorContext) {
   return pendingInvitations({ companyId: ctx.companyId })
 }
 
-/** Withdraws one. Scoped, so one company cannot cancel another's. */
+/**
+ * Withdraws one. Scoped, so one company cannot cancel another's.
+ *
+ * On `users:manage` with its sibling above — withdrawing an invitation is the
+ * same decision as making one, one keystroke later.
+ */
 export async function withdrawCompanyInvitation(
   ctx: ActorContext,
   tokenId: string,
 ): Promise<boolean> {
-  requirePermission(ctx, 'company:manage')
+  requirePermission(ctx, 'users:manage')
   return revokeInvitation(tokenId, { companyId: ctx.companyId })
 }

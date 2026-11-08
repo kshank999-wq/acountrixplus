@@ -10,6 +10,7 @@ import {
 } from '@/app/actions/practice'
 import { findPracticesAction } from '@/app/actions/practice-search'
 import { inviteToCompanyAction, withdrawInvitationAction } from '@/app/actions/notify'
+import { updateMembershipAction } from '@/app/actions/access'
 
 type Holder = {
   userId: string
@@ -19,7 +20,21 @@ type Holder = {
   viaPracticeName: string | null
   viaStaffing: 'whole_firm' | 'assigned_only' | null
   isSelf: boolean
+  /**
+   * Phase 202. `resolveSession` filters every request on this, with a comment
+   * saying *"a lock that waits for a session to expire is not a lock"* — and
+   * until this phase nothing could set it false, so §14's *revocation* was a
+   * mechanism with no handle. `page.tsx` had also been dropping the field on
+   * the way here since Phase 25.
+   */
+  isActive: boolean
+  /** Granted on top of the role, and taken away from it (spec §14). */
+  grant: string[]
+  revoke: string[]
 }
+
+/** What one permission is, for this person, relative to their role. */
+type Standing = 'default' | 'grant' | 'revoke'
 
 type Engagement = {
   id: string
@@ -65,11 +80,19 @@ export function AccessBoard({
   engagements,
   invitations,
   canManage,
+  canManageUsers,
+  permissions,
+  roleDefaults,
 }: {
   holders: Holder[]
   engagements: Engagement[]
   invitations: Invitation[]
   canManage: boolean
+  /** `users:manage` — a person's standing, as opposed to the company's own
+   *  arrangements. Only `owner` holds either today; the split is the seam. */
+  canManageUsers: boolean
+  permissions: string[]
+  roleDefaults: Record<string, string[]>
 }) {
   const router = useRouter()
   const [notice, setNotice] = useState<{ ok: boolean; text: string } | null>(null)
@@ -106,6 +129,51 @@ export function AccessBoard({
   )
 
   const viaPractice = holders.filter((holder) => holder.viaPracticeName)
+
+  /*
+    Whose permissions are open, and the three-way standing of each one while
+    it is being edited. Held here rather than derived, because it is a
+    selection somebody is part way through making — and `default` is a real
+    answer rather than the absence of one, which is why this is a map of three
+    values and not two sets.
+  */
+  const [editing, setEditing] = useState<string | null>(null)
+  const [standings, setStandings] = useState<Record<string, Standing>>({})
+
+  const edited = holders.find((holder) => holder.userId === editing) ?? null
+
+  /** A membership this side may change. The service refuses the rest. */
+  function editable(holder: Holder): boolean {
+    return canManageUsers && !holder.isSelf && !holder.viaPracticeName
+  }
+
+  function openPermissions(holder: Holder) {
+    if (editing === holder.userId) {
+      setEditing(null)
+      return
+    }
+    const next: Record<string, Standing> = {}
+    for (const permission of holder.grant) next[permission] = 'grant'
+    for (const permission of holder.revoke) next[permission] = 'revoke'
+    setStandings(next)
+    setEditing(holder.userId)
+  }
+
+  function saveOverrides() {
+    if (!edited) return
+    act(() =>
+      updateMembershipAction({
+        userId: edited.userId,
+        grant: Object.entries(standings)
+          .filter(([, standing]) => standing === 'grant')
+          .map(([permission]) => permission),
+        revoke: Object.entries(standings)
+          .filter(([, standing]) => standing === 'revoke')
+          .map(([permission]) => permission),
+      }),
+    )
+    setEditing(null)
+  }
 
   return (
     <div className="space-y-6">
@@ -178,6 +246,7 @@ export function AccessBoard({
               <th className="px-4 py-2 font-medium">Name</th>
               <th className="px-4 py-2 font-medium">Role</th>
               <th className="px-4 py-2 font-medium">How</th>
+              <th className="px-4 py-2" />
             </tr>
           </thead>
           <tbody>
@@ -188,7 +257,45 @@ export function AccessBoard({
                   {holder.isSelf && <span className="text-faint"> · you</span>}
                   <span className="block text-xs text-faint">{holder.email}</span>
                 </td>
-                <td className="px-4 py-1.5 text-muted">{holder.role}</td>
+                <td className="px-4 py-1.5 text-muted">
+                  {/*
+                    A select rather than text since Phase 202. `memberships`
+                    was insert-only, so the role somebody was invited as was
+                    the role they had for ever: a bookkeeper who became the
+                    accountant could not be made one, and this cell printed the
+                    answer with no way to change it.
+                  */}
+                  {editable(holder) ? (
+                    <select
+                      value={holder.role}
+                      disabled={pending}
+                      onChange={(event) =>
+                        act(() =>
+                          updateMembershipAction({
+                            userId: holder.userId,
+                            role: event.target.value,
+                          }),
+                        )
+                      }
+                      className="field py-1 text-sm"
+                    >
+                      {MEMBER_ROLES.map((role) => (
+                        <option key={role} value={role}>
+                          {role}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    holder.role
+                  )}
+                  {(holder.grant.length > 0 || holder.revoke.length > 0) && (
+                    <span className="ml-2 chip bg-action/10 px-2 py-0.5 text-xs text-action">
+                      {holder.grant.length > 0 && `+${holder.grant.length}`}
+                      {holder.grant.length > 0 && holder.revoke.length > 0 && ' '}
+                      {holder.revoke.length > 0 && `−${holder.revoke.length}`}
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-1.5">
                   {holder.viaPracticeName ? (
                     <>
@@ -205,11 +312,117 @@ export function AccessBoard({
                   ) : (
                     <span className="text-muted">works here</span>
                   )}
+                  {!holder.isActive && (
+                    <span className="block text-xs text-negative">access revoked</span>
+                  )}
+                </td>
+                <td className="px-4 py-1.5 text-right">
+                  {editable(holder) && (
+                    <span className="inline-flex gap-1">
+                      <button
+                        className="btn btn-ghost text-xs"
+                        onClick={() => openPermissions(holder)}
+                      >
+                        Permissions
+                      </button>
+                      <button
+                        className="btn btn-ghost text-xs"
+                        disabled={pending}
+                        onClick={() =>
+                          act(() =>
+                            updateMembershipAction({
+                              userId: holder.userId,
+                              isActive: !holder.isActive,
+                            }),
+                          )
+                        }
+                      >
+                        {holder.isActive ? 'Revoke' : 'Restore'}
+                      </button>
+                    </span>
+                  )}
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
+
+        {/*
+          The granular overrides §14 asks for (Phase 202).
+
+          `permissionOverrides` was read into the actor, parsed, and *applied*
+          by `effectivePermissions` — a grant adds a permission and a revoke
+          deletes one — with nothing anywhere able to write one. This is the
+          editor, and `default` is offered as a real third answer rather than
+          as the absence of a choice: a permission left alone follows the role
+          as the role changes, and one pinned to the role's current answer
+          would quietly stop doing so.
+        */}
+        {edited && (
+          <div className="border-t border-line px-4 py-3">
+            <p className="text-sm font-medium">
+              {edited.name} — on top of the {edited.role} role
+            </p>
+            <p className="mt-0.5 text-xs text-faint">
+              Granting more than the role is the point rather than a mistake: it is how one
+              colleague gets to enter supplier bills without also gaining the power to clear
+              them. A revocation wins over a grant.
+            </p>
+
+            <div className="mt-3 grid gap-1 sm:grid-cols-2 lg:grid-cols-3">
+              {permissions.map((permission) => {
+                const fromRole = (roleDefaults[edited.role] ?? []).includes(permission)
+                const standing = standings[permission] ?? 'default'
+
+                return (
+                  <div
+                    key={permission}
+                    className="flex items-center justify-between gap-2 rounded px-1.5 py-0.5 text-xs"
+                  >
+                    <span className={fromRole ? '' : 'text-faint'}>
+                      {permission}
+                      {fromRole && <span className="text-positive"> ·</span>}
+                    </span>
+                    <span className="inline-flex shrink-0 gap-0.5">
+                      {(['default', 'grant', 'revoke'] as const).map((choice) => (
+                        <button
+                          key={choice}
+                          onClick={() =>
+                            setStandings((current) => {
+                              const next = { ...current }
+                              if (choice === 'default') delete next[permission]
+                              else next[permission] = choice
+                              return next
+                            })
+                          }
+                          className={`rounded px-1.5 py-0.5 ${
+                            standing === choice
+                              ? 'bg-action text-white'
+                              : 'bg-raised text-muted hover:text-ink'
+                          }`}
+                        >
+                          {choice === 'default' ? '–' : choice === 'grant' ? '+' : '×'}
+                        </button>
+                      ))}
+                    </span>
+                  </div>
+                )
+              })}
+            </div>
+
+            <div className="mt-3 flex items-center gap-2">
+              <button className="btn btn-primary text-xs" disabled={pending} onClick={saveOverrides}>
+                Save permissions
+              </button>
+              <button className="btn btn-ghost text-xs" onClick={() => setEditing(null)}>
+                Cancel
+              </button>
+              <span className="text-xs text-faint">
+                A dot marks what the role already gives.
+              </span>
+            </div>
+          </div>
+        )}
         {viaPractice.length > 0 && (
           <p className="border-t border-line px-4 py-2 text-xs text-faint">
             {viaPractice.length} of these {viaPractice.length === 1 ? 'person is' : 'people are'} from

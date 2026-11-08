@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **292
-writes** and **955 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **293
+writes** and **956 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,16 +357,16 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2179 columns** across **185 tables** and reports **27** with a
+The scan reads **2179 columns** across **185 tables** and reports **35** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
 
-Twenty-three of the twenty-seven are written by a **spread** or a **helper's
-return**, which no regex can resolve, so `COLUMN_WRITERS` declares each
-mechanism and names the file that writes it. The rule its test asserts is that
-every candidate is **declared or fixed**, in both directions: an entry for a
-column the scan no longer reports is removed rather than left to excuse it.
+Most of them are written by a **spread** or a **helper's return**, which no
+regex can resolve, so `COLUMN_WRITERS` declares each mechanism and names the
+file that writes it. The rule its test asserts is that every candidate is
+**declared or fixed**, in both directions: an entry for a column the scan no
+longer reports is removed rather than left to excuse it.
 
 Four were real. Two are closed in Phase 201 and are therefore **absent** from
 the register, which is what proves the editors reach the column:
@@ -402,6 +402,63 @@ the repository was a single-line ternary. It was not — `payroll/sales-tax.ts`
 builds its rows with `const rows = input.lines.map((line) => {` — and four
 columns of `document_tax_lines` looked unwritable, two of them `notNull`, which
 would have meant a table nothing could insert into.
+
+#### What that census could not see (Phase 202)
+
+**Two blind spots, both closed or declared.**
+
+Phase 201 excluded every column carrying a **default**, on the argument that
+the database supplies it. Too wide: a `defaultRandom()` key is the whole
+answer, a `.default(true)` boolean is a *starting value for a state*, and a
+state nothing can change is a switch painted on. Narrowed to
+`defaultRandom()` and `defaultNow()` only, the census went 27 → 35, and **six
+of the eight it added are an `isActive` nothing can turn off**. One of them was
+§14's revocation.
+
+The second cannot be closed. **770 columns** are written at insert and never
+updated, so the scan counts them as written even where nothing can ever change
+them — `memberships.role` was unchangeable for 201 phases and the census
+reported nothing. Almost all 770 are immutable *on purpose* (ADR 0021's sent
+document, ADR 0042's live record), so a register of them would say "correct"
+hundreds of times and bury the few that are not. It is a pinned number
+(`audit-insert-only-columns`) rather than a register, and narrowing it needs a
+way to say which columns are state rather than record.
+
+### §14 — the switch painted on (Phase 202)
+
+**`memberships` was insert-only.** Nothing in the repository updated a
+membership row; the three `delete(memberships)` statements are keyed by
+`practiceEngagementId` and remove only what an engagement created. So §14's
+permission model was four gaps rather than the one ADR 0201 nominated:
+
+- **no revocation.** `resolveSession` re-reads the membership on *every*
+  request filtered on `isActive`, under a comment saying *"a lock that waits
+  for a session to expire is not a lock"*. §14 asks for revocation by name.
+  Nothing could set it false, so a directly-hired employee who left kept their
+  access.
+- **no promotion.** `role` is read in eight places and chosen once, at
+  invitation. The access board printed it as text.
+- **no granular overrides**, ADR 0201's finding: parsed and *applied* by
+  `effectivePermissions`, writable by nothing.
+- **no audit.** `'membership.update'` has been in `AuditAction` since Phase 3
+  and nothing had ever written it — `'organization.update'`'s shape, unwritten
+  until Phase 78.
+
+`updateMembership` closes all four in one write, with four refusals. The one
+worth naming is the invariant: **somebody must keep `company:manage`**,
+asserted over the *effective* permissions of every active membership after the
+change, so a demotion, a revocation of access and a `revoke` override all come
+through one predicate. A rule written as *"is there another owner"* would be
+wrong in the direction that locks a company out of its own books, because a
+bookkeeper **granted** `company:manage` is an administrator — and that grant is
+the seam §14 asks for.
+
+Who may do it has one answer now: `users:manage`, which `inviteToCompany` and
+`withdrawCompanyInvitation` moved onto from `company:manage`. Only `owner`
+holds either today, so no role's behaviour changed; the seam did, and a company
+can grant `users:manage` alone without the Studio, the module switches or the
+billing. `company:manage` keeps the company's own arrangements, the engagement
+with a practice included.
 
 ### §20 — all fifty-one deliverables, measured (Phase 199)
 

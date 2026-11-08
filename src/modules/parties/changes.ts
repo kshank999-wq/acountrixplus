@@ -122,6 +122,17 @@ export const ORGANIZATION_FIELDS: PartyField[] = [
   { key: 'country', label: 'Country', kind: 'description' },
   { key: 'industry', label: 'Industry', kind: 'description' },
   {
+    key: 'tags',
+    label: 'Tags',
+    kind: 'default',
+    // Phase 202, and `sizeBand`'s sibling one phase later. `tags` is one of
+    // §10's named segment dimensions with its own `in` and `contains`
+    // operators, and nothing could set it — invisible to Phase 201's scan
+    // because the column has a schema default, which is the exclusion that
+    // phase declared and this one narrowed.
+    note: 'Segments can be built on these, so they decide which campaigns reach their contacts.',
+  },
+  {
     key: 'sizeBand',
     label: 'Size band',
     kind: 'default',

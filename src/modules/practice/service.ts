@@ -11,7 +11,7 @@ import {
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
-import type { Role } from '@/modules/permissions'
+import { parseOverrides, type PermissionOverrides, type Role } from '@/modules/permissions'
 import { DomainError } from '@/modules/errors'
 
 /**
@@ -854,6 +854,16 @@ export type AccessHolder = {
    */
   viaStaffing: 'whole_firm' | 'assigned_only' | null
   isActive: boolean
+  /**
+   * The granular grants and revocations on top of the role (Phase 202).
+   *
+   * Carried here rather than fetched separately because the access board is
+   * the one screen that shows them, and `isActive` next to it is the reason
+   * this phase exists: this type has had that field since Phase 25 and
+   * `page.tsx` **dropped it on the way to the board**, so a membership's
+   * standing was selected, returned, and thrown away one map later.
+   */
+  overrides: PermissionOverrides | null
 }
 
 /**
@@ -872,6 +882,7 @@ export async function whoHasAccess(ctx: ActorContext): Promise<AccessHolder[]> {
       name: users.name,
       email: users.email,
       role: memberships.role,
+      overrides: memberships.permissionOverrides,
       isActive: memberships.isActive,
       engagementId: memberships.practiceEngagementId,
       practiceName: practices.name,
@@ -893,6 +904,7 @@ export async function whoHasAccess(ctx: ActorContext): Promise<AccessHolder[]> {
     viaEngagementId: row.engagementId,
     viaStaffing: row.staffing,
     isActive: row.isActive,
+    overrides: parseOverrides(row.overrides),
   }))
 }
 

@@ -71,7 +71,14 @@ describe('the class, measured', () => {
      * denominator quoted as a total.
      */
     expect(columnsScanned()).toEqual({ tables: 185, columns: 2179 })
-    expect(writerCandidates()).toHaveLength(27)
+    /*
+      27 when this phase measured it, and 35 since Phase 202 narrowed the
+      exclusion for a defaulted column — see `schemaColumns`. The eight it
+      added are the kind this phase was built to find, which its own exclusion
+      had made invisible, and the figure is corrected here rather than relaxed
+      to a bound (Phase 126).
+    */
+    expect(writerCandidates()).toHaveLength(35)
   })
 
   it('declares every candidate', () => {
@@ -125,14 +132,18 @@ describe('the class, measured', () => {
     /**
      * The non-vacuity check (Phase 121). A scan that found nothing would pass
      * every assertion above, so one column known by reading to have no writer
-     * at all has to still be in the answer: `memberships.permissionOverrides`
-     * is read by `auth/session.ts`, parsed by `permissions/index.ts` and
-     * applied by `effectivePermissions`, and written nowhere.
+     * at all has to still be in the answer.
+     *
+     * This was `memberships.permissionOverrides` when the phase was written.
+     * **Phase 202 closed it**, which is the right reason for a non-vacuity
+     * check to need moving — so it is `vendors.organizationId` now, read by
+     * `engagement/outbound.ts` so a letter to a supplier also reaches the CRM
+     * record of the client that supplier is, and written by nothing.
      */
     const candidates = writerCandidates().map((row) => `${row.table}.${row.column}`)
 
-    expect(candidates).toContain('memberships.permissionOverrides')
-    expect(columnWriterFor('memberships', 'permissionOverrides').verdict).toBe('unwritable')
+    expect(candidates).toContain('vendors.organizationId')
+    expect(columnWriterFor('vendors', 'organizationId').verdict).toBe('unwritable')
   })
 })
 
@@ -378,26 +389,26 @@ describe('the posting account nobody could choose', () => {
 })
 
 describe('the two it does not close', () => {
-  it('says what §14’s granular grants are missing, rather than that they exist', () => {
+  it('no longer declares §14’s granular grants, because Phase 202 built them', () => {
     /**
-     * `memberships.permissionOverrides` is §14's per-permission grants and
-     * revocations: declared, read into the actor, parsed, and *applied* by
-     * `effectivePermissions`. Nothing writes it and the access board offers
-     * roles and nothing finer. A grant and revoke editor is a screen with its
-     * own refusals, so this phase declares it and ADR 0201 nominates it —
-     * recorded so it accuses (Phase 157) rather than waiting to be found a
-     * third time.
+     * This phase declared `memberships.permissionOverrides` and nominated it:
+     * §14's per-permission grants and revocations, read into the actor,
+     * parsed, and *applied* by `effectivePermissions`, with nothing anywhere
+     * able to write one. It also took on an obligation — ADR 0199's §14
+     * register entry claimed those grants for a column nothing could write —
+     * and discharged it by correcting the entry.
      *
-     * Asserted on the register because ADR 0199's `PHASE_DELIVERABLES` entry
-     * for §14 permissions claimed *"granular grants and revocations layered on
-     * top"* for a column nothing could write. Correcting that claim was an
-     * obligation of this phase rather than a feature of it.
+     * `updateMembership` writes them now, so the entry is **gone**, and this
+     * asserts the going rather than leaving a sentence that reads as still
+     * true. A register entry outliving its candidate is the excuse ADR 0134
+     * names, and the register's own two-direction test above would fail on it;
+     * this says so by name, so the reason is recorded where somebody looking
+     * for the grants will find it.
      */
-    const entry = columnWriterFor('memberships', 'permissionOverrides')
-
-    expect(entry.verdict).toBe('unwritable')
-    expect(entry.because).toContain('effectivePermissions')
-    expect(entry.because).toContain('ADR 0201')
+    expect(() => columnWriterFor('memberships', 'permissionOverrides')).toThrow(RegistryError)
+    expect(writerCandidates().map((row) => `${row.table}.${row.column}`)).not.toContain(
+      'memberships.permissionOverrides',
+    )
   })
 
   it('says the supplier who is also a client cannot be linked', () => {

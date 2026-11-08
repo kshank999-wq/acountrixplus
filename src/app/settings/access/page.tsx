@@ -1,5 +1,6 @@
 import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
+import { PERMISSIONS, ROLE_NAMES, ROLE_PERMISSIONS } from '@/modules/permissions'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { engagementsForCompany, whoHasAccess } from '@/modules/practice/service'
 import { companyInvitations } from '@/modules/notify/invitations'
@@ -52,7 +53,29 @@ export default async function AccessPage() {
           viaPracticeName: holder.viaPracticeName,
           viaStaffing: holder.viaStaffing,
           isSelf: holder.userId === actor.userId,
+          /*
+            Phase 202. `whoHasAccess` has selected and returned `isActive`
+            since Phase 25 and this map dropped it, so the board could not show
+            whether somebody's access had been revoked — which was moot while
+            nothing could revoke it, and is the second link in the chain the
+            column scan found. The overrides arrive with it.
+          */
+          isActive: holder.isActive,
+          grant: holder.overrides?.grant ?? [],
+          revoke: holder.overrides?.revoke ?? [],
         }))}
+        /*
+          The permission vocabulary as data rather than imported into the
+          client. `permissions/index.ts` is pure, but shipping it would put the
+          whole roster and every role's defaults in the bundle to render a
+          handful of checkboxes — and the client-bundle scan exists because
+          that question is worth asking each time rather than assuming.
+        */
+        permissions={[...PERMISSIONS]}
+        roleDefaults={Object.fromEntries(
+          ROLE_NAMES.map((role) => [role, [...ROLE_PERMISSIONS[role]]]),
+        )}
+        canManageUsers={can(actor, 'users:manage')}
         engagements={engagements.map((engagement) => ({
           id: engagement.id,
           practiceId: engagement.practiceId,

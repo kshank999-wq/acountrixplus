@@ -165,6 +165,7 @@ export default async function OrganizationsPage() {
                             country: organization.country ?? '',
                             industry: organization.industry ?? '',
                             sizeBand: organization.sizeBand ?? '',
+                            tags: (organization.tags ?? []).join(', '),
                             source: organization.source ?? '',
                             isStrategicAccount: organization.isStrategicAccount,
                           }}

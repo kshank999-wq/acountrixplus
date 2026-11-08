@@ -184,9 +184,14 @@ describe('every read from a company-scoped table', () => {
       `scoped-read` because the page filters it with `scoped(actor, …)` like
       everything else on it.
     */
-    expect(READS.length).toBe(955)
+    /*
+      956 since Phase 202 and `membershipStandings`, which reads every
+      membership's role and overrides so the one-administrator invariant can be
+      asserted over the set rather than over the row being edited.
+    */
+    expect(READS.length).toBe(956)
     expect(by).toEqual({
-      'scoped-read': 578,
+      'scoped-read': 579,
       'explicit-company': 277,
       'established-above': 33,
       'id-from-fetched-row': 21,

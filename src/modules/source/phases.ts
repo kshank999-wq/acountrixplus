@@ -85,8 +85,8 @@ export const PHASE_DELIVERABLES: readonly PhaseDeliverable[] = [
     evidence: ['src/modules/auth', 'src/modules/tenancy', 'src/db/tenant-scope.ts'],
     because:
       'Sessions, devices and MFA on one side; `ActorContext`, `scoped()` and the isolation ' +
-      'census on the other. The strongest-measured deliverable in the whole table: 292 writes ' +
-      'and 955 reads, every one standing on a named guard (Phases 149–150, 196–198).',
+      'census on the other. The strongest-measured deliverable in the whole table: 293 writes ' +
+      'and 956 reads, every one standing on a named guard (Phases 149–150, 196–198).',
   },
   {
     phase: 0,

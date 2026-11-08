@@ -33,6 +33,18 @@ export type ClientFields = {
    * size and get an empty one back with nothing to say why.
    */
   sizeBand: string
+  /**
+   * Phase 202. `organizations.tags` is one of §10's named segment dimensions
+   * — the matcher has `in` and `contains` operators for it and the segment
+   * workspace labels it — and nothing set it, so a tag-based audience was the
+   * same empty list `sizeBand` returned one phase earlier. Invisible to Phase
+   * 201's scan because the column carries `.default([])`.
+   *
+   * One comma-separated field rather than a tag widget: the server splits it,
+   * and a chip editor is a thing to build when somebody has more tags than
+   * fits on a line.
+   */
+  tags: string
   source: string
   isStrategicAccount: boolean
 }
@@ -50,6 +62,7 @@ const EMPTY: ClientFields = {
   country: '',
   industry: '',
   sizeBand: '',
+  tags: '',
   source: '',
   isStrategicAccount: false,
 }
@@ -105,6 +118,11 @@ export function ClientForm({
         <Field label="Industry" value={fields.industry} onChange={set('industry')} />
         <Field label="Size band" value={fields.sizeBand} onChange={set('sizeBand')} />
         <Field label="Source" value={fields.source} onChange={set('source')} />
+        <Field
+          label="Tags (comma separated)"
+          value={fields.tags}
+          onChange={set('tags')}
+        />
       </div>
 
       {/*

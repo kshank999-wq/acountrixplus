@@ -133,6 +133,21 @@ export type MeasuredFacts = {
   scannedTables: number
   scannedColumns: number
   columnCandidates: number
+  /**
+   * Columns written only at insert (Phase 202).
+   *
+   * The column scan's other blind spot, and the one it cannot close: a column
+   * that appears in a `.values(` and never in a `.set(` counts as written even
+   * when nothing can ever change it. `memberships.role` was exactly that for
+   * 201 phases, and Phase 202 found it by reading rather than by scanning.
+   *
+   * Pinned because the audit **declares** it as a limitation, and Phase 185's
+   * rule is that a declared limitation keeps its reason — a number typed into
+   * prose beside a reason drifts away from both. There are hundreds and most
+   * are correctly immutable, which is why it is a number rather than a
+   * register.
+   */
+  insertOnlyColumns: number
 }
 
 export type PinnedClaim = {
@@ -417,6 +432,20 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
       'The candidate count also moves when one is closed, which is what makes a fix visible in ' +
       'the audit rather than only in a commit.',
     measure: (facts) => [facts.scannedColumns, facts.scannedTables, facts.columnCandidates],
+  },
+  {
+    key: 'audit-insert-only-columns',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /\*\*(\d+) columns\*\* are written at insert and never updated/,
+    because:
+      'The sentence in which this process says what its own newest check cannot see, and the ' +
+      'first limitation this register pins rather than a finding. A reader deciding whether the ' +
+      'column census is worth trusting needs to know that a column written once and never ' +
+      'changeable is counted as written — `memberships.role` was unchangeable for 201 phases and ' +
+      'the scan reported nothing. Phase 185\'s rule says a declared limitation has to keep its ' +
+      'reason, and a figure typed beside a reason goes stale while the reason stays true, which ' +
+      'reads worse than having said nothing.',
+    measure: (facts) => facts.insertOnlyColumns,
   },
 ]
 

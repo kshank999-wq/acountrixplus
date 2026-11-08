@@ -87,14 +87,31 @@ export const PERMISSIONS = [
 
 export type Permission = (typeof PERMISSIONS)[number]
 
-export type Role =
-  | 'owner'
-  | 'manager'
-  | 'bookkeeper'
-  | 'accountant'
-  | 'sales'
-  | 'marketing'
-  | 'readonly'
+/**
+ * Every role, as values rather than as a type (Phase 202).
+ *
+ * `Role` was a bare union, so there were **three** lists of roles with no
+ * mechanical relationship: this one, `roleEnum` in the schema, and a
+ * `MEMBER_ROLES` const in the access board. Nothing could validate a role
+ * arriving from a form without a fourth, which is what Phase 202 needed when
+ * `updateMembership` gave the role a writer for the first time.
+ *
+ * The type is derived from the array, so adding a role here is the one edit —
+ * and `tests/the-switch-painted-on.test.ts` holds the schema enum and the
+ * board's own list to it, because a role the database accepts and no screen
+ * offers is as invisible as the reverse.
+ */
+export const ROLE_NAMES = [
+  'owner',
+  'manager',
+  'bookkeeper',
+  'accountant',
+  'sales',
+  'marketing',
+  'readonly',
+] as const
+
+export type Role = (typeof ROLE_NAMES)[number]
 
 const ALL: Permission[] = [...PERMISSIONS]
 

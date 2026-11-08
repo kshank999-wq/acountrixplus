@@ -51,6 +51,24 @@ async function run(path: string, fn: () => Promise<string | void>): Promise<Acti
 
 // --- Organizations and opportunities ---------------------------------------
 
+/**
+ * "commercial, repeat" into two tags (Phase 202).
+ *
+ * Trimmed, de-duplicated and emptied of blanks, because the matcher compares
+ * these case-insensitively and trimmed — a tag stored as `" repeat"` would
+ * match and a duplicate would inflate nothing, but both make a list somebody
+ * reads look wrong, and the one place to fix that is where the text becomes
+ * data.
+ */
+function splitTags(value: string | undefined): string[] | undefined {
+  // `undefined` in, `undefined` out. A form that does not submit the field
+  // must leave the stored tags alone — returning `[]` here would blank them on
+  // every partial save, which is the exact failure `diffParty` takes a partial
+  // input to avoid.
+  if (value === undefined) return undefined
+  return [...new Set(value.split(',').map((tag) => tag.trim()).filter(Boolean))]
+}
+
 const organizationSchema = z.object({
   name: z.string().trim().min(1, 'A name is required.'),
   email: z.string().trim().email().optional().or(z.literal('')),
@@ -61,6 +79,13 @@ const organizationSchema = z.object({
   // has a `case` for `sizeBand` and the segment workspace labels it, so an
   // audience built on company size returned nothing and said nothing about why.
   sizeBand: z.string().trim().optional(),
+  /**
+   * Phase 202. Typed as one comma-separated field and stored as an array,
+   * because `tags` is a `jsonb` list the segment matcher reads with `in` and
+   * `contains` — and a tag with a stray space would match nothing and say
+   * nothing about why, which is the defect `sizeBand` had one phase earlier.
+   */
+  tags: z.string().trim().optional(),
   // The whole address, since Phase 78. `organizations` has had all six columns
   // since Phase 3 and this schema offered one of them.
   addressLine1: z.string().trim().optional(),
@@ -79,9 +104,11 @@ export async function createOrganizationAction(
   return run('/crm/organizations', async () => {
     const actor = await requireActor()
     const parsed = organizationSchema.parse(input)
+    const { tags: _typed, ...rest } = parsed
     const organization = await createOrganization(actor, {
-      ...parsed,
+      ...rest,
       email: parsed.email || undefined,
+      tags: splitTags(parsed.tags),
     })
     return `Added ${organization.name}.`
   })
@@ -103,7 +130,17 @@ export async function updateOrganizationAction(
     const actor = await requireActor()
     const parsed = organizationSchema.parse(input)
 
-    const fields = { ...parsed, email: parsed.email || null }
+    const tags = splitTags(parsed.tags)
+    // The key is omitted rather than set to `undefined`, because `diffParty`
+    // asks whether it is *present* — an undefined `tags` would be compared
+    // against the stored list and reported as a change the update then does
+    // not make.
+    const { tags: _typed, ...rest } = parsed
+    const fields = {
+      ...rest,
+      email: parsed.email || null,
+      ...(tags === undefined ? {} : { tags }),
+    }
 
     const before = await organizationById(actor, organizationId)
     const changes = diffParty({ fields: ORGANIZATION_FIELDS, before, after: fields })

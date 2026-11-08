@@ -57,18 +57,24 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * Four columns with a reader and nothing to write them. Two are closed in
- * Phase 201 and are therefore **absent** from this register, because the scan
- * no longer reports them — `tests/a-column-nobody-could-fill.test.ts` asserts
- * that, which is what proves the editors reach the column rather than only
- * existing:
+ * **35 candidates**, of which seven are findings. A closed one is **absent**
+ * from this register, because the scan no longer reports it — which is what
+ * proves an editor reaches the column rather than only existing, and the
+ * tests assert that absence by name.
  *
- * - `organizations.sizeBand`, a segment filter that could only ever match
- *   nothing. Closed on the client form.
- * - `service_items.inventoryAccountId`, a per-item posting account read in
- *   three places and set only by the seed. Closed on the inventory board.
+ * Phase 201 closed `organizations.sizeBand`, a segment filter that could only
+ * ever match nothing, and `service_items.inventoryAccountId`, a per-item
+ * posting account read in three places and set only by the seed.
  *
- * The two that remain are declared below and nominated in ADR 0201.
+ * Phase 202 narrowed the exclusion above and closed three more:
+ * `memberships.permissionOverrides` (ADR 0201's nomination),
+ * `memberships.isActive` — §14's *revocation*, read on every request and
+ * writable by nothing — and `organizations.tags`, `sizeBand`'s sibling and
+ * the second segment filter with no writer.
+ *
+ * Seven remain, declared below and nominated: `vendors.organizationId`, and
+ * six `isActive` columns nothing can turn off, of which one controls whether
+ * a **gift card** can still be spent.
  */
 
 /** Where a candidate stands. */
@@ -155,6 +161,8 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
     table: 'notification_log',
     columns: [
       'body',
+      /** Added to this entry in Phase 202, with the exclusion narrowed. */
+      'channel',
       'companyId',
       'detail',
       'messageId',
@@ -167,7 +175,7 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
     verdict: 'written',
     writtenBy: 'src/modules/mobile/notifications.ts',
     because:
-      'All nine written by `.values(decisionFor(input))` — one helper builds the whole row, so no ' +
+      'All ten written by `.values(decisionFor(input))` — one helper builds the whole row, so no ' +
       'key is visible at the call and every column of the table is a candidate at once. None is ' +
       'typed by anybody: this is the record of what was sent, to whom, on which topic, and what ' +
       'the push provider answered, which is why nothing in the interface offers any of it and ' +
@@ -187,14 +195,24 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   },
   {
     table: 'proposal_items',
-    columns: ['chartAccountId', 'description', 'itemId'],
+    columns: [
+      'amountCents',
+      'chartAccountId',
+      'description',
+      'isOptional',
+      'itemId',
+      'sortOrder',
+    ],
     verdict: 'written',
     writtenBy: 'src/modules/crm/proposals.ts',
     because:
       'Written by `...item` inside `items.map((item) => ({ companyId, proposalId, ...item }))` — ' +
-      'a spread **inside a callback**, which is two of the seven mechanisms at once. All three ' +
-      'are typed by a person on the proposal line editor: the wording, the revenue account, and ' +
-      'the catalogue item the line came from.',
+      'a spread **inside a callback**, which is two of the seven mechanisms at once. Three are ' +
+      'typed by a person on the proposal line editor: the wording, the revenue account, and the ' +
+      'catalogue item the line came from. The other three joined this entry in Phase 202 with ' +
+      'the default exclusion narrowed, and are computed rather than typed — the line total, its ' +
+      'position, and whether the client may decline it, which `acceptance.ts` reads to decide ' +
+      'what a signature actually agreed to.',
   },
   {
     table: 'service_items',
@@ -211,21 +229,69 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
 
   // --- Unwritable, and recorded as findings ---------------------------------
   {
-    table: 'memberships',
-    columns: ['permissionOverrides'],
+    table: 'gift_cards',
+    columns: ['isActive'],
     verdict: 'unwritable',
     writtenBy: '',
     because:
-      "**§14's granular grants, installed and inert end to end.** The column is declared, read " +
-      'into the actor by `auth/session.ts` and `practice/switching.ts`, parsed by ' +
-      '`permissions/index.ts`, and *applied* by `effectivePermissions` — a grant adds a ' +
-      'permission and a revoke deletes one. That module\'s own docstring says "Role-based ' +
-      'permissions with optional per-membership overrides (spec §14)". Nothing writes it, and ' +
-      'the access board offers roles and practice engagements and no per-permission control. ' +
-      "Phase 160's shape on a security capability, and not closable by an entry: a grant and " +
-      'revoke editor is a screen with its own refusals (nobody may grant themselves what their ' +
-      'own role lacks), which is a phase. Nominated in ADR 0201, and recorded here so it ' +
-      'accuses rather than waits to be rediscovered (Phase 157).',
+      '**A gift card cannot be voided.** `redeemGiftCard` reads it and refuses — *"Gift card X is ' +
+      'no longer valid"* — so the reader does not merely display the column, it enforces it. ' +
+      'Nothing can set it false, so a card reported lost or stolen, or one a business has agreed to ' +
+      'refund, stays spendable for as long as it has a balance. The sharpest of the six the ' +
+      'narrowed exclusion exposed, because the thing nobody can switch off is money and the ' +
+      'refusal that would stop it is already written. Nominated in ADR 0202.',
+  },
+  {
+    table: 'cash_drawers',
+    columns: ['isActive'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      '**A till cannot be retired.** `openShift` reads it and refuses — *"X is not in use."* — so ' +
+      'this is the gift card\'s shape exactly: an enforced refusal with no way to reach the state ' +
+      'that triggers it. A shop that closes a counter keeps being offered it at every cash-up for ' +
+      'ever. Below the gift card only because nothing can go missing through it.',
+  },
+  {
+    table: 'clauses',
+    columns: ['isActive'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      '**A terms clause cannot be retired, and retiring one would not do anything.** §15 asks for ' +
+      'standard terms, clauses and disclaimers, and the one thing a company does with old wording ' +
+      'is stop offering it — `createClause` has no `isActive` input and nothing updates the row. ' +
+      'Weaker than the two above and worth distinguishing from them: the only reader is a ' +
+      '**projection**, `listClauses` selecting the column to show it. Nothing filters on it, so a ' +
+      'writer alone would leave a flag a person could set with no effect — Phase 160\'s shape ' +
+      'arrived at by fixing half the gap. Closing this is two changes, not one.',
+  },
+  {
+    table: 'bills_of_materials',
+    columns: ['isActive'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      '**A bill of materials cannot be superseded, and nothing would notice if it were.** The ' +
+      'clause entry\'s shape: the only reader is a projection in `manufacturing/service.ts` that ' +
+      'selects the column to report it, and no query filters a work order\'s recipe on it. So a ' +
+      'factory that changes a recipe keeps both live *and* a flag saying which is current would ' +
+      'change nothing until something read it. An earlier draft of this entry claimed the recipe ' +
+      'choice was filtered on it; reading the two call sites is what corrected that, which is the ' +
+      'whole method of this register.',
+  },
+  {
+    table: 'practices',
+    columns: ['isActive'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      '**An accounting practice cannot be deactivated.** Filtered in four queries — the client\'s ' +
+      'own search for a firm, the offer path, the engagement check and the nightly practice ' +
+      'sweep — so the column is enforced in more places than any of the other five and reachable ' +
+      'from none. A platform-level row rather than a company\'s own, which is why it is declared ' +
+      'rather than given a screen here: who may retire a practice is a different question from ' +
+      'who may edit their own books.',
   },
   {
     table: 'vendors',
@@ -265,9 +331,30 @@ export function columnWriterFor(table: string, column: string): ColumnWriter {
 /** A column the scan cannot see a writer for. */
 export type WriterCandidate = { table: string; column: string }
 
-type SchemaColumn = { hasDefault: boolean }
+type SchemaColumn = { systemSet: boolean }
 
-/** Every table's columns, with whether the schema supplies a default. */
+/**
+ * Every table's columns, with whether the **database** is their author.
+ *
+ * Phase 201 excluded any column carrying a default, on the argument that the
+ * database supplies it so nothing has to. That was too wide, and it is what
+ * hid this phase's subject: `memberships.isActive` is
+ * `boolean().notNull().default(true)`, read on **every request** to decide
+ * whether somebody still has access, and nothing could set it false — §14's
+ * *revocation* as a mechanism with no handle.
+ *
+ * The distinction Phase 202 draws is between a default that is the **whole
+ * answer** and a default that is a **starting value for a state**. A
+ * `defaultRandom()` primary key and a `defaultNow()` timestamp are the first:
+ * nothing should ever write them, and a scan reporting them would be a
+ * register of 195 excuses. A `.default(true)` boolean is the second, and a
+ * state nothing can change is a switch painted on.
+ *
+ * So only `defaultRandom()` and `defaultNow()` are excluded, and the
+ * narrowing took the census from 27 candidates to 35 — eight columns of
+ * exactly the kind Phase 201 was built to find, which its own exclusion had
+ * made invisible. Six of the eight are an `isActive` nothing can turn off.
+ */
 function schemaColumns(): Map<string, { sqlName: string; columns: Map<string, SchemaColumn> }> {
   const tables = new Map<string, { sqlName: string; columns: Map<string, SchemaColumn> }>()
 
@@ -280,9 +367,7 @@ function schemaColumns(): Map<string, { sqlName: string; columns: Map<string, Sc
 
       for (const c of body.matchAll(/^\s{4}(\w+):\s*\w+\(/gm)) {
         const own = new RegExp(String.raw`^\s{4}${c[1]}:[\s\S]*?(?=^\s{4}\w+:|$)`, 'm').exec(body)
-        columns.set(c[1], {
-          hasDefault: /\.default\(|defaultNow\(|defaultRandom\(|\$defaultFn\(/.test(own?.[0] ?? ''),
-        })
+        columns.set(c[1], { systemSet: /defaultNow\(|defaultRandom\(/.test(own?.[0] ?? '') })
       }
 
       tables.set(m[1], { sqlName: m[2], columns })
@@ -395,7 +480,7 @@ export function writerCandidates(): WriterCandidate[] {
 
   for (const [tableVar, table] of tables) {
     for (const [column, info] of table.columns) {
-      if (info.hasDefault) continue
+      if (info.systemSet) continue
       if (!named.has(`${tableVar}.${column}`)) continue
       if (settable.has(`${tableVar}.${column}`)) continue
 
@@ -406,6 +491,81 @@ export function writerCandidates(): WriterCandidate[] {
   return candidates.sort(
     (a, b) => a.table.localeCompare(b.table) || a.column.localeCompare(b.column),
   )
+}
+
+/**
+ * Columns something writes **only at insert** — the scan's other blind spot.
+ *
+ * Measured in Phase 202 rather than registered, and the number is the reason:
+ * a column that appears in a `.values(` and never in a `.set(` is written and
+ * therefore not a candidate above, even when nothing can ever *change* it.
+ * `memberships.role` was exactly that — set once at invitation, read in eight
+ * places, and unchangeable for 201 phases — and the scan could not see it.
+ * Phase 202 found it by reading the table the nomination pointed at.
+ *
+ * There are hundreds, and the overwhelming majority are right: a journal
+ * line's amount, an audit event's action and a sent document's snapshot are
+ * immutable **on purpose**, and several ADRs exist to keep them that way
+ * (0021, 0042). So this is not a register — a register of hundreds of entries
+ * saying "correctly immutable" would be an excuse generator, which is the
+ * failure ADR 0134 names.
+ *
+ * It is a number, declared so the limitation keeps its reason (Phase 185) and
+ * measured so the prose cannot drift from it (Phase 179). Narrowing it needs a
+ * way to say which columns are *state* rather than *record*, and this phase
+ * does not have one.
+ */
+export function insertOnlyColumns(): number {
+  const tables = schemaColumns()
+  const inserted = new Set<string>()
+  const updated = new Set<string>()
+  const named = new Set<string>()
+
+  for (const dir of ['src/modules', 'src/app'] as const) {
+    for (const file of sourceFiles(dir)) {
+      const src = readableSource(file)
+      const whole = withoutComments(readFileSync(file, 'utf8'))
+
+      for (const m of whole.matchAll(/\.(insert|update)\(\s*(\w+)\s*\)\s*\.(values|set)\(/g)) {
+        const into = m[1] === 'insert' ? inserted : updated
+        const targets = tables.has(m[2])
+          ? [m[2]]
+          : [...declarationOf(whole, m.index, m[2]).matchAll(/\b(\w+)\b/g)]
+              .map((t) => t[1])
+              .filter((name) => tables.has(name))
+
+        const open = whole.indexOf('(', whole.indexOf(m[3], m.index) + m[3].length)
+        let argument = balanced(whole, open).slice(1, -1)
+
+        const bare = /^\s*(\w+)\s*$/.exec(argument)
+        if (bare) {
+          const declared = declarationOf(whole, m.index, bare[1])
+          if (declared) argument = declared
+        }
+
+        for (const target of targets) {
+          for (const k of argument.matchAll(/(\w+)\s*:/g)) into.add(`${target}.${k[1]}`)
+          for (const k of argument.matchAll(/[{,]\s*(\w+)\s*(?=[,}])/g)) {
+            into.add(`${target}.${k[1]}`)
+          }
+        }
+      }
+
+      for (const m of src.matchAll(/\b(\w+)\.(\w+)\b/g)) named.add(`${m[1]}.${m[2]}`)
+    }
+  }
+
+  let total = 0
+  for (const [tableVar, table] of tables) {
+    for (const [column, info] of table.columns) {
+      const key = `${tableVar}.${column}`
+      if (info.systemSet) continue
+      if (!named.has(key)) continue
+      if (inserted.has(key) && !updated.has(key)) total += 1
+    }
+  }
+
+  return total
 }
 
 /** How many columns the scan looked at, for the register's own prose. */
