@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { formatCents } from '@/lib/money'
 import {
   addDrawerAction,
+  setDrawerActiveAction,
   closeShiftAction,
   openShiftAction,
   payOutAction,
@@ -100,6 +101,15 @@ export function DrawersBoard(props: Props) {
 
   const shut = props.drawers.filter((row) => row.isActive && !row.openShiftId)
 
+  /*
+    Retired tills (Phase 204). `openShift` has refused an inactive drawer since
+    Phase 33 and nothing could set the flag, so this list was always empty and
+    `isActive` was a filter that only ever said yes. Shown rather than hidden,
+    because "that counter is retired" is what somebody looks for when a till
+    they remember is not on the cash-up list.
+  */
+  const retired = props.drawers.filter((row) => !row.isActive)
+
   return (
     <div className="space-y-6">
       <header>
@@ -188,12 +198,61 @@ export function DrawersBoard(props: Props) {
                     usually opens with {formatCents(drawer.defaultFloatCents)}
                   </p>
                 </div>
-                {props.canManage && (
-                  <OpenForm
-                    drawer={drawer}
-                    act={act}
-                    pending={pending}
-                  />
+                <div className="flex flex-wrap items-center gap-2">
+                  {props.canManage && (
+                    <OpenForm
+                      drawer={drawer}
+                      act={act}
+                      pending={pending}
+                    />
+                  )}
+                  {props.canAddDrawers && (
+                    <button
+                      className="btn btn-ghost text-xs"
+                      disabled={pending}
+                      onClick={() =>
+                        act(() =>
+                          setDrawerActiveAction({ drawerId: drawer.id, isActive: false }),
+                        )
+                      }
+                    >
+                      Retire
+                    </button>
+                  )}
+                </div>
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {retired.length > 0 && (
+        <section className="card overflow-hidden">
+          <header className="border-b border-line px-4 py-3">
+            <h3 className="text-sm font-semibold">Retired</h3>
+            <p className="text-xs text-muted">
+              Out of use and kept, because what a till took last March is still part of the
+              books. A shift cannot be opened on one of these — that refusal has existed since
+              Phase 33 and nothing could reach it until Phase 204.
+            </p>
+          </header>
+          <ul className="divide-y divide-line">
+            {retired.map((drawer) => (
+              <li
+                className="flex flex-wrap items-center justify-between gap-3 px-4 py-3"
+                key={drawer.id}
+              >
+                <p className="text-sm">{drawer.name}</p>
+                {props.canAddDrawers && (
+                  <button
+                    className="btn btn-ghost text-xs"
+                    disabled={pending}
+                    onClick={() =>
+                      act(() => setDrawerActiveAction({ drawerId: drawer.id, isActive: true }))
+                    }
+                  >
+                    Put back in use
+                  </button>
                 )}
               </li>
             ))}

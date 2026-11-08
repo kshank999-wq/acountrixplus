@@ -10,6 +10,7 @@ import {
   inviteStaffAction,
   respondToEngagementAction,
   setBriefPreferenceAction,
+  setPracticeActiveAction,
   type ActionResult,
 } from '@/app/actions/practice'
 
@@ -359,6 +360,50 @@ export function PracticeBoard({
           </div>
         )}
       </Card>
+
+      {/*
+        Closing the firm (Phase 204).
+
+        `practices.isActive` was read in four places and writable by nothing —
+        the strongest reader being `practicesFor`, which is why an inactive
+        firm disappears from its *own members'* list and none of them can
+        switch into it again. So the mechanism for closing a firm worked end to
+        end and had no handle, while `removePracticeMember` could already
+        retire a person: a firm could retire its people and not itself.
+
+        Owner-only, and refused while engagements are live — the error says how
+        many. Sits last because it is the thing nobody should reach for by
+        accident.
+      */}
+      {isOwner && (
+        <Card
+          title="Close the firm"
+          subtitle="Nobody can switch into a closed firm and no client can find it. Its engagements have to be ended first, because a closed firm holding somebody's books is an outside party with nothing to answer for it."
+        >
+          <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-3">
+            <p className="text-xs text-muted">
+              {live.length === 0
+                ? 'No engagements are open, so this can be done now. It is reversible.'
+                : `${live.length} engagement${live.length === 1 ? '' : 's'} still open. End ` +
+                  `${live.length === 1 ? 'it' : 'them'} above first.`}
+            </p>
+            <button
+              className="btn btn-ghost text-xs"
+              disabled={pending}
+              onClick={() =>
+                act(() =>
+                  setPracticeActiveAction({
+                    practiceId: practice.practiceId,
+                    isActive: false,
+                  }),
+                )
+              }
+            >
+              Close it
+            </button>
+          </div>
+        </Card>
+      )}
 
       {live.length > 0 && isOwner && (
         <Card

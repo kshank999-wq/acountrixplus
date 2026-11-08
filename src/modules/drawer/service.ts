@@ -127,6 +127,90 @@ export async function addDrawer(
   return drawer
 }
 
+/**
+ * Takes a till out of use, or puts it back (Phase 204).
+ *
+ * ## The switch, and why this one needs no decision about money
+ *
+ * `openShift` has refused an inactive drawer since Phase 33 — *"X is not in
+ * use."* — `listDrawers` returns the flag and the board filters on it, and
+ * **nothing could write it**: `addDrawer` inserted and nothing ever updated
+ * `cash_drawers`. A shop that closed a counter kept being offered it at every
+ * cash-up for ever.
+ *
+ * ADR 0203 nominated this expecting it to need Phase 203's shape — a decision
+ * about what happens to the float, the way stopping a gift card needs a
+ * decision about its balance. **It does not, and the reason is worth keeping.**
+ *
+ * A gift card's balance is a *liability on the books*: account 2590 owes it,
+ * and making the card unspendable without moving that figure leaves money
+ * nobody can ever settle. A drawer's float is *cash in a drawer*, and
+ * `closeShift` already accounts for it — the Z-reading, the expected figure,
+ * the over-or-short posting. There is nothing left for this to decide.
+ *
+ * So the refusal is simply that the shift has to be closed first, and it posts
+ * nothing. One sentence instead of three dispositions, because the money was
+ * already somebody else's problem and that somebody already solves it.
+ */
+export async function setDrawerActive(
+  ctx: ActorContext,
+  input: { drawerId: string; isActive: boolean },
+) {
+  requirePermission(ctx, 'company:manage')
+  await requireModule(ctx, 'cash_drawer')
+
+  return db.transaction(async (tx) => {
+    const [drawer] = await tx
+      .select()
+      .from(cashDrawers)
+      .where(scoped(ctx, cashDrawers, eq(cashDrawers.id, input.drawerId)))
+      .limit(1)
+
+    if (!drawer) throw new DrawerError('No such drawer.')
+
+    if (!input.isActive) {
+      const [open] = await tx
+        .select({ id: drawerShifts.id })
+        .from(drawerShifts)
+        .where(
+          and(
+            eq(drawerShifts.companyId, ctx.companyId),
+            eq(drawerShifts.drawerId, drawer.id),
+            eq(drawerShifts.status, 'open'),
+          ),
+        )
+        .limit(1)
+
+      if (open) {
+        throw new DrawerError(
+          `${drawer.name} has a shift open. Close it first — counting it is what accounts for ` +
+            'the cash in it, and retiring the drawer does not.',
+        )
+      }
+    }
+
+    const [row] = await tx
+      .update(cashDrawers)
+      .set({ isActive: input.isActive })
+      .where(scoped(ctx, cashDrawers, eq(cashDrawers.id, drawer.id)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: input.isActive ? 'drawer.restore' : 'drawer.retire',
+        entityType: 'cash_drawer',
+        entityId: drawer.id,
+        before: { isActive: drawer.isActive },
+        after: { isActive: row.isActive, name: row.name },
+      },
+      tx,
+    )
+
+    return row
+  })
+}
+
 export async function listDrawers(ctx: ActorContext) {
   requirePermission(ctx, 'accounting:view')
 

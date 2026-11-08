@@ -192,6 +192,18 @@ export type AuditAction =
   | 'engagement.offer'
   | 'engagement.accept'
   | 'engagement.end'
+  /**
+   * Somebody at the accountants stopped working on these books (Phase 204).
+   *
+   * Its own action rather than `engagement.end`, because **the engagement is
+   * still active**: one person left the firm, and the firm still has the
+   * books. Written once per client the removal touched, because a client's
+   * audit trail is theirs — one event filed against one of twelve companies
+   * is eleven companies with no record.
+   *
+   * `removePracticeMember` audited nothing, on either side, until this phase.
+   */
+  | 'engagement.member_removed'
   // Recorded in the company being *entered*, because "who opened our books
   // and when" is the client's question, not the accountant's.
   | 'company.switch'
@@ -277,6 +289,17 @@ export type AuditAction =
   // and what they said was in it — the count is a person's declaration about a
   // moment, and §19's whole demand is that such a moment stays reconstructable.
   | 'drawer.create'
+  /**
+   * A till taken out of use, or put back (Phase 204).
+   *
+   * `openShift` had refused an inactive drawer since Phase 33 and nothing
+   * could set the flag. Retire and restore rather than one `drawer.update`,
+   * on the pattern `account.retire`/`account.restore` set: the question asked
+   * later is *why is this counter not on the cash-up list*, and "somebody
+   * retired it on the 4th" is the answer.
+   */
+  | 'drawer.retire'
+  | 'drawer.restore'
   | 'drawer.shift_open'
   | 'drawer.shift_close'
   // Foreign exchange (spec §19, Phase 35). The rate a foreign entry posted at

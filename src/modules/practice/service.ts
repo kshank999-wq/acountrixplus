@@ -221,7 +221,7 @@ export async function addPracticeMember(
  * somebody forgot one company.
  */
 export async function removePracticeMember(
-  actor: { userId: string },
+  actor: { userId: string; userName?: string },
   input: { practiceId: string; userId: string },
 ): Promise<{ revokedAtClients: number }> {
   return db.transaction(async (tx) => {
@@ -237,12 +237,25 @@ export async function removePracticeMember(
         ),
       )
 
-    const engagementIds = await tx
-      .select({ id: practiceEngagements.id })
+    /*
+      The company each engagement is for, since Phase 204, not just its id.
+
+      This query selected `{ id }` alone, which was all the delete needed and
+      the reason the audit could not be written: the rows removed name a person
+      and an engagement, and the log a client reads is keyed by **company**.
+      One extra column turned an unauditable sweep into one event per set of
+      books it touched.
+    */
+    const engagements = await tx
+      .select({
+        id: practiceEngagements.id,
+        companyId: practiceEngagements.companyId,
+        grantedRole: practiceEngagements.grantedRole,
+      })
       .from(practiceEngagements)
       .where(eq(practiceEngagements.practiceId, input.practiceId))
 
-    if (engagementIds.length === 0) return { revokedAtClients: 0 }
+    if (engagements.length === 0) return { revokedAtClients: 0 }
 
     const removed = await tx
       .delete(memberships)
@@ -251,11 +264,55 @@ export async function removePracticeMember(
           eq(memberships.userId, input.userId),
           inArray(
             memberships.practiceEngagementId,
-            engagementIds.map((row) => row.id),
+            engagements.map((row) => row.id),
           ),
         ),
       )
-      .returning({ id: memberships.id })
+      .returning({ id: memberships.id, companyId: memberships.companyId })
+
+    /*
+      One event per client whose books this removed somebody from (Phase 204).
+
+      It audited nothing at all, on either side — a firm could take a person
+      off every client's ledger in one call and no client's log would mention
+      it. Per company rather than once, because a client's audit trail is
+      theirs: an event filed against one of twelve companies is eleven
+      companies with no record.
+
+      Named `engagement.member_removed` rather than reusing `engagement.end`,
+      because the engagement is **still active**. One person left the firm; the
+      firm still has the books.
+    */
+    const named = await tx
+      .select({ id: users.id, name: users.name })
+      .from(users)
+      .where(inArray(users.id, [input.userId, actor.userId]))
+
+    const nameOf = new Map(named.map((row) => [row.id, row.name]))
+    const firm = await practiceName(input.practiceId, tx)
+    const roleFor = new Map(engagements.map((row) => [row.companyId, row.grantedRole]))
+
+    for (const row of removed) {
+      await recordAudit(
+        practiceActorContext({
+          companyId: row.companyId,
+          grantedRole: (roleFor.get(row.companyId) ?? 'readonly') as Role,
+          userId: actor.userId,
+          // The acting owner's own name, looked up when the caller did not
+          // supply it — the audit line says who removed somebody, not who was
+          // removed, and those are different people.
+          userName: actor.userName ?? nameOf.get(actor.userId) ?? 'a practice owner',
+          practiceName: firm,
+        }),
+        {
+          action: 'engagement.member_removed',
+          entityType: 'membership',
+          entityId: row.id,
+          after: { removed: nameOf.get(input.userId) ?? input.userId, practice: firm },
+        },
+        tx,
+      )
+    }
 
     return { revokedAtClients: removed.length }
   })
@@ -420,6 +477,68 @@ async function assertNoLiveEngagement(exec: Executor, practiceId: string, compan
         ? 'That practice already has access to this company.'
         : 'There is already a request waiting on a decision.',
     )
+  }
+}
+
+/**
+ * A client-side audit context for something the **practice** did (Phase 204).
+ *
+ * ## The access that disappeared quietly
+ *
+ * Three things a firm can do remove a client's access to their own books, and
+ * until this phase the client's audit log said nothing about any of them:
+ *
+ * | | |
+ * | --- | --- |
+ * | `endEngagement` | wrote an `engagement.end` event **only** `if (party.side === 'client')`. When the accountant walked away, nothing was recorded anywhere. |
+ * | `removePracticeMember` | deletes the memberships that person held at *every* client of the firm, and audited nothing, on either side. |
+ * | closing a practice | would have been a third. It refuses while engagements are live instead. |
+ *
+ * §14 asks for an *"Audit log for … changes to … permissions"*, and losing
+ * your accountant's access is a permission change on your books. The client
+ * could see the engagement's `status` had become `ended`; what they could not
+ * see is **when, by whom, and that it happened at all** without going to look.
+ *
+ * ## Why this is a context rather than a second audit writer
+ *
+ * `recordAudit` needs a company, a person and a name. All three are reachable
+ * from the engagement — `companyId`, the practice member, and the firm — and
+ * `ActorContext.viaPractice` exists for exactly this: its own comment says the
+ * client *"should not have to cross-reference a user list to find out that the
+ * person who reopened December works for their accountants"*. So the event
+ * reads **"Dana Chen (Hartley & Co)"**, which is what that field was built to
+ * produce, on the two actions where it matters most and never fired.
+ *
+ * `role` is the engagement's `grantedRole` rather than a placeholder, because
+ * that is the role the member actually held on that company. Nothing here
+ * checks a permission with it — the practice-side authority is
+ * `requirePracticeOwner`, above — but a context carrying a role nobody held
+ * would be a fact invented to satisfy a type.
+ */
+/** A firm's name, for the audit line a client reads. */
+async function practiceName(practiceId: string, exec: Executor = db): Promise<string> {
+  const [row] = await exec
+    .select({ name: practices.name })
+    .from(practices)
+    .where(eq(practices.id, practiceId))
+    .limit(1)
+
+  return row?.name ?? 'an outside firm'
+}
+
+function practiceActorContext(input: {
+  companyId: string
+  grantedRole: Role
+  userId: string
+  userName: string
+  practiceName: string
+}): ActorContext {
+  return {
+    userId: input.userId,
+    userName: input.userName,
+    companyId: input.companyId,
+    role: input.grantedRole,
+    viaPractice: input.practiceName,
   }
 }
 
@@ -764,18 +883,43 @@ export async function endEngagement(
       })
       .where(eq(practiceEngagements.id, engagement.id))
 
-    if (party.side === 'client') {
-      await recordAudit(
-        party.ctx,
-        {
-          action: 'engagement.end',
-          entityType: 'practice_engagement',
-          entityId: engagement.id,
-          after: { membershipsRemoved: removed.length, reason: input.reason ?? null },
+    /*
+      Audited whichever side ended it, since Phase 204.
+
+      This block was `if (party.side === 'client')`, so the one event the
+      client most needs — their accountant walking away, taking every
+      membership the engagement granted — was the one that was never written.
+      The asymmetry was not a decision: `recordAudit` needs a company and the
+      practice side has none of its own, and `practiceActorContext` is where
+      that is resolved rather than worked around.
+    */
+    const ctx =
+      party.side === 'client'
+        ? party.ctx
+        : practiceActorContext({
+            companyId: engagement.companyId,
+            grantedRole: engagement.grantedRole as Role,
+            userId: party.userId,
+            userName: party.userName,
+            practiceName: await practiceName(engagement.practiceId, tx),
+          })
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'engagement.end',
+        entityType: 'practice_engagement',
+        entityId: engagement.id,
+        after: {
+          membershipsRemoved: removed.length,
+          reason: input.reason ?? null,
+          // Which side, because "we took our books back" and "they resigned"
+          // are different facts and the actor's name alone does not say which.
+          endedBy: party.side,
         },
-        tx,
-      )
-    }
+      },
+      tx,
+    )
 
     return { membershipsRemoved: removed.length }
   })
@@ -906,6 +1050,86 @@ export async function whoHasAccess(ctx: ActorContext): Promise<AccessHolder[]> {
     isActive: row.isActive,
     overrides: parseOverrides(row.overrides),
   }))
+}
+
+/**
+ * Closes a firm, or opens it again (Phase 204).
+ *
+ * ## The switch that was already wired to everything
+ *
+ * `practices.isActive` is read in four places and **nothing could write it**.
+ * Phase 202 found it among six such switches; the strongest reader is the one
+ * that makes it the right way to close a firm rather than a flag about one:
+ * `practicesFor` filters on it, so an inactive practice disappears from its
+ * **own members'** list of firms and none of them can switch into it again.
+ * The others keep it out of the client's search (`findPracticesByName`), out
+ * of the offer path, and out of the nightly sweep.
+ *
+ * So the mechanism for closing a firm worked end to end and had no handle, and
+ * the asymmetry is exact: `removePracticeMember` writes
+ * `practiceMembers.isActive = false`, so **a firm could retire its people but
+ * not itself**.
+ *
+ * ## Refused while a client's books are still reachable
+ *
+ * A closed practice whose engagements are still active would be an outside
+ * firm with access to somebody's ledger and no visible owner — the client's
+ * access board reads the firm's name through a join, and the firm would be
+ * gone from every list that could answer for it.
+ *
+ * So this refuses while any engagement is `active` or `pending`, and says how
+ * many. `endEngagement` is the path, it is callable from this side, and since
+ * this phase it writes the client an audit event when the practice uses it.
+ * A firm closing has to wind its clients down deliberately rather than as a
+ * side effect, which is the same judgement Phase 203 made about a gift card's
+ * balance: the thing that is owed gets dealt with before the switch moves.
+ *
+ * ## No audit row, and why that is not an omission here
+ *
+ * `audit_events.companyId` is not null and a practice is not a tenant. Every
+ * practice-side action in this module is in the same position, which is why
+ * `practiceActorContext` exists: an action that touches a *client's* books can
+ * be filed against that client. Closing a practice cannot touch any, because
+ * it is refused while any engagement is live — so there is no company whose
+ * log this belongs in, and filing it against an arbitrary one would be worse
+ * than not filing it. Declared rather than papered over.
+ */
+export async function setPracticeActive(
+  actor: { userId: string },
+  input: { practiceId: string; isActive: boolean },
+): Promise<{ isActive: boolean }> {
+  return db.transaction(async (tx) => {
+    await requirePracticeOwner(input.practiceId, actor.userId, tx)
+
+    if (!input.isActive) {
+      const live = await tx
+        .select({ id: practiceEngagements.id })
+        .from(practiceEngagements)
+        .where(
+          and(
+            eq(practiceEngagements.practiceId, input.practiceId),
+            inArray(practiceEngagements.status, ['active', 'pending']),
+          ),
+        )
+
+      if (live.length > 0) {
+        throw new PracticeError(
+          `${live.length} engagement${live.length === 1 ? '' : 's'} ` +
+            `${live.length === 1 ? 'is' : 'are'} still open. End ` +
+            `${live.length === 1 ? 'it' : 'them'} first — closing the firm would leave somebody ` +
+            'with access to a client’s books and no firm to answer for it.',
+        )
+      }
+    }
+
+    const [row] = await tx
+      .update(practices)
+      .set({ isActive: input.isActive })
+      .where(eq(practices.id, input.practiceId))
+      .returning({ isActive: practices.isActive })
+
+    return { isActive: row.isActive }
+  })
 }
 
 /** Practices this person could be offered an engagement with, by name. */

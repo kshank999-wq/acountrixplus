@@ -107,11 +107,12 @@ describe('what the census could not see', () => {
       `gift_cards.isActive` — the one of the six switches where the thing
       nobody could turn off was money. Corrected rather than relaxed.
     */
-    expect(candidates).toHaveLength(34)
+    expect(candidates).toHaveLength(32)
 
-    // In, because nothing can turn them off.
+    // In, because nothing can turn them off — and these two are the ones that
+    // need *two* changes rather than one, which is why they are last.
     expect(candidates).toContain('clauses.isActive')
-    expect(candidates).toContain('cash_drawers.isActive')
+    expect(candidates).toContain('bills_of_materials.isActive')
 
     // Out, because the database is their author.
     expect(candidates.filter((column) => column.endsWith('.createdAt'))).toEqual([])
@@ -121,6 +122,8 @@ describe('what the census could not see', () => {
     // Phase 203 did, which is what proves the editor reaches the column rather
     // than the entry having been reworded.
     expect(candidates).not.toContain('gift_cards.isActive')
+    expect(candidates).not.toContain('cash_drawers.isActive')
+    expect(candidates).not.toContain('practices.isActive')
     expect(candidates).not.toContain('memberships.isActive')
     expect(candidates).not.toContain('memberships.permissionOverrides')
     expect(candidates).not.toContain('organizations.tags')
@@ -144,8 +147,14 @@ describe('what the census could not see', () => {
       `gift_cards.code` the update a reissued card needs — one of the few in
       the class that genuinely was not immutable, and the only way to tell is
       still to read.
+
+      Back to 770 in Phase 204, and the reason is the class's own shape rather
+      than a regression: `removePracticeMember` now returns
+      `memberships.companyId` so it can file an audit event per client, which
+      *names* a column that is written at insert and never updated. A column
+      enters this number by being read for the first time.
     */
-    expect(insertOnlyColumns()).toBe(769)
+    expect(insertOnlyColumns()).toBe(770)
   })
 
   it('removed the entry for the column it closed, rather than rewording it', () => {
@@ -155,7 +164,7 @@ describe('what the census could not see', () => {
     expect(COLUMN_WRITERS.map((entry) => entry.table)).not.toContain('memberships')
   })
 
-  it('argues the six switches nobody can turn off', () => {
+  it('argues the switches nobody can turn off', () => {
     /*
       Six `isActive` columns nothing can turn off — and they are **not** one
       finding, which reading the readers is what established.
@@ -175,17 +184,18 @@ describe('what the census could not see', () => {
       on the column. It is not, and correcting that is why the entries say
       which kind each one is.
 
-      **Phase 203 closed the gift card**, so four are declared here now. It
-      went first precisely because it was enforced: the refusal existed and
-      the whole gap was the writer.
+      **Phase 203 closed the gift card and Phase 204 the other two enforced
+      ones**, so the two declared here are exactly the projection-only pair.
+      The enforced ones went first precisely because they were enforced: the
+      refusal existed and the whole gap was the writer, which is one change.
+      These two need a filter as well as a writer, and shipping the writer
+      alone would be Phase 160's shape reached by closing half a gap.
     */
     const switches = COLUMN_WRITERS.filter((entry) => entry.columns.includes('isActive'))
 
     expect(switches.map((entry) => entry.table).sort()).toEqual([
       'bills_of_materials',
-      'cash_drawers',
       'clauses',
-      'practices',
     ])
 
     for (const entry of switches) {
@@ -193,9 +203,10 @@ describe('what the census could not see', () => {
       expect(entry.because.length, entry.table).toBeGreaterThan(140)
     }
 
-    // `memberships.isActive` was closed here and `gift_cards.isActive` in
-    // Phase 203 — so the count above is four rather than six, and both
-    // absences are the register's two-direction rule working.
+    // `memberships.isActive` was closed here, `gift_cards.isActive` in Phase
+    // 203, and the till and the practice in Phase 204 — so the count above is
+    // two rather than six, and every absence is the register's two-direction
+    // rule working rather than an entry quietly reworded.
     expect(switches.map((entry) => entry.table)).not.toContain('memberships')
   })
 })

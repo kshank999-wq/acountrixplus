@@ -3,7 +3,13 @@
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
-import { addDrawer, closeShift, openShift, payOut } from '@/modules/drawer/service'
+import {
+  addDrawer,
+  closeShift,
+  openShift,
+  payOut,
+  setDrawerActive,
+} from '@/modules/drawer/service'
 import { formatCents } from '@/lib/money'
 import { messageFor } from '@/modules/errors'
 
@@ -21,6 +27,28 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
   } catch (error) {
     return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
+}
+
+/**
+ * Takes a till out of use, or puts it back (Phase 204).
+ *
+ * The message names the consequence rather than saying "saved", because the
+ * consequence is the point: a retired drawer stops being offered at the
+ * cash-up, which is the whole reason the column exists.
+ */
+export async function setDrawerActiveAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({ drawerId: z.string().uuid(), isActive: z.boolean() })
+      .parse(input)
+
+    const drawer = await setDrawerActive(actor, parsed)
+
+    return parsed.isActive
+      ? `${drawer.name} is back in use.`
+      : `${drawer.name} is retired. It will not be offered at the next cash-up, and its history stays.`
+  })
 }
 
 export async function addDrawerAction(input: unknown): Promise<ActionResult> {

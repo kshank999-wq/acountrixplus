@@ -189,11 +189,11 @@ describe('every read from a company-scoped table', () => {
       membership's role and overrides so the one-administrator invariant can be
       asserted over the set rather than over the row being edited.
     */
-    expect(READS.length).toBe(960)
+    expect(READS.length).toBe(963)
     expect(by).toEqual({
-      'scoped-read': 583,
-      'explicit-company': 277,
-      'established-above': 33,
+      'scoped-read': 584,
+      'explicit-company': 278,
+      'established-above': 34,
       'id-from-fetched-row': 21,
       'join-inherited': 13,
       'derives-tenant-from-row': 14,

@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **296
-writes** and **960 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **297
+writes** and **963 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,7 +357,7 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2179 columns** across **185 tables** and reports **34** with a
+The scan reads **2179 columns** across **185 tables** and reports **32** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
@@ -415,10 +415,10 @@ state nothing can change is a switch painted on. Narrowed to
 of the eight it added are an `isActive` nothing can turn off**. One of them was
 §14's revocation; Phase 203 closed a second, and the pinned figure is 34.
 
-The second cannot be closed. **769 columns** are written at insert and never
+The second cannot be closed. **770 columns** are written at insert and never
 updated, so the scan counts them as written even where nothing can ever change
 them — `memberships.role` was unchangeable for 201 phases and the census
-reported nothing. Almost all 769 are immutable *on purpose* (ADR 0021's sent
+reported nothing. Almost all 770 are immutable *on purpose* (ADR 0021's sent
 document, ADR 0042's live record), so a register of them would say "correct"
 hundreds of times and bury the few that are not. It is a pinned number
 (`audit-insert-only-columns`) rather than a register, and narrowing it needs a
@@ -459,6 +459,47 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §14 — the access that disappeared quietly (Phase 204)
+
+Phase 202 closed §14's granular grants, role changes and revocation. **The
+practice side still had three holes**, and all three are the same hole: a firm
+can remove a client's access and the client's audit log did not say so.
+
+- `endEngagement` wrote its event only `if (party.side === 'client')`, so the
+  accountant walking away — taking every membership the engagement granted —
+  was never recorded.
+- `removePracticeMember` deletes the memberships that person held at *every*
+  client of the firm and audited nothing, on either side.
+- Closing a practice would have been a third; it refuses while engagements are
+  live instead.
+
+§14 asks for an audit log of **permission** changes, and losing your
+accountant's access is one. It was never a decision: `recordAudit` needs a
+company and the practice side has none of its own. But `companyId`, the member
+and the firm are all on the engagement, and `ActorContext.viaPractice` was
+built for exactly this line — its own comment says a client should not have to
+cross-reference a user list to learn that whoever reopened December works for
+their accountants. `practiceActorContext` resolves it; the removal writes one
+event per client, because an event filed against one of twelve companies is
+eleven companies with no record.
+
+**Not auditable, and declared:** a practice-side action that touches no
+client's books. Creating a firm, adding a member, closing one. There is no
+tenant whose log they belong in, and filing them against an arbitrary company
+would be worse than not filing them.
+
+The two columns the census asked for are closed with them.
+`cash_drawers.isActive` needed no decision about the float, which ADR 0203
+expected it to — `closeShift` already counts the cash, so the refusal is only
+that the shift must be closed first. `practices.isActive` is refused while any
+engagement is live, because a closed firm holding somebody's books is an
+outside party with nothing to answer for it.
+
+Of the six switches Phase 202 found, the **three enforced** ones are now
+closed and the **two projection-only** ones remain — a distinction that only
+exists because two of Phase 202's own register entries were wrong as drafted
+and reading the call sites corrected them.
 
 ### §5 — where a gift card's money went (Phase 203)
 

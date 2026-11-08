@@ -57,7 +57,7 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **34 candidates**, of which six are findings. A closed one is **absent**
+ * **32 candidates**, of which four are findings. A closed one is **absent**
  * from this register, because the scan no longer reports it — which is what
  * proves an editor reaches the column rather than only existing, and the
  * tests assert that absence by name.
@@ -77,9 +77,18 @@ import { readableSource, sourceFiles } from './isolation-scan'
  * rather than an entry is that stopping a card with a balance on it is a
  * decision about where that balance went.
  *
- * Six remain, declared below and nominated: `vendors.organizationId`, and
- * four `isActive` columns nothing can turn off, of which two are enforced by
- * a refusal and two are only ever displayed.
+ * Phase 204 closed the other two **enforced** switches:
+ * `cash_drawers.isActive`, which `openShift` refuses on, and
+ * `practices.isActive`, which four queries filter on — including
+ * `practicesFor`, so an inactive firm leaves its own members' list and none of
+ * them can switch into it again.
+ *
+ * Four remain, declared below and nominated: `vendors.organizationId`, and
+ * two `isActive` columns that are **projections only** — selected to be
+ * displayed with nothing filtering on either, so a writer alone would hand
+ * somebody a control with no effect. Each is two changes rather than one,
+ * which is the distinction reading the readers established and the reason the
+ * three enforced ones went first.
  */
 
 /** Where a candidate stands. */
@@ -234,17 +243,6 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
 
   // --- Unwritable, and recorded as findings ---------------------------------
   {
-    table: 'cash_drawers',
-    columns: ['isActive'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      '**A till cannot be retired.** `openShift` reads it and refuses — *"X is not in use."* — so ' +
-      'this is the gift card\'s shape exactly: an enforced refusal with no way to reach the state ' +
-      'that triggers it. A shop that closes a counter keeps being offered it at every cash-up for ' +
-      'ever. Below the gift card only because nothing can go missing through it.',
-  },
-  {
     table: 'clauses',
     columns: ['isActive'],
     verdict: 'unwritable',
@@ -271,19 +269,6 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
       'change nothing until something read it. An earlier draft of this entry claimed the recipe ' +
       'choice was filtered on it; reading the two call sites is what corrected that, which is the ' +
       'whole method of this register.',
-  },
-  {
-    table: 'practices',
-    columns: ['isActive'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      '**An accounting practice cannot be deactivated.** Filtered in four queries — the client\'s ' +
-      'own search for a firm, the offer path, the engagement check and the nightly practice ' +
-      'sweep — so the column is enforced in more places than any of the other five and reachable ' +
-      'from none. A platform-level row rather than a company\'s own, which is why it is declared ' +
-      'rather than given a screen here: who may retire a practice is a different question from ' +
-      'who may edit their own books.',
   },
   {
     table: 'vendors',

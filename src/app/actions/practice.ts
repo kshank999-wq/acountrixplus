@@ -15,6 +15,7 @@ import {
   respondToEngagement,
   removePracticeMember,
   setEngagementStaffing,
+  setPracticeActive,
   staffingChangePreview,
   staffingFor,
   unassignFromEngagement,
@@ -241,13 +242,38 @@ export async function removePracticeMemberAction(input: unknown): Promise<Action
     const parsed = z.object({ practiceId: uuid, userId: uuid }).parse(input)
 
     const result = await removePracticeMember(
-      { userId: actor.userId },
+      // The acting owner's name, so the audit line each client now gets reads
+      // "Dana Chen (Hartley & Co)" rather than being looked up again inside
+      // the service (Phase 204).
+      { userId: actor.userId, userName: actor.userName },
       { practiceId: parsed.practiceId, userId: parsed.userId },
     )
 
     return `Removed, and access ended at ${result.revokedAtClients} ${
       result.revokedAtClients === 1 ? 'client' : 'clients'
-    } at once.`
+    } at once. Each of those clients now has it in their own audit log.`
+  })
+}
+
+/**
+ * Closes a firm, or opens it again (Phase 204).
+ *
+ * `practices.isActive` was read in four places and writable by nothing — the
+ * mechanism for closing a firm worked end to end and had no handle. The
+ * refusal when engagements are still open comes back as the error, which is
+ * where the argument belongs: a closed firm with live engagements is an
+ * outside party holding somebody's books with no firm to answer for it.
+ */
+export async function setPracticeActiveAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z.object({ practiceId: uuid, isActive: z.boolean() }).parse(input)
+
+    const result = await setPracticeActive({ userId: actor.userId }, parsed)
+
+    return result.isActive
+      ? 'The firm is open again. Its people can switch into it and clients can find it.'
+      : 'The firm is closed. Nobody can switch into it and it is out of every client’s search.'
   })
 }
 
