@@ -176,10 +176,10 @@ describe('every write that can be aimed at a row', () => {
     // in 202 phases: the role, the granular overrides and whether somebody
     // still has access, all of which were read and none of which could be
     // changed. One `scoped-write`.
-    expect(WRITES.length).toBe(293)
+    expect(WRITES.length).toBe(296)
     expect(by).toEqual({
       'explicit-company': 198,
-      'scoped-write': 54,
+      'scoped-write': 57,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       'owner-helper': 4,

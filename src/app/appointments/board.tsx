@@ -8,7 +8,9 @@ import {
   bookAction,
   closeAction,
   completeAction,
+  closeGiftCardAction,
   redeemGiftCardAction,
+  reissueGiftCardAction,
   sellGiftCardAction,
   takePaymentAction,
   type ActionResult,
@@ -69,6 +71,23 @@ type Props = {
     cardsWithBalance: number
     issuedCents: number
   } | null
+  /**
+   * The cards themselves (Phase 203).
+   *
+   * There was no list. `giftCardPosition` gave four totals and nothing showed
+   * a code, a balance or who bought one — so `isActive`, which
+   * `redeemGiftCard` enforces by name, had no screen it could have been
+   * switched from even if something could write it.
+   */
+  cardList: Array<{
+    id: string
+    code: string
+    issuedCents: number
+    balanceCents: number
+    issuedOn: string
+    isActive: boolean
+    purchaserName: string | null
+  }>
   today: string
   canManage: boolean
   canAddStaff: boolean
@@ -470,9 +489,16 @@ function Payouts({ payouts }: Props) {
   )
 }
 
-function Cards({ cards, today, canManage, act, pending }: Props & Helpers) {
+function Cards({ cards, cardList, today, canManage, act, pending }: Props & Helpers) {
   const [code, setCode] = useState('')
   const [amount, setAmount] = useState('')
+
+  /* Which card is being stopped or reprinted, by code. */
+  const [stopping, setStopping] = useState<string | null>(null)
+  const [reissuing, setReissuing] = useState<string | null>(null)
+  const [newCode, setNewCode] = useState('')
+  const [disposition, setDisposition] = useState('refund')
+  const [closeAccount, setCloseAccount] = useState('')
 
   return (
     <div className="space-y-4">
@@ -505,10 +531,167 @@ function Cards({ cards, today, canManage, act, pending }: Props & Helpers) {
           </dl>
           <p className="mt-2 text-xs text-faint">
             {cards.cardsIssued} sold, {cards.cardsWithBalance} with something left on them. Unlike
-            the payout figures above, these two <strong>should</strong> match exactly: nothing
-            legitimately moves 2590 except selling and spending a card, and both do it in the same
-            transaction as the balance.
+            the payout figures above, these two <strong>should</strong> match exactly: the four
+            things that move 2590 — selling a card, spending one, refunding what is left, and
+            releasing it to income — each do it in the same transaction as the balance. This
+            sentence named two of the four until Phase 203 built the other two, which is the kind
+            of claim that goes quietly wrong when a screen outlives the code it describes.
           </p>
+        </div>
+      )}
+
+      {cardList.length > 0 && (
+        <div className="card overflow-hidden">
+          <div className="px-4 py-3">
+            <h3 className="text-sm font-semibold">The cards</h3>
+            <p className="mt-1 text-xs text-muted">
+              Stopped cards are listed first and stay listed, because *&ldquo;that code was
+              stopped&rdquo;* is what somebody looks up when a customer arrives holding one.
+            </p>
+          </div>
+          <table className="w-full text-sm">
+            <thead className="bg-raised/60 text-left text-xs uppercase tracking-wide text-muted">
+              <tr>
+                <th className="px-4 py-2 font-medium">Code</th>
+                <th className="px-4 py-2 font-medium">Sold to</th>
+                <th className="px-4 py-2 text-right font-medium">Sold for</th>
+                <th className="px-4 py-2 text-right font-medium">Left</th>
+                <th className="px-4 py-2 font-medium">Sold on</th>
+                <th className="px-4 py-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {cardList.map((card) => (
+                <tr key={card.id} className="border-t border-line">
+                  <td className="px-4 py-1.5">
+                    <span className="tnum">{card.code}</span>
+                    {!card.isActive && (
+                      <span className="ml-2 chip bg-raised px-2 py-0.5 text-xs text-muted">
+                        stopped
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-1.5 text-muted">{card.purchaserName ?? '—'}</td>
+                  <td className="tnum px-4 py-1.5 text-right text-muted">
+                    {formatCents(card.issuedCents)}
+                  </td>
+                  <td className="tnum px-4 py-1.5 text-right">{formatCents(card.balanceCents)}</td>
+                  <td className="px-4 py-1.5 text-faint">{card.issuedOn}</td>
+                  <td className="px-4 py-1.5 text-right">
+                    {canManage && card.isActive && (
+                      <span className="inline-flex gap-1">
+                        <button
+                          className="btn btn-ghost text-xs"
+                          disabled={pending}
+                          onClick={() => setStopping(stopping === card.code ? null : card.code)}
+                        >
+                          Stop
+                        </button>
+                        <button
+                          className="btn btn-ghost text-xs"
+                          disabled={pending}
+                          onClick={() => setReissuing(reissuing === card.code ? null : card.code)}
+                        >
+                          Reissue
+                        </button>
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          {/*
+            Reissuing: the common thing that happens to a gift card is that
+            somebody loses it, and what the business wants is the old number
+            dead and the customer's money intact — one card with a new number
+            on it, not a card destroyed and another sold. Nothing posts.
+          */}
+          {reissuing && canManage && (
+            <div className="flex flex-wrap items-end gap-2 border-t border-line px-4 py-3">
+              <label className="text-xs text-muted">
+                <span className="mb-1 block">New code for {reissuing}</span>
+                <input
+                  className="field py-1.5 text-sm"
+                  onChange={(event) => setNewCode(event.target.value)}
+                  placeholder="GC-1004B"
+                  value={newCode}
+                />
+              </label>
+              <button
+                className="btn btn-primary"
+                disabled={pending || !newCode.trim()}
+                onClick={() => {
+                  act(() => reissueGiftCardAction({ code: reissuing, newCode }))
+                  setReissuing(null)
+                  setNewCode('')
+                }}
+              >
+                Reprint under the new code
+              </button>
+              <p className="w-full text-xs text-faint">
+                Nothing is posted. It is the same card with a different number, so 2590 still owes
+                exactly what it owed and the redemptions already filed against it still point at
+                it.
+              </p>
+            </div>
+          )}
+
+          {/*
+            Stopping: a balance has to go somewhere, and the service refuses
+            the change rather than choosing for somebody. The screen offers the
+            two answers rather than a default, because "refunded" and "given
+            up" are different facts about the same money.
+          */}
+          {stopping && canManage && (
+            <div className="flex flex-wrap items-end gap-2 border-t border-line px-4 py-3">
+              <label className="text-xs text-muted">
+                <span className="mb-1 block">What happens to what is left on {stopping}</span>
+                <select
+                  className="field py-1.5 text-sm"
+                  onChange={(event) => setDisposition(event.target.value)}
+                  value={disposition}
+                >
+                  <option value="refund">Refunded to the customer</option>
+                  <option value="write_off">Written off to income</option>
+                </select>
+              </label>
+              <label className="text-xs text-muted">
+                <span className="mb-1 block">Account (optional)</span>
+                <input
+                  className="field w-28 py-1.5 text-sm"
+                  onChange={(event) => setCloseAccount(event.target.value)}
+                  placeholder={disposition === 'refund' ? 'as sold' : '8100'}
+                  value={closeAccount}
+                />
+              </label>
+              <button
+                className="btn btn-primary"
+                disabled={pending}
+                onClick={() => {
+                  act(() =>
+                    closeGiftCardAction({
+                      code: stopping,
+                      disposition,
+                      accountNumber: closeAccount,
+                      closedOn: today,
+                    }),
+                  )
+                  setStopping(null)
+                  setCloseAccount('')
+                }}
+              >
+                Stop the card
+              </button>
+              <p className="w-full text-xs text-faint">
+                A refund leaves the account the card was sold into unless you name another. A
+                write-off has to reach an income account — a balance released from 2590 that never
+                touches the profit and loss is a liability that disappeared without anybody seeing
+                it.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

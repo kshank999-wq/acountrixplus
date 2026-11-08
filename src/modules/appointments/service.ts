@@ -712,8 +712,386 @@ export async function sellGiftCard(
 
     await tx.update(giftCards).set({ journalEntryId: entry.id }).where(eq(giftCards.id, card.id))
 
+    /*
+      Audited since Phase 203, which found selling was the only one of the four
+      movements of 2590 missing from the log while redeeming had been in it
+      since Phase 29. The journal says a liability arrived; this says who took
+      the money and under what code.
+    */
+    await recordAudit(
+      ctx,
+      {
+        action: 'giftcard.sell',
+        entityType: 'gift_card',
+        entityId: card.id,
+        after: { code, issuedCents: input.amountCents, journalEntryId: entry.id },
+      },
+      tx,
+    )
+
     return { id: card.id, balanceCents: input.amountCents }
   })
+}
+
+/**
+ * Every gift card, newest first (Phase 203).
+ *
+ * ## The list that did not exist
+ *
+ * `giftCardPosition` returned four totals and `sellGiftCard` wrote a row.
+ * Between them there was **no way to see a card at all** — not its code, not
+ * what was left on it, not who bought it. A business could not answer *"what
+ * is on GC-1004?"* except by attempting a redemption against a completed
+ * appointment and reading the refusal, and the only place a card's own figures
+ * appeared was the §19 portability export.
+ *
+ * So the finding ADR 0202 nominated — `isActive`, enforced by
+ * `redeemGiftCard` and writable by nothing — was the second half of a screen
+ * that had no first half. A void control needs a card to point at.
+ *
+ * Includes inactive cards, with the flag, because *"this code was stopped"* is
+ * the thing somebody looks up when a customer arrives holding it.
+ */
+export async function listGiftCards(
+  ctx: ActorContext,
+  opts: { limit?: number } = {},
+) {
+  requirePermission(ctx, 'reports:view')
+
+  return db
+    .select({
+      id: giftCards.id,
+      code: giftCards.code,
+      issuedCents: giftCards.issuedCents,
+      balanceCents: giftCards.balanceCents,
+      issuedOn: giftCards.issuedOn,
+      isActive: giftCards.isActive,
+      purchaserName: customers.name,
+    })
+    .from(giftCards)
+    .leftJoin(customers, eq(customers.id, giftCards.purchaserCustomerId))
+    .where(scoped(ctx, giftCards))
+    .orderBy(asc(giftCards.isActive), asc(giftCards.issuedOn))
+    .limit(opts.limit ?? 200)
+}
+
+/**
+ * A lost card reprinted under a new number (Phase 203).
+ *
+ * ## Why this is not a void
+ *
+ * The common thing that happens to a gift card is that somebody loses it. The
+ * business wants the old number to stop working and the customer to keep their
+ * money — which is **one card with a new number on it**, not a card destroyed
+ * and another sold.
+ *
+ * So this updates `code` and touches nothing else. No journal, because no
+ * money moved: account 2590 still owes exactly what it owed, and
+ * `giftCardPosition` still agrees because the subledger did not move either.
+ * The redemptions already filed against the card keep pointing at it, because
+ * they reference its id.
+ *
+ * `code` was written at insert and never updated — one of the 770 columns
+ * Phase 202 measured as insert-only and could not report, since the scan
+ * counts a column written at insert as written. This is one of the few in that
+ * class that genuinely needed an update.
+ *
+ * The card stays **active**. A reissue is not a disposal and leaves nothing to
+ * decide about the money, which is the whole difference from `closeGiftCard`.
+ */
+export async function reissueGiftCard(
+  ctx: ActorContext,
+  input: { code: string; newCode: string },
+): Promise<{ id: string; code: string; balanceCents: number }> {
+  requirePermission(ctx, 'accounting:journal')
+  await requireModule(ctx, 'appointments')
+
+  const code = input.code.trim().toUpperCase()
+  const newCode = input.newCode.trim().toUpperCase()
+
+  if (!newCode) throw new AppointmentError('The replacement needs a code.')
+  if (newCode === code) throw new AppointmentError('That is the same code.')
+
+  return db.transaction(async (tx) => {
+    const [card] = await tx
+      .select()
+      .from(giftCards)
+      .where(scoped(ctx, giftCards, eq(giftCards.code, code)))
+      .limit(1)
+      .for('update')
+
+    if (!card) throw new AppointmentError(`No gift card with code ${code}.`)
+
+    // A stopped card is stopped. Reprinting it would be a way to undo a
+    // write-off without the journal that reversing one needs.
+    if (!card.isActive) {
+      throw new AppointmentError(
+        `Gift card ${code} has been closed. Reissuing it would put a balance back without ` +
+          'the entry that took it away.',
+      )
+    }
+
+    const [moved] = await tx
+      .update(giftCards)
+      .set({ code: newCode })
+      .where(scoped(ctx, giftCards, eq(giftCards.id, card.id)))
+      .returning({ id: giftCards.id, code: giftCards.code, balanceCents: giftCards.balanceCents })
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'giftcard.reissue',
+        entityType: 'gift_card',
+        entityId: card.id,
+        before: { code },
+        after: { code: newCode, balanceCents: card.balanceCents },
+      },
+      tx,
+    )
+
+    return moved
+  })
+}
+
+/** Where a closed card's remaining balance goes. */
+export type CardDisposition =
+  /** Paid back. The liability is settled in money. */
+  | 'refund'
+  /** Released to income. The liability is given up. */
+  | 'write_off'
+
+/**
+ * Stops a card, and says where what was left on it went (Phase 203).
+ *
+ * ## The claim this function is
+ *
+ * `gift_cards.isActive` is read by `redeemGiftCard`, which refuses an inactive
+ * card by name, and **nothing could set it false** — ADR 0202 found it among
+ * six such switches and nominated this one because the thing nobody could turn
+ * off is money.
+ *
+ * The reason it is not simply a toggle is account 2590. A card holds a
+ * liability; `giftCardPosition` reconciles the sum of card balances against
+ * the ledger, and the screen's own prose said *"nothing legitimately moves
+ * 2590 except selling and spending a card"*. So there are exactly three
+ * dishonest ways to build this and one honest one:
+ *
+ * | | |
+ * | --- | --- |
+ * | flip the flag, leave the balance | 2590 keeps a liability nobody can ever settle. The reconciliation agrees and the balance sheet is wrong. |
+ * | zero the balance, post nothing | the subledger moves and the ledger does not, so the check cries wolf — on books that a person deliberately changed. |
+ * | zero both, choose the account silently | somebody's money lands in income because a default said so. |
+ *
+ * The honest one is to **refuse**: a card with something left on it cannot be
+ * stopped without saying where the money went, because *"this cannot be
+ * spent"* and *"we still owe it"* cannot both be true. That refusal is the
+ * substance of this phase and the sentence it throws is the feature.
+ *
+ * A card with nothing left on it needs no disposition and posts nothing. There
+ * is no money to place, and stopping a spent code is housekeeping.
+ *
+ * ## Refund, and the column that was waiting for it
+ *
+ * ```
+ *   Dr Gift Cards Outstanding    what was left
+ *       Cr wherever it goes out                what was left
+ * ```
+ *
+ * The default destination is the card's own `depositAccountId` — *"where the
+ * money went when it was sold"*, in the schema's words. That column was
+ * **written by `sellGiftCard` and read by nothing** until now, which is Phase
+ * 49's shape mirrored: a column with a writer and no reader. Giving the money
+ * back to the account it was taken into is both the obvious answer and the one
+ * the column was recorded for.
+ *
+ * ## Write-off, and ADR 0029
+ *
+ * ADR 0029 refuses breakage: *"Recognising the revenue on an unused card
+ * requires a judgement about how many never come back, and a wrong judgement
+ * books revenue that has to be given back."*
+ *
+ * That is an argument against an **estimate across many cards**, and it still
+ * holds — nothing here sweeps, ages or expires anything. A write-off is one
+ * card a person decided about, by name, with the account named and the entry
+ * in the audit trail. The default is `8100 Other Income` rather than service
+ * revenue, because no service was given, and the account is **refused unless
+ * it is income**: a write-off hidden on the balance sheet or against an
+ * expense would be a liability that disappeared without touching the profit
+ * and loss.
+ */
+export async function closeGiftCard(
+  ctx: ActorContext,
+  input: {
+    code: string
+    disposition?: CardDisposition
+    /** Where the money goes. Defaults by disposition — see the docstring. */
+    accountNumber?: string
+    closedOn: string
+  },
+): Promise<{ id: string; releasedCents: number; disposition: CardDisposition | null }> {
+  requirePermission(ctx, 'accounting:journal')
+  await requireModule(ctx, 'appointments')
+
+  const code = input.code.trim().toUpperCase()
+
+  return db.transaction(async (tx) => {
+    const [card] = await tx
+      .select()
+      .from(giftCards)
+      .where(scoped(ctx, giftCards, eq(giftCards.code, code)))
+      .limit(1)
+      .for('update')
+
+    if (!card) throw new AppointmentError(`No gift card with code ${code}.`)
+    if (!card.isActive) throw new AppointmentError(`Gift card ${code} is already closed.`)
+
+    // The refusal this function exists for.
+    if (card.balanceCents > 0 && !input.disposition) {
+      throw new AppointmentError(
+        `There is ${(card.balanceCents / 100).toFixed(2)} left on ${code}. Say where it goes — ` +
+          'refunded to the customer, or written off to income — because a card that cannot be ' +
+          'spent and a balance the business still owes cannot both be true.',
+      )
+    }
+
+    // Nothing left: the code stops and the ledger is not involved.
+    if (card.balanceCents === 0) {
+      await tx
+        .update(giftCards)
+        .set({ isActive: false })
+        .where(scoped(ctx, giftCards, eq(giftCards.id, card.id)))
+
+      await recordAudit(
+        ctx,
+        {
+          action: 'giftcard.close',
+          entityType: 'gift_card',
+          entityId: card.id,
+          before: { isActive: true, balanceCents: 0 },
+          after: { isActive: false, balanceCents: 0, disposition: null },
+        },
+        tx,
+      )
+
+      return { id: card.id, releasedCents: 0, disposition: null }
+    }
+
+    const disposition = input.disposition as CardDisposition
+    const credit = await creditAccountFor(ctx, card, disposition, input.accountNumber, tx)
+    const outstanding = await accountsByNumber(
+      ctx,
+      [APPOINTMENT_ACCOUNTS.giftCardsOutstanding],
+      tx,
+    )
+
+    const entry = await createJournalEntry(
+      ctx,
+      {
+        entryDate: input.closedOn,
+        memo:
+          disposition === 'refund'
+            ? `Gift card ${code} refunded`
+            : `Gift card ${code} written off`,
+        source: 'appointment',
+        sourceType: 'gift_card_close',
+        sourceId: card.id,
+        lines: [
+          {
+            chartAccountId: outstanding.get(APPOINTMENT_ACCOUNTS.giftCardsOutstanding) as string,
+            debitCents: card.balanceCents,
+            memo: 'No longer owed as a service',
+          },
+          {
+            chartAccountId: credit.id,
+            creditCents: card.balanceCents,
+            memo:
+              disposition === 'refund'
+                ? 'Paid back to the customer'
+                : 'Released — the card was given up, not spent',
+          },
+        ],
+      },
+      tx,
+    )
+
+    await tx
+      .update(giftCards)
+      .set({ balanceCents: 0, isActive: false })
+      .where(scoped(ctx, giftCards, eq(giftCards.id, card.id)))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'giftcard.close',
+        entityType: 'gift_card',
+        entityId: card.id,
+        before: { isActive: true, balanceCents: card.balanceCents },
+        after: {
+          isActive: false,
+          balanceCents: 0,
+          disposition,
+          creditAccount: credit.number,
+          journalEntryId: entry.id,
+        },
+      },
+      tx,
+    )
+
+    return { id: card.id, releasedCents: card.balanceCents, disposition }
+  })
+}
+
+/**
+ * The other side of a closing entry, with its type checked.
+ *
+ * A refund goes out of an **asset** — the account the card was sold into
+ * unless the caller names another, because that is where the money arrived and
+ * `depositAccountId` was recorded for exactly this. A write-off goes to
+ * **income**, and anything else is refused: the point of a write-off is that
+ * the profit and loss sees it.
+ */
+async function creditAccountFor(
+  ctx: ActorContext,
+  card: { depositAccountId: string | null },
+  disposition: CardDisposition,
+  named: string | undefined,
+  exec: Executor,
+): Promise<{ id: string; number: string }> {
+  const allowed =
+    disposition === 'refund'
+      ? (['asset'] as const)
+      : (['revenue', 'other_income'] as const)
+
+  const where = named
+    ? eq(chartAccounts.number, named)
+    : disposition === 'refund' && card.depositAccountId
+      ? eq(chartAccounts.id, card.depositAccountId)
+      : eq(chartAccounts.number, '8100')
+
+  const [account] = await exec
+    .select({ id: chartAccounts.id, number: chartAccounts.number, type: chartAccounts.type })
+    .from(chartAccounts)
+    .where(scoped(ctx, chartAccounts, where))
+    .limit(1)
+
+  if (!account) {
+    throw new AppointmentError(
+      named
+        ? `This chart of accounts has no ${named}. Add the account first.`
+        : 'This chart of accounts has no 8100 Other Income to release the balance to.',
+    )
+  }
+
+  if (!(allowed as readonly string[]).includes(account.type)) {
+    throw new AppointmentError(
+      disposition === 'refund'
+        ? `${account.number} is not an asset. A refund leaves an account the money is in.`
+        : `${account.number} is not an income account. A balance released from 2590 has to ` +
+          'reach the profit and loss, or a liability has disappeared without anybody seeing it.',
+    )
+  }
+
+  return { id: account.id, number: account.number }
 }
 
 export type RedemptionResult = {

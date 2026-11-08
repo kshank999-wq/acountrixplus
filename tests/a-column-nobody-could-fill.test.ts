@@ -76,9 +76,9 @@ describe('the class, measured', () => {
       exclusion for a defaulted column — see `schemaColumns`. The eight it
       added are the kind this phase was built to find, which its own exclusion
       had made invisible, and the figure is corrected here rather than relaxed
-      to a bound (Phase 126).
+      to a bound (Phase 126). 34 since Phase 203 closed one of the eight.
     */
-    expect(writerCandidates()).toHaveLength(35)
+    expect(writerCandidates()).toHaveLength(34)
   })
 
   it('declares every candidate', () => {

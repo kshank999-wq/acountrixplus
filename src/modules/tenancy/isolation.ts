@@ -209,8 +209,8 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 579 of ' +
-      'the 956 reads, against 54 of the 293 writes. The two halves of this system are guarded ' +
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 583 of ' +
+      'the 960 reads, against 57 of the 296 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
       'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
       'needed correcting by hand in every phase that touched a read — 180, 183, 184, 185 and ' +
@@ -231,7 +231,7 @@ const READ_GUARDS: readonly IsolationGuard[] = [
       'recognised a table by its name, so a query through a variable was invisible, and a key ' +
       'as an `eq`, so one keyed by `inArray` was too. Three names, each hiding some, which is ' +
       'the argument for measuring a scan against the thing it claims to cover rather than ' +
-      'reading it. **Phase 198 folded raw SQL in** — 293 and 956 — and found while doing so ' +
+      'reading it. **Phase 198 folded raw SQL in** — 296 and 960 — and found while doing so ' +
       'that Phase 196 had counted the raw *writes* and left four raw selects uncounted, one of ' +
       'them with no tenant predicate at all. Not a disclosure, because a foreign key already ' +
       'refused the row that would have made it one; a clause it should have had either way.',

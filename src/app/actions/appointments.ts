@@ -8,7 +8,9 @@ import {
   book,
   closeWithoutDelivery,
   completeAppointment,
+  closeGiftCard,
   redeemGiftCard,
+  reissueGiftCard,
   sellGiftCard,
 } from '@/modules/appointments/service'
 import { takePayment } from '@/modules/counter/service'
@@ -139,6 +141,69 @@ export async function sellGiftCardAction(input: unknown): Promise<ActionResult> 
       `${formatCents(parsed.amountCents)} taken and none of it earned — it sits on the balance ` +
       'sheet until somebody uses the card.'
     )
+  })
+}
+
+/**
+ * A lost card reprinted under a new number (Phase 203).
+ *
+ * The message says what did *not* happen, because that is the part somebody
+ * needs to trust: no money moved, so the balance sheet is untouched and the
+ * customer keeps what they paid for.
+ */
+export async function reissueGiftCardAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({
+        code: z.string().trim().min(1),
+        newCode: z.string().trim().min(1),
+      })
+      .parse(input)
+
+    const card = await reissueGiftCard(actor, parsed)
+
+    return (
+      `${parsed.code.toUpperCase()} stopped and reprinted as ${card.code} with ` +
+      `${formatCents(card.balanceCents)} still on it. Nothing was posted — it is the same card.`
+    )
+  })
+}
+
+/**
+ * Stops a card and places what was left on it (Phase 203).
+ *
+ * The refusal when a balance has nowhere to go comes back through `run` as the
+ * error, which is the point: the sentence is what tells somebody that
+ * stopping a card is a decision about money rather than a switch.
+ */
+export async function closeGiftCardAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({
+        code: z.string().trim().min(1),
+        disposition: z.enum(['refund', 'write_off']).optional(),
+        accountNumber: z.string().trim().optional(),
+        closedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+      })
+      .parse(input)
+
+    const result = await closeGiftCard(actor, {
+      ...parsed,
+      accountNumber: parsed.accountNumber || undefined,
+    })
+
+    if (result.disposition === null) {
+      return `${parsed.code.toUpperCase()} stopped. There was nothing left on it, so nothing posted.`
+    }
+
+    return result.disposition === 'refund'
+      ? `${formatCents(result.releasedCents)} refunded and ${parsed.code.toUpperCase()} stopped. ` +
+          'The liability on 2590 is settled.'
+      : `${formatCents(result.releasedCents)} released to income and ${parsed.code.toUpperCase()} ` +
+          'stopped. It shows in the profit and loss, which is the only honest place for a ' +
+          'balance the business has given up.'
   })
 }
 

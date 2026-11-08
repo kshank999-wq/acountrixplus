@@ -238,7 +238,35 @@ export type AuditAction =
   // is paid, and redeeming a card spends money a client handed over months
   // earlier — §19 asks for both to be reconstructable.
   | 'appointment.complete'
+  /**
+   * A card sold (Phase 203).
+   *
+   * The only one of the four movements of account 2590 that was not in this
+   * log. Redeeming was audited from the start and selling was not, which is
+   * the asymmetry rather than a decision: a journal entry says a liability
+   * arrived, and the audit trail is where somebody asks *who took the money
+   * and under what code*.
+   */
+  | 'giftcard.sell'
   | 'giftcard.redeem'
+  /**
+   * A lost card reprinted under a new number (Phase 203).
+   *
+   * Its own action rather than a `membership.update`-shaped catch-all, because
+   * the question asked later is *"why does this code work and that one not"*
+   * and the answer — somebody reissued it — is different from the answer to
+   * *"where did the money on that card go"*. The pair below is the second.
+   */
+  | 'giftcard.reissue'
+  /**
+   * A card stopped, with what was left on it placed (Phase 203).
+   *
+   * The `after` carries the disposition and the account credited, because the
+   * entry alone cannot say whether a balance that left 2590 was handed back or
+   * given up — and ADR 0029's reason for refusing breakage is that the second
+   * is a judgement somebody has to be able to find afterwards.
+   */
+  | 'giftcard.close'
   // Vehicles (spec §5, Phase 30). Who authorised what is the whole evidentiary
   // content of a repair order, and an odometer going backwards is the one event
   // in this application that may need explaining to somebody official.

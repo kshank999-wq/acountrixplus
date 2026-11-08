@@ -2,7 +2,7 @@ import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled } from '@/modules/industry/modules'
-import { listPractitioners } from '@/modules/appointments/service'
+import { listGiftCards, listPractitioners } from '@/modules/appointments/service'
 import { diary, diarySummary, giftCardPosition, payoutPosition } from '@/modules/appointments/reporting'
 import { AppointmentsBoard } from './board'
 
@@ -53,12 +53,20 @@ export default async function AppointmentsPage() {
 
   const today = new Date().toISOString().slice(0, 10)
 
-  const [rows, summary, staff, payouts, cards] = await Promise.all([
+  const [rows, summary, staff, payouts, cards, cardList] = await Promise.all([
     diary(actor),
     diarySummary(actor),
     listPractitioners(actor),
     can(actor, 'reports:view') ? payoutPosition(actor) : null,
     can(actor, 'reports:view') ? giftCardPosition(actor) : null,
+    /*
+      Phase 203. There was no list of cards anywhere: four totals and an
+      insert, so a business could not answer "what is on GC-1004?" except by
+      attempting a redemption and reading the refusal. A void control needs a
+      card to point at, which is why ADR 0202's nomination was the second half
+      of a screen with no first half.
+    */
+    can(actor, 'reports:view') ? listGiftCards(actor) : [],
   ])
 
   return (
@@ -83,6 +91,7 @@ export default async function AppointmentsPage() {
         }))}
         payouts={payouts}
         cards={cards}
+        cardList={cardList}
         today={today}
         canManage={can(actor, 'accounting:journal')}
         canAddStaff={can(actor, 'company:manage')}

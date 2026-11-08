@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **293
-writes** and **956 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **296
+writes** and **960 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,7 +357,7 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2179 columns** across **185 tables** and reports **35** with a
+The scan reads **2179 columns** across **185 tables** and reports **34** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
@@ -413,12 +413,12 @@ answer, a `.default(true)` boolean is a *starting value for a state*, and a
 state nothing can change is a switch painted on. Narrowed to
 `defaultRandom()` and `defaultNow()` only, the census went 27 → 35, and **six
 of the eight it added are an `isActive` nothing can turn off**. One of them was
-§14's revocation.
+§14's revocation; Phase 203 closed a second, and the pinned figure is 34.
 
-The second cannot be closed. **770 columns** are written at insert and never
+The second cannot be closed. **769 columns** are written at insert and never
 updated, so the scan counts them as written even where nothing can ever change
 them — `memberships.role` was unchangeable for 201 phases and the census
-reported nothing. Almost all 770 are immutable *on purpose* (ADR 0021's sent
+reported nothing. Almost all 769 are immutable *on purpose* (ADR 0021's sent
 document, ADR 0042's live record), so a register of them would say "correct"
 hundreds of times and bury the few that are not. It is a pinned number
 (`audit-insert-only-columns`) rather than a register, and narrowing it needs a
@@ -459,6 +459,44 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §5 — where a gift card's money went (Phase 203)
+
+`gift_cards.isActive` was one of six switches nothing could turn off, and the
+one where the thing nobody could switch off is **money**: `redeemGiftCard`
+refuses an inactive card by name and no path could set the flag.
+
+Measuring it found the nomination was the second half of a screen with no first
+half — **there was no list of gift cards anywhere.** Four totals, an insert,
+and a card's own code and balance visible only in the §19 portability export.
+
+The phase's claim is a refusal. A card holds a liability on 2590 and
+`giftCardPosition` reconciles the sum of card balances against that account
+separately, so stopping a card with a balance on it has three dishonest answers
+— leave the balance (a liability nobody can settle, and the check still
+agrees), zero it and post nothing (the check cries wolf on a deliberate
+change), or zero it and pick the account silently. `closeGiftCard` therefore
+refuses unless the caller says where the money went: **refunded** (credit the
+account the card was sold into) or **written off** (credit income, refused
+unless the account *is* income). ADR 0029 stands — nothing sweeps, ages or
+expires, and a write-off is one card decided by name with the decision in the
+audit trail.
+
+A lost card is **reprinted** rather than destroyed: `reissueGiftCard` changes
+the code and posts nothing, because one card with a new number is what a
+business means, and selling a replacement would post a sale that never
+happened.
+
+Two columns were waiting. `depositAccountId` was **written and read by
+nothing** — Phase 49's shape mirrored, invisible to the column census because
+that census asks the opposite question — and `code` was insert-only, one of the
+769.
+
+The census's mirror was measured and **declined**: *"named outside the schema"*
+is an inclusion test for reads and becomes an exclusion test when inverted, and
+one `.select()` with no projection reads every column of a table while naming
+none. The mirror reports **683 columns**, which is the size of the error rather
+than a finding.
 
 ### §20 — all fifty-one deliverables, measured (Phase 199)
 

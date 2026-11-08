@@ -57,7 +57,7 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **35 candidates**, of which seven are findings. A closed one is **absent**
+ * **34 candidates**, of which six are findings. A closed one is **absent**
  * from this register, because the scan no longer reports it — which is what
  * proves an editor reaches the column rather than only existing, and the
  * tests assert that absence by name.
@@ -72,9 +72,14 @@ import { readableSource, sourceFiles } from './isolation-scan'
  * writable by nothing — and `organizations.tags`, `sizeBand`'s sibling and
  * the second segment filter with no writer.
  *
- * Seven remain, declared below and nominated: `vendors.organizationId`, and
- * six `isActive` columns nothing can turn off, of which one controls whether
- * a **gift card** can still be spent.
+ * Phase 203 closed `gift_cards.isActive` — the one of the six switches where
+ * the thing nobody could turn off was money, and the reason it needed a phase
+ * rather than an entry is that stopping a card with a balance on it is a
+ * decision about where that balance went.
+ *
+ * Six remain, declared below and nominated: `vendors.organizationId`, and
+ * four `isActive` columns nothing can turn off, of which two are enforced by
+ * a refusal and two are only ever displayed.
  */
 
 /** Where a candidate stands. */
@@ -228,19 +233,6 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   },
 
   // --- Unwritable, and recorded as findings ---------------------------------
-  {
-    table: 'gift_cards',
-    columns: ['isActive'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      '**A gift card cannot be voided.** `redeemGiftCard` reads it and refuses — *"Gift card X is ' +
-      'no longer valid"* — so the reader does not merely display the column, it enforces it. ' +
-      'Nothing can set it false, so a card reported lost or stolen, or one a business has agreed to ' +
-      'refund, stays spendable for as long as it has a balance. The sharpest of the six the ' +
-      'narrowed exclusion exposed, because the thing nobody can switch off is money and the ' +
-      'refusal that would stop it is already written. Nominated in ADR 0202.',
-  },
   {
     table: 'cash_drawers',
     columns: ['isActive'],
