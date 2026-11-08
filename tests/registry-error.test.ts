@@ -312,7 +312,18 @@ describe('every registry refuses the same way', () => {
     // touches was two out. Fourth time this file has reported a number somebody
     // moved without looking — 167, 169, 176, and now the phase whose whole
     // subject was a sentence nobody checked.
-    expect(thrown.length).toBe(42)
+    //
+    // **Forty-three since Phase 201 and `COLUMN_WRITERS`**, the columns
+    // something reads that nothing lets a person fill in. It earns the throw on
+    // the one thing that register cannot decide for itself: a spread and a
+    // missing editor look identical to the scan, so the lookup is what a person
+    // is obliged to answer, and `undefined` would report a column as accounted
+    // for because nobody had argued about it yet.
+    //
+    // Fifth time, and this one was not a surprise — the count was checked
+    // deliberately while the register was being written, which is the habit the
+    // four before it bought.
+    expect(thrown.length).toBe(43)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

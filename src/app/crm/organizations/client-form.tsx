@@ -25,6 +25,14 @@ export type ClientFields = {
   postalCode: string
   country: string
   industry: string
+  /**
+   * Phase 201. `organizations.sizeBand` was a **segment filter that could only
+   * ever match nothing**: `marketing/segments.ts` lists it among the filterable
+   * fields and has a `case` for it, the segment workspace labels it "Size
+   * band", and no screen set it. A marketer could build an audience on company
+   * size and get an empty one back with nothing to say why.
+   */
+  sizeBand: string
   source: string
   isStrategicAccount: boolean
 }
@@ -41,6 +49,7 @@ const EMPTY: ClientFields = {
   postalCode: '',
   country: '',
   industry: '',
+  sizeBand: '',
   source: '',
   isStrategicAccount: false,
 }
@@ -94,6 +103,7 @@ export function ClientForm({
         <Field label="Phone" value={fields.phone} onChange={set('phone')} />
         <Field label="Website" value={fields.website} onChange={set('website')} />
         <Field label="Industry" value={fields.industry} onChange={set('industry')} />
+        <Field label="Size band" value={fields.sizeBand} onChange={set('sizeBand')} />
         <Field label="Source" value={fields.source} onChange={set('source')} />
       </div>
 

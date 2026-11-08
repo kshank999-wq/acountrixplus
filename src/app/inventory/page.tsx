@@ -1,9 +1,9 @@
-import { eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { requireActor, requireSession } from '@/lib/current-user'
 import { can, scoped } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { db } from '@/db'
-import { serviceItems } from '@/db/schema'
+import { chartAccounts, serviceItems } from '@/db/schema'
 import { moduleEnabled } from '@/modules/industry/modules'
 import {
   costMethodFor,
@@ -60,20 +60,70 @@ export default async function InventoryPage() {
     )
   }
 
-  const [positions, orders, unbilled, adjustments, vendors, method, reconciliation, items] =
-    await Promise.all([
-      stockOnHand(actor),
-      listPurchaseOrders(actor, { limit: 20 }),
-      unbilledReceipts(actor),
-      listAdjustments(actor, { limit: 20 }),
-      listVendors(actor),
-      costMethodFor(actor.companyId),
-      reconcileInventory(actor),
-      db
-        .select({ id: serviceItems.id, name: serviceItems.name, unit: serviceItems.unit })
-        .from(serviceItems)
-        .where(scoped(actor, serviceItems, eq(serviceItems.isInventoried, true))),
-    ])
+  const [
+    positions,
+    orders,
+    unbilled,
+    adjustments,
+    vendors,
+    method,
+    reconciliation,
+    items,
+    accounts,
+  ] = await Promise.all([
+    stockOnHand(actor),
+    listPurchaseOrders(actor, { limit: 20 }),
+    unbilledReceipts(actor),
+    listAdjustments(actor, { limit: 20 }),
+    listVendors(actor),
+    costMethodFor(actor.companyId),
+    reconcileInventory(actor),
+    db
+      .select({
+        id: serviceItems.id,
+        name: serviceItems.name,
+        unit: serviceItems.unit,
+        // Phase 201: the two the board can now change. Read here rather than
+        // through `stockOnHand`, whose rows are a costing answer — an account
+        // choice is a property of the item, not of the position.
+        inventoryAccountId: serviceItems.inventoryAccountId,
+        cogsAccountId: serviceItems.cogsAccountId,
+      })
+      .from(serviceItems)
+      .where(scoped(actor, serviceItems, eq(serviceItems.isInventoried, true))),
+    /*
+      The accounts an item may post to (Phase 201).
+
+      Queried here rather than through `coa/service`'s `listAccounts`, which
+      gates on `bookkeeping:view` while this page gates on `accounting:view` —
+      two permissions, and a picker that threw for somebody who can see the
+      screen would be a worse bug than the one this closes.
+
+      Narrowed to the two types that can answer: stock is an asset and its cost
+      is a cost of sale. Offering the whole chart would let somebody book
+      inventory to Accounts Receivable, which `categorizableAccounts` refuses
+      for the same reason.
+    */
+    db
+      .select({
+        id: chartAccounts.id,
+        number: chartAccounts.number,
+        name: chartAccounts.name,
+        type: chartAccounts.type,
+      })
+      .from(chartAccounts)
+      .where(
+        scoped(
+          actor,
+          chartAccounts,
+          and(
+            eq(chartAccounts.isActive, true),
+            inArray(chartAccounts.type, ['asset', 'cogs']),
+          ),
+        ),
+      )
+      .orderBy(chartAccounts.number),
+  ])
 
   return (
     <AppShell
@@ -110,6 +160,7 @@ export default async function InventoryPage() {
         }))}
         vendors={vendors.map((vendor) => ({ id: vendor.id, name: vendor.name }))}
         items={items}
+        accounts={accounts}
         costMethod={method}
         reconciliation={reconciliation}
         canManage={can(actor, 'accounting:journal')}

@@ -57,6 +57,10 @@ const organizationSchema = z.object({
   phone: z.string().trim().optional(),
   website: z.string().trim().optional(),
   industry: z.string().trim().optional(),
+  // Phase 201: a segment filter that nothing could set. `marketing/segments.ts`
+  // has a `case` for `sizeBand` and the segment workspace labels it, so an
+  // audience built on company size returned nothing and said nothing about why.
+  sizeBand: z.string().trim().optional(),
   // The whole address, since Phase 78. `organizations` has had all six columns
   // since Phase 3 and this schema offered one of them.
   addressLine1: z.string().trim().optional(),

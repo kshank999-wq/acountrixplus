@@ -324,14 +324,29 @@ export function declarationOf(src: string, index: number, identifier: string): s
   const { from } = enclosingSpan(src, index)
   const head = src.slice(from, index)
 
-  // The nearest local declaration, to the end of its line. Every one of these
-  // in this repository is a single-line ternary; a declaration spanning lines
-  // would resolve to its first line, which yields fewer tables rather than
-  // wrong ones.
+  /*
+    The nearest local declaration, to the end of the expression it declares.
+
+    Phase 197 took this to the end of its line, on the grounds that every one
+    of them in this repository was a single-line ternary. Phase 201's second
+    caller found that false: `payroll/sales-tax.ts` builds the rows it inserts
+    with `const rows = input.lines.map((line) => {` and four columns of
+    `document_tax_lines` looked unwritten, because the keys are on the lines
+    below. The first line of that declaration names nothing at all.
+
+    So the declaration runs to the first newline at bracket depth zero. A
+    single-line ternary closes on its own line and resolves exactly as before,
+    which is why this is a generalisation rather than a second answer to the
+    question — `isolation-scan`'s sites are unchanged, asserted in
+    `tests/scoped-by-construction.test.ts`.
+  */
   const locals = [
-    ...head.matchAll(new RegExp(String.raw`\b(?:const|let|var)\s+${identifier}\b[^\n]*`, 'g')),
+    ...head.matchAll(new RegExp(String.raw`\b(?:const|let|var)\s+${identifier}\b`, 'g')),
   ]
-  if (locals.length > 0) return locals[locals.length - 1][0]
+  if (locals.length > 0) {
+    const last = locals[locals.length - 1]
+    return head.slice(last.index, last.index + declarationLength(head, last.index))
+  }
 
   /*
     A loop that destructures it, with the whole iterated expression.
@@ -388,6 +403,27 @@ export function declarationOf(src: string, index: number, identifier: string): s
  * spans lines. Bounded, like `statementAt`'s walk, so one unterminated
  * expression cannot make a whole-tree scan walk the rest of the file.
  */
+/**
+ * How far a declaration runs: to the first newline outside any bracket.
+ *
+ * A declaration whose brackets never close within the bound falls back to its
+ * first line, which is Phase 197's behaviour — fewer names rather than a
+ * runaway slice of the file.
+ */
+function declarationLength(src: string, start: number): number {
+  let depth = 0
+
+  for (let at = start; at < src.length && at < start + 4_000; at++) {
+    const char = src[at]
+    if (char === '(' || char === '[' || char === '{') depth += 1
+    else if (char === ')' || char === ']' || char === '}') depth -= 1
+    else if (char === '\n' && depth <= 0) return at - start
+  }
+
+  const firstLine = src.indexOf('\n', start)
+  return firstLine === -1 ? Math.min(4_000, src.length - start) : firstLine - start
+}
+
 function balancedLength(src: string, start: number): number {
   let depth = 0
 

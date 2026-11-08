@@ -8,7 +8,7 @@ import { serviceItems } from '@/db/schema'
 import { requireActor } from '@/lib/current-user'
 import { requirePermission, scoped } from '@/modules/tenancy/context'
 import { recordAudit } from '@/modules/audit'
-import { adjustStock } from '@/modules/inventory/service'
+import { adjustStock, setItemPostingAccounts } from '@/modules/inventory/service'
 import { createPurchaseOrder, receiveGoods } from '@/modules/inventory/purchasing'
 import { billReceipts } from '@/modules/payables/receipt-billing'
 import { requireModule } from '@/modules/industry/modules'
@@ -52,6 +52,28 @@ const itemSchema = z.object({
   isInventoried: z.boolean(),
   reorderPoint: quantity.optional(),
   chartAccountId: uuid.optional(),
+  /**
+   * Where stock sits, and where its cost lands when it sells (Phase 201).
+   *
+   * `inventoryAccounts` has read these two per item since Phase 14, falling
+   * back to 1400 and 5000 — and `reconcileInventory` collects every account
+   * any item names so the subledger check does not cry wolf on a manufacturer
+   * who splits raw materials from finished goods. **Nothing set either one.**
+   * The override was read in three places, documented as the thing a business
+   * with separate balance-sheet lines does, and exercised only by the seed.
+   *
+   * Optional, and absent still means the standard chart: a business that never
+   * thinks about this is not made to answer a question about it.
+   */
+  inventoryAccountId: uuid.optional(),
+  cogsAccountId: uuid.optional(),
+})
+
+const itemAccountsSchema = z.object({
+  itemId: uuid,
+  /** Empty string clears the override and returns the item to 1400 / 5000. */
+  inventoryAccountId: uuid.or(z.literal('')),
+  cogsAccountId: uuid.or(z.literal('')),
 })
 
 export async function saveItemAction(input: unknown): Promise<ActionResult> {
@@ -75,6 +97,8 @@ export async function saveItemAction(input: unknown): Promise<ActionResult> {
         reorderPointMilli:
           parsed.reorderPoint === undefined ? null : Math.round(parsed.reorderPoint * 1000),
         chartAccountId: parsed.chartAccountId ?? null,
+        inventoryAccountId: parsed.inventoryAccountId ?? null,
+        cogsAccountId: parsed.cogsAccountId ?? null,
       })
       .returning()
 
@@ -108,6 +132,33 @@ export async function setReorderPointAction(
       .where(scoped(actor, serviceItems, eq(serviceItems.id, id)))
 
     return 'Reorder point saved.'
+  })
+}
+
+/**
+ * Where one item's stock and cost post (Phase 201).
+ *
+ * Separate from `saveItemAction` because the items that need this already
+ * exist: a business splits raw materials from finished goods after it has
+ * been counting both on 1400 for a year, and a picker only on the create form
+ * would have closed the gap for items nobody has yet.
+ *
+ * The empty string from the picker's first option is the only translation this
+ * does — `setItemPostingAccounts` takes null, because "the standard chart" is
+ * a state rather than a blank form field.
+ */
+export async function setItemAccountsAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = itemAccountsSchema.parse(input)
+
+    const item = await setItemPostingAccounts(actor, {
+      itemId: parsed.itemId,
+      inventoryAccountId: parsed.inventoryAccountId || null,
+      cogsAccountId: parsed.cogsAccountId || null,
+    })
+
+    return `Posting accounts saved for ${item.name}. Entries already posted keep the accounts they were posted to.`
   })
 }
 

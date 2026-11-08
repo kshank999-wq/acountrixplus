@@ -14,6 +14,7 @@ import {
 import { isolationCounts } from '@/modules/source/isolation-scan'
 import { BUILT_IN_PROMPTS } from '@/modules/ai/prompts'
 import { PHASE_DELIVERABLES } from '@/modules/source/phases'
+import { columnsScanned, writerCandidates } from '@/modules/source/column-writers'
 
 /**
  * Numbers in prose that nothing reads (Phase 179).
@@ -94,6 +95,14 @@ async function measure(): Promise<MeasuredFacts> {
     */
     phaseDeliverables: PHASE_DELIVERABLES.length,
     /*
+      The column-writer census and its answer (Phase 201). Measured here from
+      the same functions the register's own test asserts exactly, so the audit
+      sentence and the register cannot disagree about either number.
+    */
+    scannedTables: columnsScanned().tables,
+    scannedColumns: columnsScanned().columns,
+    columnCandidates: writerCandidates().length,
+    /*
       Both measured the way `tests/the-id-a-caller-hands-in.test.ts` measures
       them, from `pg_constraint` — a foreign key from one tenant-scoped table to
       another, and the subset whose key carries the tenant.
@@ -141,7 +150,7 @@ describe('the register itself', () => {
     expect(PINNED_CLAIMS.flatMap((claim) => pinnedClaimArgues(claim))).toEqual([])
   })
 
-  it('declares fifteen claims, all of them pinned', () => {
+  it('declares nineteen claims, all of them pinned', () => {
     /**
      * Phase 126, and the second number is no longer the honest half: since
      * Phase 187 there is no unmeasured entry.
@@ -172,10 +181,17 @@ describe('the register itself', () => {
      * unmeasured sentence. Four of eighteen entries in one document is this
      * register's own answer to which file it most expects to go stale, and
      * that document is the one this process reads to decide what to build.
+     *
+     * Nineteen since Phase 201, and the nineteenth is a *fifth* claim in that
+     * same audit — the column-writer census. It is the first entry here to pin
+     * a **denominator** beside its answer, which is the lesson of Phases
+     * 196–198 written into the register rather than into an ADR: each of those
+     * found a scan quoting a subset as a total, and in every case the answer
+     * looked tidy while the question had been asked of half the tree.
      */
-    expect(PINNED_CLAIMS).toHaveLength(18)
-    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(18)
-    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(18)
+    expect(PINNED_CLAIMS).toHaveLength(19)
+    expect(new Set(PINNED_CLAIMS.map((claim) => claim.key)).size).toBe(19)
+    expect(PINNED_CLAIMS.filter((claim) => claim.measure !== null)).toHaveLength(19)
   })
 
   it('pins all four numbers of the sentence that states four', () => {

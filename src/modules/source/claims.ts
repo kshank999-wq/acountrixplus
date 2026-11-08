@@ -114,6 +114,25 @@ export type MeasuredFacts = {
    * deliverable that appeared.
    */
   phaseDeliverables: number
+  /**
+   * The column-writer scan's own three numbers (Phase 201).
+   *
+   * `scannedColumns` and `scannedTables` are the denominator, and pinning them
+   * is the lesson of Phases 196–198 written into the register: every one of
+   * those phases found a census quoting a *subset* as a total, and the audit's
+   * sentence here says how much of the schema the question was asked of. A
+   * scan that silently stopped reading half the schema files would still
+   * report a tidy candidate count.
+   *
+   * `columnCandidates` is the answer — columns something reads that the scan
+   * can find no writer for. It moves down when one is closed and up when a
+   * column is added with a reader and nothing to fill it in, which is the
+   * whole point: a reader deciding whether anything is left to build needs the
+   * number to be today's.
+   */
+  scannedTables: number
+  scannedColumns: number
+  columnCandidates: number
 }
 
 export type PinnedClaim = {
@@ -383,6 +402,21 @@ export const PINNED_CLAIMS: readonly PinnedClaim[] = [
       'cell moves the register, the register moves this number, and the sentence cannot go ' +
       'quietly stale the way the one it replaced did.',
     measure: (facts) => facts.phaseDeliverables,
+  },
+  {
+    key: 'audit-column-writers',
+    file: 'docs/SPEC-AUDIT.md',
+    pattern: /reads \*\*(\d+) columns\*\* across \*\*(\d+) tables\*\* and reports \*\*(\d+)\*\*/,
+    because:
+      "§19's newest sentence, and the first census in this file whose denominator is pinned " +
+      'beside its answer. Phases 196–198 each found a scan quoting a subset as a total — 119 of ' +
+      '276 queries, reported as everything — and each time the answer looked tidy while the ' +
+      'question had been asked of half the tree. So all three numbers are here: a reader ' +
+      'deciding whether anything is left to build needs to know both how many columns with a ' +
+      'reader and no writer there are **and** how much of the schema was looked at to say so. ' +
+      'The candidate count also moves when one is closed, which is what makes a fix visible in ' +
+      'the audit rather than only in a commit.',
+    measure: (facts) => [facts.scannedColumns, facts.scannedTables, facts.columnCandidates],
   },
 ]
 

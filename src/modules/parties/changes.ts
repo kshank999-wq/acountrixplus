@@ -122,6 +122,16 @@ export const ORGANIZATION_FIELDS: PartyField[] = [
   { key: 'country', label: 'Country', kind: 'description' },
   { key: 'industry', label: 'Industry', kind: 'description' },
   {
+    key: 'sizeBand',
+    label: 'Size band',
+    kind: 'default',
+    // A `default` for the same reason `lifecycleStage` is one: `marketing/
+    // segments.ts` filters on it, so it decides which campaigns reach their
+    // contacts rather than only what is written down. Phase 201 gave it a
+    // writer — until then it was a filter that could only ever match nothing.
+    note: 'Segments can be built on this, so it decides which campaigns reach their contacts.',
+  },
+  {
     key: 'lifecycleStage',
     label: 'Lifecycle stage',
     kind: 'default',

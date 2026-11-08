@@ -442,6 +442,17 @@ export async function createOrganization(
     phone?: string
     website?: string
     industry?: string
+    /**
+     * Phase 201, and the second time this table has had this defect.
+     *
+     * The comment below records Phase 78 finding that `organizations` had six
+     * address columns since Phase 3 and this input took two, so a client's
+     * street could not be entered. `sizeBand` is the one that survived that
+     * fix — and it is worse than unused, because `marketing/segments.ts` offers
+     * it as a filter and the segment workspace labels it "Size band", so a
+     * marketer could build an audience on company size and get nothing back.
+     */
+    sizeBand?: string
     source?: string
     /**
      * The whole address, since Phase 78. `organizations` has had all six
@@ -472,6 +483,7 @@ export async function createOrganization(
       phone: input.phone ?? null,
       website: input.website ?? null,
       industry: input.industry ?? null,
+      sizeBand: input.sizeBand ?? null,
       source: input.source ?? null,
       addressLine1: input.addressLine1 ?? null,
       addressLine2: input.addressLine2 ?? null,
@@ -551,6 +563,7 @@ export async function updateOrganization(
     postalCode: string | null
     country: string | null
     industry: string | null
+    sizeBand: string | null
     lifecycleStage: (typeof organizations.$inferSelect)['lifecycleStage']
     source: string | null
     isStrategicAccount: boolean

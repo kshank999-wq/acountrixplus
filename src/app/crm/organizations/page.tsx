@@ -164,6 +164,7 @@ export default async function OrganizationsPage() {
                             postalCode: organization.postalCode ?? '',
                             country: organization.country ?? '',
                             industry: organization.industry ?? '',
+                            sizeBand: organization.sizeBand ?? '',
                             source: organization.source ?? '',
                             isStrategicAccount: organization.isStrategicAccount,
                           }}

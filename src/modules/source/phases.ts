@@ -85,18 +85,20 @@ export const PHASE_DELIVERABLES: readonly PhaseDeliverable[] = [
     evidence: ['src/modules/auth', 'src/modules/tenancy', 'src/db/tenant-scope.ts'],
     because:
       'Sessions, devices and MFA on one side; `ActorContext`, `scoped()` and the isolation ' +
-      'census on the other. The strongest-measured deliverable in the whole table: 291 writes ' +
-      'and 954 reads, every one standing on a named guard (Phases 149–150, 196–198).',
+      'census on the other. The strongest-measured deliverable in the whole table: 292 writes ' +
+      'and 955 reads, every one standing on a named guard (Phases 149–150, 196–198).',
   },
   {
     phase: 0,
     deliverable: 'permissions',
     evidence: ['src/modules/permissions/index.ts'],
     because:
-      'Seven roles against a permission list, with granular grants and revocations layered on ' +
-      'top (§14). `requirePermission` is the single gate and every service takes an actor ' +
-      'first, which is what makes a role something structural rather than a screen that hides ' +
-      'a button.',
+      'Seven roles against a permission list. `requirePermission` is the single gate and every ' +
+      'service takes an actor first, which is what makes a role something structural rather ' +
+      'than a screen that hides a button. This entry claimed §14\'s "granular grants and ' +
+      'revocations layered on top" until Phase 201 measured it: `effectivePermissions` applies ' +
+      'them and `memberships.permissionOverrides` has no writer, so the mechanism is complete ' +
+      'except for anything that could use it — declared in `COLUMN_WRITERS` and nominated.',
   },
   {
     phase: 0,

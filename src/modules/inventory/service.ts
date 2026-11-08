@@ -102,6 +102,78 @@ export async function inventoryAccounts(
   }
 }
 
+/**
+ * Where one item's stock and its cost of sale post (Phase 201).
+ *
+ * ## The override nobody could exercise
+ *
+ * `inventoryAccounts` above has read these two columns per item since Phase 14
+ * and `reconcileInventory` collects every account any item names, so the
+ * subledger check does not cry wolf on a business that splits raw materials
+ * from finished goods. Its own docstring says *"a business that keeps raw
+ * materials and finished goods on separate balance sheet lines sets them on the
+ * items"*.
+ *
+ * **Nothing set them.** Phase 201's scan for columns with a reader and no
+ * writer found `inventoryAccountId` read in three places, documented in two,
+ * and written only by the seed — so every real company's stock went to 1400
+ * and its cost to 5000, and the per-item choice existed as prose describing a
+ * capability. Phase 160's shape on a ledger decision.
+ *
+ * ## Why null means the standard chart, and why that is not a default
+ *
+ * A business that never thinks about this must not be made to answer. Null is
+ * *"wherever the chart says"*, resolved at posting time by `inventoryAccounts`
+ * — not copied in here, because a company that later renumbers its chart
+ * would otherwise find every item pinned to the account it had when the item
+ * was created.
+ *
+ * ## Not retrospective
+ *
+ * Entries already posted keep the accounts they were posted to, which is why
+ * this does no journal work and the screen says so. Moving a year of stock
+ * postings from 1400 to 1440 is a reclassification — a journal somebody
+ * decides on and can see, not a consequence of a dropdown. The subledger check
+ * stays correct across the change precisely because it reads every named
+ * account rather than only 1400.
+ *
+ * The accounts are not validated by type here. Both columns reference
+ * `chart_accounts` with the tenant in the key, so the database refuses another
+ * company's account and one that names nothing — Phase 116's rule, a
+ * constraint beating a check. What the *screen* offers is narrowed to assets
+ * and costs of sale, which is a question about what to suggest rather than
+ * about what is legal.
+ */
+export async function setItemPostingAccounts(
+  ctx: ActorContext,
+  input: { itemId: string; inventoryAccountId: string | null; cogsAccountId: string | null },
+) {
+  requirePermission(ctx, 'accounting:journal')
+
+  const [item] = await db
+    .update(serviceItems)
+    .set({
+      inventoryAccountId: input.inventoryAccountId,
+      cogsAccountId: input.cogsAccountId,
+    })
+    .where(scoped(ctx, serviceItems, eq(serviceItems.id, input.itemId)))
+    .returning()
+
+  if (!item) throw new Refusal('That item is not on these books.')
+
+  await recordAudit(ctx, {
+    action: 'item.update',
+    entityType: 'service_item',
+    entityId: item.id,
+    after: {
+      inventoryAccountId: item.inventoryAccountId,
+      cogsAccountId: item.cogsAccountId,
+    },
+  })
+
+  return item
+}
+
 /** The company's cost method. One setting, not one per item. */
 export async function costMethodFor(companyId: string, exec: Executor = db): Promise<CostMethod> {
   const { companies } = await import('@/db/schema')

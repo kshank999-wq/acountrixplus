@@ -8,6 +8,7 @@ import {
   createPurchaseOrderAction,
   receiveGoodsAction,
   saveItemAction,
+  setItemAccountsAction,
 } from '@/app/actions/inventory'
 import { COST_METHOD_LABELS } from '@/modules/inventory/costing'
 import { formatCents, parseAmountToCents } from '@/lib/money'
@@ -52,7 +53,24 @@ type Adjustment = {
   reason: string
 }
 
-type Named = { id: string; name: string; unit?: string }
+type Named = {
+  id: string
+  name: string
+  unit?: string
+  /** Null means the standard chart — 1400 and 5000. See `inventoryAccounts`. */
+  inventoryAccountId?: string | null
+  cogsAccountId?: string | null
+}
+
+/**
+ * An account an item's stock or cost may post to (Phase 201).
+ *
+ * `serviceItems` has carried `inventoryAccountId` and `cogsAccountId` since
+ * Phase 14 and **no screen set either**: `inventoryAccounts` read them and
+ * every item fell through to the default, so the per-item override existed
+ * only in the seed and in the prose describing it.
+ */
+type Account = { id: string; number: string; name: string; type: string }
 
 /** Thousandths to a readable quantity. */
 function units(milli: number): string {
@@ -67,6 +85,7 @@ export function InventoryBoard({
   adjustments,
   vendors,
   items,
+  accounts,
   costMethod,
   reconciliation,
   canManage,
@@ -77,6 +96,7 @@ export function InventoryBoard({
   adjustments: Adjustment[]
   vendors: Named[]
   items: Named[]
+  accounts: Account[]
   costMethod: 'fifo' | 'weighted_average'
   reconciliation: { subledgerCents: number; ledgerCents: number; differenceCents: number; agrees: boolean }
   canManage: boolean
@@ -95,6 +115,34 @@ export function InventoryBoard({
   const [itemUnit, setItemUnit] = useState('each')
   const [itemPrice, setItemPrice] = useState('')
   const [itemCost, setItemCost] = useState('')
+
+  /*
+    Where an item's stock and cost post (Phase 201). Empty means the standard
+    chart, which is what every item had before this existed — so the pickers
+    start blank and a business that never thinks about this answers nothing.
+  */
+  const [itemInventoryAccount, setItemInventoryAccount] = useState('')
+  const [itemCogsAccount, setItemCogsAccount] = useState('')
+
+  const assetAccounts = accounts.filter((account) => account.type === 'asset')
+  const cogsAccounts = accounts.filter((account) => account.type === 'cogs')
+
+  /** The item whose posting accounts are being changed, by id. */
+  const [posting, setPosting] = useState<string | null>(null)
+  const postingItem = items.find((item) => item.id === posting)
+  const [postInventory, setPostInventory] = useState('')
+  const [postCogs, setPostCogs] = useState('')
+
+  function openPosting(itemId: string) {
+    if (posting === itemId) {
+      setPosting(null)
+      return
+    }
+    const item = items.find((row) => row.id === itemId)
+    setPostInventory(item?.inventoryAccountId ?? '')
+    setPostCogs(item?.cogsAccountId ?? '')
+    setPosting(itemId)
+  }
 
   const [showReceive, setShowReceive] = useState(false)
   const [receiveVendor, setReceiveVendor] = useState(vendors[0]?.id ?? '')
@@ -170,6 +218,9 @@ export function InventoryBoard({
         setCounted('')
         setReason('')
         setShowItem(false)
+        setItemInventoryAccount('')
+        setItemCogsAccount('')
+        setPosting(null)
         setShowReceive(false)
         setShowOrder(false)
         setChosen([])
@@ -287,6 +338,31 @@ export function InventoryBoard({
               />
             </label>
           </div>
+
+          {/*
+            Where it posts (Phase 201). Both optional: blank keeps the standard
+            1400 and 5000, which is what every item got before anything could
+            set these — the override was read in three places and written
+            nowhere, so a manufacturer splitting raw materials from finished
+            goods had a ledger choice nobody could make.
+          */}
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            <AccountPicker
+              label="Stock sits on"
+              value={itemInventoryAccount}
+              onChange={setItemInventoryAccount}
+              accounts={assetAccounts}
+              fallback="1400 Inventory"
+            />
+            <AccountPicker
+              label="Cost lands on when it sells"
+              value={itemCogsAccount}
+              onChange={setItemCogsAccount}
+              accounts={cogsAccounts}
+              fallback="5000 Cost of Goods Sold"
+            />
+          </div>
+
           <button
             className="btn btn-primary mt-3"
             disabled={pending || !itemName.trim()}
@@ -298,6 +374,8 @@ export function InventoryBoard({
                   unitPriceCents: itemPrice ? (parseAmountToCents(itemPrice) ?? 0) : 0,
                   unitCostCents: itemCost ? (parseAmountToCents(itemCost) ?? 0) : 0,
                   isInventoried: true,
+                  inventoryAccountId: itemInventoryAccount || undefined,
+                  cogsAccountId: itemCogsAccount || undefined,
                 }),
               )
             }
@@ -436,20 +514,75 @@ export function InventoryBoard({
                   </td>
                   <td className="px-4 py-1.5 text-right">
                     {canManage && (
-                      <button
-                        className="btn btn-ghost text-xs"
-                        onClick={() =>
-                          setCounting(counting === position.itemId ? null : position.itemId)
-                        }
-                      >
-                        Count
-                      </button>
+                      <span className="inline-flex gap-1">
+                        <button
+                          className="btn btn-ghost text-xs"
+                          onClick={() => openPosting(position.itemId)}
+                        >
+                          Posting
+                        </button>
+                        <button
+                          className="btn btn-ghost text-xs"
+                          onClick={() =>
+                            setCounting(counting === position.itemId ? null : position.itemId)
+                          }
+                        >
+                          Count
+                        </button>
+                      </span>
                     )}
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        )}
+
+        {/*
+          Changing where an existing item posts (Phase 201).
+
+          Beside the count control rather than only on the create form,
+          because the items that need this already exist: a business splits raw
+          materials from finished goods after a year of counting both on 1400,
+          and a picker only on creation would have closed the gap for items
+          nobody has yet.
+        */}
+        {posting && postingItem && canManage && (
+          <div className="flex flex-wrap items-end gap-2 border-t border-line px-4 py-3">
+            <AccountPicker
+              label={`Stock sits on — ${postingItem.name}`}
+              value={postInventory}
+              onChange={setPostInventory}
+              accounts={assetAccounts}
+              fallback="1400 Inventory"
+            />
+            <AccountPicker
+              label="Cost lands on when it sells"
+              value={postCogs}
+              onChange={setPostCogs}
+              accounts={cogsAccounts}
+              fallback="5000 Cost of Goods Sold"
+            />
+            <button
+              className="btn btn-primary"
+              disabled={pending}
+              onClick={() =>
+                act(() =>
+                  setItemAccountsAction({
+                    itemId: posting,
+                    inventoryAccountId: postInventory,
+                    cogsAccountId: postCogs,
+                  }),
+                )
+              }
+            >
+              Save posting accounts
+            </button>
+            <p className="w-full text-xs text-faint">
+              Not retrospective. Entries already posted stay on the accounts they were posted to
+              — the stock check reads every account any item names, so both agree afterwards.
+            </p>
+          </div>
         )}
 
         {counting && canManage && (
@@ -657,6 +790,46 @@ export function InventoryBoard({
         </Card>
       )}
     </div>
+  )
+}
+
+/**
+ * One posting account, or the standard chart (Phase 201).
+ *
+ * The blank option is named rather than empty — "1400 Inventory (standard)"
+ * says what happens if you leave it alone, which an empty first option does
+ * not. A picker whose default reads as "nothing" invites somebody to choose an
+ * account they did not need to.
+ */
+function AccountPicker({
+  label,
+  value,
+  onChange,
+  accounts,
+  fallback,
+}: {
+  label: string
+  value: string
+  onChange: (value: string) => void
+  accounts: Account[]
+  fallback: string
+}) {
+  return (
+    <label className="text-xs text-muted">
+      <span className="mb-1 block">{label}</span>
+      <select
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="field w-full py-1.5 text-sm"
+      >
+        <option value="">{fallback} (standard)</option>
+        {accounts.map((account) => (
+          <option key={account.id} value={account.id}>
+            {account.number} {account.name}
+          </option>
+        ))}
+      </select>
+    </label>
   )
 }
 

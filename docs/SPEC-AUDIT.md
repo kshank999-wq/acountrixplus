@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **291
-writes** and **954 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **292
+writes** and **955 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -348,6 +348,60 @@ otherwise.
 > There is no known shortfall in these two numbers now. A statement whose table
 > is chosen at runtime is counted as `(dynamic)` and still has to be guarded,
 > which is the conservative direction.
+
+#### A different census of the same schema (Phase 201)
+
+Isolation asks whether every query names the tenant. **Phase 201 asks a
+question nothing had asked: which columns does something read that nothing
+lets a person fill in?** Phase 49 found that shape twice by accident and Phase
+200 found three more by accident of writing one narrow check against one form,
+so it was measured as a class instead.
+
+The scan reads **2179 columns** across **185 tables** and reports **27** with a
+reader and no writer it can see. All three numbers are pinned
+(`audit-column-writers`) — the denominator beside the answer, because Phases
+196–198 each found a census quoting a subset as a total.
+
+Twenty-three of the twenty-seven are written by a **spread** or a **helper's
+return**, which no regex can resolve, so `COLUMN_WRITERS` declares each
+mechanism and names the file that writes it. The rule its test asserts is that
+every candidate is **declared or fixed**, in both directions: an entry for a
+column the scan no longer reports is removed rather than left to excuse it.
+
+Four were real. Two are closed in Phase 201 and are therefore **absent** from
+the register, which is what proves the editors reach the column:
+
+- **`organizations.sizeBand`** — a segment filter that could only ever match
+  nothing. Listed in `SEGMENT_FIELDS`, given a `case` in the matcher, selected
+  by `loadCandidates`, labelled *"Size band"* on the segment workspace, and set
+  by no screen. Worse than an unused column, because the interface offered the
+  filter and returned an empty audience with nothing to say why.
+- **`service_items.inventoryAccountId`** — a ledger decision nobody could make.
+  `inventoryAccounts` chose the posting account from it and `reconcileInventory`
+  collects every account any item names so the subledger check does not cry
+  wolf; its docstring said *"a business that keeps raw materials and finished
+  goods on separate balance sheet lines sets them on the items"*. Only the seed
+  did.
+
+Two remain, declared and nominated:
+
+- **`memberships.permissionOverrides`** — §14's granular grants and
+  revocations, read into the actor, parsed, and *applied* by
+  `effectivePermissions`, with nothing anywhere able to write one. The
+  §20 register's own permissions entry claimed them until this phase measured
+  it. A grant and revoke editor has its own refusals and is a phase.
+- **`vendors.organizationId`** — the supplier who is also a client, the case
+  `engagement/filing.ts` exists for. The customer side is written when an
+  opportunity is won; there is no path at all for a supplier, so a remittance
+  never reaches that client's CRM timeline.
+
+The fifth mechanism is worth recording because it was a correction to a shared
+primitive rather than to this scan: Phase 197's `declarationOf` read a local
+declaration **to the end of its line**, on the stated grounds that every one in
+the repository was a single-line ternary. It was not — `payroll/sales-tax.ts`
+builds its rows with `const rows = input.lines.map((line) => {` — and four
+columns of `document_tax_lines` looked unwritable, two of them `notNull`, which
+would have meant a table nothing could insert into.
 
 ### §20 — all fifty-one deliverables, measured (Phase 199)
 
