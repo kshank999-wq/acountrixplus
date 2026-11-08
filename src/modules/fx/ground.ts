@@ -278,6 +278,22 @@ export const DOMESTIC_GROUNDS: readonly DomesticGround[] = [
       'scan disagrees with it by name.',
   },
   {
+    file: 'src/modules/appointments/service.ts',
+    symbol: 'closeGiftCard',
+    ground: 'nothing-in-reach',
+    via: [],
+    because:
+      'Stopping a card and placing what was left on it (Phase 203). **Neither side of the entry ' +
+      'can be foreign**: `gift_cards` has no currency column and no functional twin, and ' +
+      '`chart_accounts` has none either — in this schema currency lives on documents, not on ' +
+      'accounts — so a refund crediting a bank account and a write-off crediting income are both ' +
+      'home money by construction. Unlike `redeemGiftCard` below, which reads `invoices` itself, ' +
+      'this one touches no document at all: there is no visit being settled, only a liability ' +
+      'being given up or handed back. Measured rather than assumed, which is the whole point of ' +
+      'this register — and this entry exists because the full run reported the posting ' +
+      'undeclared, two shards apart from the entry that was missing.',
+  },
+  {
     file: 'src/modules/drawer/service.ts',
     symbol: 'openShift',
     ground: 'nothing-in-reach',

@@ -239,7 +239,13 @@ describe('the ground every domestic entry stands on', () => {
     // Ten since Phase 157 and `receivePledge`, which went the same way for the
     // same reason — the fourth and last of the sites Phase 136 recorded as
     // withholding a currency.
-    expect(domestic.length).toBe(10)
+    //
+    // Eleven since Phase 203 and `closeGiftCard`, which is the first to move
+    // this number **up** since Phase 136 — every earlier move was a site that
+    // stopped being domestic because it started converting. A new domestic
+    // posting arriving is the other direction, and it needed an entry on both
+    // sides of the correspondence rather than one.
+    expect(domestic.length).toBe(11)
     expect(grounded.sort()).toEqual([...domestic].sort())
   })
 
@@ -270,7 +276,12 @@ describe('the ground every domestic entry stands on', () => {
       'writes-rate-one',
     ])
     expect(counts.get('refuses-foreign')).toBeUndefined()
-    expect(counts.get('nothing-in-reach')).toBe(7)
+    // Eight since Phase 203 and `closeGiftCard`. Worth distinguishing from its
+    // two neighbours in the same file: `sellGiftCard` reaches nothing and is
+    // right about it, `redeemGiftCard` claims the same and **reads `invoices`**
+    // — so the third one in that module had to be measured rather than
+    // inherited from whichever of the two it resembled.
+    expect(counts.get('nothing-in-reach')).toBe(8)
   })
 
   it('argues each ground from the code rather than from what the thing is like', () => {

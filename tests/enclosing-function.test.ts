@@ -155,7 +155,7 @@ describe('what the broken scanner did to the registries', () => {
     // naming a function nothing scans for is the shape Phase 140 found two
     // fictions in.
     expect(SITE_REGISTRIES.length).toBe(4)
-    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(70)
+    expect(SITE_REGISTRIES.reduce((sum, entry) => sum + entry.rows.length, 0)).toBe(71)
   })
 
   it('disagrees with the old scanner, on sites the registries do not yet reach', () => {
