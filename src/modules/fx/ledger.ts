@@ -309,6 +309,20 @@ export const LEDGER_POSTINGS: readonly LedgerPosting[] = [
       'so there is nothing to convert.',
   },
   {
+    file: 'src/modules/appointments/service.ts',
+    symbol: 'closeGiftCard',
+    basis: 'domestic',
+    because:
+      '`card.balanceCents` is what is left on a gift card, and **neither side of the entry can be ' +
+      'foreign**: `gift_cards` has no currency column and no functional twin, and `chart_accounts` ' +
+      'has none either — currency lives on documents in this schema, not on accounts. So a refund ' +
+      'crediting a bank account and a write-off crediting income are both the company’s own money ' +
+      'by construction, which is the same argument as selling and redeeming one. Added in Phase ' +
+      '203, which the full run caught undeclared: the two sites are one line each on the debit and ' +
+      'the credit, and a posting that reaches the ledger without saying why it is home money is ' +
+      'the defect this register exists for.',
+  },
+  {
     file: 'src/modules/drawer/service.ts',
     symbol: 'openShift',
     basis: 'domestic',

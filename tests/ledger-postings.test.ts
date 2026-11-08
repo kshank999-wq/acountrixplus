@@ -138,8 +138,15 @@ describe('what the ledger will accept', () => {
     // Two sites rather than four, unlike Phase 137's credit notes: the sign is
     // decided by a conditional inside one `lines` array rather than by two
     // branches each writing their own entry.
-    expect(postingSites().length).toBe(123)
-    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(39)
+    //
+    // A hundred and twenty-five since Phase 203 and `closeGiftCard` — the
+    // debit of 2590 and the credit of wherever a stopped card's balance went.
+    // This assertion is what caught it: the phase's own tests were green, the
+    // targeted runs were green, and the posting had no declared basis. Seventh
+    // time a tree-wide register has reported something nothing near the change
+    // could see.
+    expect(postingSites().length).toBe(125)
+    expect(new Set(postingSites().map((site) => `${site.file}:${site.symbol}`)).size).toBe(40)
   })
 
   it('has a declared basis for every one of them', () => {
