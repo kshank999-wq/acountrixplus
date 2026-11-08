@@ -297,7 +297,22 @@ describe('every registry refuses the same way', () => {
     // `undefined` would quietly shrink that list — and the thing it would stop
     // checking is whether a block an author deliberately held back is being
     // shown to the one person it was held back from.
-    expect(thrown.length).toBe(40)
+    //
+    // **Forty-two since Phase 199 and `PHASE_DELIVERABLES`**, which throws from
+    // two lookups rather than one: by §20's own words for a deliverable, and by
+    // phase number. Both earn it on what the register replaced — the audit's
+    // sentence *"Phases 0–8 all have shipped work"*, which was true in the
+    // weakest reading of a table listing fifty-one things. A lookup answering
+    // `undefined` would let a caller ask about a deliverable §20 never promised
+    // and get silence back, which is the state the sentence was in for
+    // thirty-five phases.
+    //
+    // Counted here because this scan went red in Phase 199 and found it: the
+    // register was added, its own test passed, and the tree-wide count nobody
+    // touches was two out. Fourth time this file has reported a number somebody
+    // moved without looking — 167, 169, 176, and now the phase whose whole
+    // subject was a sentence nobody checked.
+    expect(thrown.length).toBe(42)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
