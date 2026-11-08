@@ -266,6 +266,72 @@ describe('against the database', () => {
     expect(result.moved).toEqual([{ table: 'bills', rows: 1 }])
   })
 
+  it('refuses two subcontractors by counting them, in both directions', async () => {
+    /**
+     * `EXCLUSIVE_REFERENCES` — the one table a merge refuses rather than
+     * dedupes, because a `subcontractors` row carries insurance expiry and
+     * licence numbers and choosing one to drop is choosing data to lose.
+     *
+     * **The query that decides this had no test until Phase 198.** The pure
+     * core was covered by passing `collisions: ['subcontractors']` in, so the
+     * raw `select count(*)` that *produces* that list was exercised by
+     * nothing — which is why it was the only one of this file's eleven raw
+     * statements with no tenant predicate, nine lines from a sibling that had
+     * one.
+     *
+     * Both directions, on Phase 121's rule: a test that only built the
+     * colliding case would pass against a query that always returned 2.
+     *
+     * ## What this does *not* check, and where that check lives
+     *
+     * Not the tenant predicate Phase 198 added to that query. A second test
+     * was written for it and **deleted for passing without it**: another
+     * company's `subcontractors` row cannot name this company's vendor,
+     * because `vendor_id` is a foreign key to `vendors.id` and that is the
+     * cross-tenant reference Phases 170–172 made the database refuse. So the
+     * unfiltered count was already right, and no behavioural test can tell the
+     * two versions apart.
+     *
+     * The predicate is therefore **defence in depth, not a repair**, and the
+     * check that bites is in the census: `scanRawQueries` reports that
+     * statement as unguarded without the clause, which is verified in
+     * `tests/what-a-scan-cannot-see.test.ts`.
+     */
+    const winner = await createVendor(fixture.ctx, { name: 'Ridge Roofing' })
+    const loser = await createVendor(fixture.ctx, { name: 'Ridge Roofing Co' })
+
+    const subcontractorFor = (vendorId: string) =>
+      db.execute(
+        sql`insert into "subcontractors" ("company_id", "vendor_id", "trade")
+            values (${fixture.companyId}, ${vendorId}, 'Roofing')`,
+      )
+
+    // One side only: nothing collides, so the merge goes ahead.
+    await subcontractorFor(loser.id)
+    const allowed = await mergeParties(fixture.ctx, {
+      side: 'vendor',
+      winnerId: winner.id,
+      loserId: loser.id,
+      reason: 'One subcontractor row, so there is nothing to lose.',
+    })
+    expect(allowed.winnerName).toBe('Ridge Roofing')
+
+    // Both sides: the count is 2 and the merge is refused by name.
+    const a = await createVendor(fixture.ctx, { name: 'Vale Groundworks' })
+    const b = await createVendor(fixture.ctx, { name: 'Vale Groundworks Ltd' })
+    await subcontractorFor(a.id)
+    await subcontractorFor(b.id)
+
+    await expect(
+      mergeParties(fixture.ctx, {
+        side: 'vendor',
+        winnerId: a.id,
+        loserId: b.id,
+        reason: 'Both are subcontractors, so this should be refused.',
+      }),
+    ).rejects.toThrow(/subcontractors/)
+  })
+
   it('will not reach into another company', async () => {
     const other = await createCompanyFixture({ name: 'Somebody Else' })
     const mine = await createCustomer(fixture.ctx, { name: 'Mine' })

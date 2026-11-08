@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
 import {
   readableSource,
+  scanRawQueries,
   scanReads,
   scanUnresolvedTables,
   scanWrites,
@@ -13,7 +14,7 @@ import {
   guardFor,
   isolationGuardFor,
 } from '@/modules/tenancy/isolation'
-import { enclosingQuery, templateLiteralAt } from '@/modules/source/enclosing'
+import { enclosingQuery } from '@/modules/source/enclosing'
 
 /**
  * What a scan cannot see (Phase 196, spec §19).
@@ -311,102 +312,107 @@ describe('the table held in a variable', () => {
   })
 })
 
-describe('the writes no builder-based scan can see', () => {
+describe('raw SQL, in the census since Phase 198', () => {
   /**
-   * Seven, all in `src/modules/parties/service.ts`, and found only because
-   * this phase's ADR nearly claimed *"measured as none today"* without
-   * measuring it.
+   * The party merge repoints records across tables chosen at runtime from
+   * `PARTY_REFERENCES`, so it writes through
+   * ``tx.execute(sql`update ${sql.raw(table)} …`)``. A legitimate reason to
+   * leave the builder, and invisible to scans that match `.from(`, `.update(`
+   * and `.delete(`.
    *
-   * The party merge repoints records from a loser to a winner across tables
-   * chosen at runtime from `PARTY_REFERENCES`, so it writes through
-   * `tx.execute(sql`update ${sql.raw(table)} …`)` rather than a builder call.
-   * That is a legitimate reason to leave the builder, and it puts those writes
-   * outside `scanWrites`, which matches `.update(` and `.delete(`.
+   * Phase 196 asserted that the seven raw **writes** carried a tenant
+   * predicate, in a test beside the census rather than in it. Phase 198
+   * extended the same measurement to reads and found **four selects nobody
+   * had counted** — one of them with no tenant predicate at all, nine lines
+   * from a sibling that had one. A writes-only count was not merely
+   * incomplete; it was incomplete in the direction that mattered.
    *
-   * All seven carry a `company_id` predicate. The point of this block is that
-   * it is now *checked* rather than true because somebody looked in a phase
-   * that happened to look — which is the condition the 157 were in.
+   * They are in the census now, so §19 quotes one denominator instead of a
+   * number plus a test somebody has to remember to add up.
    */
-  /*
-    The opening of a raw write, and then `templateLiteralAt` for the rest.
+  it('counts every raw statement that can reach a scoped table', () => {
+    // Measured exactly (Phase 126). Eleven: four selects, four updates, three
+    // deletes. A twelfth anywhere fails this and sends somebody to read it.
+    const raw = scanRawQueries()
 
-    A regex cannot take the whole literal, and the first attempt at this block
-    proved it the expensive way: ``/sql`[\s\S]*?`/`` ends at the backtick
-    *inside* `sql.raw(`"${ref.table}"`)`, so two correct writes were reported
-    as having no tenant filter because the extracted text stopped before the
-    `where`. Two false positives, in the phase about scans that cannot see.
-
-    `templateLiteralAt` lives in `source/enclosing.ts` rather than here, which
-    is that module's own rule: the thing more than one caller wants is a
-    module, and the next scan to read raw SQL will want exactly this.
-  */
-  const RAW_WRITE_OPENS = /sql`\s*(update|delete)\b/gi
-
-  function rawWrites(): { file: string; line: number; sql: string }[] {
-    const found: { file: string; line: number; sql: string }[] = []
-
-    for (const dir of SCANNED) {
-      for (const file of sourceFiles(dir)) {
-        const src = readableSource(file)
-        for (const m of src.matchAll(RAW_WRITE_OPENS)) {
-          const backtick = src.indexOf('`', m.index)
-          found.push({
-            file,
-            line: src.slice(0, m.index).split('\n').length,
-            sql: templateLiteralAt(src, backtick),
-          })
-        }
-      }
+    expect(raw).toHaveLength(11)
+    for (const query of raw) {
+      expect(query.file, `${query.file}:${query.line}`).toBe('src/modules/parties/service.ts')
     }
 
-    return found
-  }
-
-  it('reads the whole template, not as far as the first nested backtick', () => {
-    /*
-      The guard on the extraction itself, because the assertion below is only
-      as good as the text it reads — and a truncated read makes a *passing*
-      filter check impossible to distinguish from a missing filter.
-
-      Both of the party merge's dynamic-table writes interpolate a nested
-      template for the table name, so each is a case where the naive regex
-      stops early.
-    */
-    const nested = rawWrites().filter((write) => write.sql.includes('sql.raw('))
-
-    expect(nested.length).toBeGreaterThan(0)
-    for (const write of nested) {
-      expect(write.sql, `${write.file}:${write.line}`).toMatch(/where/i)
-    }
+    const byVerb = raw.reduce<Record<string, number>>((all, query) => {
+      all[query.verb] = (all[query.verb] ?? 0) + 1
+      return all
+    }, {})
+    expect(byVerb).toEqual({ select: 4, update: 4, delete: 3 })
   })
 
-  it('are where the measurement says they are', () => {
-    // Measured, not bounded (Phase 126). If an eighth appears anywhere, this
-    // fails and sends somebody to the assertion below rather than letting a
-    // raw write arrive unexamined.
-    const writes = rawWrites()
+  it('stands every one of them on a guard', () => {
+    /*
+      `explicit-company` for all eleven, and the vocabulary needed no new word:
+      a tenant filter written out in SQL *is* an equality on the company
+      column. That is the argument for folding these into the census rather
+      than registering them beside it.
+    */
+    const unguarded = scanRawQueries()
+      .filter((query) => query.kind === null)
+      .map((query) => `${query.file}:${query.line} ${query.symbol} — ${query.why}`)
 
-    expect(writes).toHaveLength(7)
-    for (const write of writes) {
-      expect(write.file, `${write.file}:${write.line}`).toBe('src/modules/parties/service.ts')
-    }
+    expect(unguarded).toEqual([])
+    expect(new Set(scanRawQueries().map((query) => query.kind))).toEqual(
+      new Set(['explicit-company']),
+    )
   })
 
-  it('every one filters on the acting company', () => {
+  it('is the check that bites on the predicate a behavioural test cannot see', () => {
+    /**
+     * `mergeParties`' collision count had no tenant predicate until Phase 198.
+     * It was not a disclosure — another company's `subcontractors` row cannot
+     * name this company's vendor, because `vendor_id` is a foreign key and
+     * that is the cross-tenant reference Phases 170–172 made the database
+     * refuse — so the count was right, and right because of a property of the
+     * data rather than because of anything in the statement.
+     *
+     * A behavioural test for the clause was written and **deleted for passing
+     * without it** (see `tests/party-merge.test.ts`). This is where the check
+     * lives instead: the scan reads the predicate out of the statement, so it
+     * can tell the two versions apart where no amount of data can.
+     *
+     * Asserted on the statement's own text rather than on a count, because a
+     * count would pass if some *other* statement grew a predicate.
+     */
+    const collision = scanRawQueries().find(
+      (query) => query.symbol === 'mergeParties' && query.verb === 'select',
+    )
+
+    expect(collision).toBeDefined()
+    expect(collision?.kind).toBe('explicit-company')
+    expect(collision?.table).toBe('(dynamic)')
+  })
+
+  it('reports a dynamic table as dynamic rather than guessing it', () => {
     /*
-      The assertion the reading produced. A raw write's tenant filter is in the
-      template text, so it can be required there — and the dynamic table name,
-      which is why these writes are invisible to the builder scan, is no
-      obstacle to checking the predicate beside it.
+      `${sql.raw(ref.table)}` names a table this scan cannot know, and
+      `isolation-scan` deliberately does not import `PARTY_REFERENCES` to find
+      out: a scan that knows about one domain module will be wrong about the
+      next one.
 
-      `company_id` rather than `companyId`: these are SQL strings, not drizzle
-      columns, which is exactly the difference that hid them.
+      Counted anyway — it *might* reach a scoped table, so it has to be
+      guarded, which is the conservative direction and the one that cannot
+      hide anything.
     */
-    const unfiltered = rawWrites()
-      .filter((write) => !/"company_id"\s*=\s*\$\{/.test(write.sql))
-      .map((write) => `${write.file}:${write.line}`)
+    const dynamic = scanRawQueries().filter((query) => query.table === '(dynamic)')
 
-    expect(unfiltered).toEqual([])
+    expect(dynamic).toHaveLength(4)
+    for (const query of dynamic) {
+      expect(query.kind, `${query.file}:${query.line}`).not.toBeNull()
+    }
+
+    // And the ones that do say resolve to real table names.
+    const named = scanRawQueries().filter((query) => query.table !== '(dynamic)')
+    expect(new Set(named.map((query) => query.table))).toEqual(
+      new Set(['evidence_subjects', 'document_links', 'record_notes']),
+    )
   })
 })
 

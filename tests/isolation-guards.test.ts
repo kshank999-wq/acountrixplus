@@ -156,9 +156,16 @@ describe('every write that can be aimed at a row', () => {
     // Two of the variable-table writes are in `importing/reversal.ts`, which
     // deletes the rows an import created — so the census had never looked at
     // a destructive generic helper.
-    expect(WRITES.length).toBe(284)
+    //
+    // **Two hundred and ninety-one since Phase 198**, and the last seven are a
+    // different syntax rather than another missed name: the party merge's raw
+    // `update` and `delete` statements, which go through
+    // `tx.execute(sql`…`)` because the table comes from `PARTY_REFERENCES` at
+    // runtime. Phase 196 asserted they carried a tenant predicate in a test
+    // beside this census; they are *in* it now, so §19 quotes one denominator.
+    expect(WRITES.length).toBe(291)
     expect(by).toEqual({
-      'explicit-company': 191,
+      'explicit-company': 198,
       'scoped-write': 52,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,

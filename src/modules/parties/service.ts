@@ -615,9 +615,27 @@ export async function mergeParties(
   for (const ref of EXCLUSIVE_REFERENCES) {
     if (!references.some((one) => one.table === ref.table && one.column === ref.column)) continue
 
+    /*
+      `and "company_id" = …` since Phase 198, and it was the only one of this
+      file's eleven raw statements without it — `mergePreview`'s equivalent
+      count, nine lines of code away, has had the clause all along.
+
+      It was not a disclosure: `winner.id` and `loser.id` are both read above
+      under `scoped(ctx, table, …)`, and a row of another company referring to
+      this company's customer would itself be the cross-tenant reference
+      Phases 170–172 made the database refuse. So the count was right, and
+      right *because of a property of the data* rather than because of
+      anything in the statement — which is the kind of correctness this
+      repository keeps finding it cannot check.
+
+      Found by Phase 198 extending the raw-SQL measurement from writes to
+      reads: Phase 196 counted seven raw writes and asserted every one carried
+      a tenant predicate, and there were four raw selects nobody had counted.
+    */
     const [row] = await db.execute(
       sql`select count(*)::int as n from ${sql.raw(`"${ref.table}"`)}
-          where ${sql.raw(`"${ref.column}"`)} in (${winner.id}, ${loser.id})`,
+          where ${sql.raw(`"${ref.column}"`)} in (${winner.id}, ${loser.id})
+            and "company_id" = ${ctx.companyId}`,
     )
     if (Number((row as { n: number }).n) > 1) collisions.push(ref.table.replace(/_/g, ' '))
   }

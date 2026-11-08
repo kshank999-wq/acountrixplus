@@ -254,9 +254,9 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **284
-writes** and **950 reads**, every one guarded (Phases 149–150, the census
-widened in Phases 196 and 197) — and
+rather than vaguely: the application layer is complete and measured — **291
+writes** and **954 reads**, every one guarded (Phases 149–150, the census
+widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
 tables. `RLS_ROLLOUT` carries the detail; `rlsStands` refuses to report
@@ -309,10 +309,24 @@ otherwise.
 > `RETENTION_POLICIES` at runtime — and are **declared** in
 > `scanUnresolvedTables()` with the count pinned at two, rather than skipped.
 >
-> Still outside the census, and still counted here as a known shortfall: the
-> **nine raw-SQL queries** in the party merge, which carry a `company_id`
-> predicate and are asserted to, but in a test of their own rather than in
-> these numbers.
+> **Phase 198 folded raw SQL in**, and the shortfall was not nine but eleven.
+> Phase 196 had counted the raw *writes* — seven — and asserted each carried a
+> tenant predicate; extending the same measurement to reads found **four
+> selects nobody had counted**, one of which had no tenant predicate at all,
+> nine lines from a sibling that did. A writes-only count was incomplete in the
+> direction that mattered.
+>
+> That read was not a disclosure: another company's row cannot name this
+> company's vendor, because the column is a foreign key and that is the
+> cross-tenant reference Phases 170–172 made the database refuse. So the count
+> was right, and right because of a property of the data rather than anything
+> in the statement. The clause is defence in depth, and the check that holds it
+> is the census rather than a behavioural test — a test for it was written and
+> deleted for passing without it.
+>
+> There is no known shortfall in these two numbers now. A statement whose table
+> is chosen at runtime is counted as `(dynamic)` and still has to be guarded,
+> which is the conservative direction.
 
 ## The bullet-level pass of §12–§19 (Phase 194)
 

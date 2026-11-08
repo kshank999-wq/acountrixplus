@@ -172,10 +172,16 @@ describe('every read from a company-scoped table', () => {
       `explicit-company` where the where writes the filter out, and six
       `scoped-read` where it goes through `scoped(ctx, table, …)`.
     */
-    expect(READS.length).toBe(950)
+    /*
+      954 since Phase 198 and the four raw selects in the party merge, which
+      nobody had counted — Phase 196 measured the raw *writes* and asserted
+      they were filtered, and extending the same measurement to reads found
+      one of these with no tenant predicate at all.
+    */
+    expect(READS.length).toBe(954)
     expect(by).toEqual({
       'scoped-read': 577,
-      'explicit-company': 273,
+      'explicit-company': 277,
       'established-above': 33,
       'id-from-fetched-row': 21,
       'join-inherited': 13,

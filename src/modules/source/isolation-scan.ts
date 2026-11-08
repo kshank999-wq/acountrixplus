@@ -1,6 +1,11 @@
 import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
-import { declarationOf, withoutComments, enclosingQuery } from './enclosing'
+import {
+  declarationOf,
+  templateLiteralAt,
+  withoutComments,
+  enclosingQuery,
+} from './enclosing'
 import {
   companyScopedTablesIn,
   guardFor,
@@ -218,6 +223,131 @@ function candidateTables(
 }
 
 /**
+ * The SQL name of every company-scoped table (Phase 198).
+ *
+ * `pgTable('bank_transactions', …)` for `bankTransactions`, because a raw
+ * statement names the table the way the database does and the builder scans
+ * name it the way TypeScript does.
+ */
+function scopedSqlNames(): Set<string> {
+  const scoped = companyScopedTables()
+  const names = new Set<string>()
+
+  for (const file of sourceFiles('src/db/schema')) {
+    for (const m of readFileSync(file, 'utf8').matchAll(
+      /export const (\w+) = pgTable\(\s*'([^']+)'/g,
+    )) {
+      if (scoped.has(m[1])) names.add(m[2])
+    }
+  }
+
+  return names
+}
+
+/** A raw-SQL query, in the census since Phase 198. */
+export type RawQuery = {
+  file: string
+  line: number
+  symbol: string
+  table: string
+  verb: 'select' | 'with' | 'update' | 'delete' | 'insert'
+  kind: GuardKind | null
+  why: string
+}
+
+/**
+ * Every raw `sql` statement that can reach a company-scoped table (Phase 198).
+ *
+ * ## Why these were outside both censuses
+ *
+ * The builder scans match `.from(`, `.update(` and `.delete(`. The party merge
+ * repoints records across tables chosen at runtime from `PARTY_REFERENCES`, so
+ * it writes through ``tx.execute(sql`update ${sql.raw(table)} …`)`` — a
+ * legitimate reason to leave the builder, and invisible to a scan that reads
+ * builder calls.
+ *
+ * Phase 196 asserted that the seven raw **writes** carried a tenant predicate,
+ * in a test beside the census rather than in it. Phase 198 extended the same
+ * measurement to reads and found **four selects nobody had counted** — one of
+ * them, `mergeParties`' collision count, with no tenant predicate at all while
+ * its sibling nine lines away had one. So the writes-only count was not just
+ * incomplete, it was incomplete in the direction that mattered.
+ *
+ * ## The table, when the statement does not say
+ *
+ * A literal `"document_links"` resolves. A `${sql.raw(…)}` does not, and this
+ * module deliberately does **not** import `PARTY_REFERENCES` to find out: a
+ * scan that knows about one domain module is a scan that will be wrong about
+ * the next one. Such a statement is reported as `(dynamic)` and **counted** —
+ * it might reach a scoped table, so it has to be guarded, which is the
+ * conservative direction and the one that cannot hide anything.
+ *
+ * ## Inserts
+ *
+ * Excluded, as builder inserts are: an insert has no `where` to guard, and
+ * what can go wrong with one is a wrong `company_id` *value*, which is a
+ * different check from this one. There are none today either way.
+ */
+export function scanRawQueries(): RawQuery[] {
+  const names = scopedSqlNames()
+  const found: RawQuery[] = []
+
+  for (const dir of SCANNED) {
+    for (const file of sourceFiles(dir)) {
+      const src = readableSource(file)
+
+      for (const m of src.matchAll(/\bsql`/g)) {
+        const text = templateLiteralAt(src, src.indexOf('`', m.index))
+        const verb = /^`\s*(select|with|update|delete|insert)\b/i
+          .exec(text)?.[1]
+          ?.toLowerCase() as RawQuery['verb'] | undefined
+        if (!verb || verb === 'insert') continue
+
+        const dynamic = /sql\.raw\(/.test(text)
+        const named = [...names].filter((name) => text.includes(`"${name}"`))
+        if (!dynamic && named.length === 0) continue
+
+        const before = [
+          ...src.slice(0, m.index).matchAll(/^(export )?(?:async )?function (\w+)/gm),
+        ]
+
+        /*
+          A tenant filter in a raw statement is written out in SQL, so the
+          evidence is the predicate rather than a `scoped()` call — and that is
+          what `explicit-company` already means: "an equality on the company
+          column, written out". The guard vocabulary needs no new word, which
+          is the argument for folding these in rather than registering them.
+        */
+        const filtered = /"?company_id"?\s*=\s*\$\{/.test(text)
+        const actorFiltered = /"?user_id"?\s*=\s*\$\{/.test(text)
+
+        const kind: GuardKind | null = filtered
+          ? 'explicit-company'
+          : actorFiltered
+            ? 'actor-scoped'
+            : null
+
+        found.push({
+          file,
+          line: src.slice(0, m.index).split('\n').length,
+          symbol: before.length > 0 ? before[before.length - 1][2] : '(top level)',
+          table: dynamic ? '(dynamic)' : named.sort().join('|'),
+          verb,
+          kind,
+          why: kind
+            ? ''
+            : 'This raw statement can reach a company-scoped table and carries no company or ' +
+              'actor predicate. A tenant filter in raw SQL has to be in the statement, because ' +
+              'there is no `scoped()` for the scan — or for the next reader — to find.',
+        })
+      }
+    }
+  }
+
+  return found
+}
+
+/**
  * Sites whose table nothing in the source resolves (Phase 197).
  *
  * Phase 139's device rather than a silent skip: a register that names what it
@@ -340,6 +470,22 @@ export function scanReads(): GuardedRead[] {
     }
   }
 
+  /*
+    Raw selects join the same list since Phase 198, so §19 quotes one
+    denominator instead of a number plus a test somebody has to remember to
+    add. `scanRawQueries` says why they were outside it.
+  */
+  for (const raw of scanRawQueries()) {
+    if (raw.verb !== 'select' && raw.verb !== 'with') continue
+    found.push({
+      file: raw.file,
+      line: raw.line,
+      symbol: raw.symbol,
+      table: raw.table,
+      kind: raw.kind,
+    })
+  }
+
   return found
 }
 
@@ -446,6 +592,20 @@ export function scanWrites(): GuardedWrite[] {
         })
       }
     }
+  }
+
+  /* Raw updates and deletes, for the reason given above the reads. */
+  for (const raw of scanRawQueries()) {
+    if (raw.verb !== 'update' && raw.verb !== 'delete') continue
+    writes.push({
+      file: raw.file,
+      line: raw.line,
+      symbol: raw.symbol,
+      table: raw.table,
+      op: raw.verb,
+      kind: raw.kind,
+      why: raw.why,
+    })
   }
 
   return writes
