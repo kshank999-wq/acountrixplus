@@ -178,9 +178,15 @@ describe('every read from a company-scoped table', () => {
       they were filtered, and extending the same measurement to reads found
       one of these with no tenant predicate at all.
     */
-    expect(READS.length).toBe(954)
+    /*
+      955 since Phase 201 and the chart-account picker the per-item posting
+      editor needs — new application code rather than another missed name, and
+      `scoped-read` because the page filters it with `scoped(actor, …)` like
+      everything else on it.
+    */
+    expect(READS.length).toBe(955)
     expect(by).toEqual({
-      'scoped-read': 577,
+      'scoped-read': 578,
       'explicit-company': 277,
       'established-above': 33,
       'id-from-fetched-row': 21,

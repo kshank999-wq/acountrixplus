@@ -163,10 +163,17 @@ describe('every write that can be aimed at a row', () => {
     // `tx.execute(sql`…`)` because the table comes from `PARTY_REFERENCES` at
     // runtime. Phase 196 asserted they carried a tenant predicate in a test
     // beside this census; they are *in* it now, so §19 quotes one denominator.
-    expect(WRITES.length).toBe(291)
+    //
+    // **Two hundred and ninety-two since Phase 201**, and this one *is* new
+    // application code: `setItemPostingAccounts`, the editor for a posting
+    // account that had a reader in three places and no writer anywhere. One
+    // `scoped-write`. The census moved by one and five documents had to
+    // follow — `PINNED_CLAIMS` reported four of them and this assertion, which
+    // nothing pins, was the sixth place the number lives.
+    expect(WRITES.length).toBe(292)
     expect(by).toEqual({
       'explicit-company': 198,
-      'scoped-write': 52,
+      'scoped-write': 53,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       'owner-helper': 4,
