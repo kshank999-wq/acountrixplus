@@ -75,7 +75,7 @@ export default async function InvoicesPage() {
       (Phase 169). Active items only: a deactivated item should not be sellable,
       while the lines already pointing at one keep their reference.
     */
-    listServiceItems(actor, { activeOnly: true }),
+    listServiceItems(actor),
     partiesWithOpenDocuments(actor, 'customer'),
     partiesWithOpenDocuments(actor, 'vendor'),
     listFinancialAccounts(actor, { activeOnly: true }),

@@ -41,7 +41,7 @@ export default async function BudgetsPage({
   const thisYear = new Date().getFullYear()
   const fiscalYear = Number(params.year) || thisYear
 
-  const [budgets, accounts] = await Promise.all([listBudgets(actor), listAccounts(actor)])
+  const [budgets, accounts] = await Promise.all([listBudgets(actor), listAccounts(actor, { activeOnly: true })])
 
   const forYear = budgets.filter((row) => row.fiscalYear === fiscalYear)
   const selected =

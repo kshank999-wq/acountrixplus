@@ -276,7 +276,7 @@ suppression (`modules/crm/intake`, `modules/notify`), and security review gating
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
 rather than vaguely: the application layer is complete and measured — **299
-writes** and **966 reads**, every one guarded (Phases 149–150, the census
+writes** and **967 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -459,6 +459,43 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §15, §13 — a retirement with no way back (Phase 206)
+
+Two findings, neither of them the one nominated.
+
+**`deactivateServiceItem` wrote in one direction.** It has existed since Phase
+4, set `isActive` to false only, and audited nothing — so a catalogue item
+retired by mistake was gone from every picker for ever, and it was the one of
+the Studio's four libraries whose retirement left no trace. **No census asks
+about this shape**: a column with a one-directional writer is read *and*
+written, so it is invisible both to the reader-and-no-writer census of Phases
+201–205 and to the mirror Phase 203 measured and declined. It looks identical
+to a working control until somebody wants to undo it.
+
+**Four pickers were offering retired chart accounts.** `listServiceItems` is
+one of **seven** list functions with the `activeOnly` opt-in default, and
+`listAccounts` had four callers feeding a `<select>` with no flag: the till
+pay-out's *"Where it lands"*, the takings categories, the budget lines and the
+recurring-billing revenue account. `account.retire` has claimed since Phase
+118 that retiring *"takes it out of every picker"* — **false for four of them
+for eighty-eight phases**, and the reason is in the same sentence, because an
+opt-in flag makes that a claim about what callers remember. Fixed, and the
+docstring keeps its wording with the correction attached (Phase 185).
+
+Not filtered everywhere: `dimensions` builds a name lookup so a posting on a
+retired account still reads with its name, and the §19 export carries the
+whole chart. *Offering* against *displaying*.
+
+The nomination's own two premises measured false — no screen was offering
+retired items, and retiring an item with stock hides nothing because
+`stockOnHand` filters on `isInventoried` rather than `isActive`. So did ADR
+0205's reason for declining the default flip: four callers, not five, and no
+behaviour change.
+
+**Still open and declared:** six functions with the opt-in default, of which
+`listFinancialAccounts` has nine flagless callers and is the sharpest, since a
+financial account is a bank account.
 
 ### §7, §15, §5 — offered, and not offered (Phase 205)
 

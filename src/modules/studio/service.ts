@@ -300,25 +300,133 @@ export async function createServiceItem(ctx: ActorContext, input: ServiceItemInp
   return item
 }
 
-export async function listServiceItems(ctx: ActorContext, opts: { activeOnly?: boolean } = {}) {
+/**
+ * The service catalogue, live items only unless asked otherwise (Phase 206).
+ *
+ * The option was `activeOnly`, **opt-in**, which is the unsafe default: a
+ * caller who forgot it offered retired items. Measured before changing, which
+ * is the only reason this is a tidy-up rather than a fix — **all three screens
+ * that offer items already passed the flag**, and the Studio did not because
+ * it is the library. So flipping the sense changes no behaviour and removes
+ * the trap, and the three call sites that passed `activeOnly: true` now pass
+ * nothing.
+ *
+ * This is `listClauses`' and `listTeamMembers`' shape, so the three list
+ * functions in this module agree. ADR 0205 declined exactly this change on
+ * the grounds that it was *"a behaviour change in five screens"* — four
+ * callers, and no behaviour change, both of which measuring settled.
+ *
+ * It is **not** the last one, which is the other thing that measurement
+ * found. Six more list functions still take `activeOnly` opt-in —
+ * `listAccounts`, `listFinancialAccounts`, `listEmployees`, `listTaxCodes`,
+ * `listCostCodes` and `subcontractorSummaries` — and `listAccounts` had four
+ * callers feeding a picker with no flag at all. Those four are fixed in Phase
+ * 206; the remaining five functions are nominated, because telling an offer
+ * from a list needs each caller read.
+ */
+export async function listServiceItems(
+  ctx: ActorContext,
+  opts: { includeRetired?: boolean } = {},
+) {
   requirePermission(ctx, 'crm:view')
 
   return db
     .select()
     .from(serviceItems)
     .where(
-      scoped(ctx, serviceItems, opts.activeOnly ? eq(serviceItems.isActive, true) : undefined),
+      scoped(ctx, serviceItems, opts.includeRetired ? undefined : eq(serviceItems.isActive, true)),
     )
     .orderBy(asc(serviceItems.name))
 }
 
-export async function deactivateServiceItem(ctx: ActorContext, itemId: string) {
+/**
+ * Takes a catalogue item out of the pickers, or puts it back (Phase 206).
+ *
+ * ## A retirement with no way back
+ *
+ * `deactivateServiceItem` has existed since Phase 4 and set `isActive` to
+ * **false only**. Nothing anywhere set it true, so an item retired by mistake
+ * — or a service a business started offering again — was gone from every
+ * picker for ever. That is a delete wearing a flag, and it is the mirror of
+ * the six switches Phases 202–205 closed: not a column with no writer, but a
+ * column with a writer in one direction.
+ *
+ * It also wrote no audit event, which made it the only one of the Studio's
+ * four libraries whose retirement left no trace: brand kits, clauses and team
+ * members all record both directions.
+ *
+ * ## What measuring the nominated gap found instead
+ *
+ * ADR 0205 nominated this area for a different reason — `listServiceItems`
+ * takes `activeOnly` **opt-in**, which is the unsafe default, and the question
+ * was *which screens are offering retired items today*. Measured, the answer
+ * is **none**: all three screens that offer items pass the flag, and the
+ * Studio deliberately does not because it is the library. The latent trap is
+ * real and the live defect was not there.
+ *
+ * That ADR also gave a reason for declining to change the default — *"a
+ * behaviour change in five screens dressed as a tidy-up"* — and both halves
+ * were wrong. There are four callers, not five, and since every offer-site
+ * already passes the flag, flipping the default to `includeRetired` changes
+ * no behaviour at all. Phase 206 does it, which is what the measurement
+ * licensed.
+ *
+ * ## Retiring an item that still holds stock is allowed
+ *
+ * The other half of the nomination feared that retiring an inventoried item
+ * with a quantity on it would hide a balance the subledger carries and the
+ * Inventory account agrees with. It does not: `stockOnHand` filters on
+ * `isInventoried` and **not** on `isActive`, so a retired item keeps its lots,
+ * its value and its line in the reconciliation. Stopping it being sold is a
+ * different act from writing off what is left, which is Phase 203's
+ * distinction and it already holds here.
+ */
+export async function setServiceItemActive(
+  ctx: ActorContext,
+  input: { itemId: string; isActive: boolean },
+) {
   requirePermission(ctx, 'company:manage')
 
-  await db
-    .update(serviceItems)
-    .set({ isActive: false })
-    .where(and(eq(serviceItems.id, itemId), eq(serviceItems.companyId, ctx.companyId)))
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({ id: serviceItems.id, name: serviceItems.name, isActive: serviceItems.isActive })
+      .from(serviceItems)
+      .where(scoped(ctx, serviceItems, eq(serviceItems.id, input.itemId)))
+      .limit(1)
+
+    if (!before) throw new Refusal('That item is not in this catalogue.')
+
+    const [row] = await tx
+      .update(serviceItems)
+      .set({ isActive: input.isActive })
+      .where(scoped(ctx, serviceItems, eq(serviceItems.id, input.itemId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: input.isActive ? 'service_item.restore' : 'service_item.retire',
+        entityType: 'service_item',
+        entityId: row.id,
+        before: { isActive: before.isActive },
+        after: { isActive: row.isActive, name: row.name },
+      },
+      tx,
+    )
+
+    return row
+  })
+}
+
+/**
+ * Retires an item. Kept as the name four phases of callers already use.
+ *
+ * A thin call through to `setServiceItemActive` rather than a second
+ * implementation — two answers to one question is the defect, and the one
+ * thing this signature cannot express is putting an item back.
+ */
+export async function deactivateServiceItem(ctx: ActorContext, itemId: string) {
+  await setServiceItemActive(ctx, { itemId, isActive: false })
 }
 
 // --- Clause library --------------------------------------------------------

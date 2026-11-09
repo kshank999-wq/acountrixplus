@@ -178,8 +178,8 @@ describe('every write that can be aimed at a row', () => {
     // changed. One `scoped-write`.
     expect(WRITES.length).toBe(299)
     expect(by).toEqual({
-      'explicit-company': 199,
-      'scoped-write': 60,
+      'explicit-company': 198,
+      'scoped-write': 61,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       // Phase 204's own three writes land on two of these, and one existing
@@ -187,6 +187,13 @@ describe('every write that can be aimed at a row', () => {
       // `removePracticeMember`'s delete now filters on the engagements it
       // selected rather than on a bare list of ids. The distribution is
       // measured, not predicted — guessing it is what made this assertion red.
+      //
+      // The total did not move in Phase 206 and the split did:
+      // `deactivateServiceItem` had been writing through a hand-rolled
+      // `and(eq(id), eq(companyId))` since Phase 4, and going through
+      // `setServiceItemActive` put it on `scoped()` — so one write crossed
+      // from `explicit-company` to `scoped-write`. Both are guarded; what
+      // changed is which word says so.
       'system-actor': 4,
       'actor-scoped': 4,
       'owner-helper': 3,

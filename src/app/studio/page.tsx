@@ -34,7 +34,10 @@ export default async function StudioPage() {
     getProfile(actor),
     listBrandKits(actor),
     listAssets(actor),
-    listServiceItems(actor),
+    // Retired items included, for the same reason as the clauses and the
+    // people below: this is the one screen that can put one back, and until
+    // Phase 206 nothing could (Phase 206).
+    listServiceItems(actor, { includeRetired: true }),
     // Retired clauses included, for the same reason as the people below: this
     // is the one screen that can restore one, and the two designers that
     // *offer* clauses get the default, which is live ones only (Phase 205).
@@ -99,6 +102,11 @@ export default async function StudioPage() {
           unit: item.unit,
           unitPriceCents: item.unitPriceCents,
           description: item.description,
+          // Phase 206. Selected by `listServiceItems` from the start and
+          // dropped here — the fourth time in three phases that a column the
+          // service returns was lost on the way to the one screen that needs
+          // it, after the access board, the clause tab and the card list.
+          isActive: item.isActive,
         }))}
         clauses={clauses.map((clause) => ({
           id: clause.id,

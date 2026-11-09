@@ -56,7 +56,7 @@ export default async function TakingsPage() {
   const [days, tips, accounts] = await Promise.all([
     listDays(actor),
     can(actor, 'reports:view') ? tipsPosition(actor) : null,
-    listAccounts(actor),
+    listAccounts(actor, { activeOnly: true }),
   ])
 
   return (

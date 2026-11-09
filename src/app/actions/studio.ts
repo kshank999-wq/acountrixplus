@@ -10,6 +10,7 @@ import {
   createServiceItem,
   reviseClause,
   setClauseActive,
+  setServiceItemActive,
   saveProfile,
   updateBrandKit,
 } from '@/modules/studio/service'
@@ -211,6 +212,31 @@ export async function reviseClauseAction(
  * changing a word. The message says what did *not* happen, because that is
  * the part somebody needs to trust before pressing it.
  */
+/**
+ * Takes a catalogue item out of the pickers, or puts it back (Phase 206).
+ *
+ * `deactivateServiceItemAction` had no counterpart: the service set the flag
+ * false only, so this is the first time a retired item can be brought back.
+ * The message names what retiring does *not* do, because an item with stock
+ * on it keeps its lots, its value and its line in the reconciliation —
+ * stopping something being sold is a different act from writing off what is
+ * left of it.
+ */
+export async function setServiceItemActiveAction(
+  itemId: string,
+  isActive: boolean,
+): Promise<ActionResult> {
+  return run('/studio', async () => {
+    const actor = await requireActor()
+    const item = await setServiceItemActive(actor, { itemId, isActive })
+
+    return isActive
+      ? `${item.name} is back in the catalogue and will be offered again.`
+      : `${item.name} is retired. It will not be offered on a new line, and any stock it still ` +
+          'holds stays on the books exactly as it was.'
+  })
+}
+
 export async function setClauseActiveAction(
   clauseId: string,
   isActive: boolean,

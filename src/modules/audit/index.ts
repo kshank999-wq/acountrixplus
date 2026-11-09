@@ -400,6 +400,23 @@ export type AuditAction =
   | 'asset.upload'
   | 'asset.delete'
   | 'service_item.create'
+  /**
+   * A catalogue item taken out of the pickers, or put back (Phase 206).
+   *
+   * `deactivateServiceItem` existed from Phase 4 and wrote **nothing here**,
+   * which made it the only one of the Studio's four libraries whose retirement
+   * left no trace — brand kits, clauses and team members all have a pair of
+   * actions. And it only ever set the flag *false*: there was no restore, so a
+   * catalogue item retired by mistake was a delete wearing a flag.
+   *
+   * Separate from `item.update`, which `saveItemAction` writes when somebody
+   * changes an item's price or its posting accounts. Taking something out of
+   * the pickers is a different question from changing what it says, and the
+   * question asked later — *why is this not on the invoice line picker* — wants
+   * the first.
+   */
+  | 'service_item.retire'
+  | 'service_item.restore'
   | 'clause.create'
   | 'clause.revise'
   /**

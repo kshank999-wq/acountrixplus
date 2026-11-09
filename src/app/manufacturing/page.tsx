@@ -62,7 +62,7 @@ export default async function ManufacturingPage() {
     can(actor, 'reports:view') ? wipPosition(actor, { asOf: today }) : null,
     can(actor, 'reports:view') ? stageValues(actor, { asOf: today }) : [],
     can(actor, 'reports:view') ? finishedGoodsOnHand(actor) : [],
-    listServiceItems(actor, { activeOnly: true }),
+    listServiceItems(actor),
   ])
 
   return (

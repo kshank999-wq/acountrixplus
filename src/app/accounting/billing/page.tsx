@@ -49,7 +49,7 @@ export default async function BillingPage({
     listSchedules(actor),
     awaitingRaise(actor),
     canPickCustomers ? listCustomers(actor) : Promise.resolve([]),
-    listAccounts(actor),
+    listAccounts(actor, { activeOnly: true }),
     currencyChoices(actor),
   ])
 

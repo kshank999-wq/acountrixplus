@@ -215,6 +215,16 @@ export async function accountsByIds(ctx: ActorContext, ids: string[]) {
  * walk the ledger keep reporting it, which is what a business that stopped
  * using an account actually wants.
  *
+ * **That sentence was false for four of them from Phase 118 to Phase 206**,
+ * and the reason is in it: the flag is **opt-in**, so "takes it out of every
+ * picker" was a claim about what callers remember rather than about what this
+ * function does. The till pay-out, the takings categories, the budget lines
+ * and the recurring-billing revenue account each called `listAccounts(actor)`
+ * and fed a `<select>` with the whole chart. Fixed at those four call sites,
+ * and the sentence is kept with this correction attached rather than quietly
+ * reworded — a claim that was wrong for eighty-eight phases is worth more as
+ * a record than as tidy prose (Phase 185).
+ *
  * A system account cannot be retired. The application looks those up by number
  * and posts into them without asking, so retiring one would hide an account
  * that is still being used from every screen that offers a choice.

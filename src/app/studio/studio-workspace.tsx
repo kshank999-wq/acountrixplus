@@ -15,6 +15,7 @@ import {
   retireTeamMemberAction,
   reviseClauseAction,
   setClauseActiveAction,
+  setServiceItemActiveAction,
   saveBrandKitAction,
   saveProfileAction,
   updateTeamMemberAction,
@@ -87,6 +88,7 @@ export function StudioWorkspace({
     unit: string
     unitPriceCents: number
     description: string | null
+    isActive: boolean
   }>
   /** The library, retired clauses included — the tab shows and restores them. */
   clauses: Array<{
@@ -558,6 +560,7 @@ function CatalogTab({
     unit: string
     unitPriceCents: number
     description: string | null
+    isActive: boolean
   }>
   revenueAccounts: Array<{ id: string; number: string; name: string }>
   canManage: boolean
@@ -658,9 +661,36 @@ function CatalogTab({
                   <p className="truncate text-xs text-faint">{item.description}</p>
                 )}
               </div>
-              <span className="tnum shrink-0 text-sm">
-                {formatCents(item.unitPriceCents)} / {item.unit}
-              </span>
+              <div className="flex shrink-0 items-baseline gap-2">
+                {!item.isActive && (
+                  <span className="chip bg-raised text-muted">retired</span>
+                )}
+                <span className="tnum text-sm">
+                  {formatCents(item.unitPriceCents)} / {item.unit}
+                </span>
+                {/*
+                  Phase 206. `deactivateServiceItem` existed from Phase 4 and
+                  set the flag false only — nothing anywhere set it true, so an
+                  item retired by mistake was gone from every picker for ever.
+                  A retirement with no way back is a delete wearing a flag, and
+                  this is the one screen that can undo it.
+                */}
+                {canManage && (
+                  <button
+                    onClick={() =>
+                      startTransition(async () => {
+                        const result = await setServiceItemActiveAction(item.id, !item.isActive)
+                        onResult(result)
+                        if (result.ok) router.refresh()
+                      })
+                    }
+                    disabled={pending}
+                    className="btn px-2 py-1 text-xs"
+                  >
+                    {item.isActive ? 'Retire' : 'Put back'}
+                  </button>
+                )}
+              </div>
             </li>
           ))}
         </ul>

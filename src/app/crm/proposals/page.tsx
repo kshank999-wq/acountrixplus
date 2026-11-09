@@ -43,7 +43,7 @@ export default async function ProposalsPage() {
       a deactivated service should not be quotable, and the existing lines that
       point at one keep their reference.
     */
-    listServiceItems(actor, { activeOnly: true }),
+    listServiceItems(actor),
     /*
       Questions a client asked through their link and nobody has answered
       (Phase 174). On this screen rather than the dashboard because this is

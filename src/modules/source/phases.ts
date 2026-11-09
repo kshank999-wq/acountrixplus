@@ -86,7 +86,7 @@ export const PHASE_DELIVERABLES: readonly PhaseDeliverable[] = [
     because:
       'Sessions, devices and MFA on one side; `ActorContext`, `scoped()` and the isolation ' +
       'census on the other. The strongest-measured deliverable in the whole table: 299 writes ' +
-      'and 966 reads, every one standing on a named guard (Phases 149–150, 196–198).',
+      'and 967 reads, every one standing on a named guard (Phases 149–150, 196–198).',
   },
   {
     phase: 0,

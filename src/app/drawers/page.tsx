@@ -64,7 +64,7 @@ export default async function DrawersPage() {
     listDrawers(actor),
     shiftHistory(actor, { limit: 30 }),
     can(actor, 'reports:view') ? drawerPosition(actor) : null,
-    listAccounts(actor),
+    listAccounts(actor, { activeOnly: true }),
   ])
 
   // What each open till expects to hold, so somebody counting one can see the
