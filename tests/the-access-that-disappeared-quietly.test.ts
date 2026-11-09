@@ -454,30 +454,29 @@ describe('what the register says now', () => {
     expect(() => columnWriterFor('practices', 'isActive')).toThrow(RegistryError)
   })
 
-  it('leaves exactly the two that need a filter as well as a writer', () => {
+  it('leaves none, now that the projection-only pair is closed too', () => {
     /**
      * Of the six switches Phase 202 found, three were **enforced** — a refusal
      * already written, so the whole gap was the writer — and two were
      * **projections only**, selected to be displayed with nothing filtering on
-     * either. Phases 203 and 204 closed the three enforced ones in that order,
-     * cheapest refusal last, and the two that remain are the ones where a
-     * writer alone would hand somebody a control with no effect.
+     * either, where a writer alone would hand somebody a control with no
+     * effect. Phases 203 and 204 closed the enforced ones, and **Phase 205
+     * closed the pair this assertion used to name**.
      *
-     * That ordering is the finding, not an accident of what was convenient:
-     * reading each reader is what told the two kinds apart, and an earlier
-     * draft of the register had one of them wrong.
+     * That ordering is the finding rather than an accident of what was
+     * convenient: reading each reader is what told the two kinds apart, and an
+     * earlier draft of the register had one of them wrong.
+     *
+     * The assertion is corrected rather than deleted, and it is worth saying
+     * why it had to be corrected **twice**. Phase 202's test file holds the
+     * same claim about the same register, and Phase 205 moved that one and
+     * missed this one — so the full run went red on a sentence two phases
+     * behind the code. One register, asserted in two places, is one more place
+     * than anybody remembers to look.
      */
     const switches = COLUMN_WRITERS.filter((entry) => entry.columns.includes('isActive'))
 
-    expect(switches.map((entry) => entry.table).sort()).toEqual([
-      'bills_of_materials',
-      'clauses',
-    ])
-
-    for (const entry of switches) {
-      expect(entry.verdict, entry.table).toBe('unwritable')
-      expect(entry.because, entry.table).toContain('projection')
-    }
+    expect(switches).toEqual([])
   })
 })
 
