@@ -32,7 +32,16 @@ export default async function AccountsPage() {
   }
 
   const [accounts, tieOut, atFace] = await Promise.all([
-    listFinancialAccounts(actor),
+    /*
+      Retired accounts included (Phase 207), and this one is **required**
+      rather than tidy: the board splits `open` from `closed` and carries the
+      Reopen control, so defaulting it to live accounts would make a closed
+      account vanish from the one screen that can bring it back — Phase 206's
+      defect, reintroduced by Phase 207's own default flip. Which is the
+      argument for measuring the callers before changing a default rather than
+      after.
+    */
+    listFinancialAccounts(actor, { includeRetired: true }),
     can(actor, 'accounting:view') ? cashTieOut(actor) : Promise.resolve([]),
     // Only somebody who may post a journal entry can restate one, so nobody
     // else is shown a list they cannot act on (Phase 130).

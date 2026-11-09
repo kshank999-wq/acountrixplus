@@ -38,6 +38,13 @@ export default async function PaymentsPage() {
   const [rows, credits, accounts] = await Promise.all([
     listPayments(actor, { limit: 100, today }),
     heldCredits(actor),
+    /*
+      Live accounts only (Phase 207). This fed the refund picker with every
+      account the company has ever had, so a refund could be paid out of a
+      bank account the business had closed — the one live defect of the four
+      callers, and the sharpest of the two phases that have now looked at this
+      default, because `listAccounts` was the chart and this is the cash.
+    */
     listFinancialAccounts(actor),
   ])
 

@@ -2,7 +2,7 @@ import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled, companyTerminology } from '@/modules/industry/modules'
-import { listFinancialAccounts } from '@/modules/banking/sync'
+import { pickableFinancialAccounts } from '@/modules/banking/sync'
 import { listCustomers } from '@/modules/receivables/service'
 import { fundBalances, netAssets } from '@/modules/funds/reporting'
 import { listContributions, outstandingPledges } from '@/modules/funds/contributions'
@@ -74,7 +74,7 @@ export default async function FundsPage({
       outstandingPledges(actor),
       listContributions(actor, { limit: 40 }),
       listCustomers(actor),
-      listFinancialAccounts(actor),
+      pickableFinancialAccounts(actor),
       companyTerminology(actor.companyId),
     ])
 

@@ -460,6 +460,34 @@ can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
 
+### §4, §13 — a name is not a function (Phase 207)
+
+ADR 0206 nominated *"`listFinancialAccounts`' nine flagless callers"*, since a
+financial account is a **bank account** and offering a retired one is offering
+to move money through something the business has closed.
+
+**There are two exported functions with that name.** `banking/sync.ts` takes
+no option and always filters on `isActive` — five screens import it and were
+correct all along. `banking/accounts.ts` took `activeOnly` opt-in with a
+different return shape — four callers. The count was wrong because it was
+taken by name, which is Phases 196–198's lesson about scans applied to a grep:
+a name is a claim about what code does, and the same claim was attached to two
+bodies. The sync one is `pickableFinancialAccounts` now.
+
+**One live defect** among the four real callers: the refund picker on the
+payments board was built from every account the company had ever had.
+
+Flipping the default to live-only was safe **only because the callers were
+read first**. Two would have broken: `cashTieOut`, which ties each account's
+feed to the ledger and must keep seeing a closed account that still carries a
+balance, and `settings/accounts`, which carries the Reopen control and would
+have lost closed accounts from the one screen that can restore them — Phase
+206's defect reintroduced by Phase 207's own flip. A third break was caught by
+an existing test whose two calls a blanket rewrite made identical.
+
+**Still open:** four functions with the opt-in default, and `listAccounts`
+keeping its deliberately because two of its callers need the whole chart.
+
 ### §15, §13 — a retirement with no way back (Phase 206)
 
 Two findings, neither of them the one nominated.

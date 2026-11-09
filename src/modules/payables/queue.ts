@@ -228,7 +228,7 @@ export type AccountBalance = {
 export async function accountsWithBalances(ctx: ActorContext): Promise<AccountBalance[]> {
   requirePermission(ctx, 'accounting:view')
 
-  const accounts = await listFinancialAccounts(ctx, { activeOnly: true })
+  const accounts = await listFinancialAccounts(ctx)
 
   return Promise.all(
     accounts.map(async (account) => {

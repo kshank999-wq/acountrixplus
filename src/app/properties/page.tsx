@@ -2,7 +2,7 @@ import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell } from '@/components/app-shell'
 import { moduleEnabled, companyTerminology } from '@/modules/industry/modules'
-import { listFinancialAccounts } from '@/modules/banking/sync'
+import { pickableFinancialAccounts } from '@/modules/banking/sync'
 import { functionalCurrency } from '@/modules/fx/service'
 import { listCustomers } from '@/modules/receivables/service'
 import { listProperties } from '@/modules/properties/service'
@@ -83,7 +83,7 @@ export default async function PropertiesPage({
       listRentCharges(actor, { limit: 40 }),
       can(actor, 'reports:financial') ? depositsHeld(actor) : null,
       listCustomers(actor),
-      listFinancialAccounts(actor),
+      pickableFinancialAccounts(actor),
       companyTerminology(actor.companyId),
       functionalCurrency(actor.companyId),
     ])

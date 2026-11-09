@@ -6,7 +6,7 @@ import {
   reconcilableTransactions,
   summarize,
 } from '@/modules/reconciliation/service'
-import { listFinancialAccounts } from '@/modules/banking/sync'
+import { pickableFinancialAccounts } from '@/modules/banking/sync'
 import { ACCOUNTING_NAV } from '../../nav'
 import { ReconcileWorkspace } from './workspace'
 
@@ -41,7 +41,7 @@ export default async function ReconcileSessionPage({
 
   const [transactions, accounts] = await Promise.all([
     reconcilableTransactions(actor, id),
-    listFinancialAccounts(actor),
+    pickableFinancialAccounts(actor),
   ])
 
   const account = accounts.find((row) => row.id === summary.financialAccountId)

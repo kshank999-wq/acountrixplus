@@ -78,7 +78,7 @@ export default async function InvoicesPage() {
     listServiceItems(actor),
     partiesWithOpenDocuments(actor, 'customer'),
     partiesWithOpenDocuments(actor, 'vendor'),
-    listFinancialAccounts(actor, { activeOnly: true }),
+    listFinancialAccounts(actor),
     suspectedDuplicateBills(actor, { limit: 25 }),
     // What the composer may offer, and which of them is home (Phase 64).
     currencyChoices(actor),

@@ -66,9 +66,44 @@ export type FinancialAccountSummary = {
   transactionCount: number
 }
 
+/**
+ * Bank and card accounts, live ones only unless asked otherwise (Phase 207).
+ *
+ * ## Two functions, one name
+ *
+ * There is a second exported `listFinancialAccounts`, in `banking/sync.ts`,
+ * which takes no option and **always** filters on `isActive` — its docstring
+ * says it is *"for inbox filters and account pickers"*. Five screens import
+ * that one and four import this one, and a call site tells you which only by
+ * its import.
+ *
+ * That is two answers to one question in the purest form this codebase has
+ * found it, and it is why ADR 0206 nominated *"nine flagless callers"* for
+ * this phase. There are not nine: five of those nine were calling the
+ * always-filtering function and were correct. **The count was wrong because
+ * it was measured by name, and a name is not a function** — which is Phases
+ * 196–198's own lesson about scans, turned on a grep.
+ *
+ * The sync one is `pickableFinancialAccounts` now, so what it does is visible
+ * at every call site, and this name means one thing.
+ *
+ * ## Why the default flipped, and the one caller that must not
+ *
+ * `activeOnly` opt-in is the unsafe default — a caller who forgets it offers a
+ * retired account — and Phase 206 flipped the same shape on
+ * `listServiceItems` after measuring that no behaviour changed. Here one
+ * behaviour **would** have: `cashTieOut` ties every account's feed balance to
+ * the ledger, and a retired account with a balance still has to tie out, so
+ * excluding them would hide a disagreement rather than tidy a list. It passes
+ * `includeRetired: true`, as does the settings screen that manages them.
+ *
+ * Measured before changing, which is the only reason this is safe to do: the
+ * four callers are `cashTieOut`, the accounts settings screen, the payment
+ * settings screen and the payments board, and the last two want live accounts.
+ */
 export async function listFinancialAccounts(
   ctx: ActorContext,
-  opts: { activeOnly?: boolean } = {},
+  opts: { includeRetired?: boolean } = {},
 ): Promise<FinancialAccountSummary[]> {
   requirePermission(ctx, 'bookkeeping:view')
 
@@ -96,7 +131,7 @@ export async function listFinancialAccounts(
       scoped(
         ctx,
         financialAccounts,
-        opts.activeOnly ? eq(financialAccounts.isActive, true) : undefined,
+        opts.includeRetired ? undefined : eq(financialAccounts.isActive, true),
       ),
     )
     .orderBy(chartAccounts.number)
@@ -578,7 +613,16 @@ export type CashTieOut = {
 export async function cashTieOut(ctx: ActorContext): Promise<CashTieOut[]> {
   requirePermission(ctx, 'accounting:view')
 
-  const accounts = await listFinancialAccounts(ctx)
+  /*
+    Retired accounts included, deliberately (Phase 207).
+
+    This is the one caller of the four that must see them: it ties each
+    account's feed balance to the ledger, and a retired account that still
+    carries a balance still has to tie out. Excluding them would hide a
+    disagreement rather than tidy a list — so when the default flipped to
+    "live only", this call became the one that asks for everything.
+  */
+  const accounts = await listFinancialAccounts(ctx, { includeRetired: true })
   if (accounts.length === 0) return []
 
   const results: CashTieOut[] = []

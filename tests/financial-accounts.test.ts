@@ -229,12 +229,17 @@ describe('renaming and closing', () => {
 
     await setFinancialAccountActive(fixture.ctx, account.id, false)
 
-    const active = await listFinancialAccounts(fixture.ctx, { activeOnly: true })
+    // Live accounts are the default since Phase 207, where the option flipped
+    // from `activeOnly` opt-in to `includeRetired` opt-out.
+    const active = await listFinancialAccounts(fixture.ctx)
     expect(active.map((row) => row.id)).not.toContain(account.id)
 
     // Still there, and still findable — a closed account's history is exactly
-    // what somebody looks at a year later.
-    const all = await listFinancialAccounts(fixture.ctx)
+    // what somebody looks at a year later. Asking for it is explicit now,
+    // which is the half of the flip that has to be said out loud: the first
+    // pass of Phase 207 rewrote both of these calls the same way and made
+    // this assertion test the line above it.
+    const all = await listFinancialAccounts(fixture.ctx, { includeRetired: true })
     expect(all.map((row) => row.id)).toContain(account.id)
   })
 
@@ -279,7 +284,7 @@ describe('renaming and closing', () => {
     await setFinancialAccountActive(fixture.ctx, account.id, false)
     await setFinancialAccountActive(fixture.ctx, account.id, true)
 
-    const active = await listFinancialAccounts(fixture.ctx, { activeOnly: true })
+    const active = await listFinancialAccounts(fixture.ctx)
     expect(active.map((row) => row.id)).toContain(account.id)
   })
 })

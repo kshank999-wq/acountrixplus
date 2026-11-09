@@ -438,8 +438,28 @@ export async function importTransactions(
   }
 }
 
-/** Bank/card accounts for the company, for inbox filters and account pickers. */
-export async function listFinancialAccounts(ctx: ActorContext) {
+/**
+ * Bank and card accounts a person may still choose (Phase 207).
+ *
+ * Called `listFinancialAccounts` until Phase 207, which is the same name as
+ * the function in `banking/accounts.ts` — **two exported functions, one name,
+ * different signatures and different semantics.** This one takes no option and
+ * always filters on `isActive`; that one took `activeOnly` opt-in. Five screens
+ * import this and four import that, and a call site told you which only by its
+ * import line.
+ *
+ * ADR 0206 nominated *"nine flagless callers"* of the opt-in one for this
+ * phase. There were not nine: five of the nine were calling this function and
+ * were correct all along. **The count was wrong because it was measured by
+ * name, and a name is not a function** — Phases 196–198 recorded that lesson
+ * about scans recognising a query by a name, and it turns out to apply to a
+ * grep over function names just as well.
+ *
+ * So the name says what it does now. `pickable` is the whole claim: every
+ * caller is a picker or an inbox filter, and what they must not offer is an
+ * account the business has closed.
+ */
+export async function pickableFinancialAccounts(ctx: ActorContext) {
   requirePermission(ctx, 'bookkeeping:view')
 
   return db

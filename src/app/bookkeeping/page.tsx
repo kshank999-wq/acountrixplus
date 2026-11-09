@@ -2,7 +2,7 @@ import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { inboxCounts, listInbox, UNREVIEWED_STATES, type ReviewState } from '@/modules/bookkeeping/transactions'
 import { categorizableAccounts } from '@/modules/coa/service'
-import { listFinancialAccounts } from '@/modules/banking/sync'
+import { pickableFinancialAccounts } from '@/modules/banking/sync'
 import { heldRevisions } from '@/modules/banking/revision-service'
 import { aiAvailable } from '@/modules/ai/settings'
 import { logoutAction } from '@/app/actions/auth'
@@ -61,7 +61,7 @@ export default async function BookkeepingPage({ searchParams }: { searchParams: 
     }),
     inboxCounts(actor),
     categorizableAccounts(actor),
-    listFinancialAccounts(actor),
+    pickableFinancialAccounts(actor),
     /*
       The changes a bank feed could not apply (Phase 177). Fetched here rather
       than inside the panel so an empty list costs no round trip — and so the

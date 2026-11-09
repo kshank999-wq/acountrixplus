@@ -64,8 +64,11 @@ export default async function PaymentsPage() {
         feeDescription={describeSchedule(settings.fee)}
         health={health}
         position={position}
+        // The `.filter((account) => account.isActive)` that used to be here is
+        // gone (Phase 207): the query filters now, and a screen filtering what
+        // the query already filtered is two answers to one question waiting
+        // to disagree.
         accounts={accounts
-          .filter((account) => account.isActive)
           .map((account) => ({
             id: account.id,
             name: account.name,

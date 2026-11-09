@@ -3,7 +3,7 @@ import { requireActor, requireSession } from '@/lib/current-user'
 import { can } from '@/modules/tenancy/context'
 import { AppShell, SubNav } from '@/components/app-shell'
 import { formatCents } from '@/lib/money'
-import { listFinancialAccounts } from '@/modules/banking/sync'
+import { pickableFinancialAccounts } from '@/modules/banking/sync'
 import { reconciliationHistory } from '@/modules/reconciliation/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { StartReconciliation } from './start-form'
@@ -26,7 +26,7 @@ export default async function ReconcilePage() {
   }
 
   const [accounts, history] = await Promise.all([
-    listFinancialAccounts(actor),
+    pickableFinancialAccounts(actor),
     reconciliationHistory(actor),
   ])
 
