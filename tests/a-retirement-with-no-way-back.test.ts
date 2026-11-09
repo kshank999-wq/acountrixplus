@@ -11,7 +11,7 @@ import {
 } from '@/modules/studio/service'
 import { receiveStock, stockOnHand, reconcileInventory } from '@/modules/inventory/service'
 import { setModuleEnabled } from '@/modules/industry/modules'
-import { createCompanyFixture, type Fixture } from './helpers'
+import { OPT_IN_CANDIDATES, createCompanyFixture, type Fixture } from './helpers'
 
 /**
  * A retirement with no way back (Phase 206, spec §15).
@@ -322,25 +322,27 @@ describe('the four pickers that were offering retired accounts', () => {
 
   it('is one of seven functions with the same unsafe default', () => {
     /**
-     * Declared with the count rather than claimed closed, because five of the
-     * seven still have it and each one's flagless callers need reading to tell
-     * an offer from a list. `listServiceItems` is flipped and the chart's four
-     * pickers are fixed; the rest is nominated.
+     * Declared with the count rather than claimed closed, because each
+     * remaining one's flagless callers need reading to tell an offer from a
+     * list. `listServiceItems` is flipped and the chart's four pickers are
+     * fixed; the rest is nominated.
      *
      * Measured from the source so the number cannot drift from the sentence —
      * Phase 179's rule applied to a claim about the shape of the code rather
      * than to a figure in prose.
+     *
+     * **Six when this phase measured it, five since Phase 207** flipped
+     * `banking/accounts.ts`. The file list is deliberately the same one
+     * `tests/a-name-is-not-a-function.test.ts` checks, so the two phases'
+     * assertions count the same class and cannot drift apart independently —
+     * which is what Phases 204 and 205 did with the switch register, and what
+     * sent the full run red twice.
      */
-    const withOptIn = [
-      'src/modules/coa/service.ts',
-      'src/modules/banking/accounts.ts',
-      'src/modules/payroll/service.ts',
-      'src/modules/payroll/sales-tax.ts',
-      'src/modules/jobs/cost-codes.ts',
-      'src/modules/jobs/compliance.ts',
-    ].filter((file) => /activeOnly\?: boolean/.test(readFileSync(file, 'utf8')))
+    const withOptIn = OPT_IN_CANDIDATES.filter((file) =>
+      /activeOnly\?: boolean/.test(readFileSync(file, 'utf8')),
+    )
 
-    expect(withOptIn).toHaveLength(6)
+    expect(withOptIn).toHaveLength(5)
 
     // And `listServiceItems` is no longer among them, which is the one this
     // phase was nominated to fix.

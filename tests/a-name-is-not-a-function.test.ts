@@ -7,7 +7,7 @@ import {
   setFinancialAccountActive,
 } from '@/modules/banking/accounts'
 import { pickableFinancialAccounts } from '@/modules/banking/sync'
-import { createCompanyFixture, type Fixture } from './helpers'
+import { OPT_IN_CANDIDATES, createCompanyFixture, type Fixture } from './helpers'
 
 /**
  * A name is not a function (Phase 207, spec §4, §13).
@@ -205,25 +205,25 @@ describe('the refund that could leave a closed account', () => {
 })
 
 describe('what is left of the class', () => {
-  it('is four functions, measured rather than counted by name', () => {
+  it('is five functions, measured rather than counted by name', () => {
     /**
      * Phase 206 declared six list functions with the `activeOnly` opt-in
-     * default and Phase 207 closed one of them, so four remain:
+     * default and Phase 207 closed one, so five keep it: `listAccounts`,
      * `listEmployees`, `listTaxCodes`, `listCostCodes` and
-     * `subcontractorSummaries`.
+     * `subcontractorSummaries`. Four of those are candidates to flip;
+     * `listAccounts` is deliberately not, asserted separately below.
      *
-     * Measured from the source, and the measurement is the point of the
-     * phase: the previous count of this class was taken by grepping a name,
-     * and one of the names belonged to two functions.
+     * Measured from the source over the **same list** Phase 206's test uses,
+     * read from `helpers` rather than retyped. Two phases counting one class in two
+     * places is what sent the full run red twice in this run — once on the
+     * switch register and once on this very count — so the list has one home
+     * and both assertions read it.
      */
-    const remaining = [
-      'src/modules/payroll/service.ts',
-      'src/modules/payroll/sales-tax.ts',
-      'src/modules/jobs/cost-codes.ts',
-      'src/modules/jobs/compliance.ts',
-    ].filter((file) => /activeOnly\?: boolean/.test(readFileSync(file, 'utf8')))
+    const remaining = OPT_IN_CANDIDATES.filter((file) =>
+      /activeOnly\?: boolean/.test(readFileSync(file, 'utf8')),
+    )
 
-    expect(remaining).toHaveLength(4)
+    expect(remaining).toHaveLength(5)
 
     // The two closed in Phases 206 and 207 are not among them.
     for (const file of ['src/modules/studio/service.ts', 'src/modules/banking/accounts.ts']) {

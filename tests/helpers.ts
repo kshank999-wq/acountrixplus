@@ -14,6 +14,30 @@ function nextEmail(prefix: string) {
   return `${prefix}-${uniqueCounter}@example.test`
 }
 
+/**
+ * The modules whose list function takes `activeOnly` **opt-in** (Phase 207).
+ *
+ * One list with one home, read by both `a-retirement-with-no-way-back` and
+ * `a-name-is-not-a-function`. Two phases counting one class in two files is
+ * what sent the full run red twice in this run of phases — once on the switch
+ * register in Phases 204/205 and once on this very count in 206/207 — and the
+ * first attempt at fixing it imported one test file from the other, which
+ * re-registered twelve suites and ran them twice.
+ *
+ * Here because it is test vocabulary rather than application vocabulary: the
+ * application does not care which of its list functions has the unsafe
+ * default, and a register in `src/modules/source` would be a throw site and a
+ * count to maintain for a sentence only tests read.
+ */
+export const OPT_IN_CANDIDATES = [
+  'src/modules/coa/service.ts',
+  'src/modules/banking/accounts.ts',
+  'src/modules/payroll/service.ts',
+  'src/modules/payroll/sales-tax.ts',
+  'src/modules/jobs/cost-codes.ts',
+  'src/modules/jobs/compliance.ts',
+] as const
+
 export type Fixture = {
   ctx: ActorContext
   companyId: string
