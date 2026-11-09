@@ -35,7 +35,10 @@ export default async function StudioPage() {
     listBrandKits(actor),
     listAssets(actor),
     listServiceItems(actor),
-    listClauses(actor),
+    // Retired clauses included, for the same reason as the people below: this
+    // is the one screen that can restore one, and the two designers that
+    // *offer* clauses get the default, which is live ones only (Phase 205).
+    listClauses(actor, { includeRetired: true }),
     // Retired people included: this is the one screen that can restore them,
     // and a directory that hid them would make retiring look like a delete.
     listTeamMembers(actor, { includeRetired: true }),
@@ -104,6 +107,11 @@ export default async function StudioPage() {
           body: clause.body ?? '',
           versionNumber: clause.versionNumber ?? 1,
           approved: Boolean(clause.approvedAt),
+          // Phase 205. Selected by `listClauses` from the start and dropped
+          // here, which is the same shape as Phase 204's access board losing
+          // `isActive` on the way to the screen — moot while nothing could set
+          // it, wrong the moment something could.
+          isActive: clause.isActive,
         }))}
         team={team.map((member) => ({
           id: member.id,

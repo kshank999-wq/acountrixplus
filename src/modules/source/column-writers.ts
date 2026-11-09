@@ -57,7 +57,7 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **32 candidates**, of which four are findings. A closed one is **absent**
+ * **30 candidates**, of which one is a finding. A closed one is **absent**
  * from this register, because the scan no longer reports it — which is what
  * proves an editor reaches the column rather than only existing, and the
  * tests assert that absence by name.
@@ -83,12 +83,15 @@ import { readableSource, sourceFiles } from './isolation-scan'
  * `practicesFor`, so an inactive firm leaves its own members' list and none of
  * them can switch into it again.
  *
- * Four remain, declared below and nominated: `vendors.organizationId`, and
- * two `isActive` columns that are **projections only** — selected to be
- * displayed with nothing filtering on either, so a writer alone would hand
- * somebody a control with no effect. Each is two changes rather than one,
- * which is the distinction reading the readers established and the reason the
- * three enforced ones went first.
+ * Phase 205 closed the last two, the **projection-only** pair: a writer *and*
+ * a filter each, since a writer alone would have handed somebody a control
+ * with no effect. All six `isActive` switches the narrowed exclusion exposed
+ * are now closed, in the order reading their readers established — the three
+ * enforced ones first, because for those the whole gap was the writer.
+ *
+ * **One finding remains**, `vendors.organizationId`, declared below. Every
+ * other entry is a column something writes in a way no pattern sees, which is
+ * what this register was built to hold.
  */
 
 /** Where a candidate stands. */
@@ -242,34 +245,6 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   },
 
   // --- Unwritable, and recorded as findings ---------------------------------
-  {
-    table: 'clauses',
-    columns: ['isActive'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      '**A terms clause cannot be retired, and retiring one would not do anything.** §15 asks for ' +
-      'standard terms, clauses and disclaimers, and the one thing a company does with old wording ' +
-      'is stop offering it — `createClause` has no `isActive` input and nothing updates the row. ' +
-      'Weaker than the two above and worth distinguishing from them: the only reader is a ' +
-      '**projection**, `listClauses` selecting the column to show it. Nothing filters on it, so a ' +
-      'writer alone would leave a flag a person could set with no effect — Phase 160\'s shape ' +
-      'arrived at by fixing half the gap. Closing this is two changes, not one.',
-  },
-  {
-    table: 'bills_of_materials',
-    columns: ['isActive'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      '**A bill of materials cannot be superseded, and nothing would notice if it were.** The ' +
-      'clause entry\'s shape: the only reader is a projection in `manufacturing/service.ts` that ' +
-      'selects the column to report it, and no query filters a work order\'s recipe on it. So a ' +
-      'factory that changes a recipe keeps both live *and* a flag saying which is current would ' +
-      'change nothing until something read it. An earlier draft of this entry claimed the recipe ' +
-      'choice was filtered on it; reading the two call sites is what corrected that, which is the ' +
-      'whole method of this register.',
-  },
   {
     table: 'vendors',
     columns: ['organizationId'],

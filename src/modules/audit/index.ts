@@ -328,6 +328,18 @@ export type AuditAction =
   // cancelling one writes off stock that was consumed and never became
   // anything — both are judgements §19 asks to be able to reconstruct.
   | 'bom.create'
+  /**
+   * A recipe superseded, or brought back (Phase 205).
+   *
+   * `bills_of_materials.isActive` was selected to be displayed and nothing
+   * filtered on it — one of the two **projection-only** switches Phase 202
+   * found, where a writer alone would have handed somebody a control with no
+   * effect. Retire and restore rather than one update, on the pattern
+   * `account.retire` set: the question asked later is *why is this recipe not
+   * on the list*, and "somebody superseded it in March" is the answer.
+   */
+  | 'bom.retire'
+  | 'bom.restore'
   | 'work_order.create'
   | 'work_order.complete'
   | 'work_order.cancel'
@@ -390,6 +402,19 @@ export type AuditAction =
   | 'service_item.create'
   | 'clause.create'
   | 'clause.revise'
+  /**
+   * A standard clause taken out of the library, or put back (Phase 205).
+   *
+   * The library's own `isActive`, read by `listClauses` to display and by
+   * nothing to filter. §15 asks for standard terms and disclaimers, and the
+   * one thing a company does with old wording is stop offering it —
+   * `clause.revise` already covers changing what a clause *says*, which is a
+   * different act: a revision gives new language to the same clause, and a
+   * retirement stops the clause being offered at all without touching a word
+   * of any version.
+   */
+  | 'clause.retire'
+  | 'clause.restore'
   | 'document.create'
   | 'document.update'
   | 'document.apply_template'

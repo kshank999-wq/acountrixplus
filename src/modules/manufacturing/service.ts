@@ -196,6 +196,71 @@ export async function createBom(
   })
 }
 
+/**
+ * Supersedes a recipe, or brings it back (Phase 205).
+ *
+ * ## The other projection-only switch
+ *
+ * `bills_of_materials.isActive` was selected by `listBoms` to be displayed and
+ * filtered by nothing — so a factory that changed a recipe had no way to retire
+ * the old one, and both stayed live beside each other. Phase 202 found it and
+ * **an earlier draft of that register got it wrong**, claiming the recipe a
+ * work order is built from was filtered on this column. Reading the two call
+ * sites is what corrected it, and the correction is why these two switches
+ * went last: a writer with no filter is a control that does nothing.
+ *
+ * ## Where the enforcement goes, and why not here
+ *
+ * Not on the read. `requirementsFor` and `completeWorkOrder` both look the
+ * recipe up **by the id the work order already names**, and a half-built batch
+ * that lost the recipe it was costed against is a worse outcome than the one
+ * this phase is fixing. So a retired recipe stays readable for ever and the
+ * refusal is in `createWorkOrder`: you cannot *start* a run against it.
+ *
+ * That is the opposite of the clause library, closed in the same phase, and
+ * the difference is copying against referencing. A clause is copied into a
+ * document as a version id at the moment somebody adds it, so filtering the
+ * offer is the whole job. A work order references its recipe for the life of
+ * the run, so the offer is not enough and a refusal at the start is.
+ */
+export async function setBomActive(
+  ctx: ActorContext,
+  input: { bomId: string; isActive: boolean },
+) {
+  requirePermission(ctx, 'accounting:journal')
+  await requireModule(ctx, 'manufacturing')
+
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({ id: billsOfMaterials.id, name: billsOfMaterials.name, isActive: billsOfMaterials.isActive })
+      .from(billsOfMaterials)
+      .where(scoped(ctx, billsOfMaterials, eq(billsOfMaterials.id, input.bomId)))
+      .limit(1)
+
+    if (!before) throw new ManufacturingError('No such bill of materials.')
+
+    const [row] = await tx
+      .update(billsOfMaterials)
+      .set({ isActive: input.isActive })
+      .where(scoped(ctx, billsOfMaterials, eq(billsOfMaterials.id, input.bomId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: input.isActive ? 'bom.restore' : 'bom.retire',
+        entityType: 'bill_of_materials',
+        entityId: row.id,
+        before: { isActive: before.isActive },
+        after: { isActive: row.isActive, name: row.name },
+      },
+      tx,
+    )
+
+    return row
+  })
+}
+
 export async function listBoms(ctx: ActorContext): Promise<BomRow[]> {
   requirePermission(ctx, 'accounting:view')
 
@@ -316,6 +381,37 @@ export async function createWorkOrder(
 
   return db.transaction(async (tx) => {
     await ensureAccounts(ctx, tx)
+
+    /*
+      A run cannot start against a superseded recipe (Phase 205).
+
+      This is the enforcement half of `bills_of_materials.isActive`, and it is
+      here rather than on the read because `requirementsFor` and
+      `completeWorkOrder` look the recipe up by the id the work order already
+      names — filtering there would cost a half-built batch the recipe it was
+      costed against, which is worse than the gap being fixed.
+
+      Checked rather than left to the picker: the rule is "you may not start a
+      run against this", and a rule that holds only on the one screen that
+      remembers to filter is not the rule. Nothing validated `bomId` at all
+      before this — not its existence, not its tenant, not its state — the
+      composite foreign key having been doing the first two.
+    */
+    if (input.bomId) {
+      const [bom] = await tx
+        .select({ name: billsOfMaterials.name, isActive: billsOfMaterials.isActive })
+        .from(billsOfMaterials)
+        .where(scoped(ctx, billsOfMaterials, eq(billsOfMaterials.id, input.bomId)))
+        .limit(1)
+
+      if (!bom) throw new ManufacturingError('No such bill of materials.')
+      if (!bom.isActive) {
+        throw new ManufacturingError(
+          `${bom.name} has been superseded. Runs already costed against it keep it; a new one ` +
+            'has to name the recipe the factory is actually using.',
+        )
+      }
+    }
 
     const number = await nextNumber(ctx, tx)
 

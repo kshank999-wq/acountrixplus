@@ -107,12 +107,12 @@ describe('what the census could not see', () => {
       `gift_cards.isActive` — the one of the six switches where the thing
       nobody could turn off was money. Corrected rather than relaxed.
     */
-    expect(candidates).toHaveLength(32)
+    expect(candidates).toHaveLength(30)
 
-    // In, because nothing can turn them off — and these two are the ones that
-    // need *two* changes rather than one, which is why they are last.
-    expect(candidates).toContain('clauses.isActive')
-    expect(candidates).toContain('bills_of_materials.isActive')
+    // There is no `isActive` left in the answer: Phase 205 closed the last
+    // two. So the claim that this exclusion was too wide is carried entirely
+    // by the absences below now, and `asset_links` stands in as a candidate
+    // that is still reported and still argued.
 
     // Out, because the database is their author.
     expect(candidates.filter((column) => column.endsWith('.createdAt'))).toEqual([])
@@ -121,10 +121,20 @@ describe('what the census could not see', () => {
     // Out, because this phase closed them — and `gift_cards.isActive` because
     // Phase 203 did, which is what proves the editor reaches the column rather
     // than the entry having been reworded.
-    expect(candidates).not.toContain('gift_cards.isActive')
-    expect(candidates).not.toContain('cash_drawers.isActive')
-    expect(candidates).not.toContain('practices.isActive')
-    expect(candidates).not.toContain('memberships.isActive')
+    expect(candidates).toContain('asset_links.campaignId')
+
+    // All six, which is the whole of what narrowing the exclusion found.
+    expect(candidates.filter((column) => column.endsWith('.isActive'))).toEqual([])
+    for (const column of [
+      'memberships.isActive',
+      'gift_cards.isActive',
+      'cash_drawers.isActive',
+      'practices.isActive',
+      'clauses.isActive',
+      'bills_of_materials.isActive',
+    ]) {
+      expect(candidates, column).not.toContain(column)
+    }
     expect(candidates).not.toContain('memberships.permissionOverrides')
     expect(candidates).not.toContain('organizations.tags')
   })
@@ -193,21 +203,15 @@ describe('what the census could not see', () => {
     */
     const switches = COLUMN_WRITERS.filter((entry) => entry.columns.includes('isActive'))
 
-    expect(switches.map((entry) => entry.table).sort()).toEqual([
-      'bills_of_materials',
-      'clauses',
-    ])
-
-    for (const entry of switches) {
-      expect(entry.verdict, entry.table).toBe('unwritable')
-      expect(entry.because.length, entry.table).toBeGreaterThan(140)
-    }
-
-    // `memberships.isActive` was closed here, `gift_cards.isActive` in Phase
-    // 203, and the till and the practice in Phase 204 — so the count above is
-    // two rather than six, and every absence is the register's two-direction
-    // rule working rather than an entry quietly reworded.
-    expect(switches.map((entry) => entry.table)).not.toContain('memberships')
+    // **None.** Every one of the six has a writer now, so the register
+    // declares no switch at all — this assertion's third and final state,
+    // after five entries and then two. `memberships.isActive` was closed in
+    // this phase, `gift_cards.isActive` in Phase 203, the till and the
+    // practice in Phase 204, and the clause library and the recipe in Phase
+    // 205. Every disappearance is the register's two-direction rule working
+    // rather than an entry quietly reworded, and a register that empties out
+    // on a class it opened is the outcome that rule exists to make visible.
+    expect(switches).toEqual([])
   })
 })
 

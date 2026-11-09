@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **297
-writes** and **963 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **299
+writes** and **966 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,7 +357,7 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2179 columns** across **185 tables** and reports **32** with a
+The scan reads **2179 columns** across **185 tables** and reports **30** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
@@ -459,6 +459,36 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §7, §15, §5 — offered, and not offered (Phase 205)
+
+The last two of the six `isActive` columns Phase 202 found, and **all six are
+closed**. Reading each reader had split them into *enforced* — a refusal
+already written, so the whole gap was the writer — and *projections only*,
+selected to be displayed and filtered by nothing, where a writer alone would
+have been a control with no effect. The three enforced ones went first.
+
+ADR 0204 said *filter first*, which was right and incomplete. The two need the
+filter in **different places**, and the reason is copying against referencing.
+
+A clause is **copied** into a document as a `clauseVersionId` — *"what a client
+was shown must not"* change — so retiring one is invisible to every proposal
+ever sent and not offering it is the whole job. ADR 0021 is satisfied by the
+schema rather than by a rule, and `listClauses` filters with the option as
+`includeRetired` **opt-out**, because three screens read that list and two of
+them *offer* clauses for a document.
+
+A work order **references** its recipe for the life of the run, so filtering
+the read would cost a half-built batch the recipe it was costed against. The
+recipe stays readable and `createWorkOrder` refuses to **start** a run against a
+superseded one — in the service rather than only the picker, since a rule that
+holds on the one screen that remembered to filter is not the rule. That also
+closed something nobody had asked about: **nothing validated `bomId` at all**,
+the composite foreign key having been doing the existence and tenant checks.
+
+The column census now declares **one finding**, `vendors.organizationId`. The
+other twenty-nine entries are columns something writes in a way no pattern
+sees, which is what the register was built to hold.
 
 ### §14 — the access that disappeared quietly (Phase 204)
 

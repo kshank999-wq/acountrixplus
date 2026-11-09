@@ -77,9 +77,11 @@ describe('the class, measured', () => {
       added are the kind this phase was built to find, which its own exclusion
       had made invisible, and the figure is corrected here rather than relaxed
       to a bound (Phase 126). 34 since Phase 203 closed one of the eight, and 32
-      since Phase 204 closed the two remaining enforced switches.
+      since Phase 204 closed the two remaining enforced switches, and 30 since
+      Phase 205 closed the projection-only pair — all six of them, in the order
+      reading their readers established.
     */
-    expect(writerCandidates()).toHaveLength(32)
+    expect(writerCandidates()).toHaveLength(30)
   })
 
   it('declares every candidate', () => {

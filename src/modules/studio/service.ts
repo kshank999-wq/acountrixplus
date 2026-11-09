@@ -9,7 +9,7 @@ import {
   serviceItems,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
-import { DomainError } from '@/modules/errors'
+import { DomainError, Refusal } from '@/modules/errors'
 import { BRAND_STYLE_FIELDS, brandStyleProblem } from '@/modules/design/style-values'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { missing } from '@/modules/errors/missing'
@@ -437,7 +437,41 @@ export async function reviseClause(
 }
 
 /** Clauses with their current wording, for the designer's insert menu. */
-export async function listClauses(ctx: ActorContext) {
+/**
+ * The clause library (spec §7, §15), live clauses only unless asked otherwise.
+ *
+ * ## Why the default is the safe one, against this file's own precedent
+ *
+ * `clauses.isActive` was one of the two **projection-only** switches Phase 202
+ * found: selected here to be displayed and filtered by nothing, so a retired
+ * clause went on appearing in the picker on every new proposal. That is how
+ * superseded language gets sent, and it is why ADR 0204 nominated these two
+ * *filter first* — a writer with no filter is a control that does nothing.
+ *
+ * `includeRetired`, opt-out, which is `listTeamMembers`' shape in this same
+ * module rather than `listServiceItems`' `activeOnly` opt-in — and the Studio
+ * page already passes `{ includeRetired: true }` for team members under a
+ * comment saying it is *"the one screen that can restore them"*. That is the
+ * nearer precedent and the right one here for the same reason: three screens
+ * read this list, two of them to **offer** clauses for a document and one to
+ * manage them, and a caller who forgets the flag should get the safe answer.
+ * For an offer the safe answer is "only what is still approved", so a picker
+ * added in two years gets it without knowing this sentence exists.
+ *
+ * `listServiceItems` is the odd one out of the three and is left alone: its
+ * callers were written against an opt-in flag, and changing it is a behaviour
+ * change in five screens dressed as a tidy-up.
+ *
+ * ## Why retiring one cannot touch a document, sent or draft
+ *
+ * A document block stores `clauseVersionId`, not a clause id — *"what a client
+ * was shown must not"* change, in `blocks.ts`'s own words. So the wording on
+ * every proposal ever sent is reached through the version, and retiring the
+ * clause is invisible to all of them. ADR 0021 is satisfied by the schema
+ * rather than by a rule here, which is why this phase's filter belongs on the
+ * **offer** and nowhere near a document.
+ */
+export async function listClauses(ctx: ActorContext, opts: { includeRetired?: boolean } = {}) {
   requirePermission(ctx, 'crm:view')
 
   return db
@@ -453,8 +487,61 @@ export async function listClauses(ctx: ActorContext) {
     })
     .from(clauses)
     .leftJoin(clauseVersions, eq(clauseVersions.id, clauses.currentVersionId))
-    .where(scoped(ctx, clauses))
+    .where(scoped(ctx, clauses, opts.includeRetired ? undefined : eq(clauses.isActive, true)))
     .orderBy(asc(clauses.category), asc(clauses.title))
+}
+
+/**
+ * Takes a clause out of the library, or puts it back (Phase 205).
+ *
+ * The writer the column never had. Not a revision: `reviseClause` gives new
+ * language to the same clause and every document keeps the version it was
+ * sent with, while this stops the clause being **offered** without touching a
+ * word of any version.
+ *
+ * No refusal to make. A clause is *copied* into a document as a version id at
+ * the moment somebody adds it, so there is no later moment at which a retired
+ * clause could be acted on — unlike a bill of materials, which a work order
+ * goes on referencing for the life of the run and which therefore needs
+ * `createWorkOrder` to refuse one. The difference is copying against
+ * referencing, and it is why these two switches are closed in one phase and
+ * not with one mechanism.
+ */
+export async function setClauseActive(
+  ctx: ActorContext,
+  input: { clauseId: string; isActive: boolean },
+) {
+  requirePermission(ctx, 'company:manage')
+
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select({ id: clauses.id, title: clauses.title, isActive: clauses.isActive })
+      .from(clauses)
+      .where(scoped(ctx, clauses, eq(clauses.id, input.clauseId)))
+      .limit(1)
+
+    if (!before) throw new Refusal('That clause is not in this library.')
+
+    const [row] = await tx
+      .update(clauses)
+      .set({ isActive: input.isActive })
+      .where(scoped(ctx, clauses, eq(clauses.id, input.clauseId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: input.isActive ? 'clause.restore' : 'clause.retire',
+        entityType: 'clause',
+        entityId: row.id,
+        before: { isActive: before.isActive },
+        after: { isActive: row.isActive, title: row.title },
+      },
+      tx,
+    )
+
+    return row
+  })
 }
 
 /** One clause version, scoped to the tenant. */

@@ -14,6 +14,7 @@ import {
   restoreTeamMemberAction,
   retireTeamMemberAction,
   reviseClauseAction,
+  setClauseActiveAction,
   saveBrandKitAction,
   saveProfileAction,
   updateTeamMemberAction,
@@ -87,6 +88,7 @@ export function StudioWorkspace({
     unitPriceCents: number
     description: string | null
   }>
+  /** The library, retired clauses included — the tab shows and restores them. */
   clauses: Array<{
     id: string
     title: string
@@ -94,6 +96,7 @@ export function StudioWorkspace({
     body: string
     versionNumber: number
     approved: boolean
+    isActive: boolean
   }>
   /** The directory, retired members included — the tab shows and restores them. */
   team: TeamMemberRow[]
@@ -678,6 +681,7 @@ function ClausesTab({
     body: string
     versionNumber: number
     approved: boolean
+    isActive: boolean
   }>
   canManage: boolean
   onResult: Notify
@@ -693,7 +697,8 @@ function ClausesTab({
         <h2 className="text-sm font-semibold">Legal and terms library</h2>
         <p className="text-xs text-muted">
           Revising a clause creates a new version. Proposals already sent keep the wording they
-          were sent with.
+          were sent with — and a retired clause is only stopped from being <em>offered</em>, since
+          a document holds the version it was given rather than the clause.
         </p>
       </header>
 
@@ -768,6 +773,9 @@ function ClausesTab({
                   {clause.approved && (
                     <span className="chip bg-positive/15 text-positive">approved</span>
                   )}
+                  {!clause.isActive && (
+                    <span className="chip bg-raised text-muted">retired</span>
+                  )}
                 </div>
               </div>
 
@@ -805,12 +813,36 @@ function ClausesTab({
                 <>
                   <p className="mt-1 whitespace-pre-line text-xs text-muted">{clause.body}</p>
                   {canManage && (
-                    <button
-                      onClick={() => setEditing({ id: clause.id, body: clause.body })}
-                      className="btn mt-2 px-2 py-1 text-xs"
-                    >
-                      Revise
-                    </button>
+                    <div className="mt-2 flex gap-2">
+                      <button
+                        onClick={() => setEditing({ id: clause.id, body: clause.body })}
+                        className="btn px-2 py-1 text-xs"
+                      >
+                        Revise
+                      </button>
+                      {/*
+                        Phase 205. Retire stops the clause being offered on a
+                        new document and changes no wording anywhere — a
+                        revision is the other control, and the two are
+                        deliberately not one.
+                      */}
+                      <button
+                        onClick={() =>
+                          startTransition(async () => {
+                            const result = await setClauseActiveAction(
+                              clause.id,
+                              !clause.isActive,
+                            )
+                            onResult(result)
+                            if (result.ok) router.refresh()
+                          })
+                        }
+                        disabled={pending}
+                        className="btn px-2 py-1 text-xs"
+                      >
+                        {clause.isActive ? 'Retire' : 'Put back'}
+                      </button>
+                    </div>
                   )}
                 </>
               )}

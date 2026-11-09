@@ -8,6 +8,7 @@ import {
   cancelWorkOrder,
   completeWorkOrder,
   createBom,
+  setBomActive,
   createWorkOrder,
   issueMaterial,
 } from '@/modules/manufacturing/service'
@@ -32,6 +33,28 @@ async function run(fn: () => Promise<string | void>): Promise<ActionResult> {
   } catch (error) {
     return { ok: false, error: messageFor(error, 'Something went wrong.') }
   }
+}
+
+/**
+ * Supersedes a recipe, or brings it back (Phase 205).
+ *
+ * The message names what keeps working, because that is the part somebody
+ * hesitates over: superseding a recipe does not take it away from the runs
+ * that were costed against it, and they go on reading it for the life of the
+ * batch.
+ */
+export async function setBomActiveAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z.object({ bomId: uuid, isActive: z.boolean() }).parse(input)
+
+    const bom = await setBomActive(actor, parsed)
+
+    return parsed.isActive
+      ? `${bom.name} is back and can be named on a new run.`
+      : `${bom.name} is superseded. No new run can name it; the runs already costed against it ` +
+          'keep it and go on reading it.'
+  })
 }
 
 export async function createBomAction(input: unknown): Promise<ActionResult> {

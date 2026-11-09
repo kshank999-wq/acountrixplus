@@ -8,6 +8,7 @@ import {
   cancelWorkOrderAction,
   completeWorkOrderAction,
   createBomAction,
+  setBomActiveAction,
   createWorkOrderAction,
   issueMaterialAction,
   type ActionResult,
@@ -207,13 +208,24 @@ function Runs({
           <div className="grid gap-2 sm:grid-cols-4">
             <label className="text-xs sm:col-span-2">
               <span className="block text-faint">Bill of materials</span>
+              {/*
+                Live recipes only (Phase 205). `bills_of_materials.isActive`
+                was selected to be displayed and filtered by nothing, so a
+                superseded recipe went on being offered beside the one that
+                replaced it. Filtered here *and* refused by `createWorkOrder`,
+                because the rule is "you may not start a run against this" and
+                a rule that holds only on the screen that remembered to filter
+                is not the rule.
+              */}
               <select className="field" name="bomId">
                 <option value="">None — no recipe</option>
-                {boms.map((bom) => (
-                  <option key={bom.id} value={bom.id}>
-                    {bom.name} ({bom.outputItemName})
-                  </option>
-                ))}
+                {boms
+                  .filter((bom) => bom.isActive)
+                  .map((bom) => (
+                    <option key={bom.id} value={bom.id}>
+                      {bom.name} ({bom.outputItemName})
+                    </option>
+                  ))}
               </select>
             </label>
             <label className="text-xs sm:col-span-2">
@@ -679,10 +691,34 @@ function Boms({ boms, items, canManage, act, pending }: Props & Helpers) {
       ) : (
         boms.map((bom) => (
           <div key={bom.id} className="card px-4 py-3">
-            <h3 className="text-sm font-semibold">{bom.name}</h3>
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="text-sm font-semibold">
+                {bom.name}
+                {!bom.isActive && (
+                  <span className="ml-2 chip bg-raised text-muted">superseded</span>
+                )}
+              </h3>
+              {canManage && (
+                <button
+                  className="btn btn-ghost text-xs"
+                  disabled={pending}
+                  onClick={() =>
+                    act(() => setBomActiveAction({ bomId: bom.id, isActive: !bom.isActive }))
+                  }
+                >
+                  {bom.isActive ? 'Supersede' : 'Put back'}
+                </button>
+              )}
+            </div>
             <p className="text-xs text-faint">
               Makes {qty(bom.batchMilli)} × {bom.outputItemName}
             </p>
+            {!bom.isActive && (
+              <p className="mt-1 text-xs text-muted">
+                No new run can name this. The runs already costed against it keep it, and keep
+                reading it — which is why retiring one filters the picker rather than the lookup.
+              </p>
+            )}
             <ul className="mt-2 divide-y divide-line text-sm">
               {bom.components.map((line) => (
                 <li key={line.id} className="flex justify-between py-1.5">

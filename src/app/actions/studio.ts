@@ -9,6 +9,7 @@ import {
   createClause,
   createServiceItem,
   reviseClause,
+  setClauseActive,
   saveProfile,
   updateBrandKit,
 } from '@/modules/studio/service'
@@ -199,6 +200,29 @@ export async function reviseClauseAction(
     const actor = await requireActor()
     const version = await reviseClause(actor, clauseId, { body, approve })
     return `Saved as version ${version.versionNumber}. Documents already sent keep their wording.`
+  })
+}
+
+/**
+ * Takes a clause out of the library, or puts it back (Phase 205).
+ *
+ * Deliberately not `reviseClauseAction`: a revision gives new language to the
+ * same clause, and a retirement stops the clause being offered without
+ * changing a word. The message says what did *not* happen, because that is
+ * the part somebody needs to trust before pressing it.
+ */
+export async function setClauseActiveAction(
+  clauseId: string,
+  isActive: boolean,
+): Promise<ActionResult> {
+  return run('/studio', async () => {
+    const actor = await requireActor()
+    const clause = await setClauseActive(actor, { clauseId, isActive })
+
+    return isActive
+      ? `${clause.title} is back in the library and will be offered again.`
+      : `${clause.title} is retired. It will not be offered on a new document, and every ` +
+          'document that already carries it is unchanged.'
   })
 }
 
