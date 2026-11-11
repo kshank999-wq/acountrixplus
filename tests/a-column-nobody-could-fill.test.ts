@@ -79,9 +79,12 @@ describe('the class, measured', () => {
       to a bound (Phase 126). 34 since Phase 203 closed one of the eight, and 32
       since Phase 204 closed the two remaining enforced switches, and 30 since
       Phase 205 closed the projection-only pair — all six of them, in the order
-      reading their readers established.
+      reading their readers established. **29 since Phase 208** closed
+      `vendors.organizationId`, which is the last of the findings and leaves
+      the register holding only columns something writes in a way no pattern
+      can see.
     */
-    expect(writerCandidates()).toHaveLength(30)
+    expect(writerCandidates()).toHaveLength(29)
   })
 
   it('declares every candidate', () => {
@@ -131,22 +134,29 @@ describe('the class, measured', () => {
     }
   })
 
-  it('still reports a column that genuinely has nothing', () => {
+  it('still reports columns, now that none of them is a finding', () => {
     /**
-     * The non-vacuity check (Phase 121). A scan that found nothing would pass
-     * every assertion above, so one column known by reading to have no writer
-     * at all has to still be in the answer.
+     * The non-vacuity check (Phase 121), and the third column it has had.
      *
-     * This was `memberships.permissionOverrides` when the phase was written.
-     * **Phase 202 closed it**, which is the right reason for a non-vacuity
-     * check to need moving — so it is `vendors.organizationId` now, read by
-     * `engagement/outbound.ts` so a letter to a supplier also reaches the CRM
-     * record of the client that supplier is, and written by nothing.
+     * A scan that found nothing would pass every assertion above, so it has to
+     * still be *reporting*. This was `memberships.permissionOverrides` when
+     * the phase was written; Phase 202 closed it, and it became
+     * `vendors.organizationId`; **Phase 208 closed that one too**, which is
+     * the right reason for a non-vacuity check to move twice and the point at
+     * which it has to change shape rather than find a third column.
+     *
+     * Because there is no longer a column with no writer at all, "the scan is
+     * not vacuous" can no longer be said with one. So it is said with a
+     * candidate whose writer is one the scan provably **cannot** see — a
+     * spread — asserted as both still reported and still declared. That is the
+     * property this register exists for, and it is the one that would go
+     * quiet if the scan stopped reading.
      */
     const candidates = writerCandidates().map((row) => `${row.table}.${row.column}`)
 
-    expect(candidates).toContain('vendors.organizationId')
-    expect(columnWriterFor('vendors', 'organizationId').verdict).toBe('unwritable')
+    expect(candidates).toContain('brand_kits.logoAssetId')
+    expect(columnWriterFor('brand_kits', 'logoAssetId').verdict).toBe('written')
+    expect(columnWriterFor('brand_kits', 'logoAssetId').because).toContain('spread')
   })
 })
 
@@ -414,19 +424,32 @@ describe('the two it does not close', () => {
     )
   })
 
-  it('says the supplier who is also a client cannot be linked', () => {
+  it('no longer says the supplier who is also a client cannot be linked', () => {
     /**
-     * `vendors.organizationId` is read by `engagement/outbound.ts` so a letter
-     * to a supplier also lands on that client's CRM timeline — the firm that
-     * both buys from you and sells to you, which `engagement/filing.ts` spends
-     * a page on. The customer side is written when an opportunity is won;
-     * there is no such path for a supplier, and the correction screen is driven
-     * by a registry of text fields, so a link to a CRM record is a new kind of
-     * field rather than one more entry.
+     * This asserted the declaration for five phases. `vendors.organizationId`
+     * is read by `engagement/outbound.ts` so a letter to a supplier also lands
+     * on that client's CRM timeline — the firm that both buys from you and
+     * sells to you, which `engagement/filing.ts` spends a page on — and the
+     * customer side was written when an opportunity was won with no such path
+     * for a supplier.
+     *
+     * The reason given each time for declaring rather than closing it was that
+     * the correction screen is driven by `VENDOR_FIELDS`, a registry of text
+     * fields, so the link would be a new *kind* of field. **Phase 208 measured
+     * that and it did not hold**: the customer side is not a field either, and
+     * the link is an act. `setVendorOrganization` writes it, so the entry is
+     * gone and the going is asserted — ADR 0134's rule, the same way Phase 202's
+     * closure is asserted above.
      */
-    const entry = columnWriterFor('vendors', 'organizationId')
+    expect(() => columnWriterFor('vendors', 'organizationId')).toThrow(RegistryError)
+    expect(writerCandidates().map((row) => `${row.table}.${row.column}`)).not.toContain(
+      'vendors.organizationId',
+    )
 
-    expect(entry.verdict).toBe('unwritable')
-    expect(entry.because).toContain('VENDOR_FIELDS')
+    // And the register has no findings at all now, which is the first time
+    // since Phase 201 built it. Its word for one is kept — see
+    // `tests/the-supplier-who-is-also-a-client.test.ts`, which owns that
+    // claim so this file and that one do not both count it.
+    expect(COLUMN_WRITERS.every((row) => row.verdict === 'written')).toBe(true)
   })
 })

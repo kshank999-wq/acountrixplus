@@ -57,7 +57,7 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **30 candidates**, of which one is a finding. A closed one is **absent**
+ * **29 candidates, and no findings.** A closed one is **absent**
  * from this register, because the scan no longer reports it — which is what
  * proves an editor reaches the column rather than only existing, and the
  * tests assert that absence by name.
@@ -89,16 +89,36 @@ import { readableSource, sourceFiles } from './isolation-scan'
  * are now closed, in the order reading their readers established — the three
  * enforced ones first, because for those the whole gap was the writer.
  *
- * **One finding remains**, `vendors.organizationId`, declared below. Every
- * other entry is a column something writes in a way no pattern sees, which is
- * what this register was built to hold.
+ * Phase 208 closed the last one, `vendors.organizationId` — the supplier who
+ * is also a client, which one module exists for and no screen could produce.
+ * It had been declared in five consecutive ADRs on the argument that the
+ * vendor correction screen is a registry of **text fields**, so a link to a
+ * CRM record would need that registry to learn a new kind of field. The
+ * customer side of the same link is not a field either, so it never did: it is
+ * an act, like the merge that already sits beside that form.
+ *
+ * So every entry below is now a column something writes in a way no pattern
+ * sees, which is what this register was built to hold — and what it holds
+ * **nothing** of is the thing it was built to find. That is worth stating
+ * plainly rather than letting an empty section imply it: this scan has no
+ * open findings, and the next one is a column somebody adds.
  */
 
 /** Where a candidate stands. */
 export type WriterVerdict =
   /** Something writes it; the scan cannot see the write. The entry says where. */
   | 'written'
-  /** Nothing writes it, and that is a defect with a decision recorded. */
+  /**
+   * Nothing writes it, and that is a defect with a decision recorded.
+   *
+   * **No entry carries this verdict as of Phase 208**, and it is kept rather
+   * than deleted on Phase 157's rule: an unused declaration stays when it
+   * *accuses*. This one is the register's word for a finding, and a register
+   * with no vocabulary for one is a register that cannot report the next.
+   * Deleting it would mean the next person to find a column nothing can fill
+   * has to invent the word again, and the five phases it took to close
+   * `vendors.organizationId` are the argument for leaving it where it is.
+   */
   | 'unwritable'
 
 export type ColumnWriter = {
@@ -108,6 +128,7 @@ export type ColumnWriter = {
   columns: readonly string[]
   verdict: WriterVerdict
   /** For `written`: the file that writes them. Empty for `unwritable`. */
+  // (Every entry is `written` since Phase 208; see `unwritable` above.)
   writtenBy: string
   /** Why, argued from what the code does rather than from what it looks like. */
   because: string
@@ -245,22 +266,12 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   },
 
   // --- Unwritable, and recorded as findings ---------------------------------
-  {
-    table: 'vendors',
-    columns: ['organizationId'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      '**The supplier who is also a client, which one module exists for and no screen can ' +
-      'produce.** `engagement/filing.ts` spends a page on the firm that both buys from you and ' +
-      'sells to you — one shared inbox, a remittance that must not land on their debt to us — ' +
-      'and `outbound.ts` reads `vendors.organizationId` so a supplier letter also reaches that ' +
-      "client's CRM timeline. The customer side is written by `crm/conversion.ts` when an " +
-      'opportunity is won. There is no such path for a supplier: `createVendor` has no such ' +
-      'input, and the correction screen is driven by `VENDOR_FIELDS`, a registry of text fields, ' +
-      'so a link to a CRM record is a new kind of field rather than one more entry. Declared ' +
-      'rather than closed for that reason, and nominated in ADR 0201.',
-  },
+  //
+  // Empty since Phase 208, and kept as a heading for the reason the verdict
+  // itself is kept: the next finding has somewhere to go, and a reader can see
+  // that the absence is measured rather than that the section was never
+  // written. `vendors.organizationId` stood here through five ADRs and is
+  // closed by `setVendorOrganization` in `parties/service.ts`.
 ]
 
 /** The entry accounting for one column, or a refusal naming it. */

@@ -189,9 +189,16 @@ describe('every read from a company-scoped table', () => {
       membership's role and overrides so the one-administrator invariant can be
       asserted over the set rather than over the row being edited.
     */
-    expect(READS.length).toBe(967)
+    /*
+      972 since Phase 208 and `setVendorOrganization`, whose five reads are
+      all refusals rather than lookups: the vendor, the client, the client the
+      vendor is *already* linked to, the supplier that client is already
+      linked to, and the name read before the unlink because afterwards there
+      is nothing left to read it from.
+    */
+    expect(READS.length).toBe(972)
     expect(by).toEqual({
-      'scoped-read': 588,
+      'scoped-read': 593,
       'explicit-company': 278,
       'established-above': 34,
       'id-from-fetched-row': 21,

@@ -176,10 +176,15 @@ describe('every write that can be aimed at a row', () => {
     // in 202 phases: the role, the granular overrides and whether somebody
     // still has access, all of which were read and none of which could be
     // changed. One `scoped-write`.
-    expect(WRITES.length).toBe(299)
+    //
+    // **Three hundred and one since Phase 208** and `setVendorOrganization`,
+    // which gave `vendors.organizationId` the two writes it never had — one
+    // linking a supplier to the CRM client it is, one taking the link away.
+    // Both `scoped-write`, and both measured rather than predicted.
+    expect(WRITES.length).toBe(301)
     expect(by).toEqual({
       'explicit-company': 198,
-      'scoped-write': 61,
+      'scoped-write': 63,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       // Phase 204's own three writes land on two of these, and one existing

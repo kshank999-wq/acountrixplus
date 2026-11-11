@@ -3,6 +3,7 @@ import {
   changedFields,
   humanise,
   nameOf,
+  namedActions,
   reasonFrom,
   tell,
 } from '@/modules/audit/story'
@@ -50,13 +51,54 @@ describe('what to call what happened', () => {
   })
 
   /**
-   * The refusal that shapes this module. There are 224 audit actions and words
-   * have been decided for five of them; the other 219 are handed back as their
-   * own names, flagged so the screen can show them as the codes they are.
+   * The refusal that shapes this module. `AuditAction` has **257 members** as
+   * of Phase 208 and words have been decided for **seven** of them; the other
+   * 250 are handed back as their own names, flagged so the screen can show
+   * them as the codes they are.
+   *
+   * **This sentence said 224 and five until Phase 208 measured it**, which is
+   * Phase 179's shape found in a test rather than in a document: a number in
+   * prose that nothing reads goes stale while the claim around it stays true,
+   * and 33 actions had been added without it moving. The denominator is still
+   * prose, because `AuditAction` is a type and counting its members means
+   * parsing the source; the *numerator* is asserted below, so the half that
+   * can drift silently no longer can.
    */
   it('does not invent a sentence for an action nobody has named', () => {
     expect(nameOf('journal.reclassify')).toEqual({ label: 'journal.reclassify', named: false })
     expect(nameOf('vendor.update').named).toBe(false)
+    // Phase 208's own two, which are a link rather than a correction and so
+    // are deliberately among the unnamed.
+    expect(nameOf('vendor.link_organization').named).toBe(false)
+  })
+
+  /**
+   * The seven, listed — so adding a mapping without saying so goes red.
+   *
+   * Phase 97 found the opposite failure: `party.merge` had a correction phrase
+   * from Phase 96 and no mapping here, so the one screen that would explain a
+   * merge printed the raw string as a code. A list is how both directions are
+   * caught by the same assertion.
+   */
+  it('names exactly seven of them', () => {
+    const named = [
+      'payment.void',
+      'refund.void',
+      'invoice.void',
+      'bill.void',
+      'deposit.void',
+      'bill.approval_withdraw',
+      'party.merge',
+    ]
+
+    for (const action of named) {
+      expect(nameOf(action).named, action).toBe(true)
+    }
+
+    expect(
+      namedActions().sort(),
+      'a mapping was added or removed without moving the count in the docstring above',
+    ).toEqual([...named].sort())
   })
 })
 

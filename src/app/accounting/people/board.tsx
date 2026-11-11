@@ -7,6 +7,7 @@ import {
   mergePreviewAction,
   setCustomerActiveAction,
   setVendorActiveAction,
+  setVendorOrganizationAction,
   updateCustomerAction,
   updateVendorAction,
   type ActionResult,
@@ -50,7 +51,12 @@ type Party = {
   mergedInto: { id: string; name: string } | null
 }
 
-type Vendor = Party & { taxId: string | null; is1099Vendor: boolean }
+type Vendor = Party & {
+  taxId: string | null
+  is1099Vendor: boolean
+  /** The CRM client this supplier is, when it is one (Phase 208). */
+  organization: { id: string; name: string } | null
+}
 
 type Draft = Record<string, string | boolean>
 
@@ -78,11 +84,25 @@ export function PeopleBoard({
   asOf,
   homeCurrency,
   sharedAddresses,
+  clients,
 }: {
   customers: Party[]
   vendors: Vendor[]
   canEditCustomers: boolean
   canEditVendors: boolean
+  /**
+   * The CRM records a supplier may be linked to, or null when this reader may
+   * not see the CRM at all (Phase 208).
+   *
+   * Null rather than an empty list, because the two mean different things and
+   * the screen says different things about them: no clients yet is a sentence
+   * about the business, and *you may not read the client list* is a sentence
+   * about the reader. Null also hides the **name** of an existing link, which
+   * an empty list would still have shown — the same care the page already
+   * takes with a customer clash it filters out for a reader without
+   * `crm:view`.
+   */
+  clients: { id: string; name: string }[] | null
   /** Today, decided on the server so every reader sees the same ages. */
   asOf: string
   homeCurrency: string
@@ -108,6 +128,15 @@ export function PeopleBoard({
   const [postId, setPostId] = useState<string | null>(null)
   const [draft, setDraft] = useState<Draft>({})
   const [showArchived, setShowArchived] = useState(false)
+  /**
+   * The client the open supplier is about to be linked to (Phase 208).
+   *
+   * Its own state rather than a key in `draft`, because `draft` is spread into
+   * `updateVendorAction` and this is not one of `VENDOR_FIELDS`. The schema
+   * there would have dropped it silently, which works and is exactly the kind
+   * of working-by-accident this screen should not rely on.
+   */
+  const [linkTo, setLinkTo] = useState('')
 
   /**
    * The clash being merged, which record is to survive, and why (Phase 96).
@@ -166,6 +195,10 @@ export function PeopleBoard({
     // it doing, on a supplier owing nothing.
     setNotice(null)
     setEditing(row.id)
+    // The client picker is not one of the fields and is not in the draft
+    // (Phase 208), so it gets cleared here rather than carried from whichever
+    // supplier was open before.
+    setLinkTo('')
     setDraft({
       name: row.name,
       email: row.email ?? '',
@@ -498,6 +531,82 @@ export function PeopleBoard({
                         )}
                       </div>
 
+                      {/*
+                        The supplier who is also a client (Phase 208).
+
+                        Outside the field grid on purpose. Everything above is
+                        a field on this record — a description, a default or a
+                        position taken for a filing, which is what
+                        `VENDOR_FIELDS` says of each one. This is none of the
+                        three: it is a link to another record, so it saves on
+                        its own and the notice it produces is about where
+                        letters will land rather than about what changed.
+                      */}
+                      {isVendors && clients !== null && (
+                        <div className="mt-4 border-t border-line pt-3">
+                          <p className="text-xs font-medium">Also a client</p>
+                          <p className="mt-1 text-xs text-faint">
+                            A firm you both buy from and sell to is one business. Linking it puts
+                            what we send them — a remittance included — on that client’s timeline.
+                          </p>
+
+                          {(row as Vendor).organization ? (
+                            <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                              <span className="chip bg-action/10 text-action">
+                                {(row as Vendor).organization?.name}
+                              </span>
+                              <button
+                                type="button"
+                                className="text-xs text-faint underline"
+                                disabled={pending}
+                                onClick={() =>
+                                  act(() =>
+                                    setVendorOrganizationAction({
+                                      id: row.id,
+                                      organizationId: null,
+                                    }),
+                                  )
+                                }
+                              >
+                                Take the link away
+                              </button>
+                            </div>
+                          ) : clients.length === 0 ? (
+                            <p className="mt-2 text-xs text-faint">No client records yet.</p>
+                          ) : (
+                            <div className="mt-2 flex flex-wrap items-center gap-2">
+                              <select
+                                className="input text-sm"
+                                value={linkTo}
+                                onChange={(event) => setLinkTo(event.target.value)}
+                              >
+                                <option value="">Choose a client…</option>
+                                {clients.map((client) => (
+                                  <option key={client.id} value={client.id}>
+                                    {client.name}
+                                  </option>
+                                ))}
+                              </select>
+                              <button
+                                type="button"
+                                className="btn text-sm"
+                                disabled={pending || linkTo === ''}
+                                onClick={() =>
+                                  act(() =>
+                                    setVendorOrganizationAction({
+                                      id: row.id,
+                                      organizationId: linkTo,
+                                    }),
+                                  )
+                                }
+                              >
+                                Link
+                              </button>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
                       <div className="mt-4 flex flex-wrap items-center gap-2">
                         <button
                           type="button"
@@ -553,6 +662,19 @@ export function PeopleBoard({
                         )}
                         {isVendors && (row as Vendor).is1099Vendor && (
                           <span className="ml-2 text-xs text-muted">1099</span>
+                        )}
+                        {/*
+                          Shown on the row rather than only inside the form,
+                          because "we also sell to this firm" is the fact that
+                          changes how somebody reads everything else on the
+                          line (Phase 208). Hidden with the picker from a
+                          reader who may not see the CRM: the name is the
+                          disclosure, not the control.
+                        */}
+                        {isVendors && clients !== null && (row as Vendor).organization && (
+                          <span className="ml-2 text-xs text-action">
+                            also the client {(row as Vendor).organization?.name}
+                          </span>
                         )}
                         {row.documentCount > 0 && (
                           <span className="ml-2 text-xs text-faint">

@@ -77,6 +77,22 @@ export type Name = {
   named: boolean
 }
 
+/**
+ * Every action somebody has decided words for (Phase 208).
+ *
+ * Exported so the count can be asserted rather than described. The claim
+ * *"words have been decided for seven of them"* lived only in a test's
+ * docstring and had been wrong by two for several phases, beside a count of
+ * actions that was wrong by 33 — Phase 179's finding about numbers in prose
+ * nothing reads, in a test rather than in a document.
+ *
+ * The map stays private: what it maps *to* is this module's business, and
+ * which actions are in it is the checkable half.
+ */
+export function namedActions(): string[] {
+  return Object.keys(CORRECTION_ACTIONS)
+}
+
 /** What to call what happened. */
 export function nameOf(action: string): Name {
   const kind = CORRECTION_ACTIONS[action]

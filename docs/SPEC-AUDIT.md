@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **299
-writes** and **967 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **301
+writes** and **972 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,10 +357,16 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2179 columns** across **185 tables** and reports **30** with a
+The scan reads **2179 columns** across **185 tables** and reports **29** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
+
+**As of Phase 208 none of the 29 is a finding.** Every one is declared with the
+spread or helper that writes it; the register's `unwritable` verdict is kept
+with no entry carrying it, so the next finding has a word and a place.
+`COLUMN_WRITERS`' candidate count is what makes that visible — it falls when
+one is closed, because a closed column leaves the scan.
 
 Most of them are written by a **spread** or a **helper's return**, which no
 regex can resolve, so `COLUMN_WRITERS` declares each mechanism and names the
@@ -383,17 +389,21 @@ the register, which is what proves the editors reach the column:
   goods on separate balance sheet lines sets them on the items"*. Only the seed
   did.
 
-Two remain, declared and nominated:
+Two remained at the end of Phase 201, declared and nominated. Both are closed
+now, and the gap between declaring and closing is the thing to read:
 
 - **`memberships.permissionOverrides`** — §14's granular grants and
   revocations, read into the actor, parsed, and *applied* by
   `effectivePermissions`, with nothing anywhere able to write one. The
-  §20 register's own permissions entry claimed them until this phase measured
-  it. A grant and revoke editor has its own refusals and is a phase.
+  §20 register's own permissions entry claimed them until Phase 201 measured
+  it. Closed in Phase 202, which found it was one of four §14 gaps rather than
+  the one ADR 0201 nominated.
 - **`vendors.organizationId`** — the supplier who is also a client, the case
   `engagement/filing.ts` exists for. The customer side is written when an
-  opportunity is won; there is no path at all for a supplier, so a remittance
-  never reaches that client's CRM timeline.
+  opportunity is won; there was no path at all for a supplier, so a remittance
+  never reached that client's CRM timeline. **Declared in five consecutive
+  ADRs** and closed in Phase 208 — see §6 below, because the reason it took
+  five is the interesting part.
 
 The fifth mechanism is worth recording because it was a correction to a shared
 primitive rather than to this scan: Phase 197's `declarationOf` read a local
@@ -459,6 +469,58 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §6, §19 — the supplier who is also a client (Phase 208)
+
+§6 asks for *"unified contact/company records with lead, prospect, active
+client, former client, vendor, or strategic-target status"* while §16 lists
+Customer and Vendor as their own entities. The schema answers both by making
+`organizations` the one party record and customer and vendor **accounting
+roles** it plays: `customers.organizationId` and `vendors.organizationId` point
+back at it, so *"a firm you both buy from and sell to is one organization with
+two accounting roles, not two conflicting rows"*.
+
+**The vendor half of that sentence was never writable.** `crm/conversion.ts`
+writes the customer side when an opportunity is won. For a supplier there was
+no path at all — `createVendor` has no such input, `updateVendor` has no such
+field — so `engagement/filing.ts`, a module that exists entirely for the firm
+that both buys and sells, could not serve the one case it was built for. A
+remittance advice files on the supplier's record, correctly and deliberately,
+and `columnsFor` carries the organisation along *"whenever the party has
+one"* — which for a vendor was never.
+
+**Why it took five ADRs.** The column was declared in ADRs 0201 through 0207
+on the argument that the vendor correction screen is driven by `VENDOR_FIELDS`,
+a registry of **text fields** whose three-way `kind` says what changing one
+means, so a link to a CRM record would be a new *kind* of field and `diffParty`
+would print a uuid into the audit trail.
+
+Both halves of that are true and the conclusion does not follow. **The customer
+side is not a field either** — `CUSTOMER_FIELDS` has no `organizationId` entry,
+and the link is written by winning an opportunity. And the people board already
+carries a non-text act beside the correction form: `mergeParties`, which takes
+two record ids, previews what would move, refuses a blank reason and writes both
+sides' history. So `setVendorOrganization` is an act of that kind,
+`VENDOR_FIELDS` learns nothing, and the audit entry carries the organisation's
+**name**.
+
+Four refusals, each from something the code already does: an unknown vendor or
+client; a supplier already linked **elsewhere** (repointing would leave letters
+already filed against the wrong client, so the link is taken away on purpose
+first); and a client already linked to another supplier, which would split that
+client's payables the way Phase 45 found two customer rows splitting a client's
+aging. The undo ships in the same phase on Phase 206's rule: a writer that only
+moves one way is invisible to both censuses and looks identical to a working
+control until somebody wants it back.
+
+**It does not set `lifecycleStage` to `'vendor'`.** A lifecycle stage holds one
+value, so writing `'vendor'` over `'active_client'` would delete the more
+important half of the fact being recorded. That a single stage cannot say
+"both" is the reason the link column exists, and `'vendor'` as a stage is left
+as the one §6 lists.
+
+**What this closes:** the column census's last finding. 29 candidates, none of
+them a finding.
 
 ### §4, §13 — a name is not a function (Phase 207)
 

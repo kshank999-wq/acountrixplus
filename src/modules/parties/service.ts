@@ -1,6 +1,14 @@
 import { and, eq, inArray, sql } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
-import { bills, creditNotes, customers, invoices, payments, vendors } from '@/db/schema'
+import {
+  bills,
+  creditNotes,
+  customers,
+  invoices,
+  organizations,
+  payments,
+  vendors,
+} from '@/db/schema'
 import { DomainError } from '@/modules/errors'
 import { updateCustomer, updateVendor } from '@/modules/receivables/service'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
@@ -94,6 +102,14 @@ export type PartySummary = {
 export type VendorSummary = PartySummary & {
   taxId: string | null
   is1099Vendor: boolean
+  /**
+   * The CRM client this supplier *is*, when it is one (Phase 208).
+   *
+   * The name and not only the id, for the reason the merge pointer above
+   * carries one: a panel that has the id has to ask a second question to say
+   * anything a person can read, and the screen that cannot ask it shows a uuid.
+   */
+  organization: { id: string; name: string } | null
 }
 
 /** The states a document is in while it is still somebody's business. */
@@ -390,6 +406,15 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
       documentCount: trading.documentCount,
       heldCreditCents: unspentCredit.heldCents,
       mergedIntoName: mergedIntoName(vendors),
+      /**
+       * The linked client's name (Phase 208), in the shape the pointer beside
+       * it uses — a correlated subquery rather than a join, on the argument
+       * `mergedIntoName` gives for the same decision one line up.
+       */
+      organizationName: sql<string | null>`(
+        select "client"."name" from ${organizations} as "client"
+        where "client"."id" = ${vendors.organizationId}
+      )`,
     })
     .from(vendors)
     .leftJoin(trading, eq(trading.vendorId, vendors.id))
@@ -422,6 +447,10 @@ export async function listVendorSummaries(ctx: ActorContext): Promise<VendorSumm
     mergedInto:
       row.vendor.mergedIntoId && row.mergedIntoName
         ? { id: row.vendor.mergedIntoId, name: row.mergedIntoName }
+        : null,
+    organization:
+      row.vendor.organizationId && row.organizationName
+        ? { id: row.vendor.organizationId, name: row.organizationName }
         : null,
   }))
 }
@@ -558,6 +587,222 @@ export async function sharedAddresses(ctx: ActorContext): Promise<Clash[]> {
     ...asCustomers.map((row) => ({ side: 'customer' as const, ...row })),
     ...asVendors.map((row) => ({ side: 'vendor' as const, ...row })),
   ])
+}
+
+/**
+ * The supplier who is also a client (Phase 208).
+ *
+ * ## What the column is for, and what could reach it
+ *
+ * `organizations` is this application's one party record, and customer and
+ * vendor are **accounting roles** it plays — `customers.organizationId` and
+ * `vendors.organizationId` point back at it. The schema's own docstring says
+ * why: *"a firm you both buy from and sell to is one organization with two
+ * accounting roles, not two conflicting rows"*.
+ *
+ * `engagement/filing.ts` spends a whole module on exactly that firm. A
+ * remittance advice is a payables document and belongs on the supplier's
+ * record, an invoice on the customer's, and `columnsFor` carries the
+ * organisation along *"whenever the party has one"* so the letter also appears
+ * on that client's CRM timeline — which is where somebody who has both will
+ * look first.
+ *
+ * For a vendor the party never had one. `crm/conversion.ts` writes the
+ * customer side when an opportunity is won, and nothing in 207 phases wrote
+ * the vendor side: `createVendor` has no such input and `updateVendor` has no
+ * such field, so the one case `filing.ts` exists for was the one case it could
+ * not serve.
+ *
+ * ## Why it is an act and not a field
+ *
+ * ADR 0201 declared this column and ADRs 0202–0207 carried the declaration
+ * forward, on the argument that the vendor correction screen is driven by
+ * `VENDOR_FIELDS` — a registry of text fields whose `kind` says what changing
+ * one means — so a link to a CRM record would be a *new kind* of field, and
+ * `diffParty` would print a uuid into the audit trail.
+ *
+ * Both halves of that are true and the conclusion does not follow, because
+ * **the customer side is not a field either.** `CUSTOMER_FIELDS` has no
+ * `organizationId` entry; the link is written by winning an opportunity. And
+ * the people board already carries a non-text act beside the correction form:
+ * `mergeParties`, which takes two record ids, shows what would move, refuses a
+ * blank reason and writes both sides' history. Recognising a supplier as a
+ * client is that kind of act, so `VENDOR_FIELDS` learns nothing and the audit
+ * entry carries the organisation's **name**.
+ *
+ * ## What it does not do
+ *
+ * It does not set the organisation's `lifecycleStage` to `'vendor'`. A
+ * lifecycle stage holds one value, so writing `'vendor'` over `'active_client'`
+ * would delete the more important half of precisely the fact being recorded —
+ * and a firm that both buys and sells is a client *and* a supplier. That the
+ * stage cannot say "both" is the reason this column exists.
+ *
+ * Null unlinks, and the undo is here rather than in a later phase: Phase 206
+ * found a writer that had moved in one direction only since Phase 4, invisible
+ * to every census because the column is read *and* written, and
+ * indistinguishable from a working control until somebody wanted it back.
+ */
+export async function setVendorOrganization(
+  ctx: ActorContext,
+  input: { vendorId: string; organizationId: string | null },
+): Promise<{ vendorName: string; organizationName: string | null; linked: boolean }> {
+  /*
+    Both permissions, and not one standing in for the other.
+
+    `accounting:journal` because this is an edit to a vendor, which is what
+    `updateVendor` asks for and for its reason — a supplier record decides
+    where money goes. `crm:view` because the other end is a CRM record: a
+    bookkeeper who may not read the client list must not be able to name a
+    client by trying ids, and the page hides the picker from them for the same
+    reason it already hides the customer side.
+  */
+  requirePermission(ctx, 'accounting:journal')
+  requirePermission(ctx, 'crm:view')
+
+  const [vendor] = await db
+    .select({
+      id: vendors.id,
+      name: vendors.name,
+      organizationId: vendors.organizationId,
+    })
+    .from(vendors)
+    .where(scoped(ctx, vendors, eq(vendors.id, input.vendorId)))
+    .limit(1)
+
+  if (!vendor) throw new DomainError('That vendor is not on these books.')
+
+  const current = vendor.organizationId
+
+  if (input.organizationId === null) {
+    if (!current) {
+      throw new DomainError(`${vendor.name} is not linked to a client record.`)
+    }
+    return unlink(ctx, vendor.id, vendor.name, current)
+  }
+
+  /*
+    Repointing is refused rather than allowed.
+
+    The link decides which client's timeline this supplier's letters land on,
+    and a remittance already filed against the old organisation stays filed
+    there — so moving the link would leave one firm's payment advice on
+    another firm's record with nothing saying it had moved. Unlinking first
+    makes that a thing somebody did on purpose, and the log has a word for it.
+  */
+  if (current && current !== input.organizationId) {
+    const [held] = await db
+      .select({ name: organizations.name })
+      .from(organizations)
+      .where(scoped(ctx, organizations, eq(organizations.id, current)))
+      .limit(1)
+
+    throw new DomainError(
+      `${vendor.name} is already linked to ${held?.name ?? 'another client'}. ` +
+        'Take that link away first — moving it would leave letters already filed ' +
+        'against the wrong client.',
+    )
+  }
+
+  const [organization] = await db
+    .select({ id: organizations.id, name: organizations.name })
+    .from(organizations)
+    .where(scoped(ctx, organizations, eq(organizations.id, input.organizationId)))
+    .limit(1)
+
+  if (!organization) throw new DomainError('That client is not on these books.')
+
+  if (current === organization.id) {
+    // Already so. Not an error and not a write: an audit log that records
+    // somebody re-saving a form is a log with the real change buried in it.
+    return { vendorName: vendor.name, organizationName: organization.name, linked: true }
+  }
+
+  /*
+    One supplier record per client, asked before the write.
+
+    The customer side has read this as one-per-organisation since Phase 45 —
+    `crm/conversion.ts` takes the first customer linked to the organisation and
+    adopts an unlinked namesake rather than making a second. Two supplier rows
+    for one client would split that client's payables the way Phase 45 found
+    two customer rows splitting its aging, and the escape is named: unlink the
+    other one, or put the two records together.
+  */
+  const [taken] = await db
+    .select({ id: vendors.id, name: vendors.name, isActive: vendors.isActive })
+    .from(vendors)
+    .where(scoped(ctx, vendors, eq(vendors.organizationId, organization.id)))
+    .limit(1)
+
+  if (taken) {
+    throw new DomainError(
+      `${organization.name} is already linked to the supplier ${taken.name}` +
+        `${taken.isActive ? '' : ', which is archived'}. Take that link away, or put the ` +
+        'two supplier records together.',
+    )
+  }
+
+  return db.transaction(async (tx) => {
+    await tx
+      .update(vendors)
+      .set({ organizationId: organization.id })
+      .where(scoped(ctx, vendors, eq(vendors.id, vendor.id)))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'vendor.link_organization',
+        entityType: 'vendor',
+        entityId: vendor.id,
+        before: { organization: null },
+        after: { organization: organization.name },
+      },
+      tx,
+    )
+
+    return { vendorName: vendor.name, organizationName: organization.name, linked: true }
+  })
+}
+
+/**
+ * Takes the link away, naming what it was.
+ *
+ * The name is read before the write, because after it there is nothing left to
+ * read it from — an audit entry saying a link was removed without saying to
+ * what is an entry nobody can act on.
+ */
+async function unlink(
+  ctx: ActorContext,
+  vendorId: string,
+  vendorName: string,
+  organizationId: string,
+): Promise<{ vendorName: string; organizationName: string | null; linked: boolean }> {
+  const [held] = await db
+    .select({ name: organizations.name })
+    .from(organizations)
+    .where(scoped(ctx, organizations, eq(organizations.id, organizationId)))
+    .limit(1)
+
+  return db.transaction(async (tx) => {
+    await tx
+      .update(vendors)
+      .set({ organizationId: null })
+      .where(scoped(ctx, vendors, eq(vendors.id, vendorId)))
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'vendor.unlink_organization',
+        entityType: 'vendor',
+        entityId: vendorId,
+        before: { organization: held?.name ?? null },
+        after: { organization: null },
+      },
+      tx,
+    )
+
+    return { vendorName, organizationName: held?.name ?? null, linked: false }
+  })
 }
 
 /**

@@ -163,6 +163,22 @@ export type AuditAction =
   | 'vendor.update'
   /** Two records of one business put together, on both of them (Phase 96). */
   | 'party.merge'
+  /**
+   * A supplier recognised as a CRM client, and the link taken away again
+   * (Phase 208).
+   *
+   * Two actions rather than one with a direction, for the reason Phase 206
+   * gave: a control that only ever moves one way looks identical to a working
+   * one until somebody wants to undo it, and a log in which the undo has its
+   * own word is a log where the undo was built.
+   *
+   * Both carry the organisation's **name** rather than its id. The reason
+   * `vendors.organizationId` sat declared for four phases was the belief that
+   * a reference field would print a uuid into this log; it would, which is why
+   * this is not a field.
+   */
+  | 'vendor.link_organization'
+  | 'vendor.unlink_organization'
   /** Somebody asked to move the address they sign in with (Phase 98). */
   | 'user.address_claim'
   /** They proved they hold it, and it moved. */

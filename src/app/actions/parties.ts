@@ -10,6 +10,7 @@ import {
   mergePreview,
   setCustomerActive,
   setVendorActive,
+  setVendorOrganization,
   vendorById,
 } from '@/modules/parties/service'
 import { CUSTOMER_FIELDS, VENDOR_FIELDS, describeChanges, diffParty } from '@/modules/parties/changes'
@@ -113,6 +114,37 @@ export async function setVendorActiveAction(input: unknown): Promise<ActionResul
     return result.isActive
       ? `${result.name} is active again.`
       : `${result.name} archived. Their history stays; they no longer appear when you enter a bill.`
+  })
+}
+
+/**
+ * Recognises a supplier as a CRM client, or takes the link away (Phase 208).
+ *
+ * `organizationId` nullable rather than two actions, because the one thing
+ * Phase 206 found about a control that only moves one way is that it is
+ * indistinguishable from a working one until somebody wants it back. The log
+ * still has two words for it; the handle has one.
+ */
+const linkSchema = z.object({
+  id: z.string().uuid(),
+  organizationId: z.string().uuid().nullable(),
+})
+
+export async function setVendorOrganizationAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = linkSchema.parse(input)
+    const result = await setVendorOrganization(actor, {
+      vendorId: parsed.id,
+      organizationId: parsed.organizationId,
+    })
+
+    return result.linked
+      ? `${result.vendorName} is also the client ${result.organizationName}. ` +
+          'Letters we send them will appear on that client’s timeline.'
+      : `${result.vendorName} is no longer linked to ${
+          result.organizationName ?? 'a client record'
+        }. Letters already filed stay where they are.`
   })
 }
 

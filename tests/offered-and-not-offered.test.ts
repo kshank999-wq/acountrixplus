@@ -18,7 +18,7 @@ import {
 } from '@/modules/manufacturing/service'
 import { createServiceItem } from '@/modules/studio/service'
 import { setModuleEnabled } from '@/modules/industry/modules'
-import { COLUMN_WRITERS, columnWriterFor, writerCandidates } from '@/modules/source/column-writers'
+import { columnWriterFor, writerCandidates } from '@/modules/source/column-writers'
 import { RegistryError } from '@/modules/errors/registry'
 import { createCompanyFixture, type Fixture } from './helpers'
 
@@ -329,23 +329,18 @@ describe('what the register says now', () => {
     expect(() => columnWriterFor('bills_of_materials', 'isActive')).toThrow(RegistryError)
   })
 
-  it('has one finding left, and everything else is a write no pattern sees', () => {
-    /**
-     * The class ADR 0200 nominated, four phases on. Of the 30 candidates the
-     * scan still reports, 29 are columns something writes through a spread or
-     * a helper's return — which is what the register was built to hold — and
-     * **one** is a column nothing writes at all.
-     *
-     * Asserted rather than described, because "we closed them all" is the kind
-     * of claim this process keeps finding to be a count nobody checked.
-     */
-    const findings = COLUMN_WRITERS.filter((entry) => entry.verdict === 'unwritable')
+  /*
+    **This file used to assert the register's own totals too**, as *"one finding
+    left, and everything else is a write no pattern sees"* — 30 candidates, 29
+    written columns, one finding named. Phase 208 closed that finding and the
+    assertion went red, which is the fifth time in this run that one register
+    was counted in two test files and the fourth consecutive phase to spend a
+    full-suite run finding out.
 
-    expect(findings.map((entry) => `${entry.table}.${entry.columns.join(',')}`)).toEqual([
-      'vendors.organizationId',
-    ])
-
-    const written = COLUMN_WRITERS.filter((entry) => entry.verdict === 'written')
-    expect(written.flatMap((entry) => entry.columns)).toHaveLength(29)
-  })
+    So the claim has one home. `tests/a-column-nobody-could-fill.test.ts` owns
+    the register's totals and its invariants, because it owns the register; this
+    file keeps only what Phase 205 did, which is the two columns above. The
+    pattern is the same one Phase 207 settled on for `OPT_IN_CANDIDATES`: not
+    "remember to update both", which is what failed, but "there is only one".
+  */
 })

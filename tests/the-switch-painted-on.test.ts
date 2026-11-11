@@ -103,11 +103,18 @@ describe('what the census could not see', () => {
     const candidates = writerCandidates().map((row) => `${row.table}.${row.column}`)
 
     /*
-      35 when this phase measured it, 34 since Phase 203 closed
-      `gift_cards.isActive` — the one of the six switches where the thing
-      nobody could turn off was money. Corrected rather than relaxed.
+      **The total used to be asserted here**, and was corrected four times —
+      35 when this phase measured it, then 34, 32, 30 as Phases 203 to 205
+      closed switches. It is gone, and not because it stopped being worth
+      asserting: it is asserted in `tests/a-column-nobody-could-fill.test.ts`,
+      which owns this register, and holding it here as well made this file one
+      of six places one number lived. Phase 208 closed the last finding and
+      three of those six went red in one run.
+
+      What this file is about survives without the total, which is the test
+      that the total was not doing the work: the exclusion's two directions are
+      the absences and presences below.
     */
-    expect(candidates).toHaveLength(30)
 
     // There is no `isActive` left in the answer: Phase 205 closed the last
     // two. So the claim that this exclusion was too wide is carried entirely

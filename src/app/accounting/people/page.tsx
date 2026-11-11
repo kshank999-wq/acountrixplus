@@ -7,6 +7,7 @@ import {
   sharedAddresses,
 } from '@/modules/parties/service'
 import { resolveAll } from '@/modules/parties/duplicates'
+import { listOrganizations } from '@/modules/crm/opportunities'
 import { functionalCurrency } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
 import { PeopleBoard } from './board'
@@ -36,11 +37,22 @@ export default async function PeoplePage() {
     )
   }
 
-  const [customers, vendors, homeCurrency, clashes] = await Promise.all([
+  const [customers, vendors, homeCurrency, clashes, clients] = await Promise.all([
     can(actor, 'crm:view') ? listCustomerSummaries(actor) : Promise.resolve([]),
     listVendorSummaries(actor),
     functionalCurrency(actor.companyId),
     sharedAddresses(actor),
+    /**
+     * The client records a supplier may be linked to (Phase 208).
+     *
+     * `null` without `crm:view`, which is what the board reads to hide both
+     * the picker and the *name* of a link that already exists. Linking needs
+     * `accounting:journal` as well, and the service asks for both — this list
+     * decides what a reader may see, not what they may do.
+     */
+    can(actor, 'crm:view')
+      ? listOrganizations(actor, { limit: 500 })
+      : Promise.resolve(null),
   ])
 
   /**
@@ -74,6 +86,7 @@ export default async function PeoplePage() {
         canEditVendors={can(actor, 'accounting:journal')}
         homeCurrency={homeCurrency}
         sharedAddresses={resolutions}
+        clients={clients && clients.map((one) => ({ id: one.id, name: one.name }))}
         // Decided here rather than in the browser: an age computed from the
         // reader's own clock is one two people disagree about (Phase 56).
         asOf={new Date().toISOString().slice(0, 10)}
