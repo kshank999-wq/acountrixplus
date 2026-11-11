@@ -8,6 +8,7 @@ import {
   createInvoiceAction,
   createVendorAction,
   quoteDocumentAction,
+  quoteDocumentTaxAction,
   recordPaymentAction,
   revokeInvoiceLinkAction,
   sendInvoiceAction,
@@ -15,6 +16,7 @@ import {
   voidDocumentAction,
   type ActionResult,
   type Quoted,
+  type QuotedTax,
 } from '@/app/actions/documents'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 import { CorrectionButton, CorrectionPanel } from '@/components/correction-panel'
@@ -67,6 +69,8 @@ type Line = {
   chartAccountId: string
   /** The catalogue item sold, when it is one (Phase 169). */
   itemId: string
+  /** The sales tax code this line is taxed under, when it is (Phase 209). */
+  taxCodeId: string
 }
 
 const BLANK_LINE: Line = {
@@ -75,6 +79,22 @@ const BLANK_LINE: Line = {
   unitPrice: '',
   chartAccountId: '',
   itemId: '',
+  taxCodeId: '',
+}
+
+/**
+ * A sales tax code an invoice line may be taxed under (Phase 209).
+ *
+ * Offered on an invoice only: `document_tax_lines` is read per jurisdiction for
+ * a *sales* tax return, and a bill is tax somebody else collected.
+ */
+type TaxCode = {
+  id: string
+  code: string
+  jurisdiction: string
+  rateBp: number
+  /** An exempt code has no rate, so its sales are reported and not charged. */
+  isExempt: boolean
 }
 
 /**
@@ -113,6 +133,7 @@ export function InvoicesBoard({
   revenueAccounts,
   costAccounts,
   sellableItems,
+  taxCodes,
   owedByCustomers,
   owedToVendors,
   duplicates,
@@ -131,6 +152,16 @@ export function InvoicesBoard({
   costAccounts: Account[]
   /** The sellable catalogue, for an invoice line. Empty hides the picker. */
   sellableItems: SellableItem[]
+  /**
+   * The company's active sales tax codes, or **null** when this reader may not
+   * see them (Phase 209).
+   *
+   * Null rather than empty, because the two say different things: empty means
+   * the company has set none up and the composer may say so, while null means
+   * `tax:view` is not this role's and the composer must claim nothing about
+   * what the invoice is taxed under.
+   */
+  taxCodes: TaxCode[] | null
   owedByCustomers: Owed[]
   owedToVendors: Owed[]
   duplicates: Duplicate[]
@@ -234,6 +265,9 @@ export function InvoicesBoard({
             // Invoices only. A bill line's `item_id` is the purchasing side's,
             // and `inventory/purchasing` already sets it from a purchase order.
             items={isCustomer ? sellableItems : []}
+            // Invoices only, for the same reason: a sales tax return reports
+            // what we charged, and a bill is tax somebody else collected.
+            taxCodes={isCustomer ? taxCodes : null}
             homeCurrency={homeCurrency}
             currencies={currencies}
             today={today}
@@ -334,6 +368,7 @@ function Composer({
   parties,
   accounts,
   items,
+  taxCodes,
   homeCurrency,
   currencies,
   today,
@@ -345,6 +380,7 @@ function Composer({
   parties: Party[]
   accounts: Account[]
   items: SellableItem[]
+  taxCodes: TaxCode[] | null
   homeCurrency: string
   currencies: string[]
   today: string
@@ -394,22 +430,85 @@ function Composer({
     ? chosenPartyId
     : (parties[0]?.id ?? '')
 
+  // Kept per line as well as summed, because the conversion preview has to
+  // convert line by line to match what the posting will do (Phase 64) — a
+  // preview built from the total alone would differ by a cent.
+  const lineCents = useMemo(
+    () =>
+      lines.map((line) => {
+        const unit = parseAmountToCents(line.unitPrice || '0') ?? 0
+        const quantityMilli = line.quantity.trim() ? Math.round(Number(line.quantity) * 1000) : 1000
+        if (!Number.isFinite(quantityMilli)) return 0
+        return Math.round((quantityMilli * unit) / 1000)
+      }),
+    [lines],
+  )
+
+  /**
+   * Whether this invoice's tax comes from its codes or from the typed figure
+   * (Phase 209).
+   *
+   * One or the other, never both — `createInvoice` refuses a lump that
+   * disagrees with a breakdown, because two figures for one invoice's tax is
+   * the defect rather than a thing to reconcile.
+   */
+  const coded = taxCodes !== null && lines.some((line) => line.taxCodeId !== '')
+  const [taxQuote, setTaxQuote] = useState<QuotedTax>({ tax: null, refusal: null })
+
+  /**
+   * The codes and the amounts they apply to, as one string.
+   *
+   * Same device as `amountsKey` below: the arrays are fresh on every render, so
+   * depending on them directly would re-ask the server on keystrokes that
+   * changed nothing about the tax.
+   */
+  const codedKey = lines.map((line, index) => `${line.taxCodeId}:${lineCents[index]}`).join('|')
+
+  useEffect(() => {
+    if (!coded) {
+      setTaxQuote({ tax: null, refusal: null })
+      return
+    }
+
+    // Guards a slow answer for one set of codes landing after a fast answer for
+    // the next, exactly as the currency quote does.
+    let current = true
+
+    quoteDocumentTaxAction({
+      lines: lines.map((line, index) => ({
+        amountCents: lineCents[index],
+        taxCodeId: line.taxCodeId || undefined,
+      })),
+    }).then((result) => {
+      if (current) setTaxQuote(result)
+    })
+
+    return () => {
+      current = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- codedKey stands in
+    // for the lines, which are a fresh array on every render.
+  }, [coded, codedKey])
+
+  /**
+   * Still waiting to hear what the codes price to.
+   *
+   * Treated as *unknown* rather than as zero. Showing a total with the tax
+   * left out of it is Phase 61's defect — a made-up number in front of
+   * somebody — and this one would be a number they are about to raise an
+   * invoice for.
+   */
+  const taxPending = coded && taxQuote.tax === null && taxQuote.refusal === null
+
   // Worked out as it is typed. An invoice whose total somebody only discovers
   // after posting is one they have to void and raise again.
   const totals = useMemo(() => {
-    // Kept per line as well as summed, because the conversion preview has to
-    // convert line by line to match what the posting will do (Phase 64) — a
-    // preview built from the total alone would differ by a cent.
-    const lineCents = lines.map((line) => {
-      const unit = parseAmountToCents(line.unitPrice || '0') ?? 0
-      const quantityMilli = line.quantity.trim() ? Math.round(Number(line.quantity) * 1000) : 1000
-      if (!Number.isFinite(quantityMilli)) return 0
-      return Math.round((quantityMilli * unit) / 1000)
-    })
     const subtotal = lineCents.reduce((sum, cents) => sum + cents, 0)
-    const taxCents = parseAmountToCents(tax || '0') ?? 0
+    const taxCents = coded
+      ? (taxQuote.tax?.totalCents ?? 0)
+      : (parseAmountToCents(tax || '0') ?? 0)
     return { lineCents, subtotal, taxCents, total: subtotal + taxCents }
-  }, [lines, tax])
+  }, [lineCents, tax, coded, taxQuote])
 
   /**
    * What this document will book at, or why it cannot be (Phase 64).
@@ -460,7 +559,11 @@ function Composer({
     lines.some((line) => line.description.trim() && line.chartAccountId) &&
     // A foreign document with no rate cannot be raised, and saying so here
     // rather than letting the button fail is Phase 47's rule.
-    quote.refusal === null
+    quote.refusal === null &&
+    // Nor one whose tax has not come back yet, or came back refused: the
+    // currency quote would be asked with a tax figure that is not the tax.
+    !taxPending &&
+    taxQuote.refusal === null
 
   function reset() {
     setLines([{ ...BLANK_LINE }])
@@ -474,6 +577,7 @@ function Composer({
     // of raising them by accident.
     setCurrency(homeCurrency)
     setQuote({ note: null, refusal: null })
+    setTaxQuote({ tax: null, refusal: null })
     setOpen(false)
   }
 
@@ -503,7 +607,9 @@ function Composer({
       acknowledgeDuplicate,
       currency,
       memo,
-      tax,
+      // Not sent when the lines carry codes: the breakdown is the tax, and a
+      // lump alongside it is refused (Phase 209).
+      tax: coded ? '' : tax,
       lines: lines
         .filter((line) => line.description.trim() && line.chartAccountId)
         .map((line) => ({
@@ -513,6 +619,8 @@ function Composer({
           unitPrice: line.unitPrice,
           // Only an invoice carries it; `createBillAction` ignores the field.
           itemId: line.itemId || undefined,
+          // Likewise. A bill's tax is somebody else's return.
+          taxCodeId: line.taxCodeId || undefined,
         })),
     }
 
@@ -653,6 +761,9 @@ function Composer({
                       <th className="py-1 font-medium">{isCustomer ? 'Income account' : 'Account'}</th>
                       <th className="py-1 text-right font-medium">Qty</th>
                       <th className="py-1 text-right font-medium">Each</th>
+                      {taxCodes !== null && taxCodes.length > 0 && (
+                        <th className="py-1 font-medium">Tax code</th>
+                      )}
                       <th className="py-1 text-right font-medium">Amount</th>
                       <th className="py-1" />
                     </tr>
@@ -787,6 +898,53 @@ function Composer({
                               className="field w-24 py-1 text-right text-sm"
                             />
                           </td>
+                          {taxCodes !== null && taxCodes.length > 0 && (
+                            /*
+                              The picker this module existed without (Phase 209).
+
+                              `priceDocumentTax` and `recordDocumentTax` have
+                              been complete since Phase 2 and nothing under
+                              `src/app` had ever handed them a line — the only
+                              writer of `document_tax_lines` was the seed. So a
+                              company could enter the codes it is registered
+                              for, see them on the sales tax page, and never
+                              attach one to an invoice; the composer took tax as
+                              one typed figure, credited 2200, and recorded no
+                              breakdown. The return then reported nothing
+                              collected while the ledger held the lot.
+
+                              Per line, not per invoice, because a return is
+                              filed per jurisdiction and `taxPerCode` was built
+                              to round a code's combined base once and split it
+                              back across the lines it came from.
+                            */
+                            <td className="py-1.5 pr-2">
+                              <select
+                                value={line.taxCodeId}
+                                onChange={(event) =>
+                                  setLines((rows) =>
+                                    rows.map((row, i) =>
+                                      i === index
+                                        ? { ...row, taxCodeId: event.target.value }
+                                        : row,
+                                    ),
+                                  )
+                                }
+                                className="field w-32 py-1 text-sm"
+                                aria-label={`Line ${index + 1} tax code`}
+                              >
+                                <option value="">No tax</option>
+                                {taxCodes.map((taxCode) => (
+                                  <option key={taxCode.id} value={taxCode.id}>
+                                    {taxCode.code} ·{' '}
+                                    {taxCode.isExempt
+                                      ? 'exempt'
+                                      : `${(taxCode.rateBp / 100).toFixed(2)}%`}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          )}
                           <td className="tnum py-1.5 pr-2 text-right">{formatCents(amount)}</td>
                           <td className="py-1.5 text-right">
                             {lines.length > 1 && (
@@ -818,24 +976,74 @@ function Composer({
                 </button>
 
                 <div className="flex items-end gap-3">
-                  <label className="text-xs text-muted">
-                    <span className="mb-1 block">Tax</span>
-                    <input
-                      value={tax}
-                      onChange={(event) => setTax(event.target.value)}
-                      placeholder="0.00"
-                      inputMode="decimal"
-                      className="field w-24 py-1 text-right text-sm"
-                    />
-                  </label>
+                  {coded ? (
+                    /*
+                      Priced from the codes, not typed (Phase 209).
+
+                      The field is gone rather than disabled, because a disabled
+                      box holding somebody's earlier figure is still a second
+                      answer on the screen. `createInvoice` refuses a lump that
+                      disagrees with a breakdown, so there is one tax on this
+                      form and it is the one the posting will use.
+                    */
+                    <div className="text-right">
+                      <p className="text-xs uppercase tracking-wide text-muted">Tax</p>
+                      <p className="tnum text-sm font-medium">
+                        {taxPending ? '…' : formatCents(totals.taxCents, currency)}
+                      </p>
+                    </div>
+                  ) : (
+                    <label className="text-xs text-muted">
+                      <span className="mb-1 block">Tax</span>
+                      <input
+                        value={tax}
+                        onChange={(event) => setTax(event.target.value)}
+                        placeholder="0.00"
+                        inputMode="decimal"
+                        className="field w-24 py-1 text-right text-sm"
+                      />
+                    </label>
+                  )}
                   <div className="text-right">
                     <p className="text-xs uppercase tracking-wide text-muted">Total</p>
                     <p className="tnum text-lg font-semibold">
-                      {formatCents(totals.total, currency)}
+                      {/* Not the subtotal wearing the word "total" while the tax
+                          is still being priced. */}
+                      {taxPending ? '…' : formatCents(totals.total, currency)}
                     </p>
                   </div>
                 </div>
               </div>
+
+              {/* What each jurisdiction will be shown on the return, from the
+                  same arithmetic that will post it (Phase 209). Per code, which
+                  is what somebody can check against the rate their jurisdiction
+                  told them. */}
+              {taxQuote.tax && taxQuote.tax.byCode.length > 0 && (
+                <div className="rounded-lg border border-line bg-raised/60 px-3 py-2 text-xs">
+                  <p className="uppercase tracking-wide text-muted">Tax by jurisdiction</p>
+                  <ul className="mt-1 space-y-0.5">
+                    {taxQuote.tax.byCode.map((row) => (
+                      <li key={`${row.jurisdiction}-${row.code}`} className="flex justify-between gap-4">
+                        <span className="text-muted">
+                          {row.jurisdiction} · {row.code}
+                          {row.exemptCents > 0 && (
+                            <> — {formatCents(row.exemptCents, currency)} exempt</>
+                          )}
+                        </span>
+                        <span className="tnum">{formatCents(row.taxCents, currency)}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* On the row rather than behind the button (Phase 47). */}
+              {taxQuote.refusal && (
+                <p className="rounded-lg border border-danger/40 bg-raised/60 px-3 py-2 text-sm text-danger">
+                  {taxQuote.refusal}
+                </p>
+              )}
 
               <label className="block text-xs text-muted">
                 <span className="mb-1 block">Note (optional)</span>

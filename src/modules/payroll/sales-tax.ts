@@ -53,6 +53,28 @@ export async function createTaxCode(ctx: ActorContext, input: TaxCodeInput) {
     throw new Refusal('A tax rate must be between 0% and 100%.')
   }
 
+  /**
+   * An exempt code has no rate (Phase 209).
+   *
+   * `is_exempt` was settable alongside any rate for 208 phases, and nothing
+   * reconciled the two: a code marked exempt at 8.75% would have charged 8.75%,
+   * because the pricer applies `rate_bp` to whatever base it is given and takes
+   * the exempt figure from its caller. The flag was written by one form, printed
+   * by one register, and consulted by no arithmetic anywhere — which is why
+   * neither census could see it. Nothing in the suite had ever created one.
+   *
+   * A constraint rather than a check at pricing time (Phase 116). With the rate
+   * forced to zero, routing an exempt line's amount into `exempt_cents` is a
+   * *reporting* decision — which is what §13 asks for, exempt sales reported
+   * beside taxable ones — and not a second answer to what tax was charged.
+   */
+  if (input.isExempt && input.rateBp !== 0) {
+    throw new Refusal(
+      'An exempt code has no rate. Set the rate to 0%, or leave the code taxable at ' +
+        `${(input.rateBp / 100).toFixed(2)}%.`,
+    )
+  }
+
   const liability = await accountByNumber(ctx.companyId, PAYROLL_ACCOUNTS.salesTaxPayable)
 
   return db.transaction(async (tx) => {
@@ -213,6 +235,125 @@ export async function priceDocumentTax(
       exemptCents: lines[index].exemptCents ?? 0,
       taxCents: row.taxCents,
     })),
+  }
+}
+
+/**
+ * The tax lines a document's own lines imply (Phase 209).
+ *
+ * ## Why this exists at all
+ *
+ * `priceDocumentTax` and `recordDocumentTax` have been complete since Phase 2
+ * and **nothing in the application had ever supplied them a line.** `taxLines`
+ * appeared nowhere under `src/app`; the only writer of `document_tax_lines` was
+ * `db/seed.ts`. So a company could create the codes it is registered for, see
+ * them listed, and never attach one to anything — while the invoice composer
+ * took sales tax as a single typed-in figure that credits 2200 and records no
+ * breakdown at all.
+ *
+ * Which made the return and the ledger disagree by the whole of it, on every
+ * invoice the application itself raised. The one place that became visible was
+ * the return's own uncoded-sales warning, which blamed the company: *"usually a
+ * company that has not set codes up yet; occasionally a real gap."* It was a
+ * real gap every time, and not theirs.
+ *
+ * ## One code per line, not one per document
+ *
+ * A line is already what carries a job and a cost code, a return is filed per
+ * jurisdiction, and `taxPerCode` was built to round a code's *combined* base
+ * once and split the figure back across the lines it came from — so several
+ * lines sharing one code is the shape this module was written for. A document
+ * carrying one code could not have produced the exempt split at all.
+ *
+ * An exempt code's amount goes to `exemptCents` and never to the base. That is
+ * safe to derive here rather than ask for, because `createTaxCode` now refuses
+ * an exempt code with a rate: the two fields cannot disagree about what was
+ * charged, so which one the amount lands in is purely what the return reports.
+ */
+export async function taxLinesFor(
+  ctx: ActorContext,
+  lines: Array<{ amountCents: number; taxCodeId?: string | null }>,
+  exec: Executor = db,
+): Promise<DocumentTaxLineInput[]> {
+  const coded = lines.filter(
+    (line): line is { amountCents: number; taxCodeId: string } => !!line.taxCodeId,
+  )
+  if (coded.length === 0) return []
+
+  const codes = await codesFor(ctx, coded, exec)
+
+  return coded.map((line) => {
+    const code = codes.get(line.taxCodeId)
+    if (!code) throw new Refusal('That tax code is not on this company’s list.')
+
+    return code.isExempt
+      ? { taxCodeId: line.taxCodeId, taxableCents: 0, exemptCents: line.amountCents }
+      : { taxCodeId: line.taxCodeId, taxableCents: line.amountCents, exemptCents: 0 }
+  })
+}
+
+export type QuotedDocumentTax = {
+  totalCents: number
+  /** One row per code, in the order a return reads them. */
+  byCode: Array<{
+    code: string
+    jurisdiction: string
+    rateBp: number
+    taxableCents: number
+    exemptCents: number
+    taxCents: number
+  }>
+}
+
+/**
+ * What the lines being composed will be taxed, before anybody commits to it.
+ *
+ * A read. It posts nothing and writes nothing, and it exists for the reason
+ * `quoteDocument` exists one module over (Phase 64): the arithmetic has to be
+ * *the posting's own*. A composer that worked the figure out in the browser
+ * would be a second answer to what tax was charged, and it would get it wrong
+ * — the rounding is once per code on the code's combined base, not once per
+ * line, which is the defect Phase 145 found and Phase 151 repaired here.
+ *
+ * Grouped per code because that is what a person about to raise the invoice can
+ * check against the rate each jurisdiction told them.
+ */
+export async function quoteDocumentTax(
+  ctx: ActorContext,
+  lines: Array<{ amountCents: number; taxCodeId?: string | null }>,
+): Promise<QuotedDocumentTax> {
+  requirePermission(ctx, 'tax:view')
+
+  const taxLines = await taxLinesFor(ctx, lines)
+  if (taxLines.length === 0) return { totalCents: 0, byCode: [] }
+
+  const priced = await priceDocumentTax(ctx, taxLines)
+  const codes = await codesFor(ctx, taxLines, db)
+
+  const byCode = new Map<string, QuotedDocumentTax['byCode'][number]>()
+
+  for (const line of priced.lines) {
+    const code = codes.get(line.taxCodeId)!
+    const row = byCode.get(line.taxCodeId) ?? {
+      code: code.code,
+      jurisdiction: code.jurisdiction,
+      rateBp: code.rateBp,
+      taxableCents: 0,
+      exemptCents: 0,
+      taxCents: 0,
+    }
+
+    row.taxableCents += line.taxableCents
+    row.exemptCents += line.exemptCents
+    row.taxCents += line.taxCents
+    byCode.set(line.taxCodeId, row)
+  }
+
+  return {
+    totalCents: priced.totalCents,
+    byCode: [...byCode.values()].sort(
+      (a, b) => a.jurisdiction.localeCompare(b.jurisdiction) || a.code.localeCompare(b.code),
+    ),
   }
 }
 

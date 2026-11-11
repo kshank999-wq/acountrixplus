@@ -9,10 +9,12 @@ import {
   createCustomer,
   createInvoice,
   createVendor,
+  lineAmountCents,
   recordPayment,
   voidDocument,
   DocumentError,
 } from '@/modules/receivables/service'
+import { quoteDocumentTax, taxLinesFor, type QuotedDocumentTax } from '@/modules/payroll/sales-tax'
 import { openDocumentsFor, type PaymentSide } from '@/modules/receivables/open-documents'
 import { revokeShareLink, sendInvoice, shareLinkFor } from '@/modules/receivables/send'
 import { allocate } from '@/modules/receivables/allocation'
@@ -129,6 +131,14 @@ const lineSchema = z.object({
    * had nothing to group on.
    */
   itemId: uuid.optional(),
+  /**
+   * The sales tax code this line is taxed under (Phase 209).
+   *
+   * On an invoice only, like `itemId` — `createBillAction` ignores the field,
+   * and the return reads `document_type = 'invoice'`. Optional, so a company
+   * that has not set codes up carries on typing one total.
+   */
+  taxCodeId: uuid.optional(),
 })
 
 // --- Parties ---------------------------------------------------------------
@@ -234,6 +244,23 @@ export async function createInvoiceAction(input: unknown): Promise<ActionResult>
     const actor = await requireActor()
     const parsed = documentSchema.parse(input)
 
+    /**
+     * Tax from the codes the lines name, or from the typed total — never both
+     * (Phase 209).
+     *
+     * `taxCents` is left undefined when any line carries a code, because
+     * `createInvoice` now refuses a lump that disagrees with the breakdown and
+     * this form has always sent `|| 0`. Sending both would refuse every coded
+     * invoice it raised.
+     */
+    const taxLines = await taxLinesFor(
+      actor,
+      parsed.lines.map((line) => ({
+        amountCents: lineAmountCents(line.quantity, line.unitPrice),
+        taxCodeId: line.taxCodeId,
+      })),
+    )
+
     const invoice = await createInvoice(actor, {
       customerId: parsed.partyId,
       number: parsed.number || undefined,
@@ -241,7 +268,8 @@ export async function createInvoiceAction(input: unknown): Promise<ActionResult>
       issueDate: parsed.issueDate,
       dueDate: parsed.dueDate || undefined,
       memo: parsed.memo || undefined,
-      taxCents: parsed.tax || 0,
+      taxCents: taxLines.length > 0 ? undefined : parsed.tax || 0,
+      taxLines: taxLines.length > 0 ? taxLines : undefined,
       lines: parsed.lines.map((line) => ({
         chartAccountId: line.chartAccountId,
         description: line.description,
@@ -315,6 +343,45 @@ export async function quoteDocumentAction(input: unknown): Promise<Quoted> {
         'Could not work out what this would book at. Raising it in a foreign currency is ' +
           'blocked until that is known — a document whose rate is fixed at issue is not ' +
           'something to guess at.',
+      ),
+    }
+  }
+}
+
+const taxQuoteSchema = z.object({
+  lines: z.array(
+    z.object({
+      amountCents: z.number().int(),
+      taxCodeId: uuid.optional(),
+    }),
+  ),
+})
+
+export type QuotedTax = { tax: QuotedDocumentTax | null; refusal: string | null }
+
+/**
+ * What the lines being composed will be taxed (Phase 209).
+ *
+ * The same shape as `quoteDocumentAction` and for the same reason: the rounding
+ * is once per code on the code's combined base, and a composer that worked it
+ * out in the browser would be a second answer to what tax the invoice charged
+ * — the one Phase 145 found in the core itself.
+ *
+ * Not routed through `run`: it asks a question on every edit to the form, and
+ * `run` revalidates every page path.
+ */
+export async function quoteDocumentTaxAction(input: unknown): Promise<QuotedTax> {
+  try {
+    const actor = await requireActor()
+    const parsed = taxQuoteSchema.parse(input)
+
+    return { tax: await quoteDocumentTax(actor, parsed.lines), refusal: null }
+  } catch (error) {
+    return {
+      tax: null,
+      refusal: messageFor(
+        error,
+        'Could not work out the tax on these lines. The codes they name may have changed.',
       ),
     }
   }

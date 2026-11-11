@@ -603,7 +603,30 @@ export async function createInvoice(
   const pricedTax = input.taxLines?.length
     ? await priceDocumentTax(ctx, input.taxLines)
     : null
-  const taxCents = input.taxCents ?? pricedTax?.totalCents ?? 0
+  /**
+   * The breakdown wins, and a lump that disagrees with it is refused
+   * (Phase 209).
+   *
+   * This read `input.taxCents ?? pricedTax?.totalCents ?? 0`, so a lump total
+   * passed *alongside* a breakdown silently won — and `0` is not nullish, which
+   * made the composer's `taxCents: parsed.tax || 0` the winner over every priced
+   * line it would ever send. The header would have said nothing while
+   * `document_tax_lines` said the lot, which is the exact disagreement
+   * `taxLines`' own docstring promises cannot happen.
+   *
+   * Refused rather than reconciled, because two figures for one invoice's tax
+   * is the defect and picking one of them is not an answer. The refusal names
+   * both, so somebody can see which is the one they meant (Phase 47).
+   */
+  if (pricedTax && input.taxCents !== undefined && input.taxCents !== pricedTax.totalCents) {
+    throw new DocumentError(
+      `This invoice says its tax is ${formatCents(input.taxCents, input.currency)} and its codes ` +
+        `price it at ${formatCents(pricedTax.totalCents, input.currency)}. Give a total or a ` +
+        'breakdown by code, not both.',
+    )
+  }
+
+  const taxCents = pricedTax?.totalCents ?? input.taxCents ?? 0
   const totalCents = subtotalCents + taxCents
 
   if (totalCents <= 0) {

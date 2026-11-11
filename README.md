@@ -7991,6 +7991,61 @@ recognises a query by a name, and every name it uses is a place something can
 hide.
 
 
+### The tax code nothing could reach (Phase 209)
+
+`createTaxCode`, `listTaxCodes`, `priceDocumentTax`, `recordDocumentTax` and `salesTaxReturn` have
+been complete since Phase 2. **Nothing under `src/app` had ever handed them a tax line.** The string
+`taxLines` appeared in no screen and no action; the only writer of `document_tax_lines` was
+`db/seed.ts`. So a company could enter the codes its jurisdictions registered it for, see them
+listed on the sales tax page, and never attach one to anything.
+
+What the invoice composer took instead was sales tax as a single typed figure. That credits 2200
+Sales Tax Payable and records no breakdown at all — so on every invoice the application itself
+raised, **the ledger held the tax and the return reported none of it.** The sales tax page prints
+the variance between exactly those two numbers, and its own docstring says why: *"they answer
+different questions, and quietly presenting one as the other is how a return gets filed for the
+wrong amount."*
+
+This is Phase 169's finding one table over. `invoice_lines.item_id` had existed since Phase 14 with
+no writer but a test, and Phase 169 built the screen that fills it. What let this one survive forty
+phases longer is that **it had seed data**: the demo writes `document_tax_lines` through
+`createInvoice`'s own API, so the page, the runbook step and the browser verification all showed a
+working sales tax return. Only the application could not produce one.
+
+The page even detected it, and blamed the reader. `hasUncodedSales` is `NOT EXISTS (document_tax_lines …)`,
+which is every invoice raised through the composer, and the warning read *"usually a company that
+has not set codes up yet; occasionally a real gap."* It was a real gap every time, and not theirs.
+That is ADR 0134's rule at its sharpest — an exclusion that *excuses* a site is worse than one that
+misses it — printed in front of the user.
+
+**A tax code per line, not per invoice.** A line already carries a job and a cost code, a return is
+filed per jurisdiction, and `taxPerCode` was built to round a code's *combined* base once and split
+the figure back across the lines it came from, so several lines sharing one code is the shape this
+module was written for. The figure is quoted by the server as the lines are typed, for the reason
+`quoteDocument` is (Phase 64): the arithmetic has to be the posting's own, and a browser that worked
+it out would get the per-code rounding wrong in exactly the way Phase 145 found in the core.
+
+Three things came out of building it.
+
+**The precedence was backwards, and silent.** `createInvoice` read
+`input.taxCents ?? pricedTax?.totalCents ?? 0` — and `0` is not nullish, so the composer's own
+`taxCents: parsed.tax || 0` would have beaten every priced line it ever sent: a header reading
+nothing beside a breakdown reading the lot. It refuses the pair now, naming both figures, because
+two answers to one invoice's tax is the defect rather than something to reconcile.
+
+**`is_exempt` was consulted by no arithmetic anywhere.** Written by one form, printed by one
+register, read by nothing that computes a figure — so a code marked exempt at 8.25% charged 8.25%,
+beside a checkbox that has said *"sales tracked, no tax charged"* since Phase 2. Neither census could
+see it: the column has a writer and it has a reader. Nothing in the suite had ever created one.
+`createTaxCode` refuses an exempt code with a rate now, which makes routing an exempt line's amount
+into `exempt_cents` a *reporting* decision rather than a second answer about what was charged — and
+makes the checkbox's promise true.
+
+**The demo was on a path no screen could take.** Its taxed invoice was one $4,800.00 line carrying
+two codes, with $600.00 of exempt sales hung on the city line — a shape the composer cannot build,
+and one where the exempt figure reached a return without appearing on the invoice. It is three lines
+now, one code each, including the exempt one. The tax is unchanged at $328.00.
+
 ### The supplier who is also a client (Phase 208)
 
 A firm can both buy from you and sell to you. `organizations` is this application's one party record
@@ -9249,6 +9304,7 @@ Coverage matches what spec §21 asks for:
 | `tests/the-access-that-disappeared-quietly.test.ts` | **The access that disappeared quietly** (Phase 204): ADR 0203's two remaining *enforced* switches, and beside them a defect **neither census could report** — both are about columns and this is about a write that never happens. Three practice-side actions remove a client's access and the client's audit log said nothing: `endEngagement` audited only `if (party.side === 'client')`, so the accountant walking away was never recorded; `removePracticeMember` deletes memberships at **every** client of the firm and audited nothing on either side; closing a practice would have been a third. §14 asks for an audit log of permission changes, and losing your accountant's access is one. Never a decision: `recordAudit` needs a company and the practice side has none, but all three things it needs are on the engagement and `ActorContext.viaPractice` was built to produce exactly the line *Dana Chen (Hartley & Co)* — it had never fired on these two. One extra column made the second possible, because the sweep selected `{ id }` alone and a client's log is keyed by company; it writes one event per client now, since an event filed against one of twelve companies is eleven companies with no record. The till settles the asymmetry ADR 0203 expected to be hard: a gift card's balance is a liability on 2590, so making a card unspendable without moving it leaves money nobody can settle — a drawer's float is cash `closeShift` already counts, so the refusal is just *close the shift first* and nothing posts. Closing a firm is `practices.isActive`, whose strongest reader is `practicesFor`: an inactive firm leaves its own members' list. Verified by reverting the audit branch. And the ordering of the last three phases rests on a correction: two Phase 202 register entries were wrong as drafted, and reading the call sites is what separated *enforced* switches from *projection-only* ones |
 | `tests/offered-and-not-offered.test.ts` | **Offered, and not offered** (Phase 205): the last two of the six switches, and **all six closed**. They were last because reading each reader split them into *enforced* (a refusal already written, so the gap was the writer) and *projection-only* (selected to be displayed, filtered by nothing — a writer alone would be a control with no effect). ADR 0204 said *filter first*, which was right and incomplete: the two need the filter in **different places**, and the reason is copying against referencing. A clause is **copied** into a document as a `clauseVersionId`, so retiring one is invisible to every proposal ever sent and not offering it is the whole job — `listClauses` filters, with the option as `includeRetired` **opt-out**, because three screens read it and two of them *offer* clauses, so forgetting the flag must be safe (the shape `listTeamMembers` already had in the same module). A work order **references** its recipe for the life of the run, so filtering the read would cost a half-built batch the recipe it was costed against — the recipe stays readable and `createWorkOrder` refuses to *start* a run against a superseded one, in the service rather than only the picker. That refusal also closed something nobody had asked about: **nothing validated `bomId` at all**, the composite foreign key having been doing the existence and tenant checks. Verified by reverting the filter. The register now declares **one** finding, `vendors.organizationId`, and Phase 202's assertion about which switches are declared reaches its third and final state — five, then two, then none |
 | `tests/a-retirement-with-no-way-back.test.ts` | **A retirement with no way back** (Phase 206): the nomination was wrong twice and measuring it found two real things. No screen was offering retired items (all three offer-sites passed the flag), and retiring an item with stock hides nothing (`stockOnHand` filters on `isInventoried`, not `isActive`) — so ADR 0205's two reasons both measured false, as did its reason for declining the fix: four callers, not five, and no behaviour change. What was real: **`deactivateServiceItem` set `isActive` false only**, from Phase 4, with no restore and no audit — a delete wearing a flag, and a **third shape no census asks about**, since a column with a one-directional writer is read *and* written and so invisible to the reader-no-writer census and to the mirror Phase 203 declined. And `listServiceItems` was **one of seven** functions with that default, not the last: `listAccounts` had four callers feeding a `<select>` with no flag — the till pay-out, the takings categories, the budget lines, the recurring-billing revenue account — so `account.retire`'s claim that retiring *takes it out of every picker* was false for four of them **for eighty-eight phases**, the reason being in the same sentence (an opt-in flag is a claim about what callers remember). Fixed, with the docstring keeping its wording and the correction attached. Not filtered everywhere: `dimensions` needs a name lookup and the §19 export needs the whole chart — *offering* against *displaying*. Found by a blanket assertion going red on a **different function** with the same default: the check was wrong and what it found was right |
+| `tests/the-tax-code-nothing-could-reach.test.ts` | **The tax code nothing could reach** (Phase 209): the sales tax module has been complete since Phase 2 and **nothing under `src/app` had ever handed it a tax line** — `taxLines` appeared in no screen and no action, and the only writer of `document_tax_lines` was the seed. The composer took tax as one typed figure, which credits 2200 and records no breakdown, so every invoice the application raised put the tax in the ledger and none of it on a return, with the page printing the variance between the two. Phase 169's finding one table over, surviving forty phases longer because **seed data made it look wired**. The page detected it and blamed the reader: `hasUncodedSales` is every composer-raised invoice, under a warning reading *"usually a company that has not set codes up yet"* — ADR 0134's excusing exclusion, printed in front of the user. Asserts the chain end to end through the same `taxLinesFor` the action uses: breakdown written, rates frozen, return reporting what the ledger holds, variance zero, `hasUncodedSales` false — and the lump path still working, still uncoded, with its variance pinned at the full amount. Then two defects building it turned up: the precedence was `input.taxCents ?? pricedTax?.totalCents`, and `0` is not nullish, so the composer's `|| 0` would have beaten every priced line it sent (refused now, naming both figures); and `is_exempt` was read by no arithmetic anywhere, so an exempt code at 8.25% charged 8.25% beside a checkbox promising otherwise — invisible to both censuses, since the column has a writer and a reader. Not asserted here: the per-code rounding identity, which stays in `tax-that-foots-on-the-document` |
 | `tests/the-supplier-who-is-also-a-client.test.ts` | **The supplier who is also a client** (Phase 208): `vendors.organizationId` was the column census's last finding, declared in **five consecutive ADRs**. `organizations` is the one party record and customer and vendor are *accounting roles* it plays; `engagement/filing.ts` spends 163 lines on the firm that both buys and sells, files a remittance on the supplier, and carries the organisation along *whenever the party has one* — which for a vendor was never, because `crm/conversion.ts` writes the customer side when an opportunity is won and nothing wrote the vendor side. The declared blocker was that `VENDOR_FIELDS` is a registry of **text fields** so the link would be a new *kind* of field with a uuid in the audit trail. True, and it does not follow: **the customer side is not a field either** — `CUSTOMER_FIELDS` has no such entry, and `mergeParties` already sits beside that form as a non-text act. So the link is an act, the registry learns nothing, and the audit entry carries the client's **name**. Asserted end to end through `sendRemittanceEmail`: filed on the supplier and on nobody else before, on both after, and never on the customer side. Four refusals (unknown vendor, unknown client, repointing — a remittance already filed stays filed — and a second supplier for one client, Phase 45's split aging one table over), the undo in the same phase on Phase 206's rule, and both `accounting:journal` and `crm:view`, which refuses an **accountant** and refuses **sales** |
 | `tests/a-name-is-not-a-function.test.ts` | **A name is not a function** (Phase 207): ADR 0206 nominated *nine flagless callers* of `listFinancialAccounts`. **There are two exported functions with that name** — one in `banking/sync.ts` that takes no option and always filters, imported by five screens that were correct all along, and one in `banking/accounts.ts` with `activeOnly` opt-in and a different return shape, with four callers. The count was wrong because it was taken **by name**, which is Phases 196–198's lesson about scans turned on a grep: a name is a claim about what code does, and the same claim was attached to two bodies. Renamed to `pickableFinancialAccounts`, so the claim is readable where it is *called*. One live defect of the four real callers: the **refund** picker was built from every account the company ever had, so a refund could leave a closed bank account. Flipping the default was safe only because the callers were read first — **two would have broken**: `cashTieOut` ties each account's feed to the ledger and a closed account with a balance still has to tie out (excluding it turns a disagreement into silence), and `settings/accounts` carries the **Reopen** control, so the flip would have hidden closed accounts from the one screen that can restore them — Phase 206's defect reintroduced by Phase 207's own change. Verified by reverting the tie-out's flag. A third break was caught by a test: a blanket rewrite made two calls in `financial-accounts` mean the same thing, so *still there, and still findable* was testing the line above it |
 | `tests/the-last-unmeasured-sentence.test.ts` | **The last unmeasured sentence** (Phase 199): §20, and the claim the audit had carried since Phase 164 — *Phases 0–8 all have shipped work* — which four consecutive phases had deferred. It is also the **weakest reading available**: "has shipped work" is true of a phase if anything in it shipped, and §20 is nine cells each listing several deliverables, which is exactly where Phase 195 found §11 claiming seven of seven *rows* against twenty-five of thirty-three *functions*. Counted per deliverable §20 asks for **fifty-one**, and all fifty-one are built — so the sentence holds in its strong reading too, which is a result rather than a formality: the alternative was deferring it a fifth time on the strength of nobody having looked. `PHASE_DELIVERABLES` is what replaced it, carrying §20's own words, the files that ship each one, and an argument per entry. Three assertions do the work: the keys appear verbatim in their §20 cell, **no word of any cell is unaccounted for** (strip every deliverable and only punctuation may survive — without which the register could cover two items of an eight-item cell and pass, the §11 defect inside the register built to prevent it), and all sixty-nine named paths exist. That last one **caught four of its own on the first run** — `modules/tax`, `ai/layout.ts`, `brand/brand.ts`, `db/schema/bookkeeping.ts`, every one written from what I expected the tree to look like; sales tax lives under `payroll/`, which that entry now says out loud. ADR 0194 had argued this file could not be made self-measuring because "all 12 have a module" is a judgement — right about integers, and the way round it is to write the judgement down once in `because` and check the wording, the coverage and the files around it. Three Phase 0 entries ship no code and say so. The phase's other find is in `modules/mobile/operations.ts`, which hardcoded `rememberVendor: false` on the offline queue and excused it with *"the phone offers the checkbox only when online"* — **false**, the review deck always queues, so the phone has never offered vendor memory at all: ADR 0134's rule in a comment rather than a register. Kept as a decision, with the queue handed the flag deliberately and `tests/mobile.test.ts` asserting no rule appears, which tells "the schema drops it" from "the phone happens not to send it" |
@@ -9777,14 +9833,23 @@ key and the client proposal link — keep them for steps 22 and 24.
 96. **A remittance is not an expense** — record one, then check **Accounting → Reports**. The P&L is
     unchanged. The cost was recognised when the payroll ran; this settles a debt.
 97. **Sales tax is priced from your codes** — **Sales tax** shows two jurisdictions at rates the
-    company entered. The seeded invoice carries $328.00 split between them, and it foots to the
-    ledger exactly: the invoice header and the per-jurisdiction breakdown come from one read of
-    the codes inside one transaction.
+    company entered, and a third code that is exempt. The seeded invoice carries $328.00 split
+    between the two rated ones, and it foots to the ledger exactly: the invoice header and the
+    per-jurisdiction breakdown come from one read of the codes inside one transaction. Raise one
+    yourself in **Accounting → Invoices** — each line has a **Tax code** box, the tax is priced by
+    the server as you type, and the breakdown appears per jurisdiction before you commit. Until
+    Phase 209 that box did not exist: the seed was the only thing that had ever written a tax
+    breakdown, and an invoice raised here credited 2200 and appeared on no return.
 98. **A rate change does not restate history** — the rate shown against each line is the rate *as
     applied*. Change a code's rate and the past quarter does not move.
-99. **The uncoded-sales warning is a real gap, not noise** — the demo has $29,600.00 of invoiced
-    sales carrying no tax code, so they appear on no jurisdiction's return. Most software would
-    show a short figure and say nothing.
+99. **The uncoded-sales warning is a real gap, not noise** — most of the demo's invoiced sales carry
+    no tax code, so they appear on no jurisdiction's return, and the page says so in money. Most
+    software would show a short figure and say nothing. The amount depends on the period the page
+    is showing, which defaults to the current quarter, so it is not quoted here. Its wording was
+    itself a finding: it said *"usually a company that has not set codes up yet"*, which blamed the
+    reader for a gap the application enforced, since no screen could attach a code. It now names
+    the two things that actually produce the figure, one of which is the typed-total path that
+    still exists.
 100. **What is stopping a filing** — **Contractors** lists Delta Electrical: paid $3,400.00, marked
      reportable, and *no tax identifier on file*. The figure was the easy part. That missing number
      is what actually stops a filing in January, when they no longer answer the phone.
@@ -11673,9 +11738,22 @@ Gaps within the phases already built:
   that forgets it offers retired things. `listEmployees`, `listTaxCodes`, `listCostCodes` and
   `subcontractorSummaries`. Phase 206 flipped `listServiceItems` and fixed the chart's four
   pickers, Phase 207 flipped `listFinancialAccounts` — and each of those two phases produced a
-  wrong count before the callers were read, so the remaining four will be measured rather than
-  guessed. `listAccounts` keeps its opt-in flag deliberately: two of its callers legitimately need
-  the whole chart.
+  wrong count before the callers were read. **Phase 209 read all four**, which is what ADR 0208
+  nominated, and the default has never once been taken wrongly: ten call sites outside the tests,
+  every register correctly without the flag and every offer correctly with it. So the flip is a
+  refactor with no defect behind it and it waits for one. What the reading found instead is below.
+- **An employee cannot be recorded as having left, and a tax code cannot be retired.** `employees`
+  has one insert and **no update anywhere**, so `is_active` and `end_date` have no writer;
+  `tax_codes.is_active` has none either. ADR 0208's headline — a departed employee in a payroll run
+  picker — is a real defect reached by the opposite route: the run page passes `activeOnly: true`
+  correctly and the flag does nothing. **Neither column is a census finding**, which is the part
+  worth keeping: a column is a candidate only when something names it as `table.column`, and both
+  functions select every row and filter in JavaScript on `row.isActive`, so the string the scan
+  looks for is never written. Phase 202 narrowed this register's default exclusion and closed *"all
+  six `isActive` switches"* it exposed; these two were never exposed. Pinned as source assertions
+  in `tests/the-tax-code-nothing-could-reach.test.ts`, so a retire control arriving goes red rather
+  than leaving the declaration quietly false. `listAccounts` keeps its opt-in flag deliberately:
+  two of its callers legitimately need the whole chart.
 - **The two `listFinancialAccounts`-shaped functions are still two functions.** They return
   different shapes — the pickable one joins the chart account for a display name — so merging them
   is a change to five screens' props. Renaming made the difference visible; making it unnecessary

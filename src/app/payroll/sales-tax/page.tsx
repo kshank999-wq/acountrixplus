@@ -99,8 +99,9 @@ export default async function SalesTaxPage({
           <span className="font-medium text-warning">
             {formatCents(report.uncodedSalesCents)} of invoiced sales carry no tax code
           </span>{' '}
-          and so appear on no jurisdiction’s return. Usually a company that has not set codes up
-          yet; occasionally a real gap.
+          and so appear on no jurisdiction’s return. Code the lines on the invoices that should be
+          taxed, or, if the tax on them was entered as a single figure, it is in Sales Tax Payable
+          and on no return.
         </p>
       )}
 
@@ -110,8 +111,9 @@ export default async function SalesTaxPage({
       >
         {report.lines.length === 0 ? (
           <Empty>
-            No tax was charged in this period. Add the codes you are registered for below, and
-            invoices raised against them will appear here.
+            No tax was charged in this period. Add the codes you are registered for below, then
+            choose one on an invoice line in <strong>Accounting → Invoices</strong> — that is what
+            puts a sale on a jurisdiction’s return.
           </Empty>
         ) : (
           <Table

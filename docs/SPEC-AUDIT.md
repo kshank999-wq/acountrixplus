@@ -470,6 +470,46 @@ can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
 
+### §13 — the tax code nothing could reach (Phase 209)
+
+§13 asks for sales tax support, and this audit has recorded it as built since
+Phase 2: codes a company owns, tax priced per code, a breakdown frozen at the
+rate as applied, and a return per jurisdiction. All of that exists and all of it
+works. **Nothing in the application could put a code on an invoice.**
+
+`taxLines` appeared nowhere under `src/app`, and the only writer of
+`document_tax_lines` was `db/seed.ts`. The composer took sales tax as a single
+typed figure, which credits 2200 Sales Tax Payable and records no breakdown — so
+on every invoice the application itself raised, the ledger held the tax and the
+return reported none of it. The page prints the variance between exactly those
+two numbers.
+
+**Why the audit missed it.** This section was checked bullet by bullet, and
+every bullet was true of the core. The bullet-level pass asks whether the
+capability exists, not whether a screen reaches it — and here the seed made even
+that question look answered: the demo writes a breakdown through `createInvoice`'s
+own API, so the page, the runbook step and the browser verification all showed a
+working sales tax return. It is Phase 169's finding (`invoice_lines.item_id`,
+complete since Phase 14, written only by a test) with demo data on top.
+
+Worse, the module detected the gap and attributed it to the reader.
+`hasUncodedSales` is `NOT EXISTS (document_tax_lines …)`, which is every invoice
+raised through the composer, and the warning read *"usually a company that has
+not set codes up yet; occasionally a real gap"*. ADR 0134's rule — an exclusion
+that *excuses* a site is worse than one that misses it — in user-facing copy.
+
+**What it closes:** a tax code per invoice line, priced by the server as the
+lines are typed and shown per jurisdiction before anybody commits; a refusal
+when a typed total and a breakdown disagree, where the precedence had silently
+favoured the total; and `is_exempt`, which was read by no arithmetic anywhere, so
+an exempt code at 8.25% charged 8.25%. An exempt code has no rate now.
+
+**What it does not close:** a tax code cannot be retired from any screen — the
+register has no control for it, so `activeOnly` can only ever hide a row set
+outside the application. And `document_tax_lines.documentType` admits `'bill'`
+and nothing writes it; §13 asks for sales tax and not purchase tax, so that is a
+column the schema anticipates rather than a bullet left undone.
+
 ### §6, §19 — the supplier who is also a client (Phase 208)
 
 §6 asks for *"unified contact/company records with lead, prospect, active

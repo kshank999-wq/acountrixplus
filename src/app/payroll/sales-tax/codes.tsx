@@ -38,7 +38,8 @@ export function TaxCodes({ codes, canManage }: { codes: Code[]; canManage: boole
   const [effectiveFrom, setEffectiveFrom] = useState('')
 
   function submit() {
-    const percent = Number(rate)
+    // Zero when exempt, whatever is left in the box behind the disabled field.
+    const percent = isExempt ? 0 : Number(rate)
     if (!Number.isFinite(percent)) {
       setMessage({ text: 'Enter the rate as a percentage, e.g. 8.25.', ok: false })
       return
@@ -114,7 +115,16 @@ export function TaxCodes({ codes, canManage }: { codes: Code[]; canManage: boole
               <input
                 className="field ml-1 inline-block w-24 text-right"
                 placeholder="8.25"
-                value={rate}
+                /*
+                  An exempt code has no rate (Phase 209). The checkbox below has
+                  said "sales tracked, no tax charged" since Phase 2 and the
+                  service did not keep that promise: `is_exempt` was consulted
+                  by no arithmetic anywhere, so a code marked exempt at 8.25%
+                  charged 8.25%. `createTaxCode` refuses the pair now, and the
+                  form stops offering it rather than waiting to be refused.
+                */
+                value={isExempt ? '' : rate}
+                disabled={isExempt}
                 onChange={(event) => setRate(event.target.value)}
               />
               <span className="ml-1">%</span>

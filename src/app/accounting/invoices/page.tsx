@@ -13,6 +13,7 @@ import {
   partiesWithOpenDocuments,
 } from '@/modules/receivables/open-documents'
 import { listFinancialAccounts } from '@/modules/banking/accounts'
+import { listTaxCodes } from '@/modules/payroll/sales-tax'
 import { suspectedDuplicateBills } from '@/modules/payables/duplicates'
 import { currencyChoices } from '@/modules/fx/service'
 import { ACCOUNTING_NAV } from '../nav'
@@ -63,6 +64,7 @@ export default async function InvoicesPage() {
     banks,
     duplicates,
     currencies,
+    taxCodes,
   ] = await Promise.all([
     listInvoices(actor, { limit: 60 }),
     listBills(actor, { limit: 60 }),
@@ -82,6 +84,37 @@ export default async function InvoicesPage() {
     suspectedDuplicateBills(actor, { limit: 25 }),
     // What the composer may offer, and which of them is home (Phase 64).
     currencyChoices(actor),
+    /*
+      The sales tax codes an invoice line may be taxed under (Phase 209).
+
+      A list **or null**, where null means this reader may not see the company's
+      tax codes — which hides the picker and, with it, any claim about what an
+      invoice is taxed under. An empty list would have hidden the control and
+      still implied there was nothing to choose. Phase 208's shape, for the same
+      reason: `tax:view` is separate from `accounting:view`, and `readonly` has
+      the second without the first.
+
+      Active only. A code the company has retired should not be offered on a new
+      invoice, while every line already pointing at one keeps its frozen rate —
+      which is this list function's `activeOnly` opt-in taking its first offer
+      site in 209 phases.
+
+      And the flag is **inert today**, which is said here rather than left for
+      somebody to discover: `tax_codes.is_active` has no writer anywhere in the
+      application, so no code can be retired and this filter can only ever drop
+      a row somebody set false in the database by hand. The flag is passed all
+      the same, because the alternative is an offer site that goes wrong the
+      moment a retire control exists.
+
+      Measuring ADR 0208's nomination is what found it, and `employees` is the
+      same shape and worse: one insert, no update, so `is_active` and `end_date`
+      have no writer either and an employee cannot be recorded as having left.
+      Neither is a column census finding, because `listTaxCodes` and
+      `listEmployees` select every row and filter in JavaScript — so the string
+      `taxCodes.isActive` is never written, and the scan's rule for a column
+      being read is that something names it.
+    */
+    can(actor, 'tax:view') ? listTaxCodes(actor, { activeOnly: true }) : Promise.resolve(null),
   ])
 
   return (
@@ -155,6 +188,16 @@ export default async function InvoicesPage() {
         owedByCustomers={owedByCustomers}
         owedToVendors={owedToVendors}
         banks={banks.map((row) => ({ id: row.id, name: row.name }))}
+        taxCodes={
+          taxCodes &&
+          taxCodes.map((row) => ({
+            id: row.id,
+            code: row.code,
+            jurisdiction: row.jurisdiction,
+            rateBp: row.rateBp,
+            isExempt: row.isExempt,
+          }))
+        }
         homeCurrency={currencies.homeCurrency}
         currencies={currencies.offerable}
         today={new Date().toISOString().slice(0, 10)}

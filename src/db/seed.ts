@@ -1401,22 +1401,59 @@ async function main() {
     rateBp: 400,
     effectiveFrom: '2026-01-01',
   })
-  console.log('  2 tax codes at 8.25% and 4% — the company’s rates, not ours.')
+  /**
+   * An exempt code, which this demo had none of (Phase 209).
+   *
+   * `is_exempt` had no test and no seeded instance for 208 phases, and nothing
+   * in the application's arithmetic read it — a code marked exempt at a rate
+   * charged that rate. `createTaxCode` refuses the pair now, so this one has no
+   * rate, and the invoice below puts a line under it.
+   */
+  const resale = await createTaxCode(ctx, {
+    code: 'RESALE',
+    name: 'Sold for resale — exempt certificate on file',
+    jurisdiction: 'City',
+    rateBp: 0,
+    isExempt: true,
+    effectiveFrom: '2026-01-01',
+  })
+  console.log('  3 tax codes: 8.25%, 4%, and one exempt.')
 
   if (contractRevenue) {
+    /**
+     * One code per line, which is what the composer can now produce.
+     *
+     * This was one $4,800.00 line carrying two tax codes, with $600.00 of
+     * exempt sales hung on the city line — a shape no screen could have built,
+     * and one where the exempt figure appeared on a return without appearing on
+     * the invoice. Per line, the exempt sale is a line somebody billed.
+     *
+     * The tax is unchanged at $328.00: $3,200.00 at 8.25% plus $1,600.00 at 4%.
+     */
     const taxed = await createInvoice(ctx, {
       customerId: harborview.id,
       issueDate: '2026-08-05',
       lines: [
         {
           chartAccountId: contractRevenue.id,
-          description: 'Kitchen fit-out — taxable materials and labour',
-          unitPriceCents: 480_000,
+          description: 'Kitchen fit-out — taxable materials',
+          unitPriceCents: 320_000,
+        },
+        {
+          chartAccountId: contractRevenue.id,
+          description: 'Kitchen fit-out — taxable labour',
+          unitPriceCents: 160_000,
+        },
+        {
+          chartAccountId: contractRevenue.id,
+          description: 'Fixtures sold on their resale certificate',
+          unitPriceCents: 60_000,
         },
       ],
       taxLines: [
-        { taxCodeId: cityTax.id, taxableCents: 320_000, exemptCents: 60_000 },
+        { taxCodeId: cityTax.id, taxableCents: 320_000 },
         { taxCodeId: stateTax.id, taxableCents: 160_000 },
+        { taxCodeId: resale.id, taxableCents: 0, exemptCents: 60_000 },
       ],
     })
     console.log(
