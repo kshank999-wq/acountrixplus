@@ -70,7 +70,12 @@ describe('the class, measured', () => {
      * which is the failure this phase's own first drafts kept producing: a
      * denominator quoted as a total.
      */
-    expect(columnsScanned()).toEqual({ tables: 185, columns: 2179 })
+    /*
+      2,179 until Phase 210 dropped `segments.is_active` and
+      `vehicles.is_active` — two columns with no writer and no reader, which is
+      a migration rather than a register entry.
+    */
+    expect(columnsScanned()).toEqual({ tables: 185, columns: 2177 })
     /*
       27 when this phase measured it, and 35 since Phase 202 narrowed the
       exclusion for a defaulted column — see `schemaColumns`. The eight it
@@ -79,12 +84,20 @@ describe('the class, measured', () => {
       to a bound (Phase 126). 34 since Phase 203 closed one of the eight, and 32
       since Phase 204 closed the two remaining enforced switches, and 30 since
       Phase 205 closed the projection-only pair — all six of them, in the order
-      reading their readers established. **29 since Phase 208** closed
-      `vendors.organizationId`, which is the last of the findings and leaves
-      the register holding only columns something writes in a way no pattern
-      can see.
+      reading their readers established. 29 since Phase 208 closed
+      `vendors.organizationId`.
+
+      **96 since Phase 210**, and that is a correction to the scan rather than
+      72 new columns. `writerCandidates` would not look at a column unless a
+      query *named* it, and a projectionless `select()` names nothing while
+      reading everything — so the sentence this block used to end on, *"the
+      last of the findings"*, was a claim about what the scan could see. Of the
+      72 it had never examined, **16 are written by nothing**. Of the thirty
+      tables that carried an `isActive`, the twenty-four naming it in a query
+      all had a writer and five of the six that did not had none — the sixth,
+      `cost_codes`, is the control, same shape and a writer anyway.
     */
-    expect(writerCandidates()).toHaveLength(29)
+    expect(writerCandidates()).toHaveLength(96)
   })
 
   it('declares every candidate', () => {
@@ -446,10 +459,19 @@ describe('the two it does not close', () => {
       'vendors.organizationId',
     )
 
-    // And the register has no findings at all now, which is the first time
-    // since Phase 201 built it. Its word for one is kept — see
-    // `tests/the-supplier-who-is-also-a-client.test.ts`, which owns that
-    // claim so this file and that one do not both count it.
-    expect(COLUMN_WRITERS.every((row) => row.verdict === 'written')).toBe(true)
+    /*
+      This asserted that the register had **no findings at all**, which was
+      true of what the scan could see and is the claim Phase 210 took apart:
+      the read rule skipped any column no query named, so 72 were never
+      examined. The count of findings now lives in
+      `tests/the-switch-the-census-could-not-see.test.ts`, which owns it, and
+      what is asserted here is the narrower thing this test is about — that
+      `vendors.organizationId` is not among them.
+    */
+    expect(
+      COLUMN_WRITERS.filter(
+        (row) => row.table === 'vendors' && row.columns.includes('organizationId'),
+      ),
+    ).toHaveLength(0)
   })
 })

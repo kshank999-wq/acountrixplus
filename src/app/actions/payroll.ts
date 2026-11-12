@@ -5,6 +5,7 @@ import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import {
   createEmployee,
+  recordEmployment,
   createPayrollRun,
   totalsFor,
   voidPayrollRun,
@@ -12,7 +13,7 @@ import {
 } from '@/modules/payroll/service'
 import { getPayrollProvider } from '@/modules/payroll/provider'
 import { recordRemittance } from '@/modules/payroll/remittance'
-import { createTaxCode } from '@/modules/payroll/sales-tax'
+import { createTaxCode, setTaxCodeActive } from '@/modules/payroll/sales-tax'
 import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
 import { FilingBlockedError, markFiledExternally, prepareFiling } from '@/modules/payroll/workpapers'
 import { messageFor } from '@/modules/errors'
@@ -93,6 +94,35 @@ export async function createEmployeeAction(input: unknown): Promise<ActionResult
     })
 
     return `${employee.name} added.`
+  })
+}
+
+/**
+ * Recording that somebody has left, and undoing it (Phase 210).
+ *
+ * `endDate: ''` is the reinstatement rather than a separate action, because an
+ * empty leaving date is what "they are still here" looks like on the form, and
+ * two actions would be two vocabularies for one correction (Phase 70). The
+ * service refuses a future date and a date before they started.
+ */
+const employmentSchema = z.object({
+  employeeId: z.string().uuid(),
+  endDate: isoDate.optional().or(z.literal('')),
+})
+
+export async function recordEmploymentAction(input: unknown): Promise<ActionResult> {
+  return run(PAYROLL_PATHS, async () => {
+    const actor = await requireActor()
+    const parsed = employmentSchema.parse(input)
+
+    const employee = await recordEmployment(actor, {
+      employeeId: parsed.employeeId,
+      endDate: parsed.endDate || null,
+    })
+
+    return employee.endDate
+      ? `${employee.name} recorded as having left on ${employee.endDate}.`
+      : `${employee.name} is back on the payroll.`
   })
 }
 
@@ -357,6 +387,32 @@ export async function createTaxCodeAction(input: unknown): Promise<ActionResult>
     })
 
     return `${created.code} added for ${created.jurisdiction}.`
+  })
+}
+
+/**
+ * Retiring a tax code, and bringing it back (Phase 210).
+ *
+ * Revalidates the invoice composer as well as the register, because the picker
+ * Phase 209 built there is the only thing that reads the flag — a retired code
+ * still being offered until the next full load would be the inert flag again
+ * with an extra step.
+ */
+const taxCodeActiveSchema = z.object({
+  taxCodeId: z.string().uuid(),
+  isActive: z.boolean(),
+})
+
+export async function setTaxCodeActiveAction(input: unknown): Promise<ActionResult> {
+  return run(['/payroll/sales-tax', '/accounting/invoices'], async () => {
+    const actor = await requireActor()
+    const parsed = taxCodeActiveSchema.parse(input)
+
+    const code = await setTaxCodeActive(actor, parsed)
+
+    return code.isActive
+      ? `${code.code} is available again.`
+      : `${code.code} retired. Invoices already raised under it are unchanged.`
   })
 }
 

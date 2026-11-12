@@ -87,9 +87,20 @@ describe('the field nobody could fill in', () => {
       (m) => m[1],
     )
 
-    // Edited elsewhere, each for a stated reason.
+    /*
+      Not on this form, each for a stated reason.
+
+      `credentials` said *"a structured list with its own editor and its own
+      add/remove controls"* until Phase 210, and there is no such editor
+      anywhere — nothing writes the column and nothing reads it. That is an
+      exclusion **excusing** a site, which is the failure ADR 0134 names, in
+      the test that cites ADR 0134. It is still excluded from *this* check,
+      because a jsonb list of licences is not a text box; what changed is that
+      the reason is now a pointer to the register that holds it as a finding,
+      so the claim is tested somewhere rather than asserted here.
+    */
     const elsewhere = new Set([
-      // A structured list with its own editor and its own add/remove controls.
+      // `COLUMN_WRITERS` holds this one with the verdict `unwritable`.
       'credentials',
       // Chosen in the brand kit, not typed on the profile form.
       'logoAssetId',

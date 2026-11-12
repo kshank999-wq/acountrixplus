@@ -150,6 +150,16 @@ export const RECORD_KINDS: readonly RecordKind[] = [
   scoped('assetLink', 'association'),
   // One of the firm's people, for §15's team bios (Phase 183).
   scoped('teamMember', 'team member'),
+  /*
+    Three records that could not be corrected until Phase 210 (Phase 49's
+    shape: a column with a reader and no writer). Each table had one insert and
+    no update, so nothing in the application had ever had to say "not that
+    one" about them — which is why a registry of forty-six kinds was missing a
+    worker, a tax code and a practitioner.
+  */
+  scoped('employee', 'worker'),
+  scoped('taxCode', 'tax code'),
+  scoped('practitioner', 'practitioner'),
   open('company', 'company'),
   open('user', 'user'),
 ]

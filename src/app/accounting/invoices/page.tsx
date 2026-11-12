@@ -99,20 +99,24 @@ export default async function InvoicesPage() {
       which is this list function's `activeOnly` opt-in taking its first offer
       site in 209 phases.
 
-      And the flag is **inert today**, which is said here rather than left for
-      somebody to discover: `tax_codes.is_active` has no writer anywhere in the
-      application, so no code can be retired and this filter can only ever drop
-      a row somebody set false in the database by hand. The flag is passed all
-      the same, because the alternative is an offer site that goes wrong the
+      This comment said the flag was **inert** when Phase 209 wrote it, and it
+      was: `tax_codes.is_active` had no writer, so the filter could only ever
+      drop a row somebody set false in the database by hand. It was passed
+      anyway, because the alternative is an offer site that goes wrong the
       moment a retire control exists.
 
-      Measuring ADR 0208's nomination is what found it, and `employees` is the
-      same shape and worse: one insert, no update, so `is_active` and `end_date`
-      have no writer either and an employee cannot be recorded as having left.
-      Neither is a column census finding, because `listTaxCodes` and
-      `listEmployees` select every row and filter in JavaScript — so the string
-      `taxCodes.isActive` is never written, and the scan's rule for a column
-      being read is that something names it.
+      **Phase 210 built it.** `setTaxCodeActive` is on the sales tax register,
+      so this filter now does what it says, and that action revalidates this
+      path — a retired code still being offered until the next full load would
+      be the inert flag with an extra step.
+
+      What found it is worth keeping: measuring ADR 0208's nomination showed
+      every caller of these opt-in flags already correct and the columns
+      unwritable, and **neither was a column census finding**, because
+      `listTaxCodes` and `listEmployees` select every row and filter in
+      JavaScript — so the string `taxCodes.isActive` is never written and the
+      scan's rule for a column being read is that something names it. Phase 210
+      corrected that rule; the queries here are unchanged.
     */
     can(actor, 'tax:view') ? listTaxCodes(actor, { activeOnly: true }) : Promise.resolve(null),
   ])

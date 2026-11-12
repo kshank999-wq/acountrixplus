@@ -12,6 +12,7 @@ import {
   redeemGiftCard,
   reissueGiftCard,
   sellGiftCard,
+  setPractitionerActive,
 } from '@/modules/appointments/service'
 import { takePayment } from '@/modules/counter/service'
 import { formatCents } from '@/lib/money'
@@ -50,6 +51,29 @@ export async function addPractitionerAction(input: unknown): Promise<ActionResul
 
     await addPractitioner(actor, parsed)
     return `${parsed.name} can now take appointments.`
+  })
+}
+
+/**
+ * Standing a practitioner down, and bringing them back (Phase 210).
+ *
+ * The message deliberately says what standing down does *not* do. `book`
+ * refuses from now on; the diary keeps every appointment already in it, and
+ * each of those is a commitment to a client that somebody has to decide about
+ * one at a time.
+ */
+export async function setPractitionerActiveAction(input: unknown): Promise<ActionResult> {
+  return run(async () => {
+    const actor = await requireActor()
+    const parsed = z
+      .object({ practitionerId: z.string().uuid(), isActive: z.boolean() })
+      .parse(input)
+
+    const practitioner = await setPractitionerActive(actor, parsed)
+
+    return practitioner.isActive
+      ? `${practitioner.name} can take appointments again.`
+      : `${practitioner.name} is taking no new appointments. Bookings already made still stand.`
   })
 }
 

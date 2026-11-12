@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **301
-writes** and **972 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **304
+writes** and **975 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,16 +357,20 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2179 columns** across **185 tables** and reports **29** with a
+The scan reads **2177 columns** across **185 tables** and reports **96** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
 
-**As of Phase 208 none of the 29 is a finding.** Every one is declared with the
-spread or helper that writes it; the register's `unwritable` verdict is kept
-with no entry carrying it, so the next finding has a word and a place.
-`COLUMN_WRITERS`' candidate count is what makes that visible — it falls when
-one is closed, because a closed column leaves the scan.
+**Fourteen of the 96 are findings, covering 16 columns** — the first this
+register has carried. From Phase 208 to Phase 210 it had none, and that was a
+claim about what the scan could see: its test for *read* was `tableVar.column`
+named outside the schema, and a projectionless `select()` reads every column of
+its table while naming none, so **72 columns had never been examined at all**.
+Phase 210 corrected the rule; the count went 29 → 96 and sixteen of the new
+ones are written by nothing. `COLUMN_WRITERS`' candidate count is what makes a
+closure visible — it falls when one is closed, because a closed column leaves
+the scan.
 
 Most of them are written by a **spread** or a **helper's return**, which no
 regex can resolve, so `COLUMN_WRITERS` declares each mechanism and names the
@@ -425,10 +429,10 @@ state nothing can change is a switch painted on. Narrowed to
 of the eight it added are an `isActive` nothing can turn off**. One of them was
 §14's revocation; Phase 203 closed a second, and the pinned figure is 34.
 
-The second cannot be closed. **770 columns** are written at insert and never
+The second cannot be closed. **1169 columns** are written at insert and never
 updated, so the scan counts them as written even where nothing can ever change
 them — `memberships.role` was unchangeable for 201 phases and the census
-reported nothing. Almost all 770 are immutable *on purpose* (ADR 0021's sent
+reported nothing. Almost all 1169 are immutable *on purpose* (ADR 0021's sent
 document, ADR 0042's live record), so a register of them would say "correct"
 hundreds of times and bury the few that are not. It is a pinned number
 (`audit-insert-only-columns`) rather than a register, and narrowing it needs a
@@ -469,6 +473,43 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §19 — the switch the census could not see (Phase 210)
+
+This file's §19 census passage said, from Phase 208, that *none of the 29
+candidates is a finding*. That was true of what the scan could see and false of
+the schema, and the gap between those two is this phase.
+
+`writerCandidates` tests whether something **reads** a column by looking for
+`tableVar.column` named outside the schema. A projectionless `select()`
+compiles to `select *`: it reads every column of the table and names none of
+them, and the row's columns are then reached as properties — `row.isActive`,
+`profile?.country` — which carry no table to key on. The scan skipped such a
+column *before* applying any exclusion, so it could never be a candidate
+however unwritable it was. **Seventy-two columns had never been examined, and
+sixteen of them are written by nothing.**
+
+The audit's own earlier correction is the one worth recording. Phase 202
+narrowed this register's exclusion for defaulted columns, closed the six
+`isActive` switches that exposed, and said so here. The exclusion was never
+what hid the rest; the shape of the query was. And Phase 203 found that exact
+mechanism in the mirror direction, named the file, and wrote *"conservative in
+the safe direction — a missed read loses a candidate"*. A missed read loses a
+**finding**: the forward scan reports nothing rather than reporting carefully.
+
+**What §19 can now say that it could not.** Of the thirty tables carrying an
+`isActive`, twenty-four name it in a query and all twenty-four have a writer;
+six never name it and five of those six had none. Those five are closed or
+removed, and the census enforces the general case: with the read rule
+corrected, any `isActive` that something reads and nothing writes becomes a
+candidate and must be declared or fixed.
+
+**What it does not close.** The insert-only class, measured under the same
+correction, is **1169 columns** rather than 770 — the limitation §19 declares
+is half again as large as this file has been saying since Phase 202, and
+narrowing it still needs a way to say which columns are *state* rather than
+*record*. The sixteen findings are declared, not fixed; the largest is
+`bill_lines.itemId`, which is Phase 169's inventory gap on the purchase side.
 
 ### §13 — the tax code nothing could reach (Phase 209)
 

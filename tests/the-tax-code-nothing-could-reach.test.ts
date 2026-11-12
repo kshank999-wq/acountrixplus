@@ -475,18 +475,30 @@ describe('the flag that filters on a column nothing can set', () => {
    *
    * Asserted as source rather than described, so a retire control arriving
    * makes this red instead of leaving the declaration quietly false.
+   *
+   * **It went red in Phase 210**, which is the whole reason it was written this
+   * way. Both tables have an update now, and what is asserted here is the half
+   * of the declaration that did not change: the filter is still in JavaScript,
+   * so no query names either column, and neither is visible to the census's
+   * *original* read rule. Phase 210 corrected that rule rather than the
+   * queries — `tests/the-switch-the-census-could-not-see.test.ts` owns the
+   * correction and the count.
    */
-  it('has no way to retire a tax code or an employee', () => {
+  it('can retire a tax code and record a departure, which it could not', () => {
     const everySource = sourceFiles('src/modules')
       .concat(sourceFiles('src/app'))
       .map((file) => withoutComments(readFileSync(file, 'utf8')))
       .join('\n')
 
-    expect(everySource).not.toContain('.update(taxCodes)')
-    expect(everySource).not.toContain('.update(employees)')
+    expect(everySource).toContain('.update(taxCodes)')
+    expect(everySource).toContain('.update(employees)')
 
-    // And the filter really is in JavaScript, which is why the scan cannot see
-    // the columns those updates would have written.
+    /*
+      And the thing that hid them is unchanged. The filter is still in
+      JavaScript and still names nothing, which is why the fix was to the scan
+      and not to these two queries: rewriting them as a `where` would have hidden
+      the method's defect behind two corrected call sites.
+    */
     expect(everySource).toContain('opts.activeOnly ? rows.filter((row) => row.isActive) : rows')
     expect(everySource).not.toContain('taxCodes.isActive')
     expect(everySource).not.toContain('employees.isActive')
@@ -498,8 +510,13 @@ describe('the codes a composer may be offered', () => {
     const fixture = await createCompanyFixture({ name: 'Retired Code Ltd' })
     const { city } = await codes(fixture.ctx)
 
-    // Retired straight in the table: the register has no retire control, which
-    // is a separate gap and is declared rather than quietly fixed here.
+    /*
+      Written with raw SQL in Phase 209 because the register had no retire
+      control, and left that way in Phase 210 now that it has one: this test is
+      about what the *picker* does with a retired code, and `setTaxCodeActive`
+      has its own tests. Reaching for the new writer here would make a failure
+      in it fail two unrelated claims.
+    */
     await db.execute(sql`update tax_codes set is_active = false where id = ${city.id}`)
 
     expect((await listTaxCodes(fixture.ctx)).map((row) => row.code).sort()).toEqual([

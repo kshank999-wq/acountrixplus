@@ -37,9 +37,16 @@ export default async function PeoplePage() {
           baseRateCents: person.baseRateCents,
           taxIdLast4: person.taxIdLast4,
           startDate: person.startDate,
+          endDate: person.endDate,
           isActive: person.isActive,
         }))}
         canManage={can(actor, 'payroll:manage')}
+        /*
+          The server's today, because the service refuses a future leaving date
+          against its own clock (Phase 210). A browser a day ahead would
+          otherwise offer a date the save then refuses.
+        */
+        today={new Date().toISOString().slice(0, 10)}
       />
     </AppShell>
   )

@@ -13,6 +13,7 @@ import {
 import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { requireModule } from '@/modules/industry/modules'
+import { missing } from '@/modules/errors/missing'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { createInvoice } from '@/modules/receivables/service'
 import { affords } from '@/modules/fx/affordable'
@@ -189,6 +190,76 @@ export async function listPractitioners(ctx: ActorContext) {
     .from(practitioners)
     .where(scoped(ctx, practitioners))
     .orderBy(asc(practitioners.name))
+}
+
+/**
+ * Stands somebody down, or brings them back (Phase 210).
+ *
+ * ## The sharpest of the five, because the guard was already written
+ *
+ * `bookAppointment` reads this flag and refuses:
+ *
+ * ```ts
+ * if (!practitioner.isActive) {
+ *   throw new AppointmentError(`${practitioner.name} is no longer taking appointments.`)
+ * }
+ * ```
+ *
+ * The column defaults to `true` and had no writer, so that branch has been
+ * unreachable since Phase 3 and the message has never been shown to anybody. A
+ * refusal nothing can trigger is not a safeguard, it is a comment that
+ * typechecks — and it is worse than a missing one, because reading the booking
+ * path tells you a stood-down practitioner cannot be booked.
+ *
+ * ADR 0204 closed `cash_drawers.isActive` and `practices.isActive` and called
+ * them *"the other two **enforced** switches"*. There was a third, and the
+ * census could not see it: `listPractitioners` selects every row, so no query
+ * ever names the column.
+ *
+ * ## Why the diary is left alone
+ *
+ * Standing somebody down stops **new** bookings and nothing else. Appointments
+ * already in the diary stay there: they are commitments to clients, and
+ * cancelling them is a decision about each one, with a reason and possibly a
+ * refund. `completeAppointment` keeps working, so a visit that happened still
+ * bills and still pays commission.
+ */
+export async function setPractitionerActive(
+  ctx: ActorContext,
+  input: { practitionerId: string; isActive: boolean },
+) {
+  requirePermission(ctx, 'accounting:journal')
+  await requireModule(ctx, 'appointments')
+
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(practitioners)
+      .where(scoped(ctx, practitioners, eq(practitioners.id, input.practitionerId)))
+      .limit(1)
+
+    if (!before) throw missing('practitioner')
+
+    const [practitioner] = await tx
+      .update(practitioners)
+      .set({ isActive: input.isActive })
+      .where(scoped(ctx, practitioners, eq(practitioners.id, input.practitionerId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'practitioner.update',
+        entityType: 'practitioner',
+        entityId: practitioner.id,
+        before: { isActive: before.isActive },
+        after: { name: practitioner.name, isActive: practitioner.isActive },
+      },
+      tx,
+    )
+
+    return practitioner
+  })
 }
 
 // --- The diary -------------------------------------------------------------

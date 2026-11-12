@@ -47,6 +47,29 @@ import { readableSource, sourceFiles } from './isolation-scan'
  * the writer named — or **fixed**. That is Phase 139's device: a register that
  * says what it does not cover beats one that looks complete.
  *
+ * ## The eighth mechanism, and the one that was costing findings
+ *
+ * The seven above all hide a **writer**, so the scan over-reports and each
+ * entry argues one down. Phase 210 found an eighth that hid a **reader**, and
+ * it worked the other way: `writerCandidates` would not look at a column
+ * unless some query *named* it as `tableVar.column`, and a projectionless
+ * `select()` names nothing while reading everything. Seventy-two columns had
+ * never been examined at all.
+ *
+ * `readNames` below has the correction and the argument. What it cost is the
+ * measurement: **sixteen of the seventy-two have no writer anywhere.** Of the
+ * thirty tables that carried an `isActive`, twenty-four name it in a query and
+ * **all twenty-four have a writer**; six never name it and **five of those six
+ * had none**. So every defect of that class sat inside a blind spot covering
+ * six tables of thirty.
+ *
+ * The sixth is the control, and it is why this is stated as a correlation
+ * rather than a cause: `cost_codes` has the identical shape — `listCostCodes`
+ * selects every row and filters `row.isActive` in JavaScript — and
+ * `updateCostCode` writes the column anyway. The query shape does not cause a
+ * missing writer. It hides whether there is one, and five times out of six
+ * there was not.
+ *
  * ## What it does not claim
  *
  * That a column with a writer is reachable by a *person*. `logoAssetId` is
@@ -57,10 +80,11 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **29 candidates, and no findings.** A closed one is **absent**
- * from this register, because the scan no longer reports it — which is what
- * proves an editor reaches the column rather than only existing, and the
- * tests assert that absence by name.
+ * **96 candidates and 14 findings covering 16 columns**, which is the first
+ * time this register has carried one. A closed one is **absent** from this
+ * register, because the scan no longer reports it — which is what proves an
+ * editor reaches the column rather than only existing, and the tests assert
+ * that absence by name.
  *
  * Phase 201 closed `organizations.sizeBand`, a segment filter that could only
  * ever match nothing, and `service_items.inventoryAccountId`, a per-item
@@ -97,11 +121,14 @@ import { readableSource, sourceFiles } from './isolation-scan'
  * customer side of the same link is not a field either, so it never did: it is
  * an act, like the merge that already sits beside that form.
  *
- * So every entry below is now a column something writes in a way no pattern
- * sees, which is what this register was built to hold — and what it holds
- * **nothing** of is the thing it was built to find. That is worth stating
- * plainly rather than letting an empty section imply it: this scan has no
- * open findings, and the next one is a column somebody adds.
+ * Phase 210 corrected the read rule and the empty-findings claim above went
+ * with it. Five of what it exposed were closed in the same phase — an employee
+ * who could not leave, a tax code that could not be retired, a practitioner
+ * the booking path refused and nothing could stand down, and the two address
+ * columns on every client document that this register was *created for* and
+ * had never been able to report. Two more were removed, having neither a
+ * writer nor a reader. Sixteen are below, under their own heading, each
+ * naming what reads it.
  */
 
 /** Where a candidate stands. */
@@ -111,13 +138,15 @@ export type WriterVerdict =
   /**
    * Nothing writes it, and that is a defect with a decision recorded.
    *
-   * **No entry carries this verdict as of Phase 208**, and it is kept rather
-   * than deleted on Phase 157's rule: an unused declaration stays when it
-   * *accuses*. This one is the register's word for a finding, and a register
-   * with no vocabulary for one is a register that cannot report the next.
-   * Deleting it would mean the next person to find a column nothing can fill
-   * has to invent the word again, and the five phases it took to close
-   * `vendors.organizationId` are the argument for leaving it where it is.
+   * No entry carried this verdict from Phase 208 to Phase 210. It was kept
+   * rather than deleted on Phase 157's rule — an unused declaration stays when
+   * it *accuses* — and the argument for keeping it was that the next person to
+   * find a column nothing can fill should not have to invent the word again.
+   *
+   * **Fourteen entries carry it now.** Correcting the read rule in Phase 210
+   * reported seventy-two columns the scan had never looked at, sixteen of them
+   * written by nothing. Two phases of an empty section was the cost of the
+   * vocabulary being ready when the measurement arrived.
    */
   | 'unwritable'
 
@@ -128,7 +157,7 @@ export type ColumnWriter = {
   columns: readonly string[]
   verdict: WriterVerdict
   /** For `written`: the file that writes them. Empty for `unwritable`. */
-  // (Every entry is `written` since Phase 208; see `unwritable` above.)
+  // (Empty on all fourteen `unwritable` entries, which is what the verdict means.)
   writtenBy: string
   /** Why, argued from what the code does rather than from what it looks like. */
   because: string
@@ -160,26 +189,129 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   },
   {
     table: 'bank_transaction_revisions',
-    columns: ['amountCents', 'pending', 'postedDate'],
+    columns: [
+      'amountCents',
+      'description',
+      'merchantName',
+      'pending',
+      'postedDate',
+      'previousAmountCents',
+      'previousPending',
+      'previousPostedDate',
+      'providerCategory',
+    ],
     verdict: 'written',
     writtenBy: 'src/modules/banking/revision-service.ts',
     because:
       'Written by `...incoming` and `...previous` — the feed\'s new figures and the ones they ' +
       'replace, spread side by side so a held revision records both. Nothing a person types by ' +
       'definition: a revision is what the bank said changed, and a field offering to edit it ' +
-      'would be inventing a bank statement.',
+      'would be inventing a bank statement. Six of the nine joined this entry in Phase 210 with ' +
+      'the read rule corrected: this table is read by a projectionless `select()`, so until then ' +
+      'only the three the inbox names column-wise were visible.',
+  },
+  {
+    table: 'bank_transactions',
+    columns: ['raw'],
+    verdict: 'written',
+    writtenBy: 'src/modules/banking/sync.ts',
+    because:
+      'Written as `raw: transaction.raw ?? null` inside the `.map` that builds `const rows`, and ' +
+      'the insert is `.values(rows)` — a bare identifier whose declaration resolves to ' +
+      '`input.transactions`, not to the literal. Two of the seven mechanisms compounding: the ' +
+      "literal is in a variable *and* inside a callback. It holds the provider's own payload for " +
+      'a row, which is evidence rather than a field.',
   },
   {
     table: 'brand_kits',
-    columns: ['logoAssetId'],
+    columns: [
+      'accentColor',
+      'baseSizePt',
+      'bodyFont',
+      'headingFont',
+      'logoAssetId',
+      'mutedColor',
+      'primaryColor',
+      'surfaceColor',
+      'textColor',
+    ],
     verdict: 'written',
     writtenBy: 'src/modules/studio/service.ts',
     because:
       'Written by `.values({ companyId: ctx.companyId, ...input })` and `.set({ ...input })`, so ' +
       'the column name appears nowhere at the write — the spread carries every field of ' +
-      "`BrandKitInput`, which has it. Reachable by a person: the brand kit's logo picker is what " +
-      'fills it. This is the mechanism that makes the scan a candidate list rather than an ' +
-      'assertion, because resolving a spread needs the typechecker.',
+      "`BrandKitInput`, which has all nine. Reachable by a person: the brand kit editor is a " +
+      'colour and type picker and these are what it picks. This is the mechanism that makes the ' +
+      'scan a candidate list rather than an assertion, because resolving a spread needs the ' +
+      'typechecker.',
+  },
+  {
+    table: 'company_profiles',
+    columns: [
+      'addressLine1',
+      'addressLine2',
+      'city',
+      'country',
+      'dba',
+      'description',
+      'documentFooter',
+      'email',
+      'paymentInstructions',
+      'phone',
+      'postalCode',
+      'region',
+      'tagline',
+      'taxId',
+      'website',
+    ],
+    verdict: 'written',
+    writtenBy: 'src/app/actions/studio.ts, src/modules/studio/service.ts',
+    because:
+      'Written by `saveProfile`, which spreads `...input` of type `ProfileInput`. Three of these ' +
+      '— `description`, `addressLine2` and `country` — were written by **nothing** until Phase ' +
+      '210 despite having a field on the Design Center form since Phase 200, because ' +
+      "`saveProfileAction`'s zod schema omitted them and a zod object strips what it does not " +
+      'declare. The box accepted typing, the save reported success and the value was dropped. ' +
+      'The register this file holds was created for exactly those two address columns and could ' +
+      'not see them, which is Phase 210.',
+  },
+  {
+    table: 'contacts',
+    columns: ['notes'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'Both inserts list their columns and neither lists this one; the two updates set ' +
+      '`suppressedAt` and `emailConsent`. A contact cannot be annotated. The CRM keeps notes ' +
+      'against an organisation, an opportunity and an activity, so the gap is narrow — but a ' +
+      'per-person note is what a salesperson reaches for first, and nothing anywhere writes it.',
+  },
+  {
+    table: 'customers',
+    columns: ['addressLine2'],
+    verdict: 'written',
+    writtenBy: 'src/modules/receivables/service.ts',
+    because:
+      'Written by `...normaliseParty(input)` — a **helper\'s return**, the mechanism no regex ' +
+      'resolves. `createCustomer` and `updateCustomer` both accept it and the correction form ' +
+      'offers it, which Phase 45 added when it found `modules/pdf/invoice.ts` reading an address ' +
+      'nothing wrote.',
+  },
+  {
+    table: 'design_documents',
+    columns: [
+      'marginBottomPt',
+      'marginLeftPt',
+      'marginRightPt',
+      'marginTopPt',
+      'showPageNumbers',
+    ],
+    verdict: 'written',
+    writtenBy: 'src/modules/design/documents.ts',
+    because:
+      'Written by `...(input.settings ?? {})` in `updateDocument`, where `settings` is the page ' +
+      "setup panel's own object — a spread of a nested property, so no key is visible at the " +
+      'write. The designer sets margins and page numbering there and nowhere else.',
   },
   {
     table: 'communications',
@@ -206,14 +338,18 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
       'messageId',
       'outcome',
       'practiceId',
+      /** Three more in Phase 210, with the read rule corrected. */
+      'provider',
+      'subscriptionId',
       'title',
       'topic',
+      'url',
       'userId',
     ],
     verdict: 'written',
     writtenBy: 'src/modules/mobile/notifications.ts',
     because:
-      'All ten written by `.values(decisionFor(input))` — one helper builds the whole row, so no ' +
+      'All thirteen written by `.values(decisionFor(input))` — one helper builds the whole row, so no ' +
       'key is visible at the call and every column of the table is a candidate at once. None is ' +
       'typed by anybody: this is the record of what was sent, to whom, on which topic, and what ' +
       'the push provider answered, which is why nothing in the interface offers any of it and ' +
@@ -239,7 +375,9 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
       'description',
       'isOptional',
       'itemId',
+      'quantityMilli',
       'sortOrder',
+      'unitPriceCents',
     ],
     verdict: 'written',
     writtenBy: 'src/modules/crm/proposals.ts',
@@ -250,28 +388,226 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
       'catalogue item the line came from. The other three joined this entry in Phase 202 with ' +
       'the default exclusion narrowed, and are computed rather than typed — the line total, its ' +
       'position, and whether the client may decline it, which `acceptance.ts` reads to decide ' +
-      'what a signature actually agreed to.',
+      'what a signature actually agreed to. The quantity and unit price joined in Phase 210 with ' +
+      'the read rule corrected; both are typed on the line editor.',
+  },
+  {
+    table: 'proposals',
+    columns: ['discountCents', 'taxCents'],
+    verdict: 'written',
+    writtenBy: 'src/modules/crm/proposals.ts',
+    because:
+      'Written by `...totals`, the object `proposalTotals` returns, at the insert and again on ' +
+      'every re-price. Derived from the lines rather than typed, which is the point — a discount ' +
+      "typed over a total that disagrees with the lines is the defect Phase 209 found in the " +
+      "invoice composer's tax.",
+  },
+  {
+    table: 'security_policies',
+    columns: ['lockoutMinutes', 'maxFailedAttempts', 'requireMfa', 'sessionTtlDays'],
+    verdict: 'written',
+    writtenBy: 'src/app/actions/security.ts',
+    because:
+      'Written by `...parsed` at both the insert and the update, where `parsed` is the security ' +
+      "settings form's own zod output. Worth saying out loud that these four are *settable*, " +
+      'because a password policy nothing could change would be the most serious finding this ' +
+      'register has ever held — and the only reason they look unwritten from here is that one ' +
+      'spread carries the lot.',
   },
   {
     table: 'service_items',
-    columns: ['description'],
+    columns: ['defaultProposalCopy', 'description', 'isTaxable'],
     verdict: 'written',
     writtenBy: 'src/modules/studio/service.ts',
     because:
-      '`createServiceItem` spreads `...input`, whose `ServiceItemInput` has it, and the Design ' +
-      'Center catalogue form both sets it and shows it under the item name. Worth the entry ' +
-      'because `inventoryAccountId` on this same table was a real finding: two columns of one ' +
-      'table, one written through a spread and one written nowhere, indistinguishable from the ' +
-      'scan and three lines apart in the schema.',
+      '`createServiceItem` spreads `...input`, whose `ServiceItemInput` has all three, and the ' +
+      'Design Center catalogue form sets them. Worth the entry because `inventoryAccountId` on ' +
+      'this same table was a real finding: two columns of one table, one written through a spread ' +
+      'and one written nowhere, indistinguishable from the scan and three lines apart in the ' +
+      'schema. `isTaxable` is read by nothing — Phase 209 made the invoice line carry its own ' +
+      'tax code, which is the per-line answer this per-item flag was a guess at.',
+  },
+  {
+    table: 'vendors',
+    columns: ['addressLine2', 'notes'],
+    verdict: 'written',
+    writtenBy: 'src/modules/receivables/service.ts',
+    because:
+      'Written by `...normaliseParty(input)`, as on `customers` above, and both are on the ' +
+      'supplier correction form. The helper trims and nulls every string it is handed, which is ' +
+      'why it exists and why the scan cannot see through it.',
   },
 
   // --- Unwritable, and recorded as findings ---------------------------------
   //
-  // Empty since Phase 208, and kept as a heading for the reason the verdict
-  // itself is kept: the next finding has somewhere to go, and a reader can see
-  // that the absence is measured rather than that the section was never
-  // written. `vendors.organizationId` stood here through five ADRs and is
-  // closed by `setVendorOrganization` in `parties/service.ts`.
+  // Empty from Phase 208 to Phase 210, when correcting the read rule above
+  // reported seventy-two columns the scan had never looked at and **sixteen of
+  // them have no writer at all.** The verdict was kept through two phases on
+  // Phase 157's rule — an unused declaration stays when it accuses — and this
+  // is what it was kept for.
+  //
+  // Five of the sixteen were fixed in the phase that found them, and so are
+  // absent: `employees.isActive` and `endDate`, `tax_codes.isActive`,
+  // `practitioners.isActive`, and `company_profiles.addressLine2` with
+  // `country` (which moved up to the `written` entry above). Two more were
+  // **removed** — `segments.isActive` and `vehicles.isActive` had no reader
+  // either, which is Phase 49's shape and takes a migration rather than an
+  // entry.
+  //
+  // What is left is here. The order is the scan's, and each entry says what
+  // reads the column, because a finding whose reader is nothing is a different
+  // and smaller problem than a finding whose reader is a client-facing
+  // document.
+  {
+    table: 'ai_requests',
+    columns: ['cacheHit'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'The AI cost ledger records provider, model, both token counts and the cost in micros, and ' +
+      '`cache_hit` beside them is set by nothing and read by nothing. `cachedInputTokens` is ' +
+      'written and carries the same information better, so this is the earlier draft of that idea ' +
+      'left in the table.',
+  },
+  {
+    table: 'background_jobs',
+    columns: ['startedAt'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'The queue writes `status`, `attempts`, `lockedBy`, `lockedAt`, `finishedAt` and ' +
+      '`lastError`, and never this. So a job has a finish time and no start time, and how long ' +
+      'anything took cannot be answered — `lockedAt` is the nearest thing and means something ' +
+      'else, because a job relocked after a crash moves it.',
+  },
+  {
+    table: 'bill_lines',
+    columns: ['itemId'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      "Phase 169's finding on the purchase side. `invoice_lines.itemId` existed from Phase 14 " +
+      'with no writer, so a stocked item sold through the composer relieved no stock, and Phase ' +
+      '169 built the picker that fills it. The bill composer never got one, so a stocked item ' +
+      '*bought* through a bill still receives no stock — which is the half of inventory that ' +
+      'costs money. Nominated.',
+  },
+  {
+    table: 'billable_expenses',
+    columns: ['writeOffReason'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'A disbursement can be marked billed, and there is no way to say it will not be billed and ' +
+      'why. The column names the decision and nothing records it, so an expense that will never ' +
+      'be recharged sits on the unbilled list for good.',
+  },
+  {
+    table: 'company_profiles',
+    columns: ['credentials'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'The sharpest of these, because it has been used as an **argument**. ' +
+      "`modules/studio/team.ts` says §15's certifications are covered: *\"the measurement held: " +
+      '`company_profiles.credentials` covers licences, certifications, insurance and ' +
+      'memberships"*. Nothing writes it, nothing reads it, and ' +
+      '`tests/a-voice-to-adapt-to.test.ts` excludes it from the form check as *"a structured ' +
+      'list with its own editor and its own add/remove controls"*, which does not exist. ' +
+      'An exclusion that excuses a site, which is ADR 0134 in the test that cites ADR 0134.',
+  },
+  {
+    table: 'document_templates',
+    columns: ['industry', 'isSystem'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      '`saveAsTemplate` writes the key, name, description, kind and blocks. These two are what ' +
+      'would make a template *shipped* rather than a copy of somebody\'s own document — the ' +
+      'industry it suits and whether the product supplied it — and both are read by the template ' +
+      'gallery, which therefore shows every template as the company\'s own.',
+  },
+  {
+    table: 'employees',
+    columns: ['notes'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'The one column of this table Phase 210 did not close. `isActive` and `endDate` now have a ' +
+      'writer and this does not, and it is left open deliberately rather than bundled in: a free ' +
+      'text field on a payroll record is where somebody writes something about a person that ' +
+      'payroll is the wrong place to keep, and what belongs there needs deciding before a box ' +
+      'appears.',
+  },
+  {
+    table: 'goods_receipts',
+    columns: ['journalEntryId'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'A receipt records that stock arrived and `receipt-billing.ts` posts the accrual, and the ' +
+      'column that would point from the document to its entry is set by neither. So the receipt ' +
+      'can be read and the posting it caused cannot be found from it — the drill-down every ' +
+      'other document in this system has.',
+  },
+  {
+    table: 'organizations',
+    columns: ['notes'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'The field registry lists it: `ORGANIZATION_FIELDS` has `{ key: \'notes\', label: ' +
+      "'Notes' }`, so `describeChanges` can name a change to it. `organizationSchema` does not " +
+      'have it and `updateOrganization`\'s input type does not either, so the change it would ' +
+      'describe cannot happen. A registry wider than the write path, which is the same shape as ' +
+      "the Design Center's three dropped boxes and the reason this phase reads the whole chain.",
+  },
+  {
+    table: 'projects',
+    columns: ['endDate', 'notes'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'A job is created by conversion from a won opportunity with a start date, and the only ' +
+      'update anywhere adds a change order to its contract value. So a job cannot be annotated ' +
+      'and cannot be recorded as having finished — the same absence as `employees.endDate`, on ' +
+      'the table §7 is about, and `jobs/reports.ts` reads the end date into every date range it ' +
+      'builds.',
+  },
+  {
+    table: 'repair_orders',
+    columns: ['journalEntryId'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'As `goods_receipts.journalEntryId` above: the order records the work and carries the ' +
+      'invoice it raised, and the column for the entry behind it is written by nothing. Two ' +
+      'tables with the same missing link suggests the shape is a habit rather than an oversight.',
+  },
+  {
+    table: 'tax_codes',
+    columns: ['effectiveTo'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      '`effectiveFrom` is written at creation and this is its pair: the day a rate stopped ' +
+      'applying. Phase 210 gave this table `isActive` a writer and deliberately did **not** ' +
+      'write this one from the same control, because retiring a code and superseding a rate are ' +
+      'different acts — the second needs the successor to exist and `priceDocumentTax` to choose ' +
+      'between them by date. Giving it half a meaning would be worse than leaving it here.',
+  },
+  {
+    table: 'team_members',
+    columns: ['userId'],
+    verdict: 'unwritable',
+    writtenBy: '',
+    because:
+      'Phase 183 added it with its reason stated in the module: *"`userId` is optional so a bio ' +
+      'can name the account it describes where there is one, which is what a future \'write your ' +
+      'own bio\' screen needs"*. That screen has not been built, so the column is an argument for ' +
+      'a feature rather than a gap in one — and it is here rather than excused because the next ' +
+      'reader should find that out from the register and not from the history.',
+  },
 ]
 
 /** The entry accounting for one column, or a refusal naming it. */
@@ -317,6 +653,15 @@ type SchemaColumn = { systemSet: boolean }
  * narrowing took the census from 27 candidates to 35 — eight columns of
  * exactly the kind Phase 201 was built to find, which its own exclusion had
  * made invisible. Six of the eight are an `isActive` nothing can turn off.
+ *
+ * ## `generatedAlwaysAs`, added in Phase 210
+ *
+ * The same test, applied to a third case. `evidence_subjects.subjectType` and
+ * `subjectId` are `GENERATED ALWAYS AS … STORED`: the database computes them
+ * from the twelve kind columns and **refuses** a write, which is the strongest
+ * form of "the whole answer" there is. Reporting one would be asking for an
+ * editor Postgres would reject, and declaring it would be an excuse for a
+ * column that is working exactly as designed.
  */
 function schemaColumns(): Map<string, { sqlName: string; columns: Map<string, SchemaColumn> }> {
   const tables = new Map<string, { sqlName: string; columns: Map<string, SchemaColumn> }>()
@@ -330,7 +675,9 @@ function schemaColumns(): Map<string, { sqlName: string; columns: Map<string, Sc
 
       for (const c of body.matchAll(/^\s{4}(\w+):\s*\w+\(/gm)) {
         const own = new RegExp(String.raw`^\s{4}${c[1]}:[\s\S]*?(?=^\s{4}\w+:|$)`, 'm').exec(body)
-        columns.set(c[1], { systemSet: /defaultNow\(|defaultRandom\(/.test(own?.[0] ?? '') })
+        columns.set(c[1], {
+          systemSet: /defaultNow\(|defaultRandom\(|generatedAlwaysAs\(/.test(own?.[0] ?? ''),
+        })
       }
 
       tables.set(m[1], { sqlName: m[2], columns })
@@ -357,10 +704,68 @@ function balanced(src: string, from: number): string {
 }
 
 /**
+ * Every column this file reads, by the two spellings a read has.
+ *
+ * ## `tableVar.column`, which is what Phase 201 counted
+ *
+ * Drizzle spells a projection, a `where` and an `orderBy` the same way, so a
+ * column named that way is read, and the name is right there to match.
+ *
+ * ## A projectionless `select()`, which is what Phase 210 adds
+ *
+ * `select()` with no argument compiles to `select *`. It reads **every column
+ * of the table** and names none of them, and the row's columns are then reached
+ * as properties — `row.isActive`, `profile?.country` — which carry no table to
+ * key on. Phase 201's rule therefore skipped those columns *before* applying
+ * any exclusion: `if (!named.has(key)) continue` ran first, so a column no
+ * query named could not be a candidate however unwritable it was.
+ *
+ * That is not a blind spot of the same kind as a spread. A spread hides a
+ * **writer**, so the scan over-reports and the register argues each one down. A
+ * projectionless select hid a **reader**, so the scan under-reported and said
+ * nothing at all — and ADR 0134's rule is that a silent miss is the better
+ * half of a bad pair only when somebody knows about it. Nobody did.
+ *
+ * What the correction claims is exactly what the SQL does: the query fetched
+ * the column. Whether any JavaScript then looks at it is a further question,
+ * and where the answer is no, the entry below says so — `segments.isActive` was
+ * fetched by a `select()` and consulted by nothing, which is Phase 49's class
+ * rather than this one.
+ *
+ * Measured: **29 candidates became 96.** Every `isActive` with no writer
+ * anywhere was on one of the six tables, of thirty carrying one, that no query
+ * ever named — and the sixth of those six has a writer, which is the control
+ * that keeps this a statement about what the scan could see rather than about
+ * what developers do.
+ */
+function readNames(file: string, tables: ReturnType<typeof schemaColumns>): Set<string> {
+  const src = readableSource(file)
+  const named = new Set<string>()
+
+  for (const m of src.matchAll(/\b(\w+)\.(\w+)\b/g)) named.add(`${m[1]}.${m[2]}`)
+
+  /*
+    The bound on the gap is what keeps this honest. Between `select()` and its
+    `.from(T)` sits at most a `$dynamic()`, a comment already stripped, or
+    nothing; 400 characters is room for all of them and far short of the next
+    statement. A `select({ … })` does not match at all, which is the point — a
+    projection names its columns and is already counted above.
+  */
+  for (const m of src.matchAll(/select\(\s*\)[\s\S]{0,400}?\.from\(\s*(\w+)\s*\)/g)) {
+    const table = tables.get(m[1])
+    if (!table) continue
+    for (const column of table.columns.keys()) named.add(`${m[1]}.${column}`)
+  }
+
+  return named
+}
+
+/**
  * Columns the scan cannot see a writer for.
  *
- * `read` is `tableVar.column` appearing outside the schema — drizzle spells a
- * select, a where and an order the same way, so this is "something names it".
+ * `read` is what `readNames` above defines: `tableVar.column` named anywhere
+ * outside the schema, or any column of a table a projectionless `select()`
+ * reads.
  *
  * `settable` is a key inside the balanced **argument** of a `.values(` or
  * `.set(`, with the five resolvable mechanisms handled: a callback's object
@@ -391,7 +796,6 @@ export function writerCandidates(): WriterCandidate[] {
 
   for (const dir of ['src/modules', 'src/app'] as const) {
     for (const file of sourceFiles(dir)) {
-      const src = readableSource(file)
       const whole = withoutComments(readFileSync(file, 'utf8'))
 
       for (const m of whole.matchAll(/\.(insert|update)\(\s*(\w+)\s*\)\s*\.(values|set)\(/g)) {
@@ -435,7 +839,7 @@ export function writerCandidates(): WriterCandidate[] {
         }
       }
 
-      for (const m of src.matchAll(/\b(\w+)\.(\w+)\b/g)) named.add(`${m[1]}.${m[2]}`)
+      for (const key of readNames(file, tables)) named.add(key)
     }
   }
 
@@ -486,7 +890,6 @@ export function insertOnlyColumns(): number {
 
   for (const dir of ['src/modules', 'src/app'] as const) {
     for (const file of sourceFiles(dir)) {
-      const src = readableSource(file)
       const whole = withoutComments(readFileSync(file, 'utf8'))
 
       for (const m of whole.matchAll(/\.(insert|update)\(\s*(\w+)\s*\)\s*\.(values|set)\(/g)) {
@@ -514,7 +917,7 @@ export function insertOnlyColumns(): number {
         }
       }
 
-      for (const m of src.matchAll(/\b(\w+)\.(\w+)\b/g)) named.add(`${m[1]}.${m[2]}`)
+      for (const key of readNames(file, tables)) named.add(key)
     }
   }
 

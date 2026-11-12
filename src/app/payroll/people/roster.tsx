@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { createEmployeeAction } from '@/app/actions/payroll'
+import { createEmployeeAction, recordEmploymentAction } from '@/app/actions/payroll'
 import { formatCents, parseAmountToCents } from '@/lib/money'
 import { messageFor } from '@/modules/errors'
 
@@ -16,6 +16,8 @@ type Person = {
   baseRateCents: number
   taxIdLast4: string | null
   startDate: string | null
+  /** Phase 210. Nothing could set this, so the column below was always `—`. */
+  endDate: string | null
   isActive: boolean
 }
 
@@ -27,11 +29,48 @@ type Person = {
  * business ends up holding a table of tax identifiers it has no way to
  * protect — this one cannot leak what it never took.
  */
-export function Roster({ people, canManage }: { people: Person[]; canManage: boolean }) {
+export function Roster({
+  people,
+  canManage,
+  today,
+}: {
+  people: Person[]
+  canManage: boolean
+  today: string
+}) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
   const [message, setMessage] = useState<{ text: string; ok: boolean } | null>(null)
   const [open, setOpen] = useState(false)
+
+  /*
+    Which row is being asked about, and the date being entered (Phase 210).
+
+    One row at a time rather than a date box on every line: a departure is rare
+    and irreversible-feeling, and a grid of empty date fields invites one to be
+    filled by accident. `today` comes from the server because the refusal for a
+    future date is the server's, and a browser clock a day ahead would turn a
+    correct entry into a refusal nobody could explain.
+  */
+  const [departing, setDeparting] = useState<string | null>(null)
+  const [leftOn, setLeftOn] = useState(today)
+
+  function recordEmployment(employeeId: string, endDate: string) {
+    startTransition(async () => {
+      const result = await recordEmploymentAction({ employeeId, endDate })
+
+      setMessage({
+        text: result.ok ? (result.message ?? 'Saved.') : result.error,
+        ok: result.ok,
+      })
+
+      if (result.ok) {
+        setDeparting(null)
+        setLeftOn(today)
+        router.refresh()
+      }
+    })
+  }
 
   const [name, setName] = useState('')
   const [reference, setReference] = useState('')
@@ -202,6 +241,15 @@ export function Roster({ people, canManage }: { people: Person[]; canManage: boo
                 <th className="px-4 py-2 text-right font-medium">Rate</th>
                 <th className="px-4 py-2 font-medium">Tax id</th>
                 <th className="px-4 py-2 font-medium">Started</th>
+                {/*
+                  Phase 210. The roster already struck a departed name through
+                  — `person.isActive ? … : 'line-through'` has been in this
+                  file since it was written and had never once rendered,
+                  because no end date and no flag could be set. A column that
+                  read `—` for everybody, under a style for a state nobody
+                  could reach.
+                */}
+                <th className="px-4 py-2 font-medium">Left</th>
               </tr>
             </thead>
             <tbody>
@@ -227,6 +275,55 @@ export function Roster({ people, canManage }: { people: Person[]; canManage: boo
                     {person.taxIdLast4 ? `•••• ${person.taxIdLast4}` : <span className="text-faint">—</span>}
                   </td>
                   <td className="px-4 py-1.5 text-muted">{person.startDate ?? '—'}</td>
+                  <td className="px-4 py-1.5">
+                    {person.endDate ? (
+                      <span className="flex flex-wrap items-center gap-2">
+                        <span className="text-muted">{person.endDate}</span>
+                        {canManage && (
+                          <button
+                            className="btn text-[11px]"
+                            disabled={pending}
+                            onClick={() => recordEmployment(person.id, '')}
+                          >
+                            Still here
+                          </button>
+                        )}
+                      </span>
+                    ) : departing === person.id ? (
+                      <span className="flex flex-wrap items-center gap-1">
+                        <input
+                          aria-label={`Leaving date for ${person.name}`}
+                          className="field w-32 text-xs"
+                          type="date"
+                          max={today}
+                          value={leftOn}
+                          onChange={(event) => setLeftOn(event.target.value)}
+                        />
+                        <button
+                          className="btn btn-primary text-[11px]"
+                          disabled={pending || !leftOn}
+                          onClick={() => recordEmployment(person.id, leftOn)}
+                        >
+                          {pending ? 'Saving…' : 'Save'}
+                        </button>
+                        <button className="btn text-[11px]" onClick={() => setDeparting(null)}>
+                          Cancel
+                        </button>
+                      </span>
+                    ) : canManage ? (
+                      <button
+                        className="btn text-[11px]"
+                        onClick={() => {
+                          setDeparting(person.id)
+                          setLeftOn(today)
+                        }}
+                      >
+                        Record leaving
+                      </button>
+                    ) : (
+                      <span className="text-faint">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -266,6 +266,14 @@ export type AuditAction =
   // is paid, and redeeming a card spends money a client handed over months
   // earlier — §19 asks for both to be reconstructable.
   | 'appointment.complete'
+  /*
+    Standing a practitioner down (Phase 210). The one new member this phase
+    needs: `employee.update` and `tax_code.update` have been in this union
+    since Phase 9 and nothing could emit either, because neither table had an
+    update anywhere. The vocabulary for the correction was written and the
+    correction was not.
+  */
+  | 'practitioner.update'
   /**
    * A card sold (Phase 203).
    *

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { formatCents } from '@/lib/money'
 import {
   addPractitionerAction,
+  setPractitionerActiveAction,
   bookAction,
   closeAction,
   completeAction,
@@ -346,10 +347,53 @@ function PractitionerForm({ practitioners, act, pending }: Props & Helpers) {
       }}
     >
       <h3 className="text-sm font-semibold">Who takes appointments</h3>
-      <p className="text-xs text-muted">
-        {practitioners.length === 0
-          ? 'Nobody yet — add somebody before booking anyone in.'
-          : practitioners.map((row) => row.name).join(', ')}
+      {/*
+        One chip per person with a stand-down beside it (Phase 210).
+
+        This was a comma-joined sentence, which is the right shape for a list
+        that can only grow — and it could only grow. `book` has refused an
+        inactive practitioner since Phase 3 and the picker below has filtered
+        on the same flag, and neither had ever excluded anybody, because
+        `practitioners.is_active` had no writer anywhere. Two readers and no
+        way to make either of them true.
+      */}
+      {practitioners.length === 0 ? (
+        <p className="text-xs text-muted">Nobody yet — add somebody before booking anyone in.</p>
+      ) : (
+        <ul className="flex flex-wrap gap-2">
+          {practitioners.map((row) => (
+            <li
+              key={row.id}
+              className="chip flex items-center gap-2 bg-raised px-2 py-1 text-[11px]"
+            >
+              <span className={row.isActive ? '' : 'text-faint line-through'}>{row.name}</span>
+              <button
+                aria-label={
+                  row.isActive ? `Stand ${row.name} down` : `Let ${row.name} take appointments again`
+                }
+                className="text-faint hover:text-fg"
+                disabled={pending}
+                onClick={(event) => {
+                  event.preventDefault()
+                  act(() =>
+                    setPractitionerActiveAction({
+                      practitionerId: row.id,
+                      isActive: !row.isActive,
+                    }),
+                  )
+                }}
+                type="button"
+              >
+                {row.isActive ? 'stand down' : 'bring back'}
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="text-xs text-faint">
+        Standing somebody down stops new bookings. Appointments already in the diary stay there —
+        each of those is a commitment to a client, and cancelling one is a decision about that
+        client.
       </p>
 
       <div className="grid gap-2 sm:grid-cols-4">

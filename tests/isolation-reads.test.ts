@@ -196,9 +196,16 @@ describe('every read from a company-scoped table', () => {
       linked to, and the name read before the unlink because afterwards there
       is nothing left to read it from.
     */
-    expect(READS.length).toBe(972)
+    /*
+      975 since Phase 210, which gave three columns a writer and each writer
+      reads the row it is about to change first — the employee whose leaving
+      date is being recorded, the tax code being retired, the practitioner
+      being stood down. All three are `scoped-read`, because a correction to
+      somebody else's record is the one that must not be possible.
+    */
+    expect(READS.length).toBe(975)
     expect(by).toEqual({
-      'scoped-read': 593,
+      'scoped-read': 596,
       'explicit-company': 278,
       'established-above': 34,
       'id-from-fetched-row': 21,

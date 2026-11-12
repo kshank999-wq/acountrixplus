@@ -170,8 +170,17 @@ describe('what the census could not see', () => {
       `memberships.companyId` so it can file an audit event per client, which
       *names* a column that is written at insert and never updated. A column
       enters this number by being read for the first time.
+
+      **1,169 since Phase 210**, which is the same correction that took the
+      candidate census from 29 to 96 and is worth reading as a measurement of
+      how badly this number was understated. "A column enters this number by
+      being read for the first time" was exactly right and the test for *read*
+      was too narrow: a projectionless `select()` reads every column of its
+      table and names none, so 399 insert-only columns were outside the count.
+      The limitation this number declares is therefore half again as large as
+      it has been saying since Phase 202.
     */
-    expect(insertOnlyColumns()).toBe(770)
+    expect(insertOnlyColumns()).toBe(1169)
   })
 
   it('removed the entry for the column it closed, rather than rewording it', () => {

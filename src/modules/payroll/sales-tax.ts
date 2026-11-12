@@ -8,6 +8,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { taxPerCode } from '@/modules/payroll/tax-rounding'
 import { functionalSumSql } from '@/modules/fx/summing'
 import { Refusal } from '@/modules/errors'
+import { missing } from '@/modules/errors/missing'
 
 /**
  * Sales tax (spec §13: "sales tax and payroll should use modular/integration
@@ -121,6 +122,70 @@ export async function listTaxCodes(ctx: ActorContext, opts: { activeOnly?: boole
     .orderBy(asc(taxCodes.jurisdiction), asc(taxCodes.code))
 
   return opts.activeOnly ? rows.filter((row) => row.isActive) : rows
+}
+
+/**
+ * Retires a code, or brings it back (Phase 210).
+ *
+ * Phase 209 built the invoice composer's tax-code picker, passed
+ * `{ activeOnly: true }` to it, and said in the comment beside the call that
+ * the flag was **inert**: `tax_codes.is_active` had no writer, so the filter
+ * could only ever drop a row somebody had set false by hand. This is that
+ * comment coming out.
+ *
+ * ## What retiring does not do
+ *
+ * It does not touch a single invoice. Every `document_tax_lines` row carries
+ * the `rate_bp` it was priced at (Phase 2's decision, and ADR 0021's rule for
+ * a sent document), so last quarter's return is unaffected by this quarter's
+ * list. Retiring is a statement about what may be *offered*, which is exactly
+ * the scope of the only flag the picker reads.
+ *
+ * ## Why `effective_to` is not written here
+ *
+ * Because the two mean different things and writing both from one control
+ * would make them one. A retired code is one a company no longer charges
+ * under; a code with an `effective_to` is one superseded by a newer rate for
+ * the same jurisdiction from a given day, which needs the *successor* to exist
+ * and `priceDocumentTax` to choose between them by date. Nothing does that
+ * yet, so `effective_to` keeps no writer and is recorded as a finding rather
+ * than given a half meaning.
+ */
+export async function setTaxCodeActive(
+  ctx: ActorContext,
+  input: { taxCodeId: string; isActive: boolean },
+) {
+  requirePermission(ctx, 'tax:manage')
+
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(taxCodes)
+      .where(scoped(ctx, taxCodes, eq(taxCodes.id, input.taxCodeId)))
+      .limit(1)
+
+    if (!before) throw missing('taxCode')
+
+    const [code] = await tx
+      .update(taxCodes)
+      .set({ isActive: input.isActive })
+      .where(scoped(ctx, taxCodes, eq(taxCodes.id, input.taxCodeId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'tax_code.update',
+        entityType: 'tax_code',
+        entityId: code.id,
+        before: { isActive: before.isActive },
+        after: { code: code.code, isActive: code.isActive },
+      },
+      tx,
+    )
+
+    return code
+  })
 }
 
 /**

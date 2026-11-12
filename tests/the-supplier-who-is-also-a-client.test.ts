@@ -516,29 +516,45 @@ describe('the column census, with nothing left in it', () => {
     expect(candidates).not.toContain('vendors.organizationId')
 
     /*
-      The count itself is asserted in `a-column-nobody-could-fill`, which owns
-      this register's invariants — including that no entry is a finding any
-      more. Two test files holding one count is what reddened shards 3, 4, 5
-      and 6 across Phases 204–207, and the fix each time was to give the claim
-      one home rather than to update both. What this file owns is its own
-      column and the word the register keeps for the next one.
+      The counts themselves are asserted in `a-column-nobody-could-fill` and
+      `the-switch-the-census-could-not-see`, which own this register's
+      invariants. Two test files holding one count is what reddened shards 3,
+      4, 5 and 6 across Phases 204–207, and the fix each time was to give the
+      claim one home rather than to update both. What this file owns is its own
+      column.
+
+      Asserted on the column rather than the table since Phase 210, which gave
+      `vendors` an entry for `addressLine2` and `notes` — both written through
+      `normaliseParty`, and both invisible until the read rule was corrected.
+      "No entry for this table" was a convenient stand-in for "no entry for
+      this column" and the two stopped being the same thing.
     */
-    expect(COLUMN_WRITERS.some((row) => row.table === 'vendors')).toBe(false)
+    expect(
+      COLUMN_WRITERS.some(
+        (row) => row.table === 'vendors' && row.columns.includes('organizationId'),
+      ),
+    ).toBe(false)
   })
 
-  it('keeps the word for a finding, with nothing carrying it', () => {
+  it('keeps the word for a finding, which Phase 210 needed', () => {
     /*
       Phase 157's rule: an unused declaration stays when it *accuses*. The
       `unwritable` verdict is this register's word for a finding, and a
       register with no vocabulary for one cannot report the next — the five
       phases it took to close `vendors.organizationId` are the argument for
       leaving it where it is rather than deleting it as dead code.
+
+      Two phases later it was needed. Phase 210 corrected the read rule and
+      sixteen columns arrived with no writer at all, so this is the rule
+      vindicated rather than a hypothetical: had the verdict been deleted as
+      dead code in Phase 208, the phase that found them would have had to
+      invent the word first.
     */
     const source = readFileSync('src/modules/source/column-writers.ts', 'utf8')
 
     expect(source).toContain("| 'unwritable'")
-    expect(source).toContain('No entry carries this verdict as of Phase 208')
-    // And the heading it would go under, so the next finding has a place.
+    expect(source).toContain('No entry carried this verdict from Phase 208 to Phase 210')
+    // And the heading they go under.
     expect(source).toContain('--- Unwritable, and recorded as findings ---')
   })
 })

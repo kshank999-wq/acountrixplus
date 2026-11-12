@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
-import { createTaxCodeAction } from '@/app/actions/payroll'
+import { createTaxCodeAction, setTaxCodeActiveAction } from '@/app/actions/payroll'
 
 type Code = {
   id: string
@@ -36,6 +36,22 @@ export function TaxCodes({ codes, canManage }: { codes: Code[]; canManage: boole
   const [rate, setRate] = useState('')
   const [isExempt, setIsExempt] = useState(false)
   const [effectiveFrom, setEffectiveFrom] = useState('')
+
+  /**
+   * Retiring a code, and offering it again (Phase 210).
+   *
+   * No confirmation step, because nothing is destroyed and the undo is the
+   * same button: every line already priced keeps the `rate_bp` it was priced
+   * at, so retiring changes what the invoice composer offers and nothing else.
+   * The message the server sends back says so.
+   */
+  function setActive(taxCodeId: string, isActive: boolean) {
+    startTransition(async () => {
+      const result = await setTaxCodeActiveAction({ taxCodeId, isActive })
+      setMessage({ text: result.ok ? (result.message ?? 'Saved.') : result.error, ok: result.ok })
+      if (result.ok) router.refresh()
+    })
+  }
 
   function submit() {
     // Zero when exempt, whatever is left in the box behind the disabled field.
@@ -177,6 +193,14 @@ export function TaxCodes({ codes, canManage }: { codes: Code[]; canManage: boole
                 <th className="px-4 py-2 font-medium">Name</th>
                 <th className="px-4 py-2 text-right font-medium">Rate</th>
                 <th className="px-4 py-2 font-medium">From</th>
+                {/*
+                  Phase 210. The code column has struck a retired code through
+                  since this register was written and had never rendered it,
+                  because `tax_codes.is_active` had no writer — the same
+                  painted-on style the payroll roster carries for a departed
+                  worker, in a different module.
+                */}
+                {canManage && <th className="px-4 py-2 font-medium">Offered</th>}
               </tr>
             </thead>
             <tbody>
@@ -198,6 +222,17 @@ export function TaxCodes({ codes, canManage }: { codes: Code[]; canManage: boole
                     {entry.rateBp / 100}%
                   </td>
                   <td className="px-4 py-1.5 text-muted">{entry.effectiveFrom ?? '—'}</td>
+                  {canManage && (
+                    <td className="px-4 py-1.5">
+                      <button
+                        className="btn text-[11px]"
+                        disabled={pending}
+                        onClick={() => setActive(entry.id, !entry.isActive)}
+                      >
+                        {entry.isActive ? 'Retire' : 'Offer again'}
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

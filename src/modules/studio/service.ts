@@ -24,15 +24,34 @@ import { missing } from '@/modules/errors/missing'
 
 // --- Profile ---------------------------------------------------------------
 
+/**
+ * What a company may say about itself.
+ *
+ * `addressLine2` and `country` joined this type in Phase 210, and the reason
+ * they were missing is worth keeping. Phase 200 found that the Design Center's
+ * form had no field for `description`, added one, and the test written for that
+ * named two more columns `letterhead.ts` reads on every document a client sees.
+ * All three got a **field**. None of them got a **place to land**: this type
+ * never learned `addressLine2` or `country`, and `saveProfileAction`'s schema
+ * learned none of the three — so a company could type its second address line,
+ * press Save, read *"Company profile saved."* and have the value dropped by
+ * `profileSchema.parse`, which strips what it does not declare.
+ *
+ * The tripwire Phase 200 left behind asserts the **form** covers the table, and
+ * it passed throughout, because a form is one of the three places a field has
+ * to exist. `tests/the-boxes-that-threw-it-away.test.ts` now asserts the chain.
+ */
 export type ProfileInput = {
   legalName?: string | null
   dba?: string | null
   tagline?: string | null
   description?: string | null
   addressLine1?: string | null
+  addressLine2?: string | null
   city?: string | null
   region?: string | null
   postalCode?: string | null
+  country?: string | null
   phone?: string | null
   email?: string | null
   website?: string | null

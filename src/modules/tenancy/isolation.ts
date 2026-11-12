@@ -209,8 +209,8 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 593 of ' +
-      'the 972 reads, against 63 of the 301 writes. The two halves of this system are guarded ' +
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 596 of ' +
+      'the 975 reads, against 66 of the 304 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
       'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
       'needed correcting by hand in every phase that touched a read — 180, 183, 184, 185 and ' +
@@ -235,8 +235,10 @@ const READ_GUARDS: readonly IsolationGuard[] = [
       'that Phase 196 had counted the raw *writes* and left four raw selects uncounted, one of ' +
       'them with no tenant predicate at all. Not a disclosure, because a foreign key already ' +
       'refused the row that would have made it one; a clause it should have had either way. ' +
-      'The numbers at the head of this entry are 301 and 972 since Phase 208, which added two ' +
-      'writes and five reads and left the ratio where it was.',
+      'The numbers at the head of this entry were 301 and 972 from Phase 208, and are 304 and ' +
+      '975 since Phase 210 — one write and one read each for the three switches it gave a ' +
+      'writer to, every one of them scoped, which is why both scoped figures move by three ' +
+      'as well.',
   },
   {
     kind: 'join-inherited',

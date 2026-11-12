@@ -60,6 +60,7 @@ import { wipPosition } from '@/modules/manufacturing/reporting'
 import { importDay, listDays, tipsPosition } from '@/modules/pos/service'
 import {
   addPractitioner,
+  setPractitionerActive,
   book,
   closeWithoutDelivery,
   completeAppointment,
@@ -173,9 +174,9 @@ import { applyOperation } from '@/modules/mobile/operations'
 import { listInbox as listInboxForMobile } from '@/modules/bookkeeping/transactions'
 import { postManualEntry } from '@/modules/ledger/journal'
 import { suggestCategory, summarizeInbox } from '@/modules/ai/bookkeeping'
-import { createEmployee, createPayrollRun } from '@/modules/payroll/service'
+import { createEmployee, createPayrollRun, recordEmployment } from '@/modules/payroll/service'
 import { recordRemittance } from '@/modules/payroll/remittance'
-import { createTaxCode } from '@/modules/payroll/sales-tax'
+import { createTaxCode, setTaxCodeActive } from '@/modules/payroll/sales-tax'
 import { setVendorReporting } from '@/modules/payroll/vendor-reporting'
 import { workpaperPack } from '@/modules/payroll/workpapers'
 import { installCompanySchedules, installGlobalSchedules } from '@/modules/worker/defaults'
@@ -765,9 +766,30 @@ async function main() {
     legalName: 'Ridgeline Construction LLC',
     tagline: 'Foundations, framing, and finish work since 2009.',
     addressLine1: '412 Mill Street',
+    /*
+      The second address line and the country (Phase 210). Both are printed by
+      `letterhead.ts` on every invoice, quote and statement, both had a field
+      on the Design Center form from Phase 200, and until Phase 210 neither
+      had a place to land — `saveProfileAction`'s schema omitted them and a zod
+      object strips what it does not declare. A demo that never set them was
+      the last thing keeping the blank lines invisible.
+    */
+    addressLine2: 'Unit B, Mill Yard',
     city: 'Bellingham',
     region: 'WA',
     postalCode: '98225',
+    country: 'United States',
+    /*
+      The company in its own words, which §11 asks the marketing assistant to
+      adapt to. `description` had a field, a column and a service that accepted
+      it from Phase 200, and the action schema in between dropped it — so the
+      only writer it ever had was a test calling `saveProfile` directly.
+    */
+    description:
+      'Ridgeline is a nine-person general contractor working the north Sound. We take on ' +
+      'residential additions, light commercial tenant improvements and the occasional ' +
+      'from-scratch build, and we do our own framing and finish work rather than ' +
+      'subcontracting it out.',
     phone: '(360) 555-0148',
     email: 'hello@ridgeline.test',
     website: 'ridgeline.test',
@@ -1325,7 +1347,25 @@ async function main() {
     taxIdLast4: '9082',
     startDate: '2025-11-17',
   })
-  console.log('  2 people on payroll, with the last four digits of a tax id and nothing more.')
+  /*
+    Somebody who left, which no company could record until Phase 210 (Phase
+    49's shape: `employees.end_date` and `is_active` had a reader and no
+    writer). Her departure is after July's run and before today, so the run
+    below is unaffected and the roster shows what a leaver looks like — struck
+    through, with a date, under a style that had never rendered.
+  */
+  const priya = await createEmployee(ctx, {
+    name: 'Priya Raman',
+    reference: 'EMP-003',
+    workerType: 'employee',
+    payBasis: 'hourly',
+    baseRateCents: 3_800,
+    taxIdLast4: '2260',
+    startDate: '2025-02-10',
+  })
+  await recordEmployment(ctx, { employeeId: priya.id, endDate: '2026-08-29' })
+
+  console.log('  3 people on payroll, one of whom left in August.')
 
   const july = await createPayrollRun(ctx, {
     frequency: 'monthly',
@@ -1417,7 +1457,27 @@ async function main() {
     isExempt: true,
     effectiveFrom: '2026-01-01',
   })
-  console.log('  3 tax codes: 8.25%, 4%, and one exempt.')
+  /*
+    The city rate before it rose, retired (Phase 210). `tax_codes.is_active`
+    had no writer, so Phase 209's composer passed `{ activeOnly: true }` to a
+    filter that could only ever drop a row somebody had set false by hand.
+
+    A retired code is not offered on a new invoice and keeps every line already
+    priced under it — which is the whole of what retiring means, and is why the
+    successor and the predecessor can sit here under different codes. What this
+    cannot say is *from when*: `effective_to` still has no writer, and
+    superseding a rate by date is a different act from withdrawing a code.
+  */
+  const cityTaxOld = await createTaxCode(ctx, {
+    code: 'CITY-2025',
+    name: 'Bellingham city sales tax — rate in force before 2026',
+    jurisdiction: 'City',
+    rateBp: 800,
+    effectiveFrom: '2024-01-01',
+  })
+  await setTaxCodeActive(ctx, { taxCodeId: cityTaxOld.id, isActive: false })
+
+  console.log('  4 tax codes: 8.25%, 4%, one exempt, and the old city rate retired.')
 
   if (contractRevenue) {
     /**
@@ -2671,6 +2731,22 @@ async function main() {
     commissionBp: 5_500,
     productCommissionBp: 1_000,
   })
+
+  /*
+    A third who has moved on, stood down (Phase 210).
+
+    `book` has refused an inactive practitioner since Phase 3 —
+    *"X is no longer taking appointments"* — and `practitioners.is_active` had
+    no writer, so that branch had never been reachable and the message had
+    never been shown to anybody. The diary below books nobody with her, which
+    is now a fact about the data rather than a coincidence of the script.
+  */
+  const nina = await addPractitioner(salonCtx, {
+    name: 'Nina Haugen',
+    commissionBp: 4_000,
+    productCommissionBp: 1_000,
+  })
+  await setPractitionerActive(salonCtx, { practitionerId: nina.id, isActive: false })
 
   const at = (day: number, hour: number) => new Date(Date.UTC(2026, 3, day, hour, 0))
 

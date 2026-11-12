@@ -6,7 +6,6 @@ import {
   timestamp,
   bigint,
   integer,
-  boolean,
   index,
   unique,
   pgEnum,
@@ -129,7 +128,16 @@ export const vehicles = pgTable(
     odometerMiles: integer('odometer_miles'),
 
     notes: text('notes'),
-    isActive: boolean('is_active').notNull().default(true),
+    /*
+      `is_active` was here and is gone in Phase 210, for the reason
+      `segments.is_active` is: nothing wrote it and nothing read it. It was the
+      one of the thirty `isActive` columns that not even the corrected scan
+      reports, because no query fetches it either — `listVehicles` projects its
+      columns by name and this was not among them.
+
+      A car does not stop existing, and what a workshop means by "we no longer
+      see that vehicle" is a question about its owner. Nothing asked it.
+    */
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

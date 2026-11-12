@@ -233,6 +233,97 @@ export async function listEmployees(ctx: ActorContext, opts: { activeOnly?: bool
   return opts.activeOnly ? rows.filter((row) => row.isActive) : rows
 }
 
+/**
+ * Records that somebody has left, or that they have not (Phase 210).
+ *
+ * ## The gap this closes
+ *
+ * `employees` had **one insert and no update** for 209 phases. `end_date` and
+ * `is_active` had no writer, so a person who left in March was still on every
+ * payroll run in December, and `createPayrollRun` accepted a payslip for them
+ * because its own check reads the unnarrowed list. The index on this table is
+ * `(company_id, is_active)` — the schema was built to serve a filter the
+ * application never ran against the database and could never have made false.
+ *
+ * ADR 0208 nominated this as *a caller that forgot the flag*. Measured, the
+ * payroll run page passes `{ activeOnly: true }` and has since it was built.
+ * The caller was right and the column was unwritable, which is the opposite
+ * defect with the same symptom — and the reason neither census saw it is that
+ * `listEmployees` selects every row and filters `row.isActive` in JavaScript,
+ * so no query ever named the column (Phase 210's correction to the read rule).
+ *
+ * ## One act, two columns, and no way for them to disagree
+ *
+ * A date and a flag that each have their own control are two answers to *has
+ * this person left* (Phase 70's rule about one vocabulary for a correction).
+ * So there is one function: an end date means gone, `null` means here.
+ *
+ * ## Why a future date is refused rather than scheduled
+ *
+ * `is_active` is stored, so a departure dated next month would need something
+ * to come along and flip it — and nothing would. The flag would read `true`
+ * beside a leaving date already in the row, which is the defect this phase
+ * exists to remove rather than relocate. A constraint beats a state machine
+ * nobody winds (Phase 116).
+ *
+ * The limitation is real and is declared rather than hidden: a departure is
+ * recorded on or after the day it takes effect. Scheduling one needs the worker
+ * queue, which is a different phase.
+ */
+export async function recordEmployment(
+  ctx: ActorContext,
+  input: { employeeId: string; endDate: string | null },
+) {
+  requirePermission(ctx, 'payroll:manage')
+
+  const today = new Date().toISOString().slice(0, 10)
+
+  if (input.endDate !== null && input.endDate > today) {
+    throw new Refusal(
+      `A departure is recorded once it has happened. ${input.endDate} is in the future — ` +
+        `come back on the day, or record it as ${today} if they have already gone.`,
+    )
+  }
+
+  return db.transaction(async (tx) => {
+    const [before] = await tx
+      .select()
+      .from(employees)
+      .where(scoped(ctx, employees, eq(employees.id, input.employeeId)))
+      .limit(1)
+
+    if (!before) throw missing('employee')
+
+    if (input.endDate !== null && before.startDate && input.endDate < before.startDate) {
+      throw new Refusal(
+        `${before.name} started on ${before.startDate}, so they cannot have left on ` +
+          `${input.endDate}.`,
+      )
+    }
+
+    const [employee] = await tx
+      .update(employees)
+      .set({ endDate: input.endDate, isActive: input.endDate === null, updatedAt: new Date() })
+      .where(scoped(ctx, employees, eq(employees.id, input.employeeId)))
+      .returning()
+
+    await recordAudit(
+      ctx,
+      {
+        action: 'employee.update',
+        entityType: 'employee',
+        entityId: employee.id,
+        // Never the rate, on `createEmployee`'s rule.
+        before: { endDate: before.endDate, isActive: before.isActive },
+        after: { endDate: employee.endDate, isActive: employee.isActive },
+      },
+      tx,
+    )
+
+    return employee
+  })
+}
+
 // --- Runs ------------------------------------------------------------------
 
 /**
@@ -262,6 +353,27 @@ export async function createPayrollRun(ctx: ActorContext, input: PayrollRunInput
   for (const payslip of input.payslips) {
     const person = byId.get(payslip.employeeId)
     if (!person) throw new Refusal('One of those workers is not on this company’s payroll.')
+
+    /*
+      Somebody who left before this period began (Phase 210).
+
+      The list above is deliberately **unnarrowed**, and stays that way: a
+      person who left mid-period is owed their last payslip, so filtering on
+      `isActive` here would refuse the one run that matters most. The date is
+      the question, not the flag — gone before the period opened is a payslip
+      for work nobody did.
+
+      This is the check ADR 0208 said was missing. It was: until this phase no
+      end date could be recorded, so there was nothing for it to read and
+      writing it would have been a guard over an always-null column.
+    */
+    if (person.endDate && person.endDate < input.periodStart) {
+      throw new Refusal(
+        `${person.name} left on ${person.endDate}, before this period began on ` +
+          `${input.periodStart}. Remove the payslip, or correct the leaving date on the payroll ` +
+          'roster.',
+      )
+    }
 
     const net = netPayFor(payslip)
     if (net < 0) throw new NegativeNetPayError(person.name, net)

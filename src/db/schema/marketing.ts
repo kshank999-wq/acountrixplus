@@ -4,7 +4,6 @@ import {
   text,
   timestamp,
   integer,
-  boolean,
   jsonb,
   date,
   index,
@@ -80,14 +79,28 @@ export const segments = pgTable(
     description: text('description'),
     /** Shape validated by `segmentDefinitionSchema`. */
     definition: jsonb('definition').$type<unknown>().notNull(),
-    isActive: boolean('is_active').notNull().default(true),
 
+    /*
+      `is_active` was here, with an index on `(company_id, is_active)`, and it
+      is gone in Phase 210.
+
+      Nothing wrote it and nothing read it: `createSegment` never set it,
+      `updateSegment` never set it, and no query, filter or screen anywhere
+      consulted it. A column with neither a writer nor a reader is Phase 49's
+      shape, and the honest fix for one is removal rather than a control —
+      building a retire button here would be inventing a requirement to justify
+      a column, and leaving it is leaving a promise in the schema that a
+      segment can be turned off.
+
+      Removed rather than declared because a declaration is for a column
+      something *reads*. This one only ever cost an index.
+    */
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
-    companyIdx: index('segments_company_idx').on(t.companyId, t.isActive),
+    companyIdx: index('segments_company_idx').on(t.companyId, t.name),
   }),
 )
 

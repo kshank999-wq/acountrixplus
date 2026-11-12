@@ -57,14 +57,30 @@ async function run(
 
 // --- Company profile -------------------------------------------------------
 
+/**
+ * The boundary, and for 210 phases the narrowest part of the path (Phase 210).
+ *
+ * A zod object **strips** what it does not declare rather than refusing it, so
+ * every key this schema omits is a box on the Design Center form that accepts
+ * typing, reports success and saves nothing. Three were omitted:
+ * `description`, which Phase 200 added a field for and §11 asks the marketing
+ * assistant to adapt to; and `addressLine2` and `country`, which
+ * `letterhead.ts` prints on every invoice, quote and statement a client sees.
+ *
+ * The order here follows `PROFILE_FIELDS`, and the test asserting the two agree
+ * is the only reason that is more than tidiness.
+ */
 const profileSchema = z.object({
   legalName: z.string().trim().max(200).optional(),
   dba: z.string().trim().max(200).optional(),
   tagline: z.string().trim().max(300).optional(),
+  description: z.string().trim().max(4000).optional(),
   addressLine1: z.string().trim().max(200).optional(),
+  addressLine2: z.string().trim().max(200).optional(),
   city: z.string().trim().max(120).optional(),
   region: z.string().trim().max(120).optional(),
   postalCode: z.string().trim().max(40).optional(),
+  country: z.string().trim().max(120).optional(),
   phone: z.string().trim().max(60).optional(),
   email: z.string().trim().max(320).optional(),
   website: z.string().trim().max(300).optional(),

@@ -483,12 +483,21 @@ describe('what the census could not have found', () => {
      *
      * And the mirror census cannot be built from the same predicate.
      * `writerCandidates` uses "named outside the schema" as the test for
-     * *read*, which is conservative in the safe direction — a missed read
-     * loses a candidate. Inverted it becomes the exclusion test, and a single
+     * *read*. Inverted it becomes the exclusion test, and a single
      * `.select()` with no projection reads every column of a table while
      * naming none: `recentRequests` in `ai/settings.ts` is one, so every
      * column of `ai_requests` looks unread. Measured, the mirror reports 683
      * columns, which is the size of the error rather than a finding.
+     *
+     * **This paragraph used to end "which is conservative in the safe
+     * direction — a missed read loses a candidate", and that was the wrong
+     * conclusion from the right observation (corrected in Phase 210).** A
+     * missed read does not lose a candidate, it loses a **finding**: the
+     * forward census skips a column it cannot see a read for *before* applying
+     * any exclusion, so the same projectionless select that inflates the
+     * mirror to 683 silences the forward scan completely. Seventy-two columns,
+     * sixteen of them written by nothing — including `ai_requests.cacheHit`,
+     * on the very table named three lines above as the example.
      *
      * Asserted on the source because the claim is about where the column is
      * read, and the reader is a default rather than a figure a test can see

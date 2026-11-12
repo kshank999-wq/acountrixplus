@@ -181,10 +181,15 @@ describe('every write that can be aimed at a row', () => {
     // which gave `vendors.organizationId` the two writes it never had — one
     // linking a supplier to the CRM client it is, one taking the link away.
     // Both `scoped-write`, and both measured rather than predicted.
-    expect(WRITES.length).toBe(301)
+    //
+    // **Three hundred and four since Phase 210** and the three switches it
+    // gave a writer to — `recordEmployment`, `setTaxCodeActive` and
+    // `setPractitionerActive`. All three `scoped-write`, which is the only
+    // guard that makes sense for a correction to one record among many.
+    expect(WRITES.length).toBe(304)
     expect(by).toEqual({
       'explicit-company': 198,
-      'scoped-write': 63,
+      'scoped-write': 66,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       // Phase 204's own three writes land on two of these, and one existing
