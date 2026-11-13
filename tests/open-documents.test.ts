@@ -218,10 +218,29 @@ describe('what a line may be coded to', () => {
     expect(accounts.some((account) => account.type === 'expense')).toBe(true)
     expect(accounts.some((account) => account.type === 'revenue')).toBe(false)
 
-    // A van or a pallet of stock arrives on a supplier bill, so assets are on
-    // the list — this is why the exclusions below have to be by name.
+    // A van arrives on a supplier bill, so assets are on the list — this is
+    // why the exclusions below have to be by name.
     expect(accounts.some((account) => account.number === '1500')).toBe(true)
-    expect(accounts.some((account) => account.number === '1400')).toBe(true)
+
+    /*
+      This line read `'1400'` and `toBe(true)` from Phase 31 to Phase 211.
+
+      It came from the same sentence as the van — the function's docstring said
+      *"a supplier bill for a van legitimately debits Fixed Assets, and one for
+      stock debits Inventory"* — and the second half was the exception to the
+      rule stated two sentences later, about accounts whose invariant a line
+      would break. Measured: a $1,000 bill line coded to 1400 put
+      `inventory.lots` into a **fault**, Σ open lots 0 against a ledger of
+      100000, and then receiving the goods properly *doubled* the difference
+      instead of closing it, because the receipt posts its own debit to the
+      same account.
+
+      The van stays true. `registerAsset` posts nothing precisely because "a
+      supplier bill already coded the cost to Fixed Assets", so that fault has
+      one action behind it and the check names it. Stock has no such adoption
+      step, which is the asymmetry ADR 0211 is about.
+    */
+    expect(accounts.some((account) => account.number === '1400')).toBe(false)
   })
 
   /**

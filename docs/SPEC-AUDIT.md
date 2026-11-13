@@ -276,7 +276,7 @@ suppression (`modules/crm/intake`, `modules/notify`), and security review gating
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
 rather than vaguely: the application layer is complete and measured — **304
-writes** and **975 reads**, every one guarded (Phases 149–150, the census
+writes** and **977 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,13 +357,15 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2177 columns** across **185 tables** and reports **96** with a
+The scan reads **2176 columns** across **185 tables** and reports **95** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
 
-**Fourteen of the 96 are findings, covering 16 columns** — the first this
-register has carried. From Phase 208 to Phase 210 it had none, and that was a
+**Thirteen of the 95 are findings, covering 15 columns** — fourteen over
+sixteen when Phase 210 wrote them, less `bill_lines.item_id`, which Phase 211
+established had never been a defect and dropped. They are the first findings
+this register has carried. From Phase 208 to Phase 210 it had none, and that was a
 claim about what the scan could see: its test for *read* was `tableVar.column`
 named outside the schema, and a projectionless `select()` reads every column of
 its table while naming none, so **72 columns had never been examined at all**.
@@ -473,6 +475,73 @@ holds either today, so no role's behaviour changed; the seam did, and a company
 can grant `users:manage` alone without the Studio, the module switches or the
 billing. `company:manage` keeps the company's own arrangements, the engagement
 with a practice included.
+
+### §13, §14 — the account with no way back (Phase 211)
+
+§13 claims payables and §14 claims inventory, and the seam between them is a
+supplier's bill for goods. This phase measured what the application does when
+somebody codes one.
+
+`documentLineAccounts` offers a bill line every expense, cost of sale and asset
+account, holding back four it names in a bare array, on a rule its docstring
+states plainly: *"two kinds of account are held back even so, because coding a
+line to one silently breaks an invariant something else is checking"*. Two
+sentences earlier the same docstring says *"a supplier bill for a van
+legitimately debits Fixed Assets, and one for stock debits Inventory, so assets
+are offered"*.
+
+Measured, with every account the bill side offers put on its own $1,000 bill
+and all nineteen integrity checks run after each: **four of them raise a
+fault** — `1250` breaks `payments.in_transit`, `1400` breaks `inventory.lots`,
+`1450` breaks `manufacturing.wip`, `1500` breaks `assets.register`. The invoice
+side breaks nothing, because it offers revenue only.
+
+**One of the four is not a defect, and finding out which is the phase.**
+Registering the asset closes `1500` — 0 against 4,000,000 becomes 4,000,000
+against 4,000,000 — because a bill line *is* the intended way to capitalise
+one; `registerAsset` posts nothing precisely so the truck is not on the balance
+sheet twice. Stock has no adoption step: after a bill coded to `1400`,
+receiving the same goods properly **doubles** the difference, because the
+receipt posts its own debit.
+
+So §14's subledger identity — Σ open lots equals the Inventory account — was
+reachable from a dropdown, and the audit can now say the composer cannot reach
+it. The class of accounts something else maintains is one register,
+`coa/maintained.ts`, measured against `FALSIFIERS`: **fifteen accounts have a
+fault-severity check watching them**, and the two lists that each described the
+class for their own call site named four between them. Eight of the rest were
+safe only because a bill line may not name a liability, which is a filter about
+what a cost is rather than a protection, and that is now written down where
+somebody widening the filter will see it.
+
+One correction the audit should carry, because it is about this file's method
+as much as the phase's. The measurement above asked what the **pickers** offer,
+and the invoice picker offers revenue only, so the invoice side measured clean.
+Nine modules raise documents with accounts they choose themselves and no picker
+is involved in any of them — two of them raise a deposit invoice credited to the
+retainer account, correctly, because money taken before the work is not revenue.
+The register names that licence now. A guard measured against the dropdown it
+backs is measured against the wrong thing, and the suite was the instrument that
+could see it.
+
+ADR 0210's nomination is answered in the other direction: `bill_lines.item_id`
+had no writer, and the right place to record what arrived is the goods receipt
+line, which has had one since Phase 14. The column had no reader either, so it
+is dropped (`0104`) rather than filled — a picker there would have been a second
+way to receive stock, which is the one thing §14's subledger cannot survive.
+
+Dropping it moved two tree-wide censuses, and the audit should carry the second
+of them because it is about this file's subject rather than the phase's. The
+reference count between tenant-scoped tables falls to **294 and 39** from 295
+and 40 — the first fall in that tally, in both figures. And the test asserting
+`item_id` is a foreign key *"on both invoice and bill lines"* has been asserting
+something true and empty: **Phase 169 keyed `bill_lines.item_id` and Phase 170
+made that key composite so it could not name another tenant's item, over a
+column nothing ever wrote.** A tenancy guarantee asserted over an unwritten
+column is indistinguishable, from the test's side, from one that is doing work.
+The assertion now measures every column in the schema that names a catalogue
+item and requires a key on each, then names the twelve exactly.
+
 
 ### §19 — the switch the census could not see (Phase 210)
 

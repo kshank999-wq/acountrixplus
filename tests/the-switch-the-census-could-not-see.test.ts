@@ -137,7 +137,7 @@ describe('the rule the scan was missing', () => {
     expect(scan.match(/readNames\(file, tables\)/g)).toHaveLength(2)
   })
 
-  it('reports 96 candidates and declares every one of them', () => {
+  it('reports 95 candidates and declares every one of them', () => {
     /*
       29 before the correction. The 67 the number moves by is not new code — it
       is columns the scan had never looked at, and the register had to argue
@@ -147,7 +147,9 @@ describe('the rule the scan was missing', () => {
       found a version of.
     */
     const candidates = writerCandidates()
-    expect(candidates).toHaveLength(96)
+    // 96 when this phase measured it; 95 since Phase 211 dropped
+    // `bill_lines.item_id` rather than filling it.
+    expect(candidates).toHaveLength(95)
 
     const declared = new Set(
       COLUMN_WRITERS.flatMap((entry) => entry.columns.map((c) => `${entry.table}.${c}`)),
@@ -169,11 +171,16 @@ describe('the rule the scan was missing', () => {
       verdict was created in Phase 201, emptied in Phase 208, and kept on the
       argument that a register with no word for a finding cannot report the
       next one. Two phases later it was needed sixteen times.
+
+      Fifteen now. Phase 211 took `bill_lines.item_id` off the list — not by
+      fixing it, but by establishing that it had never been a defect: the
+      receipt line already records what arrived, so the column was dropped and
+      the finding became an argument in the schema where it used to sit.
     */
     const findings = COLUMN_WRITERS.filter((row) => row.verdict === 'unwritable')
 
-    expect(findings).toHaveLength(14)
-    expect(findings.flatMap((row) => row.columns)).toHaveLength(16)
+    expect(findings).toHaveLength(13)
+    expect(findings.flatMap((row) => row.columns)).toHaveLength(15)
 
     // The verdict means nothing writes it, so there is no writer to name.
     for (const finding of findings) {

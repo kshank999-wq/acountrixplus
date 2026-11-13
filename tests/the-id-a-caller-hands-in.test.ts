@@ -139,8 +139,25 @@ describe('how many references could point at another tenant', () => {
       tenant in the key because the alternative was the shape Phase 170 was
       written to retire — which is the shape these two tables had.
     */
-    expect(measured.total).toBe(295)
-    expect(measured.composite).toBe(40)
+    /*
+      294 and 39 since Phase 211, and this is the first entry in this tally that
+      goes **down** — in both figures. Every paragraph above it records
+      references being added; this one records one being deleted.
+      `bill_lines.item_id` carried a composite tenant key from Phase 170 and was
+      counted in both numbers from then on, and nothing ever wrote it or read it
+      but a test. So for forty-one phases one of the keys this file counts as
+      protection was protecting a column that held nothing. Phase 49's shape,
+      and migration `0104` is the answer to it.
+
+      Both figures falling together is the part worth keeping. Had only `total`
+      fallen, the share carrying the tenant would have *improved* — 40 of 294
+      rather than 40 of 295 — and a running total that can only rise reads like
+      progress whether any was made or not. 39 of 294 is the same share it was,
+      measured over one less reference, which is what deleting an empty column
+      is actually worth.
+    */
+    expect(measured.total).toBe(294)
+    expect(measured.composite).toBe(39)
   })
 
   it('leaves no single-column reference into the catalogue at all', async () => {

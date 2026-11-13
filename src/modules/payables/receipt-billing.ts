@@ -45,6 +45,13 @@ import {
  * right and stays. **This is the something else.** A caller reaching for this
  * function has named the deliveries it is clearing, so the amount is derived
  * rather than typed, and the receipts are marked in the same transaction.
+ *
+ * Phase 211 made that licence explicit. The class those four accounts belong to
+ * is now a register, `createBill` refuses a line naming one of them, and this
+ * function says which authority it is using — `actingAs: 'receipt_clearance'`,
+ * the register's only named act. The sentence above was true and had nothing
+ * enforcing it: `2050` was kept off the list by the type filter, not by the
+ * rule the sentence states.
  */
 
 export type ReceiptBillResult = {
@@ -171,6 +178,17 @@ export async function billReceipts(
      * apart, and here there is something.
      */
     acknowledgeDuplicate: true,
+    /*
+      The licence the register names (Phase 211).
+
+      `2050` was already off the bill composer's list, but by accident: the
+      vendor side offers expenses, costs of sale and assets, and `2050` is a
+      liability. Phase 211 wrote the class down, which turned the accidental
+      protection into a stated one and left this function needing to say out
+      loud what it already was — the something-else in *"accounts something
+      else maintains, which nothing may post to by hand"*.
+    */
+    actingAs: 'receipt_clearance',
     lines: [
       {
         chartAccountId: grni.id,

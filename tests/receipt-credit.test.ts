@@ -12,8 +12,38 @@ import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
  */
 
 describe('the accounts a receipt may not credit', () => {
-  it('names both control accounts, and only those', () => {
-    expect(CONTROL_ACCOUNTS.map((row) => row.number).sort()).toEqual(['1100', '2000'])
+  /**
+   * This test asserted `['1100', '2000']` — "names both control accounts, and
+   * only those" — from Phase 117 to Phase 211.
+   *
+   * It was exactly right about the two it had and wrong about the word *both*,
+   * which is the whole of ADR 0211: this file argued that what it excluded was
+   * *"a single, statable class"*, and then stated two members of a class that
+   * has fifteen with a fault-severity check watching them. The twelve it
+   * missed were each watched by a check whose own falsifier says the one act
+   * that breaks it is a hand-written journal entry at that account — so a
+   * stock receipt crediting one was a second route to the same damage, and
+   * nothing anywhere said so.
+   *
+   * Pinned as a floor and a membership rather than an exact list, because the
+   * exact list belongs to `MAINTAINED_ACCOUNTS` and is asserted against the
+   * check register in `the-account-with-no-way-back.test.ts`. What this file
+   * keeps is the claim it has always made: the two the seed got wrong are on
+   * it, and the accounts a receipt legitimately credits are not.
+   */
+  it('names the whole class, not the two it was written for', () => {
+    const numbers = CONTROL_ACCOUNTS.map((row) => row.number)
+
+    expect(numbers).toContain('1100')
+    expect(numbers).toContain('2000')
+    expect(numbers.length).toBeGreaterThan(2)
+
+    // The three a receipt may credit, each for a reason this file argues:
+    // the clearing account a purchase receipt uses, the work in process a
+    // finished run credits, and a bank account for stock bought outright.
+    expect(numbers).not.toContain('2050')
+    expect(numbers).not.toContain('1450')
+    expect(numbers).not.toContain('1000')
   })
 
   it('gives each one a reason in the terms of the books', () => {

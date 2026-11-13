@@ -77,31 +77,92 @@ describe('one name for one reference', () => {
 // --- Two references that were not -----------------------------------------
 
 describe('the two that were never foreign keys', () => {
-  it('constrains item_id on both invoice and bill lines', async () => {
+  it('constrains every column in the schema that names a catalogue item', async () => {
     /**
-     * Of the twelve places this codebase points at `service_items`, these two
-     * were the only ones that were not foreign keys — and they are the two that
-     * matter most: `item_id` on an invoice line is what tells the invoice to
-     * relieve inventory, and what any revenue-by-product report groups on.
+     * Of the twelve places Phase 169 found this codebase pointing at
+     * `service_items`, two were not foreign keys — `item_id` on an invoice line
+     * and on a bill line — and they were the two that mattered most: `item_id`
+     * on a document line is what tells a sale to relieve inventory, and what any
+     * revenue-by-product report groups on.
      *
      * Phase 116: a constraint beats a check. There is nothing to remember once
      * the database refuses it.
+     *
+     * ## What this test asserted for forty-one phases, and what it asserts now
+     *
+     * It named the two tables and asserted both were constrained:
+     *
+     * > expect(tables).toEqual(['bill_lines', 'invoice_lines'])
+     *
+     * **Phase 211 deleted `bill_lines.item_id`** (migration `0104`). Nothing had
+     * ever written it and nothing read it: `receiveGoods` records the item on
+     * `goods_receipt_lines`, and the bill that clears the delivery names no
+     * item, because a picker on a bill line would be a second way to receive
+     * stock. Phase 49's shape — a column with no writer and no reader is a
+     * migration, not a feature waiting for one.
+     *
+     * The honest reading of that is uncomfortable and belongs here rather than
+     * in the ADR alone: Phase 169 put a foreign key on this column and Phase 170
+     * made that key composite so it could not name another tenant's item, and
+     * both phases were protecting a column that was always empty. This test's
+     * pass was never evidence the protection was doing anything.
+     *
+     * So the assertion is no longer a list of tables. It measures every column
+     * in the schema that names a catalogue item and insists each one is
+     * constrained, which is the claim the two-table version was standing in for
+     * and could not make. A thirteenth table added later without a key fails
+     * here on the day it is added rather than when somebody remembers to extend
+     * a list — and the twelve are spelled out so that a key *disappearing* is a
+     * failure too, not a silently shorter array (Phase 126: the count, not a
+     * bound).
      */
     const rows = await db.execute(sql`
-      select conrelid::regclass::text as table_name
-        from pg_constraint
-       where contype = 'f'
-         and conrelid in ('invoice_lines'::regclass, 'bill_lines'::regclass)
-         and confrelid = 'service_items'::regclass
+      with naming as (
+        select c.relname::text as table_name, a.attname::text as column_name
+          from pg_class c
+          join pg_attribute a on a.attrelid = c.oid
+         where c.relkind = 'r'
+           and a.attnum > 0
+           and not a.attisdropped
+           and a.attname in ('item_id', 'service_item_id')
+      ),
+      keyed as (
+        select k.conrelid::regclass::text as table_name, a.attname::text as column_name
+          from pg_constraint k
+          join unnest(k.conkey) as col on true
+          join pg_attribute a on a.attrelid = k.conrelid and a.attnum = col
+         where k.contype = 'f'
+           and k.confrelid = 'service_items'::regclass
+      )
+      select naming.table_name, keyed.column_name is not null as constrained
+        from naming
+        left join keyed
+          on keyed.table_name = naming.table_name
+         and keyed.column_name = naming.column_name
+       order by naming.table_name
     `)
 
-    const tables = (rows as unknown as Array<{ table_name: string }>)
-      .map((row) => row.table_name)
-      .sort()
+    const measured = rows as unknown as Array<{ table_name: string; constrained: boolean }>
 
-    expect(tables).toEqual([
-      'bill_lines',
+    // Every one of them, and no table naming an item without a key to the
+    // catalogue it names it from.
+    expect(measured.filter((row) => !row.constrained)).toEqual([])
+
+    // And these twelve, exactly. `bill_lines` was the thirteenth until Phase 211
+    // and is deliberately not in this list.
+    expect(measured.map((row) => row.table_name)).toEqual([
+      'appointments',
+      'goods_receipt_lines',
+      'inventory_lots',
+      'invoice_costings',
       'invoice_lines',
+      'proposal_items',
+      'purchase_order_lines',
+      'repair_order_lines',
+      'stock_adjustments',
+      'stock_movements',
+      'time_entries',
+      'work_order_entries',
     ])
   })
 

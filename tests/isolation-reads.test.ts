@@ -203,10 +203,23 @@ describe('every read from a company-scoped table', () => {
       being stood down. All three are `scoped-read`, because a correction to
       somebody else's record is the one that must not be possible.
     */
-    expect(READS.length).toBe(975)
+    /*
+      977 since Phase 211, which added two reads and no writes — the chart the
+      bill composer filters, and the same chart the bill service re-reads
+      behind it. Two rather than one on purpose: a dropdown is cosmetic, and
+      the account a line may not name has to be refused against whatever built
+      the payload. Both `scoped-read`, which on a chart of accounts is the
+      whole point — the class is per company, because an item may name any
+      account as the one its stock is carried on.
+    */
+    expect(READS.length).toBe(977)
     expect(by).toEqual({
-      'scoped-read': 596,
-      'explicit-company': 278,
+      'scoped-read': 599,
+      // 278 until Phase 211, when the read that collects every account an
+      // item carries stock on moved out of `reconcileInventory` into a
+      // function the composer reads too, and picked up `scoped()` on the way.
+      // Hence +3 scoped and -1 explicit against +2 overall.
+      'explicit-company': 277,
       'established-above': 34,
       'id-from-fetched-row': 21,
       'join-inherited': 13,

@@ -226,6 +226,22 @@ export async function billStage(
   const invoice = await createInvoice(ctx, {
     customerId,
     issueDate,
+    /*
+      The licence the register names for a deposit (Phase 211).
+
+      A deposit stage credits the retainer account — 2550, or 2500 where the
+      pack installed none — and `timebilling.retainers` reconciles that account
+      against the retainers held, so a person typing it onto an invoice line
+      would break a fault-severity check. This module derives the amount from a
+      schedule it owns and recognises the liability on the last stage, which is
+      what makes it the something-else rather than a caller with a licence.
+
+      Passed on every stage rather than only a deposit: `creditAccountId` is
+      revenue for the others, and the register has no opinion about revenue, so
+      narrowing it here would be a second place that has to know which stage
+      kind credits what.
+    */
+    actingAs: 'deposit_billing',
     lines: [
       {
         chartAccountId: creditAccountId,

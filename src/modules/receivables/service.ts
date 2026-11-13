@@ -16,6 +16,7 @@ import { recordAudit } from '@/modules/audit'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { accountByNumber } from '@/modules/coa/service'
 import { INDUSTRY_ACCOUNTS, SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
+import { refusalFor, type MaintainingAct } from '@/modules/coa/maintained'
 import { createJournalEntry, voidJournalEntry, type JournalLineInput } from '@/modules/ledger/journal'
 import type { DimensionAssignment } from '@/modules/dimensions/service'
 import {
@@ -215,6 +216,69 @@ export type RetainageInput = {
 /** Extended amount for a line, rounded half-up to the nearest cent. */
 export function lineAmountCents(quantityMilli: number, unitPriceCents: number): number {
   return Math.round((quantityMilli * unitPriceCents) / 1000)
+}
+
+/**
+ * Refuses a line coded to an account something else maintains (Phase 211).
+ *
+ * ## Why the picker was not enough
+ *
+ * `documentLineAccounts` stopped offering these in the same phase, and a
+ * dropdown is cosmetic: this function takes a `chartAccountId` from whatever
+ * built the payload, and a server action, an import, a future screen and a
+ * typo in a test all reach it without passing the picker. Phase 116's rule —
+ * a constraint beats a check — applies one level down from the database too,
+ * and the two read one decision function so the list offered and the list
+ * accepted cannot drift.
+ *
+ * ## Two queries rather than a correlated `exists`
+ *
+ * The register settles most of the class by number and the rest by the chart's
+ * own `subtype`. The remainder is an account an *item* names as the one its
+ * stock is carried on, which no number and no subtype can answer.
+ *
+ * Written as an `exists` on the same row it was silently false: drizzle
+ * renders a bare column reference inside a `sql` fragment unqualified, so
+ * `si.inventory_account_id = id` resolved `id` against the **subquery's** own
+ * table and compared each item's primary key with its inventory account. The
+ * measurement caught it — a bill coded to an account an item had named was
+ * accepted while the picker correctly refused to offer it — which is the
+ * argument for the second query rather than a hand-qualified one: this reads
+ * `stockCarryingAccountIds`, the same function the picker and the
+ * reconciliation read, and there is then no third derivation of the set to be
+ * wrong.
+ */
+async function refuseMaintainedLines(
+  ctx: ActorContext,
+  lines: readonly { chartAccountId: string }[],
+  reader: Executor,
+  actingAs?: MaintainingAct,
+): Promise<void> {
+  const { chartAccounts } = await import('@/db/schema')
+  const { stockCarryingAccountIds } = await import('@/modules/inventory/accounts')
+
+  const named = [...new Set(lines.map((line) => line.chartAccountId))]
+  if (named.length === 0) return
+
+  const [rows, carrying] = await Promise.all([
+    reader
+      .select({
+        id: chartAccounts.id,
+        number: chartAccounts.number,
+        name: chartAccounts.name,
+        subtype: chartAccounts.subtype,
+      })
+      .from(chartAccounts)
+      .where(scoped(ctx, chartAccounts, inArray(chartAccounts.id, named))),
+    stockCarryingAccountIds(ctx, reader),
+  ])
+
+  for (const row of rows) {
+    const why = refusalFor({ ...row, carriesStock: carrying.has(row.id) }, 'documentLine', {
+      actingAs,
+    })
+    if (why) throw new DocumentError(why)
+  }
 }
 
 // --- Parties ---------------------------------------------------------------
@@ -546,6 +610,20 @@ export async function createInvoice(
      * ledger is posted at the rate on file for `issueDate`.
      */
     currency?: string
+    /**
+     * The act this invoice is part of, where it is one the maintained-account
+     * register names (Phase 211).
+     *
+     * Only the two deposit paths pass it — `billProposalStage` and the
+     * conversion that raises a won proposal's deposit — and only to say that
+     * this line is the deferred-revenue half of a schedule the module owns, so
+     * it may credit `2550`, or `2500` where the pack installed no `2550`. A
+     * person typing an invoice line may not, and the picker does not offer it
+     * either: the customer side offers revenue only, which is why this phase's
+     * first measurement reported the invoice side clean and the suite found
+     * otherwise.
+     */
+    actingAs?: MaintainingAct
   },
   /**
    * Runs inside an existing transaction when one is supplied.
@@ -579,6 +657,15 @@ export async function createInvoice(
     .limit(1)
 
   if (!customer) throw new DocumentError('Customer not found')
+
+  /*
+    Measured in Phase 211: no account the invoice *picker* offers breaks a
+    check, because the customer side offers revenue only. Asked anyway, and the
+    asking earned itself inside the phase — nine modules raise documents with
+    accounts they choose themselves, and two of them credit a deposit to the
+    retainer account for a correct reason the register now names.
+  */
+  await refuseMaintainedLines(ctx, input.lines, reader, input.actingAs)
 
   const arAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsReceivable)
   if (!arAccount) throw new DocumentError('Accounts Receivable account is missing from the chart.')
@@ -859,6 +946,18 @@ export async function createBill(
     retainageCents?: number
     /** What the vendor billed in (Phase 35). Defaults to the company's own. */
     currency?: string
+    /**
+     * The act this bill is part of, where it is one the maintained-account
+     * register names (Phase 211).
+     *
+     * Only `billReceipts` passes it, and only to say that this bill is the
+     * clearing half of a delivery already received, so its line may name
+     * `2050` — the account Phase 48 found $28,700 stranded in precisely
+     * because a bill line could not. Nothing else may pass it, which a source
+     * assertion keeps true: every other caller is a person typing a bill, and
+     * a person typing a bill is who the refusal is for.
+     */
+    actingAs?: MaintainingAct
   },
 ) {
   requirePermission(ctx, 'accounting:journal')
@@ -874,6 +973,8 @@ export async function createBill(
     .limit(1)
 
   if (!vendor) throw new DocumentError('Vendor not found')
+
+  await refuseMaintainedLines(ctx, input.lines, db, input.actingAs)
 
   const apAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.accountsPayable)
   if (!apAccount) throw new DocumentError('Accounts Payable account is missing from the chart.')

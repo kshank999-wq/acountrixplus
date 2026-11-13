@@ -141,6 +141,7 @@ export function InvoicesBoard({
   homeCurrency,
   currencies,
   today,
+  tracksStock,
   canManage,
   canAddCustomer,
 }: {
@@ -171,6 +172,13 @@ export function InvoicesBoard({
   /** What may be chosen: home, then every currency with a rate on file. */
   currencies: string[]
   today: string
+  /**
+   * Whether this company keeps perpetual inventory (Phase 211).
+   *
+   * Decides one sentence, under the bill composer's lines, saying where a
+   * stock purchase goes now that the Inventory account is not on the picker.
+   */
+  tracksStock: boolean
   canManage: boolean
   canAddCustomer: boolean
 }) {
@@ -271,6 +279,7 @@ export function InvoicesBoard({
             homeCurrency={homeCurrency}
             currencies={currencies}
             today={today}
+            tracksStock={tracksStock}
             pending={pending}
             canAddParty={isCustomer ? canAddCustomer : true}
             act={act}
@@ -372,6 +381,7 @@ function Composer({
   homeCurrency,
   currencies,
   today,
+  tracksStock,
   pending,
   canAddParty,
   act,
@@ -384,6 +394,8 @@ function Composer({
   homeCurrency: string
   currencies: string[]
   today: string
+  /** Whether this company keeps perpetual inventory (Phase 211). */
+  tracksStock: boolean
   pending: boolean
   canAddParty: boolean
   act: (
@@ -964,6 +976,32 @@ function Composer({
                   </tbody>
                 </table>
               </div>
+
+              {!isCustomer && tracksStock && (
+                /*
+                  Where a stock purchase goes (Phase 211).
+
+                  The Inventory account came off this picker in the same phase,
+                  because a bill line coded to it debits stock with no lot
+                  behind it and nothing in the application can put that right
+                  afterwards — receiving the goods properly posts its own debit
+                  and doubles the difference. `createBill` refuses it now and
+                  says so, but a refusal arrives after somebody has typed a
+                  bill, and the account they were looking for is simply not on
+                  the list. So the list says where it went.
+
+                  Only on the bill side, and only for a company that tracks
+                  stock: everybody else is being told about a screen they have
+                  no reason to open.
+                */
+                <p className="-mt-1 text-xs text-muted">
+                  Buying stock? Receive the delivery in{' '}
+                  <a className="underline" href="/inventory">
+                    Purchasing
+                  </a>{' '}
+                  first — no purchase order needed — then bill the delivery, which codes itself.
+                </p>
+              )}
 
               <div className="flex flex-wrap items-end justify-between gap-3">
                 <button

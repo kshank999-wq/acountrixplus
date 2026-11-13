@@ -381,6 +381,9 @@ async function depositInvoice(
     customerId,
     issueDate: new Date().toISOString().slice(0, 10),
     projectId,
+    // The licence the register names for a deposit (Phase 211): this line
+    // credits the retainer account, which a person typing an invoice may not.
+    actingAs: 'deposit_billing',
     lines: [
       {
         chartAccountId: account.id,

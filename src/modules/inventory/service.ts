@@ -17,6 +17,7 @@ import { accountByNumber } from '@/modules/coa/service'
 import { SYSTEM_ACCOUNTS } from '@/modules/coa/standard'
 import { createJournalEntry } from '@/modules/ledger/journal'
 import { creditableByReceipt } from './receipt-credit'
+import { stockCarryingAccountIds } from './accounts'
 import { Refusal } from '@/modules/errors'
 import {
   applyConsumption,
@@ -315,7 +316,19 @@ export async function receiveStock(
     // Where the other side of the entry goes is the caller's to choose, except
     // for one class it may never be (Phase 117).
     const [creditAccount] = await tx
-      .select({ number: chartAccounts.number, name: chartAccounts.name })
+      .select({
+        number: chartAccounts.number,
+        name: chartAccounts.name,
+        /*
+          The chart's own word for an account that carries stock (Phase 211).
+
+          Without it the refusal could only name the four numbers this chart
+          happens to ship, and a company's fifth inventory account — or a
+          manufacturer's, under a name nobody here chose — would be creditable
+          by a receipt that also debits it.
+        */
+        subtype: chartAccounts.subtype,
+      })
       .from(chartAccounts)
       .where(scoped(ctx, chartAccounts, eq(chartAccounts.id, input.creditAccountId)))
       .limit(1)
@@ -850,9 +863,6 @@ export async function reconcileInventory(
         )
     : [{ value: '0' }]
 
-  const inventoryAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.inventory)
-  if (!inventoryAccount) throw new Refusal('The Inventory account is missing from the chart.')
-
   /**
    * Every account stock is actually carried on, not just 1400.
    *
@@ -863,24 +873,20 @@ export async function reconcileInventory(
    * correct, which is worse than not checking: a reconciliation that cries wolf
    * is one people learn to ignore.
    *
-   * The default is always included, because an item that names no account
-   * lands there.
+   * Moved to `inventory/accounts.ts` in Phase 211 and read from there, because
+   * the composer needs the same set to know which accounts a bill line must
+   * not name — and two derivations of one set is how the refusal and the check
+   * come to disagree about which accounts carry stock.
+   *
+   * The refusal stayed here. A chart with no 1400 has nothing for this to
+   * compare against, and a reconciliation that answered anyway would be
+   * comparing the lots against zero; the composer, reading the same set, wants
+   * the opposite behaviour and gets it.
    */
-  const named = await db
-    .selectDistinct({ id: serviceItems.inventoryAccountId })
-    .from(serviceItems)
-    .where(
-      and(
-        eq(serviceItems.companyId, ctx.companyId),
-        eq(serviceItems.isInventoried, true),
-        isNotNull(serviceItems.inventoryAccountId),
-      ),
-    )
+  const inventoryAccount = await accountByNumber(ctx.companyId, SYSTEM_ACCOUNTS.inventory)
+  if (!inventoryAccount) throw new Refusal('The Inventory account is missing from the chart.')
 
-  const accountIds = [
-    inventoryAccount.id,
-    ...named.map((row) => row.id as string).filter((id) => id !== inventoryAccount.id),
-  ]
+  const accountIds = [...(await stockCarryingAccountIds(ctx))]
 
   const [ledger] = await db
     .select({

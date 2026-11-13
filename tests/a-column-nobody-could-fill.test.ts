@@ -73,9 +73,12 @@ describe('the class, measured', () => {
     /*
       2,179 until Phase 210 dropped `segments.is_active` and
       `vehicles.is_active` — two columns with no writer and no reader, which is
-      a migration rather than a register entry.
+      a migration rather than a register entry. 2,176 since Phase 211 dropped
+      `bill_lines.item_id` for the same reason, which ADR 0210 had nominated
+      building a picker for: measured, what the column was for is already
+      recorded one table over, on the goods receipt line that posts the stock.
     */
-    expect(columnsScanned()).toEqual({ tables: 185, columns: 2177 })
+    expect(columnsScanned()).toEqual({ tables: 185, columns: 2176 })
     /*
       27 when this phase measured it, and 35 since Phase 202 narrowed the
       exclusion for a defaulted column — see `schemaColumns`. The eight it
@@ -96,8 +99,10 @@ describe('the class, measured', () => {
       tables that carried an `isActive`, the twenty-four naming it in a query
       all had a writer and five of the six that did not had none — the sixth,
       `cost_codes`, is the control, same shape and a writer anyway.
+
+      95 since Phase 211 dropped `bill_lines.item_id`.
     */
-    expect(writerCandidates()).toHaveLength(96)
+    expect(writerCandidates()).toHaveLength(95)
   })
 
   it('declares every candidate', () => {

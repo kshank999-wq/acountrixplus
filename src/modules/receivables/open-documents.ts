@@ -143,27 +143,44 @@ export async function partiesWithOpenDocuments(
  * Accounts a document line can be coded to.
  *
  * An invoice line is income; a bill line is a cost or something bought — a
- * supplier bill for a van legitimately debits Fixed Assets, and one for stock
- * debits Inventory, so assets are offered.
+ * supplier bill for a van legitimately debits Fixed Assets, so assets are
+ * offered.
  *
  * **Two kinds of account are held back even so**, because coding a line to one
  * silently breaks an invariant something else is checking:
  *
- *  - **The control accounts.** Receivables and payables are built from the
- *    documents underneath them. A bill line posted straight at 1100 makes the
- *    control account disagree with the sum of open invoices, which is exactly
- *    the fault `ledger.receivables` exists to catch — raised by the tool that
- *    is supposed to prevent it.
+ *  - **The accounts something else maintains.** Receivables and payables are
+ *    built from the documents underneath them. A bill line posted straight at
+ *    1100 makes the control account disagree with the sum of open invoices,
+ *    which is exactly the fault `ledger.receivables` exists to catch — raised
+ *    by the tool that is supposed to prevent it. The class is
+ *    `MAINTAINED_ACCOUNTS`, and reading it here rather than keeping a list is
+ *    the whole of Phase 211.
  *  - **Cash.** Every bank and card account has a ledger account of its own
  *    (Phase 40), and its balance is tied out against its feed. "I owe a
  *    supplier, and the money went into my current account" is not a thing that
  *    happens, and recording it puts the tie-out permanently out.
+ *
+ * ## The sentence this docstring used to end on
+ *
+ * It read *"and one for stock debits Inventory"*, two sentences before the rule
+ * about accounts whose invariant a line would break. Both were right and the
+ * first was the exception to the second: measured in Phase 211, a $1,000 bill
+ * line coded to 1400 put `inventory.lots` into a **fault** — Σ open lots 0
+ * against a ledger of 100000 — and receiving the goods properly afterwards
+ * doubled the difference instead of closing it, because the receipt posts its
+ * own debit to the same account.
+ *
+ * `1500 Fixed Assets` stays on the list and the clause about the van stays
+ * true, because there the bill line is the intended path and `registerAsset`
+ * adopts the cost without posting it again. The register carries that argument
+ * and the measurement behind it.
  */
 export async function documentLineAccounts(ctx: ActorContext, side: PaymentSide) {
   requirePermission(ctx, 'accounting:view')
 
   const { chartAccounts, financialAccounts } = await import('@/db/schema')
-  const { SYSTEM_ACCOUNTS } = await import('@/modules/coa/standard')
+  const { refusedAccountIds } = await import('@/modules/coa/maintained')
 
   const wanted =
     side === 'customer'
@@ -178,17 +195,17 @@ export async function documentLineAccounts(ctx: ActorContext, side: PaymentSide)
   /**
    * Accounts something else maintains, which nothing may post to by hand.
    *
-   * Receivables and payables are built from the documents underneath them;
-   * undeposited funds is moved by a receipt and a deposit; accumulated
-   * depreciation is moved by the depreciation run and is what the asset
-   * register reconciles to. Each has an integrity check watching it.
+   * Resolved to ids for this company rather than filtered by number, because
+   * the stock half of the class is not a list of numbers: an item may name any
+   * account as the one its stock is carried on, and `stockCarryingAccountIds`
+   * is the same function `reconcileInventory` compares against.
+   *
+   * Run for the customer side too, where it currently removes nothing — every
+   * account the class names is an asset or a liability and an invoice line
+   * offers revenue. That was measured rather than assumed, and asking the
+   * question on both sides is what keeps it true if either list widens.
    */
-  const maintainedElsewhere = [
-    SYSTEM_ACCOUNTS.accountsReceivable,
-    SYSTEM_ACCOUNTS.accountsPayable,
-    SYSTEM_ACCOUNTS.undepositedFunds,
-    SYSTEM_ACCOUNTS.accumulatedDepreciation,
-  ]
+  const maintainedElsewhere = await refusedAccountIds(ctx, 'documentLine')
 
   return db
     .select({
@@ -204,7 +221,12 @@ export async function documentLineAccounts(ctx: ActorContext, side: PaymentSide)
         chartAccounts,
         eq(chartAccounts.isActive, true),
         inArray(chartAccounts.type, wanted),
-        notInArray(chartAccounts.number, maintainedElsewhere),
+        // Omitted rather than given an empty list: `notInArray` over nothing
+        // compiles to a predicate postgres-js will not bind, and `scoped`
+        // drops an undefined condition.
+        maintainedElsewhere.size > 0
+          ? notInArray(chartAccounts.id, [...maintainedElsewhere])
+          : undefined,
         // Cash is cash whether or not anybody has opened a bank account
         // against it. Filtering only on the `financial_accounts` link leaves a
         // brand-new company's 1000 Checking Account on the list, because

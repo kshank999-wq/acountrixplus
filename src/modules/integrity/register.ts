@@ -460,7 +460,11 @@ export const INTEGRITY_CHECKS: IntegrityCheck[] = [
   {
     key: 'assets.register',
     label: 'The asset register, against the balance sheet',
-    compares: 'Σ register cost and depreciation against 1500 and 1590',
+    // 1510, not 1590. `SYSTEM_ACCOUNTS.accumulatedDepreciation` is '1510' and
+    // always has been; this string said 1590 from Phase 31 until Phase 211
+    // read it while measuring which accounts a composer can reach. A number in
+    // prose that nothing reads is a number nothing corrects (Phase 179).
+    compares: 'Σ register cost and depreciation against 1500 and 1510',
     module: null,
     severity: 'fault',
     meaning:

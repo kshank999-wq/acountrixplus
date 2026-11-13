@@ -1,0 +1,30 @@
+-- Phase 211: the item on the wrong document.
+--
+-- `bill_lines.item_id` goes away. It arrived in Phase 14 as a copy of
+-- `invoice_lines.item_id`, docstring included — "the catalogue item **sold**,
+-- which is what tells the invoice to relieve inventory" — on the payables side
+-- of the books, where nothing is sold and no invoice is being raised.
+--
+-- Measured: nothing ever wrote it and nothing ever read it. `createBill` and
+-- the opening-balance importer both omit it, and the one query that fetches
+-- these rows is a projectionless `select()` whose mapper names six columns,
+-- none of them this. Phase 210's census declared it a finding and ADR 0210
+-- nominated building the picker that would fill it.
+--
+-- Phase 211 measured where the thing it was for actually lives, and the answer
+-- was: already built, one table over. A delivery writes
+-- `goods_receipt_lines.item_id`, a lot, a cost and a stock movement, and posts
+-- Dr Inventory / Cr Goods Received Not Invoiced. The supplier's bill then
+-- clears the delivery and names no item, because by the time it arrives the
+-- stock is already on the books at what it cost. A picker on a bill line would
+-- have been a second way to receive stock, which is two answers to the one
+-- question an inventory subledger exists to answer.
+--
+-- So this is Phase 49's shape and gets Phase 49's answer: a column with no
+-- writer and no reader is a promise the schema cannot keep.
+--
+-- Nothing else references it. There is no foreign key — it was declared as a
+-- bare `uuid('item_id')`, which is its own small finding — and the table's one
+-- index is on `bill_id`.
+
+ALTER TABLE "bill_lines" DROP COLUMN IF EXISTS "item_id";

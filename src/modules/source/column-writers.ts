@@ -80,8 +80,12 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **96 candidates and 14 findings covering 16 columns**, which is the first
- * time this register has carried one. A closed one is **absent** from this
+ * **95 candidates and 13 findings covering 15 columns**, which is the first
+ * time this register has carried one. (96 and 14 over 16 when Phase 210 wrote
+ * them: Phase 211 answered one of the findings by establishing that
+ * `bill_lines.item_id` had never been a defect — what it was for is recorded
+ * on the goods receipt line — and dropped the column, so it is gone from the
+ * numerator and the denominator both.) A closed one is **absent** from this
  * register, because the scan no longer reports it — which is what proves an
  * editor reaches the column rather than only existing, and the tests assert
  * that absence by name.
@@ -143,10 +147,11 @@ export type WriterVerdict =
    * it *accuses* — and the argument for keeping it was that the next person to
    * find a column nothing can fill should not have to invent the word again.
    *
-   * **Fourteen entries carry it now.** Correcting the read rule in Phase 210
+   * **Thirteen entries carry it now.** Correcting the read rule in Phase 210
    * reported seventy-two columns the scan had never looked at, sixteen of them
-   * written by nothing. Two phases of an empty section was the cost of the
-   * vocabulary being ready when the measurement arrived.
+   * written by nothing; Phase 211 took one back off, having measured that the
+   * thing it was for lives on another table. Two phases of an empty section
+   * was the cost of the vocabulary being ready when the measurement arrived.
    */
   | 'unwritable'
 
@@ -446,6 +451,12 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   // Phase 157's rule — an unused declaration stays when it accuses — and this
   // is what it was kept for.
   //
+  // One of the sixteen was never a defect: `bill_lines.item_id` was a copy of
+  // the invoice column, docstring included, on the side of the books where
+  // nothing is sold, and what it was for is already recorded on the goods
+  // receipt line that posts the stock. Phase 211 dropped it, which is why this
+  // section holds thirteen entries over fifteen columns.
+  //
   // Five of the sixteen were fixed in the phase that found them, and so are
   // absent: `employees.isActive` and `endDate`, `tax_codes.isActive`,
   // `practitioners.isActive`, and `company_profiles.addressLine2` with
@@ -479,18 +490,6 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
       '`lastError`, and never this. So a job has a finish time and no start time, and how long ' +
       'anything took cannot be answered — `lockedAt` is the nearest thing and means something ' +
       'else, because a job relocked after a crash moves it.',
-  },
-  {
-    table: 'bill_lines',
-    columns: ['itemId'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      "Phase 169's finding on the purchase side. `invoice_lines.itemId` existed from Phase 14 " +
-      'with no writer, so a stocked item sold through the composer relieved no stock, and Phase ' +
-      '169 built the picker that fills it. The bill composer never got one, so a stocked item ' +
-      '*bought* through a bill still receives no stock — which is the half of inventory that ' +
-      'costs money. Nominated.',
   },
   {
     table: 'billable_expenses',

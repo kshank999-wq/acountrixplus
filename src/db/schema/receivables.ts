@@ -453,14 +453,35 @@ export const billLines = pgTable(
     /** Job costing dimensions, copied onto the derived journal lines. */
     projectId: uuid('project_id').references(() => projects.id, { onDelete: 'set null' }),
     costCodeId: uuid('cost_code_id').references(() => costCodes.id, { onDelete: 'set null' }),
-    /**
-     * The catalogue item sold (Phase 14).
-     *
-     * Set on a stocked line, which is what tells the invoice to relieve
-     * inventory. Null for a free-text line, which is every line raised before
-     * this phase and most lines raised after it.
-     */
-    itemId: uuid('item_id'),
+    /*
+      `item_id` was here, and was dropped in Phase 211.
+
+      It arrived in Phase 14 as a copy of `invoice_lines.item_id`, with the
+      invoice's docstring copied along with it — *"the catalogue item **sold**…
+      which is what tells the invoice to relieve inventory"* — on the payables
+      side of the books, where nothing is sold and no invoice is being raised.
+
+      Measured: **nothing ever wrote it and nothing ever read it.** Both
+      inserts into this table omit it, and the one query that fetches these
+      rows is a projectionless `select()` whose mapper names six columns, none
+      of them this. Phase 210's column census declared it a finding and ADR
+      0210 nominated building the picker that would fill it.
+
+      Phase 211 measured where the thing it was for actually lives and the
+      answer was: already built, one table over. A delivery writes
+      `goods_receipt_lines.item_id`, a lot, a cost and a stock movement, and
+      posts `Dr Inventory / Cr Goods Received Not Invoiced`; the supplier's
+      bill then *clears* the delivery and names no item, because by the time it
+      arrives the stock is already on the books at what it cost. A picker here
+      would have been a second way to receive stock — two answers to the one
+      question the subledger exists to answer — and `DocumentLineInput.itemId`
+      going on being silently dropped for bills is the honest state of affairs
+      rather than a gap.
+
+      So this is Phase 49's shape and gets Phase 49's answer: a column with no
+      writer and no reader is a promise the schema cannot keep, and the honest
+      fix is a migration. `0104`.
+    */
     sortOrder: integer('sort_order').notNull().default(0),
   },
   (t) => ({

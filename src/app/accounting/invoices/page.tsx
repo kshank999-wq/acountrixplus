@@ -16,6 +16,7 @@ import { listFinancialAccounts } from '@/modules/banking/accounts'
 import { listTaxCodes } from '@/modules/payroll/sales-tax'
 import { suspectedDuplicateBills } from '@/modules/payables/duplicates'
 import { currencyChoices } from '@/modules/fx/service'
+import { enabledModules } from '@/modules/industry/modules'
 import { ACCOUNTING_NAV } from '../nav'
 import { InvoicesBoard } from './board'
 
@@ -65,6 +66,7 @@ export default async function InvoicesPage() {
     duplicates,
     currencies,
     taxCodes,
+    modules,
   ] = await Promise.all([
     listInvoices(actor, { limit: 60 }),
     listBills(actor, { limit: 60 }),
@@ -119,6 +121,8 @@ export default async function InvoicesPage() {
       corrected that rule; the queries here are unchanged.
     */
     can(actor, 'tax:view') ? listTaxCodes(actor, { activeOnly: true }) : Promise.resolve(null),
+    // One sentence on this screen depends on it (Phase 211).
+    enabledModules(actor.companyId),
   ])
 
   return (
@@ -205,6 +209,17 @@ export default async function InvoicesPage() {
         homeCurrency={currencies.homeCurrency}
         currencies={currencies.offerable}
         today={new Date().toISOString().slice(0, 10)}
+        /*
+          Whether to say where a stock purchase goes (Phase 211).
+
+          `documentLineAccounts` stopped offering the Inventory account in that
+          phase — measured, a $1,000 bill line coded to it put `inventory.lots`
+          into a fault that receiving the goods properly made worse rather than
+          better. A company that keeps stock is told where the delivery goes
+          instead; a company that does not is told nothing, because the screen
+          it would be pointed at is not one it has.
+        */
+        tracksStock={modules.has('inventory')}
         canManage={can(actor, 'accounting:journal')}
         canAddCustomer={can(actor, 'crm:manage')}
       />
