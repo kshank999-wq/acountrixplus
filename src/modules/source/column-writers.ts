@@ -458,8 +458,15 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
   // One of the sixteen was never a defect: `bill_lines.item_id` was a copy of
   // the invoice column, docstring included, on the side of the books where
   // nothing is sold, and what it was for is already recorded on the goods
-  // receipt line that posts the stock. Phase 211 dropped it, which is why this
-  // section holds thirteen entries over fifteen columns.
+  // receipt line that posts the stock. Phase 211 dropped it, which took the
+  // section to thirteen entries over fifteen columns.
+  //
+  // Phase 212 took it to **twelve entries over thirteen columns** by deleting
+  // the `projects` entry and its two columns — not because they gained an
+  // editor, but because the entry's stated reason was false and the right
+  // subject was a third column it never named. The comment where that entry
+  // stood says so in full; read it before trusting any count here, because a
+  // finding can leave this section for two very different reasons.
   //
   // Five of the sixteen were fixed in the phase that found them, and so are
   // absent: `employees.isActive` and `endDate`, `tax_codes.isActive`,

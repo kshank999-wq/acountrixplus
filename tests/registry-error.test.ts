@@ -323,7 +323,21 @@ describe('every registry refuses the same way', () => {
     // Fifth time, and this one was not a surprise — the count was checked
     // deliberately while the register was being written, which is the habit the
     // four before it bought.
-    expect(thrown.length).toBe(43)
+    //
+    // **Forty-four since Phase 212 and `JOB_STATES`**, the four states a job
+    // can be in. It earns the throw on what three different callers ask it:
+    // whether a job may still be booked time against, whether it still belongs
+    // on the WIP schedule, and whether a cost may still be coded to it. A
+    // status answering `undefined` would not refuse — it would read as *no* to
+    // all three at once, so an unrecognised state would silently take a live
+    // job off the schedule and start rejecting its costs, which is the one
+    // failure the register exists to make impossible.
+    //
+    // Sixth time, and the habit did not hold: this scan went red on the full
+    // run, because `jobState` was written and tested without anyone coming
+    // back here. Phase 199's lesson is that a register's own test passing is
+    // exactly what makes the tree-wide count easy to leave behind.
+    expect(thrown.length).toBe(44)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

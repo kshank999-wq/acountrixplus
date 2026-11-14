@@ -632,14 +632,22 @@ describe('the item on the wrong document', () => {
     expect(purchasing).toContain('itemId: line.itemId')
   })
 
-  it('declares thirteen findings over fifteen columns', () => {
+  it('declares twelve findings over thirteen columns', () => {
     // Was fourteen over sixteen when Phase 210 wrote the register. This
     // phase did not fix one: it established that the sixteenth was never a
     // defect, which is a different thing and the reason the count moves.
+    //
+    // Twelve over thirteen since Phase 212, which deleted the `projects`
+    // entry. That is the third distinct reason a finding has left this
+    // section — fixed, never-a-defect, and now argued-for-falsely — and it is
+    // the one this assertion was worst placed to notice, because it fell on
+    // the phase after the one that wrote the sentence this test reads. The
+    // count went past here untouched and the suite caught it tree-wide, which
+    // is ADR 0178's rule collecting on the file that states it.
     const findings = COLUMN_WRITERS.filter((row) => row.verdict === 'unwritable')
 
-    expect(findings).toHaveLength(13)
-    expect(findings.reduce((total, row) => total + row.columns.length, 0)).toBe(15)
+    expect(findings).toHaveLength(12)
+    expect(findings.reduce((total, row) => total + row.columns.length, 0)).toBe(13)
     expect(findings.every((row) => row.writtenBy === '')).toBe(true)
   })
 })

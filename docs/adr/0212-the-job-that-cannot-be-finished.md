@@ -300,6 +300,43 @@ posting is being refused against.
 One audit action (259), one entity type placed, no new record kind, no migration:
 every column this phase writes was already there.
 
+## What the full run found
+
+Two tree-wide counts, in the shard furthest from anything this phase touched.
+
+`tests/registry-error.test.ts` wanted **43** throwing registry lookups and
+measured 44. `JOB_STATES` is a registry; `jobState` throws `RegistryError`; the
+count nobody looks at moved and nobody looked. That file keeps a tally of the
+times this has happened to it — 167, 169, 176, 199, 201 — and had just recorded
+that Phase 201 *"was not a surprise, the count was checked deliberately while
+the register was being written, which is the habit the four before it bought."*
+The habit did not survive the next register. Phase 199's lesson is exactly the
+mechanism: a register's own test passing is what makes the tree-wide count easy
+to leave behind, because the phase feels finished.
+
+`tests/the-account-with-no-way-back.test.ts` wanted **13 findings over 15
+columns** and measured 12 over 13 — the same two figures this phase moved
+correctly in `the-switch-the-census-could-not-see.test.ts`, in the register's own
+docstring, in the SPEC-AUDIT and in the section above. Two places state one
+number, and the one that went stale is the one in a file about a different
+subject. Its prose now records that this is the **third** distinct reason a
+finding leaves the register — fixed, never-a-defect, and argued-for-falsely —
+because the count alone cannot tell them apart, and a reader who sees it fall
+will otherwise assume somebody added an editor.
+
+A third stale sentence came out of the same grep and no test was reading it:
+`column-writers.ts` still said the findings section *"holds thirteen entries over
+fifteen columns"*, forty lines below a docstring this phase had corrected to
+twelve and thirteen. Phase 179's shape, inside the very file whose register the
+figure describes.
+
+So: ADR 0178 collecting on the phase that cites it, and the correction is not a
+new rule but the old one applied where it was skipped — **a tree-wide scan cannot
+be checked by running the tests near the code that changed.** The three
+figures this phase did move were moved because the phase was looking at them.
+The two it missed are the two it had no reason to look at, which is the whole of
+why the full run exists.
+
 ## Nominated for Phase 213
 
 **The history nobody can read.** Six job-costing entity types write audit events
