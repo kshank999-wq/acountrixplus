@@ -186,10 +186,16 @@ describe('every write that can be aimed at a row', () => {
     // gave a writer to — `recordEmployment`, `setTaxCodeActive` and
     // `setPractitionerActive`. All three `scoped-write`, which is the only
     // guard that makes sense for a correction to one record among many.
-    expect(WRITES.length).toBe(304)
+    //
+    // **Three hundred and five since Phase 212** and `setJobStatus`, the one
+    // write that moves a job between the four states `JOB_STATES` names — and
+    // with it the end date and the note, because three columns answering "is
+    // this job over" need one statement rather than three. `scoped-write`, on
+    // the same reasoning as Phase 210's three.
+    expect(WRITES.length).toBe(305)
     expect(by).toEqual({
       'explicit-company': 198,
-      'scoped-write': 66,
+      'scoped-write': 67,
       'read-then-refuse': 16,
       'id-from-fetched-row': 8,
       // Phase 204's own three writes land on two of these, and one existing

@@ -100,9 +100,14 @@ describe('the class, measured', () => {
       all had a writer and five of the six that did not had none — the sixth,
       `cost_codes`, is the control, same shape and a writer anyway.
 
-      95 since Phase 211 dropped `bill_lines.item_id`.
+      95 since Phase 211 dropped `bill_lines.item_id`, and **93 since Phase
+      212** gave `projects.endDate` and `projects.notes` a writer. Those two
+      had been on this list since Phase 210 with an entry whose stated reason
+      was false — it named a reader that was a function parameter of the same
+      name — so the scan was right about them and the register was right by
+      accident.
     */
-    expect(writerCandidates()).toHaveLength(95)
+    expect(writerCandidates()).toHaveLength(93)
   })
 
   it('declares every candidate', () => {

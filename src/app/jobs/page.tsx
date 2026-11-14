@@ -6,6 +6,7 @@ import { formatCents } from '@/lib/money'
 import { formatBasisPoints } from '@/modules/crm/analytics'
 import { companyTerminology, moduleEnabled } from '@/modules/industry/modules'
 import { wipSummary } from '@/modules/jobs/reports'
+import { jobState } from '@/modules/jobs/lifecycle'
 import { expiringDocuments } from '@/modules/jobs/compliance'
 import { JOBS_NAV } from './nav'
 import { Card, Empty, ModuleOff, NoAccess, Stat, Table, Variance } from './ui'
@@ -104,6 +105,18 @@ export default async function JobsPage() {
               <Link key={job.projectId} href={`/jobs/${job.projectId}`} className="underline">
                 <span className="font-medium">{job.code}</span>{' '}
                 <span className="text-muted">{job.name}</span>
+                {/*
+                  A closed job is on this schedule only while it is still over-
+                  or under-billed (Phase 212), so the date is the whole reason
+                  the row is here: without it this reads as an open job nobody
+                  is working.
+                */}
+                {job.endDate ? (
+                  <span className="text-faint">
+                    {' '}
+                    · {jobState(job.status).label} {job.endDate}
+                  </span>
+                ) : null}
               </Link>,
               formatCents(job.contractValueCents),
               formatCents(job.revisedBudgetCents),

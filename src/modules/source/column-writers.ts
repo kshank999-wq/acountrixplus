@@ -80,12 +80,16 @@ import { readableSource, sourceFiles } from './isolation-scan'
  *
  * ## What it found
  *
- * **95 candidates and 13 findings covering 15 columns**, which is the first
+ * **93 candidates and 12 findings covering 13 columns**, which is the first
  * time this register has carried one. (96 and 14 over 16 when Phase 210 wrote
  * them: Phase 211 answered one of the findings by establishing that
  * `bill_lines.item_id` had never been a defect — what it was for is recorded
  * on the goods receipt line — and dropped the column, so it is gone from the
- * numerator and the denominator both.) A closed one is **absent** from this
+ * numerator and the denominator both. Phase 212 closed another, the two
+ * `projects` columns, and found while doing so that the entry's stated reason
+ * was false: it named a reader for `endDate` that is a function parameter of
+ * the same name, so the register had been right about the column and wrong
+ * about why since the day it was written.) A closed one is **absent** from this
  * register, because the scan no longer reports it — which is what proves an
  * editor reaches the column rather than only existing, and the tests assert
  * that absence by name.
@@ -147,7 +151,7 @@ export type WriterVerdict =
    * it *accuses* — and the argument for keeping it was that the next person to
    * find a column nothing can fill should not have to invent the word again.
    *
-   * **Thirteen entries carry it now.** Correcting the read rule in Phase 210
+   * **Twelve entries carry it now.** Correcting the read rule in Phase 210
    * reported seventy-two columns the scan had never looked at, sixteen of them
    * written by nothing; Phase 211 took one back off, having measured that the
    * thing it was for lives on another table. Two phases of an empty section
@@ -162,7 +166,7 @@ export type ColumnWriter = {
   columns: readonly string[]
   verdict: WriterVerdict
   /** For `written`: the file that writes them. Empty for `unwritable`. */
-  // (Empty on all fourteen `unwritable` entries, which is what the verdict means.)
+  // (Empty on all twelve `unwritable` entries, which is what the verdict means.)
   writtenBy: string
   /** Why, argued from what the code does rather than from what it looks like. */
   because: string
@@ -561,18 +565,35 @@ export const COLUMN_WRITERS: readonly ColumnWriter[] = [
       'describe cannot happen. A registry wider than the write path, which is the same shape as ' +
       "the Design Center's three dropped boxes and the reason this phase reads the whole chain.",
   },
-  {
-    table: 'projects',
-    columns: ['endDate', 'notes'],
-    verdict: 'unwritable',
-    writtenBy: '',
-    because:
-      'A job is created by conversion from a won opportunity with a start date, and the only ' +
-      'update anywhere adds a change order to its contract value. So a job cannot be annotated ' +
-      'and cannot be recorded as having finished — the same absence as `employees.endDate`, on ' +
-      'the table §7 is about, and `jobs/reports.ts` reads the end date into every date range it ' +
-      'builds.',
-  },
+  /*
+    `projects.endDate` and `projects.notes` were here from Phase 210 until Phase
+    212, which gave them a writer — `setJobStatus` in `jobs/lifecycle.ts`, one
+    act for the status, the end date and the note, so that no two of them can
+    disagree about whether the job is over.
+
+    The sentence that entry ended on is worth keeping, because it was false and
+    it was load-bearing. It said: *"`jobs/reports.ts` reads the end date into
+    every date range it builds."* It does not. `jobs/reports.ts` has exactly one
+    `endDate` and it is a function parameter — a caller-supplied window for a
+    ledger query, named the same and related to nothing. Nothing in `src/` names
+    `projects.endDate` at all; four projectionless `select()`s fetch it and no
+    property access consults it.
+
+    ADR 0211 then built its nomination on that sentence: *"the column is read —
+    the register's entry for it names what reads it — so this is not Phase 49's
+    shape and a migration is not the answer."* The conclusion held and the
+    reason did not, which is the part worth a paragraph. Phase 210 taught this
+    scan that a projectionless `select()` **is** a read, correctly, because the
+    SQL fetches the column. The first register entry written after that
+    correction then used "it is read" as an argument about a column no reader
+    consults. A correction to what the scan can see created a new way for an
+    entry to be wrong, and only prose can catch that: a column is worth writing
+    because something is waiting for the answer, not because a query carries it
+    back.
+
+    What was waiting for the answer was `projects.status`, which this scan could
+    not see at all — see `paintedStates` below.
+  */
   {
     table: 'repair_orders',
     columns: ['journalEntryId'],
@@ -629,7 +650,15 @@ export function columnWriterFor(table: string, column: string): ColumnWriter {
 /** A column the scan cannot see a writer for. */
 export type WriterCandidate = { table: string; column: string }
 
-type SchemaColumn = { systemSet: boolean }
+type SchemaColumn = {
+  systemSet: boolean
+  /**
+   * The column's own declaration text, from its property name to the next
+   * one's. Carried since Phase 212, which needed `enum:` and `.default(` to ask
+   * whether a column is a **state** or a **record** — see `paintedStates`.
+   */
+  declaration: string
+}
 
 /**
  * Every table's columns, with whether the **database** is their author.
@@ -674,8 +703,10 @@ function schemaColumns(): Map<string, { sqlName: string; columns: Map<string, Sc
 
       for (const c of body.matchAll(/^\s{4}(\w+):\s*\w+\(/gm)) {
         const own = new RegExp(String.raw`^\s{4}${c[1]}:[\s\S]*?(?=^\s{4}\w+:|$)`, 'm').exec(body)
+        const declaration = own?.[0] ?? ''
         columns.set(c[1], {
-          systemSet: /defaultNow\(|defaultRandom\(|generatedAlwaysAs\(/.test(own?.[0] ?? ''),
+          systemSet: /defaultNow\(|defaultRandom\(|generatedAlwaysAs\(/.test(declaration),
+          declaration,
         })
       }
 
@@ -760,44 +791,47 @@ function readNames(file: string, tables: ReturnType<typeof schemaColumns>): Set<
 }
 
 /**
- * Columns the scan cannot see a writer for.
+ * Every write this tree makes, by table and column, in one pass.
  *
- * `read` is what `readNames` above defines: `tableVar.column` named anywhere
- * outside the schema, or any column of a table a projectionless `select()`
- * reads.
+ * Extracted in Phase 212, which needed a third reading of the same scan and
+ * found two copies of it already — `writerCandidates` keeping one set of
+ * writable keys, `insertOnlyColumns` keeping two, and the twenty lines that
+ * fill them identical in both. A third copy would have made the mechanism
+ * three places to correct, and every correction to this scan so far has been
+ * to the mechanism.
  *
- * `settable` is a key inside the balanced **argument** of a `.values(` or
- * `.set(`, with the five resolvable mechanisms handled: a callback's object
- * literal and an array are inside that argument; shorthand properties are
- * matched without a colon; a bare identifier is resolved through
- * `declarationOf`, which finds the *nearest preceding* declaration rather than
- * the file's first; and that declaration now runs to the end of the expression
- * rather than the end of its line, which is Phase 201's correction to Phase
- * 197's primitive and removed four false positives on `document_tax_lines`
- * alone.
- *
- * Keyed by **table and column**, not by column name alone. The first version
- * kept a set of names, so `notification_log.topic` counted as written because
- * `notification_preferences.topic` is — and in that case it happens to be true,
- * which is exactly why the looseness was worth removing rather than noting: a
- * column is only ever marked written by a statement that writes *its* table.
- * The target comes from the `.insert(T)` or `.update(T)` the call is chained
- * to, which also means a `.set(` on something that is not a table — a Map, a
- * cookie store — no longer contributes names at all.
- *
- * A column with a schema default is excluded: the database supplies it, so
- * nothing has to.
+ * `literals` is the part that is new rather than moved: for each key, the
+ * right-hand side of every write of it, as source text. A caller can then ask
+ * whether a column is only ever written the **same literal** — which is what
+ * tells a state apart from a record, and what two of the three callers do not
+ * need.
  */
-export function writerCandidates(): WriterCandidate[] {
-  const tables = schemaColumns()
-  const settable = new Set<string>()
-  const named = new Set<string>()
+type WriteSites = {
+  /** Keys a `.values(` names. */
+  inserted: Set<string>
+  /** Keys a `.set(` names. */
+  updated: Set<string>
+  /** Keys something reads, by either spelling `readNames` accepts. */
+  named: Set<string>
+  /** Per key, the source text of every right-hand side written to it. */
+  literals: Map<string, string[]>
+}
+
+function writeSites(tables: ReturnType<typeof schemaColumns>): WriteSites {
+  const sites: WriteSites = {
+    inserted: new Set(),
+    updated: new Set(),
+    named: new Set(),
+    literals: new Map(),
+  }
 
   for (const dir of ['src/modules', 'src/app'] as const) {
     for (const file of sourceFiles(dir)) {
       const whole = withoutComments(readFileSync(file, 'utf8'))
 
       for (const m of whole.matchAll(/\.(insert|update)\(\s*(\w+)\s*\)\s*\.(values|set)\(/g)) {
+        const into = m[1] === 'insert' ? sites.inserted : sites.updated
+
         /*
           The table, resolved when it is held in a variable — Phase 197's
           finding, and the fifth mechanism this scan hit.
@@ -831,24 +865,88 @@ export function writerCandidates(): WriterCandidate[] {
         }
 
         for (const target of targets) {
-          for (const k of argument.matchAll(/(\w+)\s*:/g)) settable.add(`${target}.${k[1]}`)
+          /*
+            The two key patterns are exactly as Phase 201 left them, and the
+            right-hand side is read in a second pass rather than by widening
+            them. Widening looks tidier and is not equivalent: `foo: bar ? x :
+            y` lets one pattern consume the ternary's colon, so `x` stops being
+            matched as a key. That is a *better* answer — `x` was never a
+            column — but it is a different one, and a scan whose census moves
+            because somebody made it read more neatly is a scan nobody can
+            compare across phases.
+          */
+          for (const k of argument.matchAll(/(\w+)\s*:/g)) into.add(`${target}.${k[1]}`)
           for (const k of argument.matchAll(/[{,]\s*(\w+)\s*(?=[,}])/g)) {
-            settable.add(`${target}.${k[1]}`)
+            into.add(`${target}.${k[1]}`)
+          }
+
+          for (const k of argument.matchAll(/(\w+)\s*:\s*([^,\n}]*)/g)) {
+            record(sites.literals, `${target}.${k[1]}`, k[2].trim())
+          }
+          /*
+            A shorthand property — `{ enabled }` — names the column and says
+            nothing about what reaches it, so it is recorded as a write whose
+            right-hand side cannot be read rather than as no write at all.
+          */
+          for (const k of argument.matchAll(/[{,]\s*(\w+)\s*(?=[,}])/g)) {
+            record(sites.literals, `${target}.${k[1]}`, '')
           }
         }
       }
 
-      for (const key of readNames(file, tables)) named.add(key)
+      for (const key of readNames(file, tables)) sites.named.add(key)
     }
   }
 
+  return sites
+}
+
+function record(into: Map<string, string[]>, key: string, value: string): void {
+  const list = into.get(key)
+  if (list) list.push(value)
+  else into.set(key, [value])
+}
+
+/**
+ * Columns the scan cannot see a writer for.
+ *
+ * `read` is what `readNames` above defines: `tableVar.column` named anywhere
+ * outside the schema, or any column of a table a projectionless `select()`
+ * reads.
+ *
+ * `settable` is a key inside the balanced **argument** of a `.values(` or
+ * `.set(`, with the five resolvable mechanisms handled: a callback's object
+ * literal and an array are inside that argument; shorthand properties are
+ * matched without a colon; a bare identifier is resolved through
+ * `declarationOf`, which finds the *nearest preceding* declaration rather than
+ * the file's first; and that declaration now runs to the end of the expression
+ * rather than the end of its line, which is Phase 201's correction to Phase
+ * 197's primitive and removed four false positives on `document_tax_lines`
+ * alone.
+ *
+ * Keyed by **table and column**, not by column name alone. The first version
+ * kept a set of names, so `notification_log.topic` counted as written because
+ * `notification_preferences.topic` is — and in that case it happens to be true,
+ * which is exactly why the looseness was worth removing rather than noting: a
+ * column is only ever marked written by a statement that writes *its* table.
+ * The target comes from the `.insert(T)` or `.update(T)` the call is chained
+ * to, which also means a `.set(` on something that is not a table — a Map, a
+ * cookie store — no longer contributes names at all.
+ *
+ * A column with a schema default is excluded: the database supplies it, so
+ * nothing has to.
+ */
+export function writerCandidates(): WriterCandidate[] {
+  const tables = schemaColumns()
+  const { inserted, updated, named } = writeSites(tables)
   const candidates: WriterCandidate[] = []
 
   for (const [tableVar, table] of tables) {
     for (const [column, info] of table.columns) {
+      const key = `${tableVar}.${column}`
       if (info.systemSet) continue
-      if (!named.has(`${tableVar}.${column}`)) continue
-      if (settable.has(`${tableVar}.${column}`)) continue
+      if (!named.has(key)) continue
+      if (inserted.has(key) || updated.has(key)) continue
 
       candidates.push({ table: table.sqlName, column })
     }
@@ -877,48 +975,17 @@ export function writerCandidates(): WriterCandidate[] {
  * failure ADR 0134 names.
  *
  * It is a number, declared so the limitation keeps its reason (Phase 185) and
- * measured so the prose cannot drift from it (Phase 179). Narrowing it needs a
- * way to say which columns are *state* rather than *record*, and this phase
- * does not have one.
+ * measured so the prose cannot drift from it (Phase 179).
+ *
+ * **Phase 212 has a way**, after this sentence spent ten phases saying there
+ * was none: `paintedStates` below. It does not whittle the number down — 1,168
+ * columns are still written once and never changed, and nearly all of them
+ * rightly — it narrows the *question*, to the 28 that could have held more than
+ * one value and the one that never could.
  */
 export function insertOnlyColumns(): number {
   const tables = schemaColumns()
-  const inserted = new Set<string>()
-  const updated = new Set<string>()
-  const named = new Set<string>()
-
-  for (const dir of ['src/modules', 'src/app'] as const) {
-    for (const file of sourceFiles(dir)) {
-      const whole = withoutComments(readFileSync(file, 'utf8'))
-
-      for (const m of whole.matchAll(/\.(insert|update)\(\s*(\w+)\s*\)\s*\.(values|set)\(/g)) {
-        const into = m[1] === 'insert' ? inserted : updated
-        const targets = tables.has(m[2])
-          ? [m[2]]
-          : [...declarationOf(whole, m.index, m[2]).matchAll(/\b(\w+)\b/g)]
-              .map((t) => t[1])
-              .filter((name) => tables.has(name))
-
-        const open = whole.indexOf('(', whole.indexOf(m[3], m.index) + m[3].length)
-        let argument = balanced(whole, open).slice(1, -1)
-
-        const bare = /^\s*(\w+)\s*$/.exec(argument)
-        if (bare) {
-          const declared = declarationOf(whole, m.index, bare[1])
-          if (declared) argument = declared
-        }
-
-        for (const target of targets) {
-          for (const k of argument.matchAll(/(\w+)\s*:/g)) into.add(`${target}.${k[1]}`)
-          for (const k of argument.matchAll(/[{,]\s*(\w+)\s*(?=[,}])/g)) {
-            into.add(`${target}.${k[1]}`)
-          }
-        }
-      }
-
-      for (const key of readNames(file, tables)) named.add(key)
-    }
-  }
+  const { inserted, updated, named } = writeSites(tables)
 
   let total = 0
   for (const [tableVar, table] of tables) {
@@ -931,6 +998,124 @@ export function insertOnlyColumns(): number {
   }
 
   return total
+}
+
+/**
+ * A state nothing can change, as opposed to a record nothing should (Phase 212).
+ *
+ * ## The question this answers
+ *
+ * `insertOnlyColumns` has said since Phase 202 that narrowing its 1,169 *"needs
+ * a way to say which columns are **state** rather than **record**, and this
+ * phase does not have one."* Ten phases later, here is one, and the reason it
+ * took ten phases is that the first three attempts were all judgements. This
+ * one is not:
+ *
+ * > A column is **state** when its declared domain holds more than one value —
+ * > an `enum` list, or a boolean. It is **painted on** when it is insert-only,
+ * > every write of it is the same literal, and that literal is also its schema
+ * > default: no statement anywhere can make the column differ from what the
+ * > database would have put there by itself.
+ *
+ * Both halves matter. Without the domain test this is a register of hundreds of
+ * amounts and dates that are immutable on purpose (ADR 0021, ADR 0042). Without
+ * the default test it reports a column whose write **is** the distinction.
+ *
+ * ## What it measured on the day it was written
+ *
+ * **1,169 insert-only columns, 28 with a domain of more than one value, 4
+ * written only ever as literals, 1 whose literal is also its default.** The
+ * three survivors each survive for a different reason, which is what makes the
+ * one a finding rather than a quota:
+ *
+ * | column | domain | written | why it is fine |
+ * | --- | --- | --- | --- |
+ * | `progress_billings.isRetainageRelease` | 2 | `true` | defaults to `false`, so both values occur |
+ * | `accountant_exports.result` | 2 | `'generated'`, `'held'` | no default, both literals written |
+ * | `refunds.direction` | 2 | `'out'`, `'in'` | no default, both literals written |
+ * | `projects.status` | **4** | `'active'` | its one literal is its default |
+ *
+ * `projects.status` is Phase 212's subject: four states, read by the WIP
+ * schedule's own filter, and one of the four ever reachable. `writerCandidates`
+ * could not see it, because an insert that names a column counts as a writer;
+ * `insertOnlyColumns` counted it among 1,169 and said nothing about which; and
+ * the register's entry for that table was about two *other* columns and gave a
+ * false reason for keeping them.
+ *
+ * ## Why this returns the list and not a count
+ *
+ * The three survivors are the point. A number would go green at 0 and say
+ * nothing about what it had ruled out, and the next painted-on state will be
+ * found by the shape of its entry here rather than by somebody re-deriving the
+ * rule. The test asserts the whole list, so adding a fifth literal-written
+ * state is a failure that names it.
+ */
+export type PaintedState = {
+  table: string
+  column: string
+  /** How many values the declaration allows. Always greater than one. */
+  domain: number
+  /** The distinct right-hand sides written to it, as source text. */
+  written: readonly string[]
+  /** The schema default's literal, or null when it has none. */
+  fallback: string | null
+  /** True when no write can make it differ from its default. */
+  painted: boolean
+}
+
+export function paintedStates(): PaintedState[] {
+  const tables = schemaColumns()
+  const { inserted, updated, named, literals } = writeSites(tables)
+  const found: PaintedState[] = []
+
+  for (const [tableVar, table] of tables) {
+    for (const [column, info] of table.columns) {
+      const key = `${tableVar}.${column}`
+      if (info.systemSet) continue
+      if (!named.has(key)) continue
+      if (!inserted.has(key) || updated.has(key)) continue
+
+      const domain = declaredDomain(info.declaration)
+      if (domain < 2) continue
+
+      const written = [...new Set(literals.get(key) ?? [])]
+      if (!written.every(isLiteral)) continue
+
+      const fallback = declaredDefault(info.declaration)
+
+      found.push({
+        table: table.sqlName,
+        column,
+        domain,
+        written,
+        fallback,
+        painted: written.length === 1 && fallback !== null && written[0] === fallback,
+      })
+    }
+  }
+
+  return found.sort(
+    (a, b) => a.table.localeCompare(b.table) || a.column.localeCompare(b.column),
+  )
+}
+
+/** How many values a declaration allows: an enum's list, a boolean's two, else one. */
+function declaredDomain(declaration: string): number {
+  const listed = /enum:\s*\[([^\]]*)\]/.exec(declaration)
+  if (listed) return listed[1].split(',').filter((entry) => entry.trim().length > 0).length
+
+  return /^\s{4}\w+:\s*boolean\(/.test(declaration) ? 2 : 1
+}
+
+/** The literal a schema default supplies, or null. */
+function declaredDefault(declaration: string): string | null {
+  const defaulted = /\.default\((\s*'[^']*'\s*|\s*true\s*|\s*false\s*)\)/.exec(declaration)
+  return defaulted ? defaulted[1].trim() : null
+}
+
+/** A quoted string or a boolean keyword — something with no input behind it. */
+function isLiteral(written: string): boolean {
+  return /^'[^']*'$/.test(written) || written === 'true' || written === 'false'
 }
 
 /** How many columns the scan looked at, for the register's own prose. */

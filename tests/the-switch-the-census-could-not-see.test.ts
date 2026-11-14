@@ -133,11 +133,28 @@ describe('the rule the scan was missing', () => {
 
     expect(scan).toContain('function readNames(')
     expect(scan).toContain('select\\(\\s*\\)[\\s\\S]{0,400}?\\.from\\(\\s*(\\w+)\\s*\\)')
-    // Called by both, rather than a third copy of the loop.
-    expect(scan.match(/readNames\(file, tables\)/g)).toHaveLength(2)
+
+    /*
+      One call site, because there is one loop.
+
+      This assertion read `toHaveLength(2)` from Phase 210 to Phase 212, with
+      the comment *"called by both, rather than a third copy of the loop"* —
+      pinning that `writerCandidates` and `insertOnlyColumns` shared the
+      reader. They shared the reader and duplicated everything around it:
+      twenty identical lines resolving the table, balancing the argument and
+      collecting the keys, in both. Phase 212 needed a third reading and
+      extracted `writeSites`, so there is now one pass over the tree and this
+      number went **down** when the duplication went away.
+
+      Which is why it is still asserted. The property was never "two callers";
+      it was that the scans cannot drift apart, and one shared pass is the
+      stronger form of it.
+    */
+    expect(scan.match(/readNames\(file, tables\)/g)).toHaveLength(1)
+    expect(scan.match(/writeSites\(tables\)/g)).toHaveLength(3)
   })
 
-  it('reports 95 candidates and declares every one of them', () => {
+  it('reports 93 candidates and declares every one of them', () => {
     /*
       29 before the correction. The 67 the number moves by is not new code — it
       is columns the scan had never looked at, and the register had to argue
@@ -148,8 +165,9 @@ describe('the rule the scan was missing', () => {
     */
     const candidates = writerCandidates()
     // 96 when this phase measured it; 95 since Phase 211 dropped
-    // `bill_lines.item_id` rather than filling it.
-    expect(candidates).toHaveLength(95)
+    // `bill_lines.item_id` rather than filling it; 93 since Phase 212 gave
+    // `projects.endDate` and `projects.notes` a writer.
+    expect(candidates).toHaveLength(93)
 
     const declared = new Set(
       COLUMN_WRITERS.flatMap((entry) => entry.columns.map((c) => `${entry.table}.${c}`)),
@@ -176,11 +194,17 @@ describe('the rule the scan was missing', () => {
       fixing it, but by establishing that it had never been a defect: the
       receipt line already records what arrived, so the column was dropped and
       the finding became an argument in the schema where it used to sit.
+
+      Thirteen, over twelve entries, since Phase 212 closed `projects.endDate`
+      and `projects.notes` — one act for both, because a job's end date and the
+      note explaining it are written by the same decision. Three of the sixteen
+      Phase 210 reported are now closed and one was never a defect, which is
+      the rate this register was built to make visible.
     */
     const findings = COLUMN_WRITERS.filter((row) => row.verdict === 'unwritable')
 
-    expect(findings).toHaveLength(13)
-    expect(findings.flatMap((row) => row.columns)).toHaveLength(15)
+    expect(findings).toHaveLength(12)
+    expect(findings.flatMap((row) => row.columns)).toHaveLength(13)
 
     // The verdict means nothing writes it, so there is no writer to name.
     for (const finding of findings) {

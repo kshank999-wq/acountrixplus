@@ -209,8 +209,8 @@ const READ_GUARDS: readonly IsolationGuard[] = [
     detect: '`scoped(ctx, table, …)` inside the select’s own `where`.',
     atLeastCompanyTight: true,
     because:
-      'The reading half of `scoped-write`, and by far the most common guard on this side: 599 of ' +
-      'the 977 reads, against 66 of the 304 writes. The two halves of this system are guarded ' +
+      'The reading half of `scoped-write`, and by far the most common guard on this side: 601 of ' +
+      'the 979 reads, against 67 of the 305 writes. The two halves of this system are guarded ' +
       'quite differently and nobody had noticed, because nothing had counted either of them. ' +
       'All four were a phase or more out until Phase 179 measured them, and the sentence has ' +
       'needed correcting by hand in every phase that touched a read — 180, 183, 184, 185 and ' +
@@ -237,10 +237,12 @@ const READ_GUARDS: readonly IsolationGuard[] = [
       'refused the row that would have made it one; a clause it should have had either way. ' +
       'The numbers at the head of this entry were 301 and 972 from Phase 208, then 304 and 975 ' +
       'from Phase 210 — one write and one read each for the three switches it gave a writer — ' +
-      'and are 304 and 977 since Phase 211, which added two scoped reads and no writes: the ' +
+      'then 304 and 977 from Phase 211, which added two scoped reads and no writes: the ' +
       'chart the bill composer filters and the same chart the bill service re-reads behind it, ' +
       'because a dropdown is cosmetic and the refusal has to hold against whatever built the ' +
-      'payload.',
+      'payload. They are 305 and 979 since Phase 212, whose one write moves a job between the ' +
+      'four states it may be in, and whose two reads are the job that write is about to change ' +
+      'and the job a posting is being refused against.',
   },
   {
     kind: 'join-inherited',

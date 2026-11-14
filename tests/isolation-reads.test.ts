@@ -212,9 +212,17 @@ describe('every read from a company-scoped table', () => {
       whole point — the class is per company, because an item may name any
       account as the one its stock is carried on.
     */
-    expect(READS.length).toBe(977)
+    /*
+      979 since Phase 212, which gave `projects.status` its first writer and so
+      added the two reads an act like that needs: the job `setJobStatus` reads
+      before it changes it, and the jobs `assertJobsAcceptCosts` reads to refuse
+      a cost coded to a cancelled one. Both `scoped-read`, for the reason Phase
+      210's three were — a correction to, or a refusal about, one record among
+      many is the read that must not reach somebody else's.
+    */
+    expect(READS.length).toBe(979)
     expect(by).toEqual({
-      'scoped-read': 599,
+      'scoped-read': 601,
       // 278 until Phase 211, when the read that collects every account an
       // item carries stock on moved out of `reconcileInventory` into a
       // function the composer reads too, and picked up `scoped()` on the way.

@@ -17,6 +17,7 @@ import {
 } from '@/modules/dimensions/service'
 import { DomainError, Refusal } from '@/modules/errors'
 import { missing } from '@/modules/errors/missing'
+import { assertJobsAcceptCosts } from '@/modules/jobs/lifecycle'
 
 /**
  * The double-entry journal (spec §13).
@@ -606,6 +607,23 @@ async function assertDimensionsInCompany(
     if (rows.length !== projectIds.length) {
       throw missing('jobs', { plural: true })
     }
+
+    /*
+      And that the job will take it (Phase 212).
+
+      This function was the third of the three readers ADR 0211 asked about —
+      *"possibly refused new costs"* — and before this line it was the clearest
+      of the three: it selects `projects.id`, checks the count, and has never
+      looked at `projects.status`, which until this phase could only ever hold
+      one of its four values anyway.
+
+      Here rather than in each caller because this is the one place every
+      posting's dimensions are checked, so there is a single answer to *may this
+      cost be coded here*. `JOB_STATES` decides which states refuse: today only
+      `cancelled` does, and the register says why that is the only real
+      difference between the two terminal states.
+    */
+    await assertJobsAcceptCosts(ctx, projectIds, exec)
   }
 
   if (costCodeIds.length > 0) {

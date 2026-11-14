@@ -179,8 +179,20 @@ describe('what the census could not see', () => {
       table and names none, so 399 insert-only columns were outside the count.
       The limitation this number declares is therefore half again as large as
       it has been saying since Phase 202.
+
+      **1,168 since Phase 212**, and the one that left is the whole of that
+      phase: `projects.status` had been written once at insert, as the literal
+      `'active'` that is also its default, so a four-value state had one
+      reachable value. Giving it an `.update` took it out of this number.
+
+      Worth being clear about what that does and does not mean. 1,168 is not
+      meaningfully smaller than 1,169 and this limitation is not being whittled
+      down one column a phase. What changed is that the question now has an
+      instrument: `paintedStates` asks which of these columns are *state*
+      rather than *record*, which is what `insertOnlyColumns` has said since
+      Phase 202 it had no way to ask.
     */
-    expect(insertOnlyColumns()).toBe(1169)
+    expect(insertOnlyColumns()).toBe(1168)
   })
 
   it('removed the entry for the column it closed, rather than rewording it', () => {

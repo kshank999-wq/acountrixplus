@@ -10,6 +10,7 @@ import {
   projects,
 } from '@/db/schema'
 import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { jobState } from './lifecycle'
 import type { CostType } from './cost-codes'
 
 /**
@@ -182,6 +183,17 @@ export type JobFinancials = {
    * paid for work not yet done), negative is *under*billed (an asset).
    */
   overUnderBillingCents: number
+  /**
+   * The day the job reached a terminal state, or null while it is running
+   * (Phase 212).
+   *
+   * The schedule's reader is the reason this is here rather than only on the
+   * job page: a closed job stays on the schedule while its over/under-billing
+   * is non-zero, and *"closed on 2026-06-30, still $12,000 underbilled"* is the
+   * line an accountant needs to act on. Without the date it reads as an open
+   * job that nobody is working.
+   */
+  endDate: string | null
 }
 
 /**
@@ -192,6 +204,29 @@ export type JobFinancials = {
  * budget reports `null` rather than 0%: unknown and not-started are different
  * answers, and reporting 0% for the first would show a fully-cost-loaded job
  * as having earned nothing.
+ *
+ * ## Which jobs are on it (Phase 212)
+ *
+ * This filter was the one reader of `projects.status` that already existed, and
+ * it had never been able to fire: the column could only hold `'active'` until
+ * Phase 212 gave it a writer. It also said `status === 'active' || status ===
+ * 'on_hold'` in a literal pair, which is the shape that register now holds — so
+ * the question *which states are on the schedule* has one answer and it is in
+ * `JOB_STATES`.
+ *
+ * The change that is not a rename: a job whose state is **off** the schedule
+ * stays on it while its over- or under-billing is non-zero. `wipSummary` feeds
+ * `jobs.propose_wip_entry`, which drafts the adjusting entry against `1160`,
+ * `2560` and `4200` — so a job closed while underbilled, dropping off the
+ * schedule, takes its share of a posted adjustment with it and nothing ever
+ * proposes the reversal. Carrying closed-but-unsettled jobs until they clear is
+ * what a real WIP schedule does, and it is what makes closing a job safe rather
+ * than something to be refused.
+ *
+ * Which is also why the figures are now computed for **every** job and filtered
+ * afterwards: whether a closed job belongs on the schedule is a question about
+ * its over/under-billing, and that is not known until the three queries below
+ * have run.
  */
 export async function workInProgress(
   ctx: ActorContext,
@@ -205,6 +240,7 @@ export async function workInProgress(
       code: projects.code,
       name: projects.name,
       status: projects.status,
+      endDate: projects.endDate,
       contractValueCents: projects.contractValueCents,
       clientName: organizations.name,
     })
@@ -215,13 +251,9 @@ export async function workInProgress(
     )
     .orderBy(asc(projects.code))
 
-  const visible = opts.includeComplete
-    ? jobs
-    : jobs.filter((job) => job.status === 'active' || job.status === 'on_hold')
+  if (jobs.length === 0) return []
 
-  if (visible.length === 0) return []
-
-  const ids = visible.map((job) => job.id)
+  const ids = jobs.map((job) => job.id)
 
   // Two grouped queries over the ledger, and one over the budget. Everything
   // else in this function is arithmetic on those three results.
@@ -246,7 +278,7 @@ export async function workInProgress(
     ]),
   )
 
-  return visible.map((job) => {
+  const rows = jobs.map((job) => {
     const budget = budgetByProject.get(job.id) ?? { original: 0, change: 0 }
     const revisedBudgetCents = budget.original + budget.change
     const costToDateCents = costs.get(job.id) ?? 0
@@ -280,8 +312,17 @@ export async function workInProgress(
       percentCompleteBp,
       earnedRevenueCents,
       overUnderBillingCents: billedToDateCents - earnedRevenueCents,
+      endDate: job.endDate,
     }
   })
+
+  if (opts.includeComplete) return rows
+
+  // The register decides which states are on the schedule, and an unsettled job
+  // is on it whatever its state says — see the docstring above.
+  return rows.filter(
+    (row) => jobState(row.status).reportsWip || row.overUnderBillingCents !== 0,
+  )
 }
 
 export type WipSummary = {

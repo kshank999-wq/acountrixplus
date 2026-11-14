@@ -1,4 +1,4 @@
-import { and, eq, isNull, sql } from 'drizzle-orm'
+import { and, eq, inArray, isNull, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import {
   customers,
@@ -23,6 +23,7 @@ import {
 } from './billing-schedule'
 import { billingSchedule } from './proposals'
 import { setScheduleOfValues } from '@/modules/jobs/billing'
+import { bookableStatuses } from '@/modules/jobs/lifecycle'
 import { moduleEnabled } from '@/modules/industry/modules'
 import { resolveRetainerAccount } from '@/modules/timebilling/billing'
 
@@ -448,7 +449,33 @@ async function nextProjectCode(
   return `JOB-${1001 + Number(row?.count ?? 0)}`
 }
 
-export async function listProjects(ctx: ActorContext) {
+/**
+ * Every job, or only the ones somebody may book time to.
+ *
+ * ## `bookableOnly`, and the reader that was not there (Phase 212)
+ *
+ * This function has selected `status` since it was written, and the one screen
+ * that uses it as a **picker** threw it away on the way to the dropdown:
+ *
+ * ```tsx
+ * projects={projectList.map((project) => ({ id: project.id, name: project.name }))}
+ * ```
+ *
+ * ADR 0211 asked whether a finished job is *"out of the picker on a new
+ * timesheet"*, and this was the answer: not out of it, and not kept in it on
+ * purpose either — the column reached the component and the component did not
+ * ask. It could not have mattered before, because `projects.status` had one
+ * reachable value; it matters from the first job somebody closes.
+ *
+ * A flag rather than two functions, and it is opt-**in** rather than opt-out
+ * because the other two callers want every job: the CRM's client panel lists a
+ * client's jobs whatever state they are in, and so does the seed. A picker is
+ * the unusual case, so the picker is the one that says so.
+ */
+export async function listProjects(
+  ctx: ActorContext,
+  opts: { bookableOnly?: boolean } = {},
+) {
   requirePermission(ctx, 'crm:view')
 
   return db
@@ -460,9 +487,16 @@ export async function listProjects(ctx: ActorContext) {
       contractValueCents: projects.contractValueCents,
       organizationName: organizations.name,
       startDate: projects.startDate,
+      endDate: projects.endDate,
     })
     .from(projects)
     .leftJoin(organizations, eq(organizations.id, projects.organizationId))
-    .where(scoped(ctx, projects))
+    .where(
+      scoped(
+        ctx,
+        projects,
+        opts.bookableOnly ? inArray(projects.status, bookableStatuses()) : undefined,
+      ),
+    )
     .orderBy(projects.code)
 }

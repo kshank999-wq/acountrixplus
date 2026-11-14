@@ -73,7 +73,10 @@ export default async function TimePage() {
       timesheet(actor, { limit: 60 }),
       unbilledWork(actor),
       billablePeople(actor),
-      listProjects(actor),
+      // Only the jobs somebody may book time to (Phase 212). This page is a
+      // picker, and before that phase it mapped the status off the row on its
+      // way into the dropdown — so a finished job stayed bookable for ever.
+      listProjects(actor, { bookableOnly: true }),
       listCustomers(actor),
       listRetainers(actor, { openOnly: true }),
       utilizationReport(actor, { from: monthStart, to: today }),

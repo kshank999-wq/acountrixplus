@@ -51,15 +51,21 @@ describe('what to call what happened', () => {
   })
 
   /**
-   * The refusal that shapes this module. `AuditAction` has **258 members** as
-   * of Phase 210 and words have been decided for **seven** of them; the other
-   * 251 are handed back as their own names, flagged so the screen can show
+   * The refusal that shapes this module. `AuditAction` has **259 members** as
+   * of Phase 212 and words have been decided for **seven** of them; the other
+   * 252 are handed back as their own names, flagged so the screen can show
    * them as the codes they are.
    *
    * Phase 210 added one, `practitioner.update`, and needed no others: it gave
    * writers to `employees` and `tax_codes`, both of which have had an
    * `.update` action in this union since Phase 9 with nothing able to emit it.
    * The vocabulary for the correction was written and the correction was not.
+   *
+   * Phase 212 added one, `job.status`, and that one is the opposite case: no
+   * action for a job existed at all, because nothing had ever corrected a job.
+   * One action rather than four — `complete`, `cancel`, `hold`, `reopen` — on
+   * Phase 70's rule, since the pair of states is already in `before`/`after`
+   * and four words for one correction is what this test exists to prevent.
    *
    * **This sentence said 224 and five until Phase 208 measured it**, which is
    * Phase 179's shape found in a test rather than in a document: a number in

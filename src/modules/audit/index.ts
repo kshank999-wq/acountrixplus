@@ -485,6 +485,15 @@ export type AuditAction =
   | 'subcontractor.update'
   | 'compliance_document.record'
   | 'compliance_document.delete'
+  /**
+   * A job moved between the four states `JOB_STATES` names (Phase 212).
+   *
+   * One action for all of them rather than `job.complete`, `job.cancel`,
+   * `job.hold` and `job.reopen`, because the interesting thing is always the
+   * pair of states and that is in `before`/`after` — four actions would be four
+   * vocabularies for one correction, which is Phase 70's rule.
+   */
+  | 'job.status'
   // The optional AI module (spec §11, §12)
   | 'ai.settings_update'
   | 'ai_prompt.save'

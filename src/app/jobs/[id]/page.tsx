@@ -22,7 +22,9 @@ import {
 } from '@/modules/jobs/billing'
 import { JOBS_NAV } from '../nav'
 import { Card, Empty, ModuleOff, NoAccess, Stat, Table } from '../ui'
+import { JOB_STATES, jobState, transitionRefusal } from '@/modules/jobs/lifecycle'
 import { JobPanels } from './panels'
+import { JobStatus } from './status'
 
 export const dynamic = 'force-dynamic'
 
@@ -94,14 +96,41 @@ export default async function JobDetailPage({
             {job.code} <span className="font-normal text-muted">{job.name}</span>
           </h2>
           <p className="text-xs text-muted">
-            {terms.job} · {job.status.replace('_', ' ')}
+            {terms.job} · {jobState(job.status).label}
             {job.startDate ? ` · started ${job.startDate}` : ''}
+            {job.endDate ? ` · ended ${job.endDate}` : ''}
           </p>
         </div>
         <Link href="/jobs" className="btn text-xs">
           Back to WIP
         </Link>
       </div>
+
+      {/*
+        Phase 212. The options and their refusals are worked out here, from
+        `JOB_STATES`, so the control has no transition table of its own.
+      */}
+      <JobStatus
+        projectId={id}
+        jobCode={job.code}
+        current={{
+          status: jobState(job.status).status,
+          label: jobState(job.status).label,
+          terminal: jobState(job.status).terminal,
+          because: jobState(job.status).because,
+          refusal: null,
+        }}
+        options={JOB_STATES.filter((state) => state.status !== job.status).map((state) => ({
+          status: state.status,
+          label: state.label,
+          terminal: state.terminal,
+          because: state.because,
+          refusal: transitionRefusal(job.status, state.status),
+        }))}
+        endDate={job.endDate}
+        notes={job.notes}
+        canManage={can(actor, 'jobs:manage')}
+      />
 
       {financials && (
         <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-5">

@@ -17,12 +17,15 @@ import {
   releaseRetainage,
   setScheduleOfValues,
 } from '@/modules/jobs/billing'
+import { jobState, setJobStatus } from '@/modules/jobs/lifecycle'
+import { workInProgress } from '@/modules/jobs/reports'
 import {
   createSubcontractor,
   recordComplianceDocument,
   updateSubcontractor,
 } from '@/modules/jobs/compliance'
 import { messageFor } from '@/modules/errors'
+import { formatCents } from '@/lib/money'
 
 export type ActionResult = { ok: true; message?: string } | { ok: false; error: string }
 
@@ -306,5 +309,56 @@ export async function recordComplianceDocumentAction(
     const actor = await requireActor()
     await recordComplianceDocument(actor, documentSchema.parse(input))
     return 'Document recorded.'
+  })
+}
+
+// --- The job's own state ---------------------------------------------------
+
+const jobStatusSchema = z.object({
+  projectId: z.string().uuid(),
+  status: z.enum(['active', 'on_hold', 'complete', 'cancelled']),
+  effectiveDate: z.string().optional(),
+  note: z.string().trim().nullish(),
+})
+
+/**
+ * Closes, holds, cancels or reopens a job (Phase 212).
+ *
+ * The message is where this action earns its keep. `setJobStatus` returns the
+ * row it wrote, so the figure that decides whether the job is still on the WIP
+ * schedule can be read back and said out loud — because the surprising outcome
+ * is the one worth naming: *closed, and still on the schedule because it is
+ * underbilled.* A screen that said only "Job closed." would leave the person
+ * who closed it to find that out from a report.
+ *
+ * Both job paths are revalidated, and `/time` with them: the timesheet picker
+ * only offers bookable jobs, so closing one changes that dropdown.
+ */
+export async function setJobStatusAction(
+  input: z.input<typeof jobStatusSchema>,
+): Promise<ActionResult> {
+  return run(['/jobs', `/jobs/${input.projectId}`, '/time'], async () => {
+    const actor = await requireActor()
+    const parsed = jobStatusSchema.parse(input)
+    const job = await setJobStatus(actor, parsed)
+    const state = jobState(job.status)
+
+    if (!state.reportsWip) {
+      const [financials] = await workInProgress(actor, {
+        projectId: job.id,
+        includeComplete: true,
+      })
+
+      if (financials && financials.overUnderBillingCents !== 0) {
+        const over = financials.overUnderBillingCents > 0
+        return (
+          `${job.code} is ${state.label}. It stays on the WIP schedule because it is ` +
+          `${formatCents(Math.abs(financials.overUnderBillingCents))} ${over ? 'over' : 'under'}billed — ` +
+          `${over ? 'credit the overbilling' : 'raise the final application'} to clear it.`
+        )
+      }
+    }
+
+    return `${job.code} is ${state.label}.`
   })
 }

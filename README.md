@@ -7991,6 +7991,121 @@ recognises a query by a name, and every name it uses is a place something can
 hide.
 
 
+### The job that cannot be finished (Phase 212)
+
+ADR 0211 nominated **the job that cannot be finished** — `projects.end_date` has no writer, so a job
+can be created, billed, have its retainage held and its costs coded, and there is no way to say it is
+over — with one instruction attached: measure *"what else is a finished job supposed to mean?"*
+before building anything.
+
+**The nomination's own reason was false.** It argued the column was worth writing rather than
+dropping because *"the column is read — the register's entry for it names what reads it"*, and that
+entry said `jobs/reports.ts` *"reads the end date into every date range it builds."* That file has
+exactly one `endDate` and it is a **function parameter**: a caller-supplied window for a ledger
+query, named the same and related to nothing. Measured, **nothing in `src/` names
+`projects.endDate` at all** — four projectionless `select()`s fetch it and no property access
+consults it.
+
+The conclusion held, the reason did not, and how it failed is the part worth keeping. **Phase 210
+taught the scan that a projectionless `select()` is a read**, which was right and had uncovered
+seventy-two unexamined columns. The first register entry written after that correction then used
+*"it is read"* as the argument for keeping a column no reader consults. A correction to what the
+scan can see created a new way for an entry to be wrong, and nothing but prose can catch that,
+because the scan agrees with the entry. The rule that replaces it: **a column is worth writing
+because something is waiting for the answer, not because a query happens to carry it back.**
+
+**What was waiting for the answer was `status`.** Four enum values —
+`active`/`on_hold`/`complete`/`cancelled` — and the only statement that has ever written it is the
+conversion that creates the job, writing `status: 'active'`, the literal that is also its default.
+So the column has four values and **one of them has ever been reachable.** `writerCandidates` could
+not see it, because an insert that names a column counts as a writer.
+
+**The narrowing device that has been owed since Phase 202.** `insertOnlyColumns`' docstring has said
+for ten phases that narrowing its number *"needs a way to say which columns are **state** rather
+than **record**, and this phase does not have one."* Here is one, and it is measurable rather than
+editorial: a column is **state** when its declared domain holds more than one value, and **painted
+on** when it is insert-only, every write of it is the same literal, and that literal is also its
+schema default — so no statement anywhere can make it differ from what the database would have put
+there by itself.
+
+```
+insert-only                                      1169
+  … with a domain of more than one value            28
+  … of those, written only ever as literals          4
+  … of those, whose one literal is its default       1
+```
+
+The three survivors each survive for a **different** reason, which is what makes the one a finding
+rather than a quota: `progress_billings.isRetainageRelease` defaults to `false` and is written
+`true`, so the write *is* the distinction; `accountant_exports.result` and `refunds.direction` have
+no default and write both of their values. `paintedStates()` returns the list rather than a count,
+because a count would go green at 0 and say nothing about what it ruled out.
+
+**The three readers, measured before anything was built.** ADR 0211 named three candidates and each
+was a different kind of answer — which is the argument for measuring rather than assuming all three
+were gaps:
+
+| | reader | before this phase |
+| --- | --- | --- |
+| 1 | off the WIP schedule | **exists and is correct** — and had never been able to fire |
+| 2 | out of the timesheet picker | **does not exist** — `listProjects` selects `status` and `/time` maps it off the row one line before the dropdown |
+| 3 | refuses new costs | **does not exist** — `assertDimensionsInCompany`, the one chokepoint every posting passes, selected `projects.id` and looked at nothing else |
+
+Reader 2 is the sharpest shape: not a missing query and not a missing column, but a value thrown
+away one line before the place it was needed.
+
+**And reader 1 is about accounting, not display.** `wipSummary` feeds `jobs.propose_wip_entry`,
+which drafts the period-end adjusting entry against `1160 Costs in Excess of Billings`, `2560
+Billings in Excess of Costs` and `4200`. So "complete means off the schedule", taken literally, has
+a defect in it: the accountant posts the adjustment in June, the job is closed in July while still
+over-billed, the job leaves the schedule, and **nothing ever proposes the reversal** — `2560`
+carries the figure for good. The answer is not a refusal on the act: **completion does not take a
+job off the schedule; being settled does**, which is what a real WIP schedule does anyway, carrying
+closed-but-unbilled jobs until they clear. That is also why the schedule now carries the closing
+date: *"closed on 2026-06-30, still $12,000 underbilled"* is a line somebody can act on, and without
+the date the same row reads as an open job nobody is working.
+
+**One register, four states, no two the same.**
+
+| | terminal | bookable | on the schedule | takes costs |
+| --- | --- | --- | --- | --- |
+| `active` | no | **yes** | yes | yes |
+| `on_hold` | no | no | yes | yes |
+| `complete` | **yes** | no | no | yes |
+| `cancelled` | **yes** | no | no | **no** |
+
+No two rows agree on all four, and the test asserts it: two states a reader cannot tell apart are
+one state with two names and the second is spare. The pairs are close on purpose — `active` and
+`on_hold` differ only in whether you may book time, `complete` and `cancelled` only in whether a
+cost may still arrive — and those two distinctions are the entire reason the enum has four members
+rather than two. `complete` takes costs because a subcontractor invoices in arrears and the last
+delivery's bill arrives after the last day on site; refusing it would push a real cost onto a job
+that did not incur it, which is worse than the job reappearing on the schedule — and reappear it
+does, correctly.
+
+One act writes all three columns, with the end date **derived** from the state rather than typed
+beside it, so reopening a job clears it: `recordEmployment`'s rule from Phase 210, *"a date and a
+flag that each have their own control are two answers to `has this person left`."* The job screen's
+dropdown offers every state and renders the **refusal** for the ones that cannot be reached, rather
+than greying them out — a control that knew which moves were legal would be a second copy of the
+transition table, and somebody would read nothing instead of reading why.
+
+Placing `job` in the audit log's readable-types table is not a tidy-up either. This is the first
+phase to write an audit event about a project, and **`bookkeeper` holds `jobs:manage` and does not
+hold `audit:view`** — so unplaced, the history of closing a job would have been hidden from exactly
+the role most likely to be closing jobs. Phase 78's sentence, arriving at a different module.
+Measured in both directions, because placing a type can take access away as easily as give it:
+every role holding `audit:view` also holds `jobs:view`, so no reader loses a record.
+
+**What the full run found.** The column census is **93 candidates and 12 findings over 13 columns**;
+`insertOnlyColumns` is **1,168**; the isolation census is **305 writes and 979 reads**. And one
+assertion moved *down*: `readNames` was pinned as appearing twice, commented *"called by both,
+rather than a third copy of the loop"* — the two scans shared the reader and duplicated the twenty
+lines around it. This phase needed a third reading, extracted `writeSites`, and now there is one
+pass. The property was never "two callers"; it was that the scans cannot drift apart, and one shared
+pass is the stronger form of it.
+
+
 ### The account with no way back (Phase 211)
 
 ADR 0210 nominated **the stock nobody received** — `bill_lines.item_id` has no writer — with one
@@ -9501,6 +9616,7 @@ Coverage matches what spec §21 asks for:
 | `tests/the-access-that-disappeared-quietly.test.ts` | **The access that disappeared quietly** (Phase 204): ADR 0203's two remaining *enforced* switches, and beside them a defect **neither census could report** — both are about columns and this is about a write that never happens. Three practice-side actions remove a client's access and the client's audit log said nothing: `endEngagement` audited only `if (party.side === 'client')`, so the accountant walking away was never recorded; `removePracticeMember` deletes memberships at **every** client of the firm and audited nothing on either side; closing a practice would have been a third. §14 asks for an audit log of permission changes, and losing your accountant's access is one. Never a decision: `recordAudit` needs a company and the practice side has none, but all three things it needs are on the engagement and `ActorContext.viaPractice` was built to produce exactly the line *Dana Chen (Hartley & Co)* — it had never fired on these two. One extra column made the second possible, because the sweep selected `{ id }` alone and a client's log is keyed by company; it writes one event per client now, since an event filed against one of twelve companies is eleven companies with no record. The till settles the asymmetry ADR 0203 expected to be hard: a gift card's balance is a liability on 2590, so making a card unspendable without moving it leaves money nobody can settle — a drawer's float is cash `closeShift` already counts, so the refusal is just *close the shift first* and nothing posts. Closing a firm is `practices.isActive`, whose strongest reader is `practicesFor`: an inactive firm leaves its own members' list. Verified by reverting the audit branch. And the ordering of the last three phases rests on a correction: two Phase 202 register entries were wrong as drafted, and reading the call sites is what separated *enforced* switches from *projection-only* ones |
 | `tests/offered-and-not-offered.test.ts` | **Offered, and not offered** (Phase 205): the last two of the six switches, and **all six closed**. They were last because reading each reader split them into *enforced* (a refusal already written, so the gap was the writer) and *projection-only* (selected to be displayed, filtered by nothing — a writer alone would be a control with no effect). ADR 0204 said *filter first*, which was right and incomplete: the two need the filter in **different places**, and the reason is copying against referencing. A clause is **copied** into a document as a `clauseVersionId`, so retiring one is invisible to every proposal ever sent and not offering it is the whole job — `listClauses` filters, with the option as `includeRetired` **opt-out**, because three screens read it and two of them *offer* clauses, so forgetting the flag must be safe (the shape `listTeamMembers` already had in the same module). A work order **references** its recipe for the life of the run, so filtering the read would cost a half-built batch the recipe it was costed against — the recipe stays readable and `createWorkOrder` refuses to *start* a run against a superseded one, in the service rather than only the picker. That refusal also closed something nobody had asked about: **nothing validated `bomId` at all**, the composite foreign key having been doing the existence and tenant checks. Verified by reverting the filter. The register now declares **one** finding, `vendors.organizationId`, and Phase 202's assertion about which switches are declared reaches its third and final state — five, then two, then none |
 | `tests/a-retirement-with-no-way-back.test.ts` | **A retirement with no way back** (Phase 206): the nomination was wrong twice and measuring it found two real things. No screen was offering retired items (all three offer-sites passed the flag), and retiring an item with stock hides nothing (`stockOnHand` filters on `isInventoried`, not `isActive`) — so ADR 0205's two reasons both measured false, as did its reason for declining the fix: four callers, not five, and no behaviour change. What was real: **`deactivateServiceItem` set `isActive` false only**, from Phase 4, with no restore and no audit — a delete wearing a flag, and a **third shape no census asks about**, since a column with a one-directional writer is read *and* written and so invisible to the reader-no-writer census and to the mirror Phase 203 declined. And `listServiceItems` was **one of seven** functions with that default, not the last: `listAccounts` had four callers feeding a `<select>` with no flag — the till pay-out, the takings categories, the budget lines, the recurring-billing revenue account — so `account.retire`'s claim that retiring *takes it out of every picker* was false for four of them **for eighty-eight phases**, the reason being in the same sentence (an opt-in flag is a claim about what callers remember). Fixed, with the docstring keeping its wording and the correction attached. Not filtered everywhere: `dimensions` needs a name lookup and the §19 export needs the whole chart — *offering* against *displaying*. Found by a blanket assertion going red on a **different function** with the same default: the check was wrong and what it found was right |
+| `tests/the-job-that-cannot-be-finished.test.ts` | **The job that cannot be finished** (Phase 212): ADR 0211 nominated `projects.end_date` — no writer, so a job can be created, billed, have its retainage held and its costs coded with no way to say it is over — and attached one instruction: measure *"what else is a finished job supposed to mean?"* first. **The nomination's own reason was false.** It said the column *"is read — the register's entry for it names what reads it"*, and that entry said `jobs/reports.ts` *"reads the end date into every date range it builds"*. That file's one `endDate` is a **function parameter**, a caller-supplied window for a ledger query; nothing in `src/` names `projects.endDate` at all. Phase 210 taught the scan that a projectionless `select()` is a read, correctly — and the first register entry written after that correction used *"it is read"* as an argument about a column no reader consults. **What was waiting for an answer was `status`**: four enum values, written once at insert as the literal `'active'` that is also its default, so one of four was ever reachable. `insertOnlyColumns` has said since Phase 202 that narrowing it *"needs a way to say which columns are state rather than record"*; `paintedStates()` is that way — **1,169 insert-only → 28 with a domain of more than one value → 4 written only as literals → 1 whose literal is its default** — and the three survivors each survive for a different reason (`isRetainageRelease` defaults `false` and is written `true`; `accountant_exports.result` and `refunds.direction` have no default and write both of theirs). The three readers ADR 0211 guessed at were three different answers: **off the WIP schedule exists and had never been able to fire**; **out of the timesheet picker did not exist** — `listProjects` selects `status` and `/time` maps it off the row one line before the dropdown; **refusing costs did not exist** — `assertDimensionsInCompany`, the one chokepoint every posting passes, selected `projects.id` and looked at nothing else. And the first of those is about accounting, not display: `wipSummary` feeds the draft entry against `1160`/`2560`/`4200`, so a job closed while over-billed drops off the schedule and **nothing ever proposes the reversal**. So completion does not take a job off the schedule — being **settled** does, which is what a real WIP schedule does anyway. `JOB_STATES` holds the four states, each arguing for itself and saying what it means to all four readers, with **no two agreeing on all four flags**: `active` and `on_hold` differ only in bookability, `complete` and `cancelled` only in whether a cost may still arrive, and `complete` takes costs because a subcontractor invoices in arrears. One act writes all three columns, with the end date **derived** from the state so reopening clears it |
 | `tests/the-account-with-no-way-back.test.ts` | **The account with no way back** (Phase 211): ADR 0210 nominated `bill_lines.item_id` and said to measure whether a bill line or a goods receipt line is the right place to record what arrived. **It is the receipt line, built in Phase 14** — `receiveGoods` needs no purchase order, writes `goods_receipt_lines.item_id`, a lot, a cost and a stock movement, and posts `Dr Inventory / Cr Goods Received Not Invoiced`, after which the bill *clears* the delivery and names no item. So a picker there would have been a second way to receive stock, and the column was Phase 49's shape rather than Phase 169's: **nothing ever wrote it and nothing ever read it**, it arrived as a copy of `invoice_lines.item_id` with *"the catalogue item **sold**"* copied along with it onto the payables side, and it is dropped in migration `0104`. The question that answer raised: the composer offers `1400`, in the same docstring that states the rule against it. Measured, every account the bill side offers on its own $1,000 bill with nineteen checks after each: **`1250` → `payments.in_transit`, `1400` → `inventory.lots`, `1450` → `manufacturing.wip`, `1500` → `assets.register`, all faults**; the invoice side broke nothing. **The control makes the finding precise** — registering the asset closes `1500` (0/4000000 → 4000000/4000000), because a bill line *is* the intended way to capitalise one, while receiving the goods properly after billing them to `1400` **doubles** the difference (0/1000000 → 1000000/2000000) because the receipt posts its own debit. The class was already written down twice and differently: `documentLineAccounts` held four in a bare array and `CONTROL_ACCOUNTS` held two, having argued that what it excluded was *"a single, **statable** class"* — and measured against `FALSIFIERS`, which records per check that the one act breaking it is *"post a manual journal entry against `<account>`"*, **fifteen accounts have a check watching them** and the two lists named four between them, three of the gaps reachable from a dropdown. One register now, read by the picker, by `createBill`/`createInvoice` (a dropdown is cosmetic) and by the stock receipt, answering **per act** because `2050` is what a receipt must credit and a person must never type, and recording **what else protects each account** — eight were safe only because a bill line may not name a liability. Membership is not numbers: `stockCarryingAccountIds` moved out of `reconcileInventory` so both sides read one function, and filing a stocked item on `1300` takes `1300` off the composer. Two defects measurement caught and reading would not: the licence test read as a licence for every entry naming no act, putting `1100`, `1200` and `1510` **back** on the list after eighty phases while `2000` stayed off it, held by the liability filter this register exists to write down; and a correlated `exists` resolved the outer column unqualified, accepting what the picker refused. And a second licence the measurement missed entirely: both censuses asked what the *pickers* offer, the invoice picker offers revenue only, and two modules raise a deposit invoice credited to the retainer account through no picker at all — nine modules raise documents with accounts they choose themselves, so a guard measured against the dropdown it backs is measured against the wrong thing |
 | `tests/the-switch-the-census-could-not-see.test.ts` | **The switch the census could not see** (Phase 210): ADR 0209 nominated *an employee who cannot leave* — `employees` had one insert and no update, so `end_date` and `is_active` had no writer. True, and the smaller half. The larger half is **why neither census could see it**: `writerCandidates` tests *read* as `tableVar.column` named outside the schema, and a projectionless `select()` compiles to `select *` — it reads every column and names none, the row's columns then being reached as properties — so the scan skipped such a column **before applying any exclusion** and it could never be a candidate however unwritable it was. Phase 202 narrowed the exclusion for defaulted columns and closed *"all six `isActive` switches"* that exposed; the exclusion was never what hid these. **Phase 203 found the mechanism, in the mirror direction, named the exact file, and concluded *"conservative in the safe direction — a missed read loses a candidate"*.** It loses a **finding**, and one of the sixteen is `ai_requests.cacheHit`, on that paragraph's own example table. Corrected: **29 candidates became 96, with 16 of the 72 never examined written by nothing** — the first findings this register has carried, in the verdict created in Phase 201 and kept unused through two phases on Phase 157's rule. The class, measured: of **thirty** tables carrying an `isActive`, the **twenty-four** naming it in a query all have a writer and **five of the six** that do not had none — the sixth, `cost_codes`, is the control, identical shape and a writer anyway, which is what makes this a correlation rather than a cause. Five closed: `practitioners.isActive`, where `book` has thrown *"X is no longer taking appointments"* since Phase 3 down a branch that was **unreachable**, so ADR 0204's *"other two enforced switches"* were three; `employees.isActive` with `end_date` as **one act** so the date and the flag cannot disagree, a future date **refused** rather than scheduled because nothing would come along to flip a stored flag, and `createPayrollRun` refusing a payslip for somebody who left before the period opened while keeping its list **unnarrowed** and guarding on the date, since a person who left on the 14th is owed the run covering the 14th; `tax_codes.isActive`, the flag Phase 209's picker passed and its own comment called inert; and **`company_profiles.addressLine2` and `country`, the two columns this register was created for** — Phase 200 gave all three missing fields a box on the form and the action's zod schema declared none of them, so typing was accepted, *"Company profile saved."* was reported and the value was stripped, while the tripwire Phase 200 left behind passed throughout because a form is one of three places a field has to exist (the chain is asserted now: form → action schema → service input type). Two **removed** instead: `segments.isActive` and `vehicles.isActive` had no reader either, Phase 49's shape, and a control to justify a column is inventing a requirement. And one exclusion that was excusing a site: `credentials`, left out of the Phase 200 form check as *"a structured list with its own editor"* that does not exist, and cited in `studio/team.ts` as the reason §15's certifications are covered |
 | `tests/the-tax-code-nothing-could-reach.test.ts` | **The tax code nothing could reach** (Phase 209): the sales tax module has been complete since Phase 2 and **nothing under `src/app` had ever handed it a tax line** — `taxLines` appeared in no screen and no action, and the only writer of `document_tax_lines` was the seed. The composer took tax as one typed figure, which credits 2200 and records no breakdown, so every invoice the application raised put the tax in the ledger and none of it on a return, with the page printing the variance between the two. Phase 169's finding one table over, surviving forty phases longer because **seed data made it look wired**. The page detected it and blamed the reader: `hasUncodedSales` is every composer-raised invoice, under a warning reading *"usually a company that has not set codes up yet"* — ADR 0134's excusing exclusion, printed in front of the user. Asserts the chain end to end through the same `taxLinesFor` the action uses: breakdown written, rates frozen, return reporting what the ledger holds, variance zero, `hasUncodedSales` false — and the lump path still working, still uncoded, with its variance pinned at the full amount. Then two defects building it turned up: the precedence was `input.taxCents ?? pricedTax?.totalCents`, and `0` is not nullish, so the composer's `|| 0` would have beaten every priced line it sent (refused now, naming both figures); and `is_exempt` was read by no arithmetic anywhere, so an exempt code at 8.25% charged 8.25% beside a checkbox promising otherwise — invisible to both censuses, since the column has a writer and a reader. Not asserted here: the per-code rounding identity, which stays in `tax-that-foots-on-the-document` |

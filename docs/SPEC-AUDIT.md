@@ -275,8 +275,8 @@ portability export plus Phase 158's accountant exporter), privacy and
 suppression (`modules/crm/intake`, `modules/notify`), and security review gating.
 
 **Strong tenant isolation** is the partial, and it is partial in a precise way
-rather than vaguely: the application layer is complete and measured — **304
-writes** and **977 reads**, every one guarded (Phases 149–150, the census
+rather than vaguely: the application layer is complete and measured — **305
+writes** and **979 reads**, every one guarded (Phases 149–150, the census
 widened in Phases 196–198) — and
 the database layer is installed, forced on 165 tables, proven against a restricted role, and **not
 switched on**, because the application connects as a superuser that owns the
@@ -357,14 +357,15 @@ lets a person fill in?** Phase 49 found that shape twice by accident and Phase
 200 found three more by accident of writing one narrow check against one form,
 so it was measured as a class instead.
 
-The scan reads **2176 columns** across **185 tables** and reports **95** with a
+The scan reads **2176 columns** across **185 tables** and reports **93** with a
 reader and no writer it can see. All three numbers are pinned
 (`audit-column-writers`) — the denominator beside the answer, because Phases
 196–198 each found a census quoting a subset as a total.
 
-**Thirteen of the 95 are findings, covering 15 columns** — fourteen over
-sixteen when Phase 210 wrote them, less `bill_lines.item_id`, which Phase 211
-established had never been a defect and dropped. They are the first findings
+**Twelve of the 93 are findings, covering 13 columns** — fourteen over sixteen
+when Phase 210 wrote them, less `bill_lines.item_id`, which Phase 211
+established had never been a defect and dropped, and less the two `projects`
+columns Phase 212 gave a writer. They are the first findings
 this register has carried. From Phase 208 to Phase 210 it had none, and that was a
 claim about what the scan could see: its test for *read* was `tableVar.column`
 named outside the schema, and a projectionless `select()` reads every column of
@@ -431,14 +432,15 @@ state nothing can change is a switch painted on. Narrowed to
 of the eight it added are an `isActive` nothing can turn off**. One of them was
 §14's revocation; Phase 203 closed a second, and the pinned figure is 34.
 
-The second cannot be closed. **1169 columns** are written at insert and never
+The second cannot be closed. **1168 columns** are written at insert and never
 updated, so the scan counts them as written even where nothing can ever change
 them — `memberships.role` was unchangeable for 201 phases and the census
-reported nothing. Almost all 1169 are immutable *on purpose* (ADR 0021's sent
+reported nothing. Almost all 1168 are immutable *on purpose* (ADR 0021's sent
 document, ADR 0042's live record), so a register of them would say "correct"
 hundreds of times and bury the few that are not. It is a pinned number
-(`audit-insert-only-columns`) rather than a register, and narrowing it needs a
-way to say which columns are state rather than record.
+(`audit-insert-only-columns`) rather than a register, and narrowing it needed a
+way to say which columns are state rather than record — which **Phase 212
+supplied**, ten phases later, and the figure is 1168. See §5 below.
 
 ### §14 — the switch painted on (Phase 202)
 
@@ -574,11 +576,63 @@ corrected, any `isActive` that something reads and nothing writes becomes a
 candidate and must be declared or fixed.
 
 **What it does not close.** The insert-only class, measured under the same
-correction, is **1169 columns** rather than 770 — the limitation §19 declares
+correction, was **1169 columns** rather than 770 — the limitation §19 declares
 is half again as large as this file has been saying since Phase 202, and
 narrowing it still needs a way to say which columns are *state* rather than
-*record*. The sixteen findings are declared, not fixed; the largest is
-`bill_lines.itemId`, which is Phase 169's inventory gap on the purchase side.
+*record*. (Phase 212 found one; see §5 below.) The sixteen findings are
+declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
+inventory gap on the purchase side.
+
+### §5, §19 — the job that cannot be finished (Phase 212)
+
+§5 claims job costing and §19 claims an audit trail, and this phase is about a
+column neither of them could have told you was missing.
+
+`projects.end_date` had no writer. ADR 0211 nominated it and argued the column
+was worth **writing** rather than dropping, *"because the register's entry for
+it names what reads it"* — and that entry said `jobs/reports.ts` *"reads the end
+date into every date range it builds."* It does not. That file's one `endDate`
+is a function parameter: a caller-supplied window for a ledger query, named the
+same as the column and related to nothing. Measured, nothing in `src/` names
+`projects.endDate`.
+
+The audit should carry how that happened, because it is a failure mode of this
+file's own method. Phase 210 taught the column scan that a projectionless
+`select()` is a read, correctly, and uncovered seventy-two columns it had never
+examined. The **first** register entry written after that correction then used
+"it is read" as the argument for keeping a column no reader consults. A
+correction to what a scan can see created a new way for prose about it to be
+wrong, and no scan can catch that, because the scan agrees with the prose.
+
+**What was waiting for an answer was `projects.status`:** four enum values,
+written once at insert as the literal `'active'` that is also its default, so
+one of the four was ever reachable. That is the kind of column §19's insert-only
+limitation has been unable to name since Phase 202, and this phase supplies the
+test it was missing — a column is **state** when its declared domain holds more
+than one value, and **painted on** when every write of it is the same literal
+and that literal is its default. Measured: **1,169 insert-only columns, 28 with
+a domain of more than one value, 4 written only as literals, 1 painted on.** The
+limitation is unchanged in size (1,168 now) and the question is no longer
+unanswerable.
+
+For §5 the finding is sharper than a missing writer. The three readers a
+finished job should have were three different states of affairs: the WIP
+schedule's filter **existed and had never been able to fire**; the timesheet
+picker's **did not exist**, because `listProjects` selects the status and the
+page maps it off the row one line before the dropdown; and the cost chokepoint's
+**did not exist either**. And the WIP filter is a §13 matter rather than a
+display one: `wipSummary` feeds the draft period-end entry against `1160`,
+`2560` and `4200`, so a job closed while over-billed drops off the schedule and
+nothing proposes the reversal. The audit can now say that completing a job does
+not remove it from the schedule — being settled does — which is what a WIP
+schedule does in practice.
+
+For §19 the correction is `job` in the audit log's readable-types table.
+`bookkeeper` holds `jobs:manage` and not `audit:view`, so the first audit event
+this application ever wrote about a project would have been invisible to the
+role most likely to have caused it. Phase 78's finding, on a different module,
+and the other six job-costing types are still unplaced — nominated rather than
+fixed one seventh at a time.
 
 ### §13 — the tax code nothing could reach (Phase 209)
 

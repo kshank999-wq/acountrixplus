@@ -98,6 +98,31 @@ const READABLE_BY: Record<string, Permission> = {
    * Noticed while giving `organization.update` a writer: an audit entry the
    * person who made the correction cannot see is not much of an audit trail.
    */
+  /**
+   * A job, placed in Phase 212 for the same reason the six above were placed in
+   * Phase 78, and measured rather than assumed.
+   *
+   * Phase 212 gave `projects.status` its first writer, so a job has a history
+   * for the first time. Unplaced, that history would need `audit:view` — which
+   * **`bookkeeper` does not hold**, while holding both `jobs:view` and
+   * `jobs:manage`. The person who closed the job could not read the record of
+   * closing it, which is Phase 78's sentence arriving at a different module:
+   * *"an audit entry the person who made the correction cannot see is not much
+   * of an audit trail."*
+   *
+   * Placing it takes nothing from anybody, which is the half worth measuring:
+   * every role holding `audit:view` (owner, manager, accountant) also holds
+   * `jobs:view`, so no reader loses a type they could see. `sales` gains the
+   * history of the job it has been able to open since Phase 3.
+   *
+   * The other six job-costing types — `cost_code`, `change_order`, `sov`,
+   * `progress_billing`, `subcontractor`, `compliance_document` — write audit
+   * events and are still unplaced. That is the same finding and it is not this
+   * phase's; ADR 0212 nominates it rather than this entry quietly fixing one
+   * seventh of it.
+   */
+  job: 'jobs:view',
+
   organization: 'crm:view',
   opportunity: 'crm:view',
   proposal: 'crm:view',
