@@ -634,6 +634,18 @@ role most likely to have caused it. Phase 78's finding, on a different module,
 and the other six job-costing types are still unplaced — nominated rather than
 fixed one seventh at a time.
 
+One more entry for this file's own method, because the full run found two stale
+counts and neither was anywhere near the subject. A new register moved the
+tree-wide tally of throwing registry lookups from 43 to 44 and nothing in the
+phase pointed at it; and the findings count this phase changed in four places —
+the register's docstring, the census test, this document and the ADR — stayed at
+the old figure in a fifth, a test file about catalogue items. The lesson is not
+that counts drift, which this audit has recorded six times. It is that **the
+places a figure is correct are the places somebody was looking**, so the measure
+of a phase's reach is the figures it had no reason to visit. That is why the
+suite is run whole rather than near the change, and this phase is the sixth time
+the argument has paid for itself.
+
 ### §13 — the tax code nothing could reach (Phase 209)
 
 §13 asks for sales tax support, and this audit has recorded it as built since

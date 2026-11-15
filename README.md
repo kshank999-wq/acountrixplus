@@ -8097,13 +8097,28 @@ the role most likely to be closing jobs. Phase 78's sentence, arriving at a diff
 Measured in both directions, because placing a type can take access away as easily as give it:
 every role holding `audit:view` also holds `jobs:view`, so no reader loses a record.
 
-**What the full run found.** The column census is **93 candidates and 12 findings over 13 columns**;
+**What moved.** The column census is **93 candidates and 12 findings over 13 columns**;
 `insertOnlyColumns` is **1,168**; the isolation census is **305 writes and 979 reads**. And one
 assertion moved *down*: `readNames` was pinned as appearing twice, commented *"called by both,
 rather than a third copy of the loop"* — the two scans shared the reader and duplicated the twenty
 lines around it. This phase needed a third reading, extracted `writeSites`, and now there is one
 pass. The property was never "two callers"; it was that the scans cannot drift apart, and one shared
 pass is the stronger form of it.
+
+**What the full run found.** Two counts this phase had no reason to look at, in the shard furthest
+from anything it touched — ADR 0178 collecting on the phase that cites it. `registry-error` wanted
+**43** throwing registry lookups and measured 44, because `JOB_STATES` is a registry; the paragraph
+directly above that assertion had just recorded that Phase 201's count *"was not a surprise — the
+count was checked deliberately while the register was being written, which is the habit the four
+before it bought"*, and the habit did not survive the next register. `the-account-with-no-way-back`
+wanted **13 findings over 15 columns** and measured 12 over 13 — the same two figures this phase
+moved correctly in four other places, stale in the one file whose subject is something else. A third
+sentence came out of the same grep with no test reading it at all: `column-writers.ts` still said
+the findings section *"holds thirteen entries over fifteen columns"*, forty lines below a docstring
+this phase had corrected. The digits were the cheap part; both assertions now carry why the number
+moved, because the findings count alone cannot distinguish a finding that was **fixed** from one
+that was **never a defect** from one that was **argued for falsely**, and Phase 212 is the first of
+the third kind.
 
 
 ### The account with no way back (Phase 211)
