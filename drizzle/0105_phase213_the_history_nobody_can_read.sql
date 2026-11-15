@@ -1,0 +1,30 @@
+-- Phase 213: the history nobody can read.
+--
+-- One record, two names. `audit_events.entity_type` has carried both `project`
+-- and `job` for the same rows of the same table: `budget.set` and `sov.set`
+-- file under `project`, `job.status` files under `job`, and all three write
+-- `projects.id` as the entity id.
+--
+-- That is Phase 70's defect — one vocabulary for one record — and it had a
+-- consequence beyond tidiness. Phase 212 placed `job` in the audit log's
+-- readable-types register so that a bookkeeper, who holds `jobs:manage` and no
+-- `audit:view`, could read the history of the job they closed. Measured in
+-- Phase 213, that placement reached one of the three acts that write a job's
+-- history, and not the two that are about money: setting the budget and setting
+-- the schedule of values stayed invisible to the person who performed them.
+--
+-- The writers now say `job`. This migration moves the rows already written, so
+-- a job's history is one list rather than two, and the older half is readable
+-- by the same people as the newer half.
+--
+-- Nothing recorded about what happened changes. The actor, the timestamp, the
+-- action and the before/after payloads are untouched; what moves is the index
+-- the event is filed under, which was never a fact about the event. An audit
+-- row's immutability is a promise about what it says, not about the name of the
+-- drawer it sits in — and leaving the drawer wrong would mean honouring the
+-- letter of that promise by permanently hiding half of what the log recorded.
+--
+-- No index or constraint names `entity_type`'s values, so this is a value
+-- rewrite and nothing else.
+
+UPDATE audit_events SET entity_type = 'job' WHERE entity_type = 'project';

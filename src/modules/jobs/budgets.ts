@@ -160,7 +160,8 @@ export async function setJobBudget(
       ctx,
       {
         action: 'budget.set',
-        entityType: 'project',
+        // `job`, not `project` — see `billing.ts:setScheduleOfValues` (Phase 213).
+        entityType: 'job',
         entityId: projectId,
         after: {
           lines: lines.length,

@@ -167,7 +167,13 @@ export async function setScheduleOfValues(
       ctx,
       {
         action: 'sov.set',
-        entityType: 'project',
+        // `job`, not `project` (Phase 213). This act and `budget.set` filed
+        // under a second name for the table `job` was placed under, both
+        // carrying `projects.id`, so the history of a job was split across two
+        // entity types and only one of them was readable by the bookkeeper who
+        // holds `jobs:manage`. Phase 70's rule, one module over: one vocabulary
+        // for one record.
+        entityType: 'job',
         entityId: projectId,
         after: {
           items: lines.length,

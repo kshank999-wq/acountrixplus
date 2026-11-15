@@ -14,7 +14,11 @@ import {
   diffParty,
   normaliseParty,
 } from '@/modules/parties/changes'
-import { permissionToRead, withheldEntityTypes } from '@/modules/audit/visibility'
+import {
+  permissionToRead,
+  permissionsToRead,
+  withheldEntityTypes,
+} from '@/modules/audit/visibility'
 import { historyFor } from '@/modules/audit'
 import { can } from '@/modules/tenancy/context'
 
@@ -202,10 +206,30 @@ describe('the CRM can read its own history', () => {
     }
   })
 
+  /**
+   * `proposal` left this assertion in Phase 213, and the departure is the
+   * point rather than an exception to it.
+   *
+   * A reader holding everything except `crm:view` is an accountant, and
+   * `billStage` raises an invoice from a proposal's schedule under
+   * `accounting:journal` — so an accountant was filing `proposal.stage_billed`
+   * into a type only the CRM could read. The register now names both doors and
+   * withholds a type only from a reader holding neither key.
+   *
+   * `organization` keeps the assertion whole: it has one door, and this is
+   * still a test that a reader without the key is refused rather than one that
+   * happens to pass because nothing is withheld from anybody.
+   */
   it('withholds them from a reader who holds no crm:view', () => {
     const withheld = withheldEntityTypes((permission) => permission !== 'crm:view')
+
     expect(withheld).toContain('organization')
-    expect(withheld).toContain('proposal')
+    expect(withheld).toContain('opportunity')
+    expect(withheld).toContain('design_document')
+    expect(withheld).toContain('lead_intake_key')
+
+    expect(permissionsToRead('proposal')).toEqual(['crm:view', 'accounting:view'])
+    expect(withheld).not.toContain('proposal')
   })
 
   it('lets a salesperson read the correction they just made', async () => {

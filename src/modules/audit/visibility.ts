@@ -45,7 +45,7 @@ import type { Permission } from '@/modules/permissions'
  */
 
 /**
- * The permission that opens a record, and therefore its history.
+ * The permissions that open a record, and therefore its history.
  *
  * Phase 71's rule — you may read the history of a record you may read — with
  * Phase 72's guarded domains folded into the same table rather than a second
@@ -55,23 +55,92 @@ import type { Permission } from '@/modules/permissions'
  * An entity type absent from here needs `audit:view`, which is the strict end:
  * a record type nobody has placed is readable by those who may read
  * everything, rather than by anybody with a session.
+ *
+ * ## Why an entry holds a list (Phase 213)
+ *
+ * It held one permission until Phase 213, and the rule it implements has always
+ * been *"the history of a record you may read"* — so a record that can be
+ * opened **two ways** was mis-stated the moment it was placed. One permission
+ * had to be picked and the other set of readers went blind.
+ *
+ * Measured, that is not hypothetical and it is not fixable by choosing better:
+ *
+ * - A **customer** is reached through the books by an accountant (`accounting:
+ *   view`) and through the CRM by a salesperson (`crm:view`). `createCustomer`
+ *   is gated on `crm:manage`, so the people who create customers are exactly
+ *   the ones the old single entry shut out. Either choice blinded somebody who
+ *   may open the record.
+ * - A **proposal** is a contract, and `billStage` raises an invoice from one
+ *   under `accounting:journal` — an accountant's act, filed under a type only
+ *   the CRM could read.
+ *
+ * A reader is shown the type if they hold **any** of the listed permissions,
+ * which is what "a record you may read" means when a record has two doors. The
+ * first in the list is the primary — what a refusal names, and what
+ * `permissionToRead` returns for the callers that want one.
+ *
+ * ## The other half, which has to be measured per entry
+ *
+ * `withheldEntityTypes` is a `NOT IN` handed to the feed, so **placing a type
+ * narrows as well as widens**: a type nobody has placed is visible to every
+ * holder of `audit:view` (owner, manager, accountant), and placing it hands it
+ * to the people who may read that kind of record instead. Five of Phase 213's
+ * placements take something away, and each is deliberate — the same argument
+ * Phase 72 made about a manager and the payroll: showing somebody the history
+ * of records they may not open is not a courtesy, it is the leak.
  */
-const READABLE_BY: Record<string, Permission> = {
-  bank_transaction: 'bookkeeping:view',
-  categorization_rule: 'bookkeeping:view',
+const READABLE_BY: Record<string, readonly Permission[]> = {
+  bank_transaction: ['bookkeeping:view'],
+  categorization_rule: ['bookkeeping:view'],
 
-  invoice: 'accounting:view',
-  bill: 'accounting:view',
-  credit_note: 'accounting:view',
-  payment: 'accounting:view',
-  refund: 'accounting:view',
-  deposit: 'accounting:view',
-  vendor: 'accounting:view',
-  customer: 'accounting:view',
-  journal_entry: 'accounting:view',
-  chart_account: 'accounting:view',
-  financial_account: 'accounting:view',
-  company: 'accounting:view',
+  /**
+   * Added in Phase 213, both on the same measurement: a **bookkeeper** holds
+   * `bookkeeping:import` and not `audit:view`, so the person who connects a
+   * bank or commits an import could not read the record of doing it — and an
+   * import is the act most likely to need re-reading, because what it did is
+   * hundreds of rows and the event is the only summary of them.
+   *
+   * Nobody loses: every `audit:view` holder also holds `bookkeeping:view`.
+   */
+  bank_connection: ['bookkeeping:view'],
+  import_run: ['bookkeeping:view'],
+
+  invoice: ['accounting:view'],
+  bill: ['accounting:view'],
+  credit_note: ['accounting:view'],
+  payment: ['accounting:view'],
+  refund: ['accounting:view'],
+  deposit: ['accounting:view'],
+  vendor: ['accounting:view'],
+  journal_entry: ['accounting:view'],
+  chart_account: ['accounting:view'],
+  financial_account: ['accounting:view'],
+  company: ['accounting:view'],
+
+  /**
+   * The first entry to need two, and the one that forced the shape (Phase 213).
+   *
+   * `accounting:view` since Phase 72, because a customer is a receivables
+   * record. But `createCustomer` and `updateCustomer` are gated on `crm:manage`
+   * — held by `manager` and `sales`, neither of whom holds `accounting:view`.
+   * The two roles that create and correct customers were the two that could not
+   * read what they had done.
+   */
+  customer: ['accounting:view', 'crm:view'],
+
+  /**
+   * Placed in Phase 213, and both **take something away from a manager**, who
+   * holds `audit:view` and deliberately not `accounting:view`.
+   *
+   * That is the intended direction. A statement is a customer's balance and a
+   * pay run is what is about to leave the bank; a manager may not open either,
+   * and the feed was handing them the history of both. Phase 72 made this exact
+   * argument about payroll — *"the permission that guards a record guards the
+   * events about it too"* — and this is the same sentence applied to the two
+   * acts a `bookkeeper` performs and could not read back.
+   */
+  customer_statement: ['accounting:view'],
+  pay_run: ['accounting:view'],
 
   /**
    * Payroll is the one part of the books that is also somebody's private pay,
@@ -79,12 +148,32 @@ const READABLE_BY: Record<string, Permission> = {
    * That has been true of the records since Phase 9; from Phase 72 it is true
    * of the log about them too.
    */
-  payroll_run: 'payroll:view',
-  employee: 'payroll:view',
+  payroll_run: ['payroll:view'],
+  employee: ['payroll:view'],
 
-  tax_code: 'tax:view',
-  tax_filing: 'tax:view',
-  tax_remittance: 'tax:view',
+  tax_code: ['tax:view'],
+  tax_filing: ['tax:view'],
+  tax_remittance: ['tax:view'],
+
+  /**
+   * Reconciliation, placed in Phase 213.
+   *
+   * `reconciliation:perform` is held by `bookkeeper` and `audit:view` is not,
+   * so the person who reconciles an account could not read the history of the
+   * reconciliation — including the one event that matters, a completed period
+   * being reopened. Nobody loses: every `audit:view` holder holds
+   * `reconciliation:view`.
+   */
+  reconciliation: ['reconciliation:view'],
+
+  /**
+   * What the assistant was asked and what it answered, placed in Phase 213.
+   *
+   * `ai:use` is the widest permission in the system — every role but `readonly`
+   * holds it — and `audit:view` is one of the narrowest, so three roles could
+   * put a question to the assistant and never see the record of it.
+   */
+  ai_suggestion: ['ai:use'],
 
   /**
    * The CRM, placed in Phase 78.
@@ -120,20 +209,105 @@ const READABLE_BY: Record<string, Permission> = {
    * events and are still unplaced. That is the same finding and it is not this
    * phase's; ADR 0212 nominates it rather than this entry quietly fixing one
    * seventh of it.
+   *
+   * **Phase 213 measured that nomination and it was wrong three ways.** `sov`
+   * writes no audit events at all. `progress_billing` has no blind producer —
+   * its one act is gated on `accounting:journal`, which only `audit:view`
+   * holders have. And the list missed `project`, which was a **second name for
+   * this very table**: `budget.set` and `sov.set` both file under it, carrying
+   * `projects.id`, so the sentence above — a job has a history for the first
+   * time — was true of one of three acts, and not the two about money. Phase
+   * 213 folds that name into this one and migrates the rows already written.
    */
-  job: 'jobs:view',
+  job: ['jobs:view'],
 
-  organization: 'crm:view',
-  opportunity: 'crm:view',
-  proposal: 'crm:view',
-  design_document: 'crm:view',
-  document_template: 'crm:view',
-  lead_intake_key: 'crm:view',
+  /**
+   * The rest of job costing, placed in Phase 213 on `job`'s own measurement
+   * rather than on the family resemblance that nominated them.
+   *
+   * Every one is gated on `jobs:manage`, which `bookkeeper` holds while holding
+   * no `audit:view` — so the role that codes costs, raises change orders and
+   * files a subcontractor's insurance certificate could read the history of
+   * none of it. `vehicle` and `repair_order` are the two the nomination never
+   * mentioned, and they are the same defect in a different module.
+   *
+   * Nobody loses: every `audit:view` holder also holds `jobs:view`, and `sales`
+   * and `readonly` gain the history of records they could already open.
+   */
+  cost_code: ['jobs:view'],
+  change_order: ['jobs:view'],
+  subcontractor: ['jobs:view'],
+  compliance_document: ['jobs:view'],
+  vehicle: ['jobs:view'],
+  repair_order: ['jobs:view'],
+
+  organization: ['crm:view'],
+  opportunity: ['crm:view'],
+  design_document: ['crm:view'],
+  document_template: ['crm:view'],
+  lead_intake_key: ['crm:view'],
+
+  /**
+   * A proposal reads two ways (Phase 213).
+   *
+   * `crm:view` since Phase 78, so a salesperson can read the contract they
+   * sent — and that is still the primary. But `billStage` raises an invoice
+   * from a proposal's schedule under `accounting:journal`, and the accountant
+   * who does it was filing `proposal.stage_billed` into a type they could not
+   * read. The money half of a contract belongs to whoever may read the books.
+   */
+  proposal: ['crm:view', 'accounting:view'],
+
+  /**
+   * The two CRM acts Phase 78 missed, placed in Phase 213 for its reason.
+   *
+   * Both are gated on `crm:manage` and `sales` holds it without `audit:view`,
+   * which is the sentence Phase 78 wrote: answering a client's question and
+   * completing a task are a salesperson's work, and the record of them was
+   * readable by everyone except the salesperson.
+   *
+   * These take the type from `accountant`, who holds `audit:view` and no
+   * `crm:view`. Deliberate, and the same trade Phase 78 made for the other six.
+   */
+  communication: ['crm:view'],
+  task: ['crm:view'],
+
+  /**
+   * Marketing, placed in Phase 213 — a family nothing had ever placed.
+   *
+   * `marketing:manage` gates all three and the `marketing` role holds no
+   * `audit:view`, so the only person whose job this is was the only person who
+   * could not read it. A suppression is the sharpest case: it is the record of
+   * somebody being removed from a mailing list, which is precisely the thing a
+   * marketer is later asked to account for.
+   *
+   * These take the three types from `accountant`. Deliberate: campaign history
+   * is not part of the books.
+   */
+  campaign: ['marketing:view'],
+  segment: ['marketing:view'],
+  suppression: ['marketing:view'],
 }
 
-/** What somebody must hold to be shown events about this kind of record. */
+/**
+ * Every permission that opens this kind of record's history — any one will do.
+ *
+ * Empty-handed types answer `['audit:view']` rather than `[]`, so a caller
+ * never has to special-case the fall-through.
+ */
+export function permissionsToRead(entityType: string): readonly Permission[] {
+  return READABLE_BY[entityType] ?? ['audit:view']
+}
+
+/**
+ * The primary permission for this kind of record: what a refusal names.
+ *
+ * Phase 47 — a refusal must name something actionable — so where a record has
+ * two doors this names the one the type is chiefly about, rather than listing
+ * both at somebody who holds neither.
+ */
 export function permissionToRead(entityType: string): Permission {
-  return READABLE_BY[entityType] ?? 'audit:view'
+  return permissionsToRead(entityType)[0]
 }
 
 /**
@@ -148,10 +322,13 @@ export function permissionToRead(entityType: string): Permission {
  * `audit:view` is already covered by the gate on the feed itself, and listing
  * every unnamed type here is impossible anyway — the log takes an entity type
  * as a string.
+ *
+ * A type is withheld when the reader holds **none** of its permissions (Phase
+ * 213): a record with two doors is open to whoever has either key.
  */
 export function withheldEntityTypes(holds: (permission: Permission) => boolean): string[] {
   return Object.entries(READABLE_BY)
-    .filter(([, permission]) => !holds(permission))
+    .filter(([, permissions]) => !permissions.some(holds))
     .map(([entityType]) => entityType)
 }
 

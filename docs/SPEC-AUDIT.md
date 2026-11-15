@@ -583,6 +583,50 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §14, §19 — the history nobody can read (Phase 213)
+
+§14 claims a permission model and §19 claims an audit trail, and this phase is
+about the question nobody had ever put to the place where the two meet.
+
+`READABLE_BY` says who may be shown events about a kind of record, on Phase 71's
+rule: you may read the history of a record you may read. Phase 78 found the
+other half of that rule and wrote it as prose — *an audit entry the person who
+made the correction cannot see is not much of an audit trail* — and then nothing
+measured it for a hundred and thirty-five phases. The register's answers were
+checked against nothing, so some of them were wrong in the register's own terms.
+
+Measured across **263 audit write sites and 93 entity types**, **20** types had
+a role that could cause an event and never read it. The audit should record that
+the nomination which produced this phase named six, of which one writes no
+events at all, one cannot be produced by the role it was nominated for, and
+none covered five of the six families the scan found.
+
+Two consequences matter beyond the count.
+
+The first is a **vocabulary** finding, and §19's own. A job's history is written
+by three acts and all three carry `projects.id`, but two of them filed under
+`project` and one under `job`. Phase 212 placed `job` and wrote that a job "has
+a history for the first time"; the sentence was a third true, and the two acts it
+missed were the two about money. One record answering to two names is Phase 70's
+defect, and here it had a reader's consequence rather than a tidiness one.
+Migration `0105` moves the rows: an audit row's immutability is a promise about
+what it says, not about the name of the drawer it sits in.
+
+The second is a **shape** finding, for §14. The register mapped a type to one
+permission, and some records can be opened two ways — a customer through the
+books by an accountant and through the CRM by a salesperson, with `crm:manage`
+gating the act that creates one. No single permission was right, so the entry
+now names every permission that opens the record and a reader needs any one.
+Exactly two entries need it, and the audit's interest is that both were found by
+a measurement rather than by anybody noticing while writing them.
+
+The limitation this leaves is honest and recorded: **44 of the 263 write sites
+have no permission check in the function that writes them**, and this phase
+treats every one as blinding nobody. That is correct about readers and says
+nothing about writers; whether each act is gated upstream, reached by a public
+token, run from a worker, or not gated at all is the next measurement, and ADR
+0213 nominates it rather than guessing at a number.
+
 ### §5, §19 — the job that cannot be finished (Phase 212)
 
 §5 claims job costing and §19 claims an audit trail, and this phase is about a

@@ -3,7 +3,7 @@ import { desc, eq, and, isNull, inArray, notInArray } from 'drizzle-orm'
 import { db, type Executor } from '@/db'
 import { auditEvents } from '@/db/schema'
 import { can, requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
-import { permissionToRead, withheldEntityTypes } from './visibility'
+import { permissionsToRead, permissionToRead, withheldEntityTypes } from './visibility'
 
 export type AuditAction =
   | 'transaction.categorize'
@@ -627,7 +627,13 @@ export async function historyFor(
   entityId: string,
   limit = 50,
 ) {
-  requirePermission(ctx, permissionToRead(entityType))
+  // Any one of them opens it (Phase 213): a customer is reached through the
+  // books or through the CRM, and a reader with either key may read its
+  // history. The refusal names the primary, because naming three permissions
+  // at somebody who holds none of them is not an actionable sentence.
+  if (!permissionsToRead(entityType).some((permission) => can(ctx, permission))) {
+    requirePermission(ctx, permissionToRead(entityType))
+  }
 
   return db
     .select(HISTORY_COLUMNS)
