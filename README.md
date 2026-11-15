@@ -8024,6 +8024,19 @@ permissions and the test says *exactly* two. Five placements take something away
 `customer_statement` and `pay_run`, an accountant loses the CRM and marketing families — and each is
 Phase 72's argument restated: the permission that guards a record guards the events about it too.
 
+**What the full run found.** One failure in eight shards, and it was not in the audit log. Phase 140's
+scanner test asserted that none of the twenty-one names the broken reader invents out of prose is a
+function *anywhere in the codebase* — true for seventy-three phases, and true by vocabulary luck.
+This phase declared `function holds(role, permission)` in its own scan module, and `holds` is one of
+those twenty-one words. The fix was not to rename the helper, which would have made the measurement
+pass by moving the thing it measured and left the next short verb to reopen it. The claim that carries
+weight is **per file**, because that is the shape of the check it underwrites: the fiction test reads
+`row.file` and asks about that file alone. A collision across two files costs nothing. A collision
+*within* one is the dangerous case — the broken reader would name a real function at the wrong site,
+the fiction check would answer yes, and the registry would hold a row that is wrong and passes. Per
+file the count is zero, and the three other registries that ask the same question were already asking
+it per file. A tree-wide claim that happened to be true is weaker than a narrow one that has to be.
+
 ### The job that cannot be finished (Phase 212)
 
 ADR 0211 nominated **the job that cannot be finished** — `projects.end_date` has no writer, so a job

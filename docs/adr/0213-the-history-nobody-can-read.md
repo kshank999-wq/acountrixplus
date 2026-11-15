@@ -175,6 +175,38 @@ about, preserved as data.
 sites measured, 44 of them ungated. `blindProducers()` is empty. One migration,
 one entity type folded away, no new audit action, no schema change.
 
+## What the full run found
+
+One failure in eight shards, in `tests/enclosing-function.test.ts` — a scanner
+test from Phase 140, as far from the audit log as this tree gets, which is ADR
+0178's rule collecting again.
+
+Its second assertion said that none of the twenty-one names the broken reader
+invents out of prose is a function **anywhere in the codebase**. That had been
+true for seventy-three phases and it was true by vocabulary luck. This phase
+declared `function holds(role, permission)` in `source/audit-readers.ts`, and
+`holds` is one of the twenty-one — the old reader hands it back at three
+`…Cents:` sites in `fx/settlement.ts`.
+
+Renaming the helper was the wrong repair. It would have made the measurement
+pass by moving the thing measured, and the next short verb somebody picks would
+reopen it.
+
+The load-bearing claim is **per file**, because that is the shape of the check it
+underwrites: the fiction assertion above it reads `row.file` and asks
+`declaresFunction` about that file alone, and so do the three other registries
+that ask this question — `bank-money.test.ts`, `tax-rounding.test.ts` and
+`ledger-postings.test.ts`. A collision across two files costs nothing;
+`declaresFunction(settlement.ts, 'holds')` is still false, so a row invented
+there is still detectable as fiction. A collision **within** a file is the
+dangerous one: the broken reader would name a real function at the wrong site,
+`declaresFunction` would answer yes, and the registry would hold a row that is
+wrong and passes — ADR 0134's check that excuses a site rather than missing it,
+arriving by way of a helper named after a verb. Per file the count is zero.
+
+A tree-wide claim that happens to be true is weaker than a narrow one that has
+to be, and the only way to tell the two apart is to break the accident.
+
 ## Nominated for Phase 214
 
 **The act with no gate.** This phase's scan found **44 write sites whose

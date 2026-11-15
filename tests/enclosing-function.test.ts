@@ -168,7 +168,29 @@ describe('what the broken scanner did to the registries', () => {
     // prose — `has`, `exists`, `the`, `as`, `to`, `holds`, `whose`, `never`,
     // `nobody`, `rather` — and each one is a posting site that would land in a
     // registry under a word if a narrowing were widened by a line.
-    const invented = new Set<string>()
+    //
+    // Phase 213 moved the second half of this test, and the correction is worth
+    // more than the assertion it replaced.
+    //
+    // It used to say: not one of the invented names is a function *anywhere in
+    // the codebase*. That was true for seventy-three phases and it was true by
+    // vocabulary luck. Phase 213 declared `function holds(role, permission)` in
+    // `src/modules/source/audit-readers.ts`, and `holds` is one of the words the
+    // old reader invents out of prose in `fx/settlement.ts` — so the tree-wide
+    // claim is now false by one name, and the next short English word somebody
+    // picks for a helper would make it false again.
+    //
+    // The claim that carries weight is per file, because that is the shape of
+    // the check it underwrites: the fiction test above reads `row.file` and asks
+    // `declaresFunction` about that file alone. A collision across two files
+    // costs nothing — `declaresFunction(settlement.ts, 'holds')` is still false,
+    // so a row invented there is still detectable as fiction. A collision
+    // *within* a file is the dangerous one: the broken reader would name a real
+    // function at the wrong site, `declaresFunction` would answer yes, and the
+    // registry would hold a row that is wrong and passes. That is ADR 0134's
+    // rule about a check that excuses a site rather than missing it, arriving
+    // here by way of a helper named after a verb.
+    const invented = new Map<string, string>()
     let sites = 0
 
     for (const file of sourceFiles('src/modules')) {
@@ -176,21 +198,17 @@ describe('what the broken scanner did to the registries', () => {
       for (const match of src.matchAll(/[A-Za-z]Cents:\s*[A-Za-z_][\w.]*/g)) {
         sites += 1
         const was = brokenSymbolAt(src, match.index)
-        if (was !== enclosingSymbol(src, match.index)) invented.add(was)
+        if (was !== enclosingSymbol(src, match.index)) invented.set(`${file}::${was}`, file)
       }
     }
 
     expect(sites).toBeGreaterThan(2_000)
-    expect(invented.size).toBeGreaterThanOrEqual(15)
+    expect(new Set([...invented.keys()].map((key) => key.split('::')[1])).size).toBeGreaterThanOrEqual(15)
 
-    // Not one of them is a function anywhere in the codebase.
-    for (const name of invented) {
-      expect(
-        sourceFiles('src/modules').some((file) =>
-          declaresFunction(readFileSync(file, 'utf8'), name),
-        ),
-        name,
-      ).toBe(false)
+    // Not one of them is a function in the file the invented name was read from.
+    for (const [key, file] of invented) {
+      const name = key.split('::')[1]
+      expect(declaresFunction(readFileSync(file, 'utf8'), name), key).toBe(false)
     }
   })
 

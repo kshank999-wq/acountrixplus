@@ -627,6 +627,18 @@ nothing about writers; whether each act is gated upstream, reached by a public
 token, run from a worker, or not gated at all is the next measurement, and ADR
 0213 nominates it rather than guessing at a number.
 
+The full run caught one thing, and it belongs in this audit for a reason that
+has nothing to do with §14 or §19. Phase 140's scanner test asserted that none
+of the twenty-one names the broken source reader invents out of prose is a
+function anywhere in the codebase — true for seventy-three phases, and true
+because nobody had happened to name a helper after a short English verb. This
+phase named one `holds`. The repair was not to rename it but to narrow the claim
+to the one the check actually rests on, which is per file, where the count is
+zero and the three other registries asking this question were already asking it
+that way. **An assertion that passes because of an accident reads exactly like
+one that passes because of an invariant**, and the audit's standing interest is
+that the only way to tell them apart is for the accident to break.
+
 ### §5, §19 — the job that cannot be finished (Phase 212)
 
 §5 claims job costing and §19 claims an audit trail, and this phase is about a
