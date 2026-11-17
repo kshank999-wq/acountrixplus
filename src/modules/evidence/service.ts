@@ -204,6 +204,50 @@ export async function storeDocument(
 }
 
 /**
+ * Stores a new file and hangs it on a record, in that order, behind one check.
+ *
+ * Phase 214 found this missing and the shape of what was there instead is the
+ * interesting part. `uploadEvidenceAction` called `storeDocument` and then
+ * `attachDocument`, and only the second gates — so a member with no permission
+ * on the subject had the bytes put in the object store, a `documents` row
+ * written over them and a `document.store` audit event filed, and *then* got
+ * their refusal. The check was not missing, it was late, which is the harder
+ * kind to see: every test of the refusal passes, because the refusal does
+ * happen.
+ *
+ * `storeDocument` cannot gate on its own account — it is told the bytes and not
+ * what they are *for*, so it has no subject whose permission to ask about. The
+ * fix is therefore not a check inside it but a caller that knows both halves,
+ * which is also what keeps `src/app` free of the decision: the action now names
+ * one function instead of sequencing two, and the permission is settled before
+ * anything is written.
+ */
+export async function attachNewDocument(
+  ctx: ActorContext,
+  input: SubjectRef & StoreInput,
+): Promise<{ stored: StoredDocument; alreadyAttached: boolean }> {
+  // Before the store, not after it. The subject decides, and `attachDocument`
+  // asks the same registry again on the way through — one question, one answer,
+  // asked twice by two layers that must not disagree.
+  requirePermission(ctx, subjectDefinition(input.subjectType).manage)
+
+  const stored = await storeDocument(ctx, {
+    filename: input.filename,
+    contentType: input.contentType,
+    data: input.data,
+    note: input.note ?? null,
+  })
+
+  const attached = await attachDocument(ctx, {
+    subjectType: input.subjectType,
+    subjectId: input.subjectId,
+    documentId: stored.id,
+  })
+
+  return { stored, alreadyAttached: attached.alreadyAttached }
+}
+
+/**
  * Hangs an existing document on a record.
  *
  * Both halves are proved before anything is written: the document under the

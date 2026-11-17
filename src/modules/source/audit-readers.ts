@@ -7,6 +7,7 @@ import {
 } from '@/modules/permissions'
 import { permissionsToRead } from '@/modules/audit/visibility'
 import { enclosingSpan, enclosingSymbol, withoutComments } from './enclosing'
+import { openAct, permissionChecksIn, resolveComputedGate } from './gate-forms'
 import { sourceFiles } from './isolation-scan'
 
 /**
@@ -96,11 +97,22 @@ export type AuditWriteSite = {
   symbol: string
   entityType: string
   /**
-   * Every permission the enclosing function requires, in source order. Empty
-   * when the act is reached without a permission check — a public token, a
-   * background sweep, or a path gated somewhere other than here.
+   * Every permission the enclosing function requires outright, in source order
+   * — whether thrown by `requirePermission` or refused softly by `can`. A role
+   * performs the act only if it holds all of them.
+   *
+   * Empty when nothing here demands a fixed permission, which Phase 213 read as
+   * "no producer" and Phase 214 found means only "no *literal* gate". Check
+   * `alternatives` before concluding anything from it.
    */
   gates: readonly Permission[]
+  /**
+   * One set per computed check, each resolved through `GATE_RESOLVERS` (Phase
+   * 214). A role performs the act if it holds **at least one** member of every
+   * set: the permission is chosen from the record's own kind, so holding the
+   * marketing key is enough to do the act to marketing records.
+   */
+  alternatives: readonly (readonly Permission[])[]
 }
 
 /** A role that can cause an event and can never be shown it. */
@@ -114,7 +126,6 @@ export type BlindProducer = {
 }
 
 const WRITE = /entityType: '([a-z_]+)'/g
-const GATE = /requirePermission\(\s*\w+\s*,\s*'([a-z_]+:[a-z_]+)'/g
 
 /** Every place in `src/` that files an audit event under a literal type. */
 export function auditWriteSites(): AuditWriteSite[] {
@@ -129,17 +140,40 @@ export function auditWriteSites(): AuditWriteSite[] {
     for (const match of src.matchAll(WRITE)) {
       const span = enclosingSpan(raw, match.index)
       const body = src.slice(span.from, span.to)
+      // Every form of check, not only the literal `requirePermission` this scan
+      // read until Phase 214 — see `gate-forms.ts` for what that cost.
+      const checks = permissionChecksIn(body)
 
       sites.push({
         file,
         symbol: enclosingSymbol(raw, match.index),
         entityType: match[1],
-        gates: [...body.matchAll(GATE)].map((gate) => gate[1] as Permission),
+        gates: checks.literal,
+        alternatives: checks.computed.map(resolveComputedGate),
       })
     }
   }
 
   return sites
+}
+
+/**
+ * Acts that write an audit event behind no check of any form and say nothing
+ * about why. Must be empty: `OPEN_ACTS` is where the reason goes.
+ */
+export function unexplainedActs(sites = auditWriteSites()): string[] {
+  const unexplained = new Set<string>()
+
+  for (const site of sites) {
+    if (site.gates.length > 0 || site.alternatives.length > 0) continue
+    try {
+      openAct(site.file, site.symbol)
+    } catch {
+      unexplained.add(`${site.file}::${site.symbol}`)
+    }
+  }
+
+  return [...unexplained].sort()
 }
 
 function holds(role: Role, permission: Permission): boolean {
@@ -158,19 +192,34 @@ export function blindProducers(sites = auditWriteSites()): BlindProducer[] {
   const found = new Map<string, BlindProducer>()
 
   for (const site of sites) {
-    // An ungated act has no producing role, so it blinds nobody. This is the
-    // line that keeps the property from being a count of unplaced types.
-    if (site.gates.length === 0) continue
+    // An act with no check at all has no producing role, so it blinds nobody.
+    // This is the line that keeps the property from being a count of unplaced
+    // types — and Phase 214 is the reason it now consults `alternatives` too.
+    // Reading it off the literal gates alone excused eleven sites that do have
+    // producers, and hid a real finding in `asset` behind a computed gate.
+    // `OPEN_ACTS` is where an act that reaches this `continue` argues for it.
+    if (site.gates.length === 0 && site.alternatives.length === 0) continue
 
     const needs = permissionsToRead(site.entityType)
 
     for (const role of ROLE_NAMES) {
       if (!site.gates.every((gate) => holds(role, gate))) continue
+      // Any one member of each computed set: the permission is chosen from the
+      // record's kind, so the marketing key performs the act on marketing
+      // records and that is enough to make the role a producer.
+      if (!site.alternatives.every((set) => set.some((gate) => holds(role, gate)))) continue
       if (needs.some((permission) => holds(role, permission))) continue
 
       const key = `${site.entityType}:${role}`
       if (!found.has(key)) {
-        found.set(key, { entityType: site.entityType, role, held: site.gates, needs })
+        // What this role actually had to hold: the outright gates, plus the
+        // members of each computed set it holds. A finding a reader cannot check
+        // without re-running the scan is half a finding.
+        const held = [
+          ...site.gates,
+          ...site.alternatives.flat().filter((permission) => holds(role, permission)),
+        ]
+        found.set(key, { entityType: site.entityType, role, held, needs })
       }
     }
   }

@@ -337,7 +337,25 @@ describe('every registry refuses the same way', () => {
     // run, because `jobState` was written and tested without anyone coming
     // back here. Phase 199's lesson is that a register's own test passing is
     // exactly what makes the tree-wide count easy to leave behind.
-    expect(thrown.length).toBe(44)
+    //
+    // **Forty-six since Phase 214**, which added two in one phase because the
+    // two halves of its repair are both registers.
+    //
+    // `GATE_RESOLVERS` earns the throw on the sharpest version of this file's
+    // argument. It maps a *computed* permission check — `subject.manage`,
+    // `permissionFor(document.kind, 'manage')` — onto the permissions it can
+    // yield, and the audit scan uses the answer to decide which roles perform an
+    // act. `undefined` there would resolve to no permission, which is precisely
+    // how the eleven gates Phase 213 could not read came to be treated as acts
+    // with no producer: the silent answer and the dangerous answer are the same
+    // answer. A refusal is the only safe reply to an expression nobody has
+    // explained.
+    //
+    // `OPEN_ACTS` earns it for the converse. An act with no permission check at
+    // all has to say why, and a lookup that answered `undefined` would let a
+    // newly-written ungated act inherit the excuse that thirty-one argued-for
+    // ones earned.
+    expect(thrown.length).toBe(46)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

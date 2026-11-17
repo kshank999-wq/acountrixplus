@@ -583,6 +583,65 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §14, §19 — the gate the scan could not read (Phase 214)
+
+§14 claims a permission model. This phase is about what the audit discovered
+when it tried to *read* that model mechanically, and found it had been reading a
+subset.
+
+Phase 213 measured which roles can produce each audit event by matching
+`requirePermission(ctx, '<literal>')`. It reported 44 sites with no permission at
+all. **Twelve of those forty-four do require one**, because the pattern is wrong
+about both of the check's arguments: eight permissions are computed from
+the record's own kind, three checks refuse softly with `can` rather than
+throwing, and one passes its context as a property access. Tree-wide the audit
+should record **30 computed permission checks against 795 literal ones** — one in
+twenty-seven, which is small enough to miss and large enough to matter.
+
+The audit's standing interest here is not the arithmetic. It is that **the
+previous phase's number was an artefact of its instrument and read as a fact
+about the system**, and that the ADR carried it forward as a nomination in the
+system's own voice: *"44 write sites whose enclosing function requires no
+permission at all."* Nothing in that sentence flags it as the output of a regular
+expression.
+
+Two further things belong on the record for §14.
+
+The nomination's four categories were wrong in a way that is itself a finding
+about the architecture. **"Gated upstream in a server action" cannot happen
+here** — `src/app` holds eleven `requirePermission` calls in three files, because
+business logic and its gates live in `src/modules`. So an ungated module function
+reached from an action is ungated, full stop, and the comfortable reading was
+never available. **"Run from a worker" is empty.** And §14's permission model is
+not the only authority model in the system: the practice side runs on
+`requirePracticeOwner`, used eight times, which is not a `Permission`, so the
+audit scan is structurally silent about those acts. `endEngagement` gates both
+ways at once, by which side of an engagement is speaking.
+
+The defect found: **`asset` history was unreadable by the only role that manages
+assets.** All five entries in `ASSET_SUBJECTS` declare
+`manage: 'marketing:manage'`, `asset` was in no entry of the readable-types
+register so its history fell through to `audit:view`, and `marketing` holds the
+first and not the second. A marketer could attach an asset to a campaign, detach
+it, and read the history of neither — §19's trail, absent for the person §19
+exists to hold accountable. Placed under `marketing:view`, which takes asset
+history from `accountant` on Phase 72's argument.
+
+The second defect is a §19 one and a shape worth naming: **a check that ran after
+the write.** `uploadEvidenceAction` stored the bytes, wrote the `documents` row
+and filed the `document.store` event, and only then asked whether the actor may
+touch the subject. Every test of that refusal passed, because the refusal
+happened — late. An audit trail that records an act the actor was not permitted
+to perform is not a record of a permitted act; it is a record of a check in the
+wrong place.
+
+The limitation this leaves is recorded rather than closed: the scan now treats a
+**soft** refusal as equivalent to a thrown one. They are not. A thrown
+`PermissionError` carries a 403 and cannot be ignored; a returned `{ ok: false }`
+can be dropped by a caller, and the scan would still report the act as gated.
+Whether all nine callers check it is ADR 0214's nomination, and the audit should
+not claim the forms are interchangeable until that is measured.
+
 ### §14, §19 — the history nobody can read (Phase 213)
 
 §14 claims a permission model and §19 claims an audit trail, and this phase is

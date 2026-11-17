@@ -461,14 +461,24 @@ describe('what a placement takes away', () => {
 // --- The register itself ---------------------------------------------------
 
 describe('the register after the phase', () => {
-  it('places forty-three types and leaves the rest correctly silent', () => {
+  it('places forty-four types and leaves the rest correctly silent', () => {
     const placed = writtenEntityTypes().filter(
       (type) => permissionToRead(type) !== 'audit:view',
     )
 
     // `customer` and the rest are all written, so the written set covers the
     // register; a type placed but never written would be prose nothing reads.
-    expect(placed.length).toBe(43)
+    //
+    // Forty-four since Phase 214 placed `asset`, and the way it got there is
+    // the point. This phase's property found it — the same `blindProducers()`
+    // this file asserts is empty — once the scan could read a permission
+    // computed from the record's own kind. `linkAsset` gates on
+    // `subject.manage`, every asset subject manages under `marketing:manage`,
+    // and `marketing` holds no `audit:view`: a marketer could attach and detach
+    // an asset and read the history of neither. The forty-three above were found
+    // by asking the register a question it had never been asked; the
+    // forty-fourth was found by fixing the reader that asked it.
+    expect(placed.length).toBe(44)
     expect(writtenEntityTypes().length).toBe(93)
   })
 

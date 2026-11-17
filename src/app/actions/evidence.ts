@@ -5,9 +5,9 @@ import { z } from 'zod'
 import { requireActor } from '@/lib/current-user'
 import {
   attachDocument,
+  attachNewDocument,
   deleteDocument,
   detachDocument,
-  storeDocument,
 } from '@/modules/evidence/service'
 import { resolveNote, writeNote } from '@/modules/evidence/notes'
 import { EVIDENCE_SUBJECTS } from '@/modules/evidence/subjects'
@@ -55,20 +55,19 @@ export async function uploadEvidenceAction(form: FormData): Promise<ActionResult
     const file = form.get('file')
     if (!(file instanceof File) || file.size === 0) throw new Refusal('Choose a file first.')
 
-    const stored = await storeDocument(actor, {
+    // One call, not two (Phase 214). Sequencing `storeDocument` then
+    // `attachDocument` here put the only permission check on the path *after*
+    // the bytes were stored and the audit event written.
+    const { stored, alreadyAttached } = await attachNewDocument(actor, {
+      subjectType: parsed.subjectType as never,
+      subjectId: parsed.subjectId,
       filename: file.name || 'attachment',
       contentType: file.type,
       data: Buffer.from(await file.arrayBuffer()),
       note: (form.get('note') as string | null)?.trim() || null,
     })
 
-    const attached = await attachDocument(actor, {
-      subjectType: parsed.subjectType as never,
-      subjectId: parsed.subjectId,
-      documentId: stored.id,
-    })
-
-    if (attached.alreadyAttached) return 'That file is already on this record.'
+    if (alreadyAttached) return 'That file is already on this record.'
     return stored.deduplicated
       ? `Attached. You already had ${stored.filename}, so it is stored once and used twice.`
       : `Attached ${stored.filename}.`

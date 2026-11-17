@@ -287,6 +287,33 @@ const READABLE_BY: Record<string, readonly Permission[]> = {
   campaign: ['marketing:view'],
   segment: ['marketing:view'],
   suppression: ['marketing:view'],
+
+  /**
+   * The asset, placed in Phase 214 — and placed because a scan finally saw it.
+   *
+   * Phase 213 missed this one for a reason worth keeping. It read a site's gates
+   * by matching `requirePermission(ctx, '<literal>')`, and `linkAsset` and
+   * `unlinkAsset` gate on `subject.manage` and
+   * `assetSubjectFor(ref.kind).manage` — the permission is **computed from the
+   * subject's own kind**, so the scan saw no gate, concluded the act named no
+   * producer, and skipped it. The code was never unguarded; the scan could not
+   * read the guard.
+   *
+   * What that hid: all five entries in `ASSET_SUBJECTS` declare
+   * `manage: 'marketing:manage'`, so the roles that may associate and detach
+   * assets are `owner`, `manager` and `marketing` — and `asset` was in no entry
+   * here, so its history needed `audit:view`, which `marketing` does not hold.
+   * **A marketer could attach an asset to a campaign, detach it again, and read
+   * the history of neither.** Phase 78's sentence, found a third time, by the
+   * third different method.
+   *
+   * `marketing:view` rather than `crm:view`, even though four of the five
+   * subjects are CRM records: the act is gated on marketing and the permission
+   * that guards a record guards the events about it too (Phase 72). This takes
+   * asset history from `accountant`, as the three above do, and for the same
+   * reason — which association a campaign used is not part of the books.
+   */
+  asset: ['marketing:view'],
 }
 
 /**
