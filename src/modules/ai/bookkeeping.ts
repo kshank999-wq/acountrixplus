@@ -44,10 +44,16 @@ import { Refusal } from '@/modules/errors'
 // --- Suggest a category ----------------------------------------------------
 
 export async function suggestCategory(ctx: ActorContext, transactionId: string) {
-  const transaction = await transactionContext(ctx, transactionId)
-  if (!transaction) {
-    return { ok: false as const, message: 'That transaction was not found.', reason: 'not_found' }
+  // The two reasons, kept apart (Phase 215). This said
+  // `message: 'That transaction was not found.'` for both of them, including for
+  // a reader who may not see bookkeeping at all — so the sentence sent them
+  // looking for a record that exists. The same idiom the rest of this file uses
+  // for a refusal travelling outward: `if (!result.ok) return { …result }`.
+  const found = await transactionContext(ctx, transactionId)
+  if (!found.ok) {
+    return { ok: false as const, message: found.message, reason: found.reason }
   }
+  const transaction = found.value
 
   const accounts = await accountOptions(ctx)
   if (accounts.length === 0) {
@@ -208,10 +214,16 @@ export async function reviewAnomalies(ctx: ActorContext) {
  * assistant is generalizing a decision the person made, not inventing one.
  */
 export async function suggestRule(ctx: ActorContext, transactionId: string) {
-  const transaction = await transactionContext(ctx, transactionId)
-  if (!transaction) {
-    return { ok: false as const, message: 'That transaction was not found.', reason: 'not_found' }
+  // The two reasons, kept apart (Phase 215). This said
+  // `message: 'That transaction was not found.'` for both of them, including for
+  // a reader who may not see bookkeeping at all — so the sentence sent them
+  // looking for a record that exists. The same idiom the rest of this file uses
+  // for a refusal travelling outward: `if (!result.ok) return { …result }`.
+  const found = await transactionContext(ctx, transactionId)
+  if (!found.ok) {
+    return { ok: false as const, message: found.message, reason: found.reason }
   }
+  const transaction = found.value
 
   const merchantKey = transaction.merchantName ?? transaction.description
 

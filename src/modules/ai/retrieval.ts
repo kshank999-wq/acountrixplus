@@ -66,12 +66,48 @@ export type TransactionContext = {
   amountCents: number
 }
 
-/** One transaction, by id, or null if it is not this company's. */
+/**
+ * A read whose absence has to be explained (Phase 215).
+ *
+ * The four reads below this one may answer empty and say nothing about why,
+ * because they are **supplements**: an insight assembled from four of five
+ * sources is still an insight, which is the rule this file opens with.
+ *
+ * This shape is for the other kind — a value that *is* the subject of the act.
+ * There is nothing to degrade into when the subject is withheld, so the two
+ * reasons have to stay apart all the way to the caller.
+ */
+export type SubjectRead<T> =
+  | { ok: true; value: T }
+  | { ok: false; message: string; reason: 'permission' | 'not_found' }
+
+/**
+ * One transaction, by id — or which of the two reasons there is none.
+ *
+ * Until Phase 215 this answered `TransactionContext | null`, and `null` meant
+ * both *not on these books* and *not yours to see*. Both callers reported the
+ * second as the first: **"That transaction was not found."** It was found. A
+ * salesperson holds `ai:use` and not `bookkeeping:view`, so a salesperson was
+ * sent looking for a transaction that exists.
+ *
+ * The vocabulary for saying this properly already existed and these two acts
+ * were the only ones in the module locked out of it — `explainReconciliation`,
+ * `draftProposalSections`, `draftCampaignCopy`, `businessInsights` and
+ * `adviseOnAccount` all answer `reason: 'permission'` and `reason: 'not_found'`
+ * separately. Nobody decided these two should not; the shape of a return type
+ * decided it for them (Phase 70).
+ */
 export async function transactionContext(
   ctx: ActorContext,
   transactionId: string,
-): Promise<TransactionContext | null> {
-  if (!can(ctx, 'bookkeeping:view')) return null
+): Promise<SubjectRead<TransactionContext>> {
+  if (!can(ctx, 'bookkeeping:view')) {
+    return {
+      ok: false,
+      message: 'Your role does not include bookkeeping.',
+      reason: 'permission',
+    }
+  }
 
   const [row] = await db
     .select({
@@ -85,7 +121,11 @@ export async function transactionContext(
     .where(scoped(ctx, bankTransactions, eq(bankTransactions.id, transactionId)))
     .limit(1)
 
-  return row ?? null
+  if (!row) {
+    return { ok: false, message: 'That transaction was not found.', reason: 'not_found' }
+  }
+
+  return { ok: true, value: row }
 }
 
 /** Recent activity for the anomaly review. */

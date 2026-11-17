@@ -355,7 +355,20 @@ describe('every registry refuses the same way', () => {
     // all has to say why, and a lookup that answered `undefined` would let a
     // newly-written ungated act inherit the excuse that thirty-one argued-for
     // ones earned.
-    expect(thrown.length).toBe(46)
+    //
+    // **Forty-seven since Phase 215 and `DEGRADING_READS`**, the reads that
+    // answer empty because the reader may not see them. It earns the throw on
+    // the distinction the register exists to hold: four of those reads *should*
+    // answer empty, because an insight built from four of five sources is still
+    // an insight, and one of them was the subject of its act and therefore had
+    // to say which of the two happened. `undefined` would collapse those back
+    // together and silently license the next `return null`, which is how
+    // `suggestCategory` came to tell a salesperson that a transaction they may
+    // not see does not exist.
+    //
+    // Seventh and eighth times counted deliberately rather than after a red
+    // run, in two consecutive phases. The habit the first six bought is holding.
+    expect(thrown.length).toBe(47)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

@@ -583,6 +583,64 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §11, §14 — the refusal that says the record does not exist (Phase 215)
+
+§11 claims an AI assistant and §14 claims a permission model. This phase is
+about the sentence a person reads when the two meet and the answer is no.
+
+The audit should record first that **ADR 0214's nomination named nothing**. It
+asked whether any caller drops a soft refusal, since a dropped one is a gate in
+name only. None does: all nine soft refusals in `src/modules` are handled, seven
+returning `{ ok: false }` with every caller testing `.ok`, two returning `null`
+with all four callers handling it. Five consecutive phases had replaced their
+nomination with something larger, and the discipline worth recording is that this
+one was reported as empty rather than stretched until it yielded.
+
+What the measurement found instead is a §11 defect with a §14 cause.
+`ai/retrieval.ts` holds five permission-gated reads and every one answers an
+absence. For four of them that is right, and the file's own rule says why: an
+insight assembled from four of five sources is still an insight. The fifth,
+`transactionContext`, is not a supplement but the **subject** of its act, so
+there was nothing to degrade into — and `null` meant both *not on these books*
+and *not yours to see*. Both callers reported the second as the first:
+
+> That transaction was not found.
+
+It was found. A salesperson holds `ai:use` and not `bookkeeping:view`, so §11's
+assistant told them to go looking for a record that exists, and then added that
+no accounts were available to choose from. Neither sentence was true and both
+were the same cause.
+
+For §14 the interesting part is that **no permission was missing and no data
+leaked.** The gate worked; the reader got nothing. What failed is the account the
+system gave of its own decision, which is a thing an audit of a permission model
+should look for and had not: §14 has been checked for whether the right people
+are refused, never for whether a refusal says what it is.
+
+For §11 the finding is Phase 70's and is measurable rather than editorial. Five
+acts in the module answer `reason: 'permission'` and `reason: 'not_found'`
+separately. `suggestCategory` and `suggestRule` were the only two with a
+`not_found` and no `permission` — not by anyone's decision, but because the
+return type of a helper could not carry the distinction. A type removed a
+sentence from two acts, and the only way to notice was to count the reasons the
+module can give.
+
+The property now asserted is deliberately narrow: a read whose absence a caller
+turns into a refusal must be able to say why it is absent. Four reads may
+legitimately answer empty and are declared; one exception is licensed by
+**ordering** — `suggestCategory` may refuse on an empty account list because it
+reads the subject first on the same permission — and the falsifier checks that
+ordering by source position rather than accepting the claim.
+
+Two limits are recorded rather than closed. An **eleventh form** a permission
+check can take, `ifPermitted(ctx, permission, read, fallback)`, is invisible to
+Phase 214's reader; that phase's figures were re-checked rather than assumed and
+stand, because the wrapper is module-private, read-only, and called by none of
+the thirty-one acts in `OPEN_ACTS`. And `companyContext`'s `crm:view` branch
+cannot fire through either of its callers, so it is belt and braces — kept, with
+the premise pinned, because a gate that cannot refuse today is one caller away
+from being the only guard.
+
 ### §14, §19 — the gate the scan could not read (Phase 214)
 
 §14 claims a permission model. This phase is about what the audit discovered

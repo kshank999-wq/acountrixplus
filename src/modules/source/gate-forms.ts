@@ -530,9 +530,9 @@ export type PermissionChecks = {
  * nobody could add. Which is the phase's own lesson arriving one layer down: a
  * computed permission is exactly the thing a pattern cannot read.
  */
-function secondArgument(body: string, open: number): string | null {
+export function callArguments(body: string, open: number): string[] {
+  const commas: number[] = []
   let depth = 0
-  let comma = -1
 
   for (let at = open; at < body.length; at += 1) {
     const char = body[at]
@@ -540,12 +540,19 @@ function secondArgument(body: string, open: number): string | null {
     else if (char === ')' || char === ']' || char === '}') {
       depth -= 1
       if (depth === 0) {
-        return comma < 0 ? null : body.slice(comma + 1, at).trim().replace(/\s+/g, ' ')
+        const cuts = [open, ...commas, at]
+        return cuts
+          .slice(0, -1)
+          .map((from, index) => body.slice(from + 1, cuts[index + 1]).trim().replace(/\s+/g, ' '))
       }
-    } else if (char === ',' && depth === 1 && comma < 0) comma = at
+    } else if (char === ',' && depth === 1) commas.push(at)
   }
 
-  return null
+  return []
+}
+
+function secondArgument(body: string, open: number): string | null {
+  return callArguments(body, open)[1] ?? null
 }
 
 export function permissionChecksIn(body: string): PermissionChecks {

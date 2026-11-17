@@ -2,12 +2,12 @@
 
 **Status:** accepted · **Phase:** 215 · **Spec:** §11, §14
 
-> **Written before the code.** The measurement below is complete and was taken
-> against the tree at `cc536b4`. The implementation it describes is staged and
-> lands in the commit after this one: Phase 214's full eight-shard run was still
-> going, and writing to `src/` or `tests/` while it runs contaminates it —
-> `tests/setup.ts` truncates every table in `beforeEach`. Figures here are
-> measured; the "What is built" section is the decision, not yet the diff.
+> **This ADR was committed one commit ahead of its code** (`29f1cf5`), because
+> Phase 214's eight-shard run was still going and writing to `src/` or `tests/`
+> while it runs contaminates it — `tests/setup.ts` truncates every table in
+> `beforeEach`. The run was then stopped two shards in and the two phases folded
+> into one verification, since the combined tree is what ships and a failing test
+> names itself. The implementation described below is now in the tree.
 
 ## The nomination, and the first one in five phases that was not there
 
