@@ -99,24 +99,73 @@ With `willDemand`, the screen property over all 236 pairs returns **zero**.
 That is ADR 0217's question, finally answered, by a property that cannot
 false-positive on a form the span reader cannot see.
 
-## What `mayDemand` is for, which is not nothing
+## Conditionality is a property of the call, not of the act
 
-The two it leaves are not noise — they are a kind of defect nothing in this tree
-has had a name for:
+The draft of this ADR said `createInvoice` was *"a checkbox on `/crm`"* and
+called the category *"the control that works until you choose the wrong
+option."* Both were wrong, and reading the call site is what showed it:
 
-> **The control that works until you choose the wrong option.**
+```ts
+  const result = await convertAction(id, true)
+```
 
-`convertAction(opportunityId, createInvoice: boolean)` is the sharp one.
-`createInvoice` is a checkbox on `/crm`. A manager or a salesperson can convert a
-won opportunity — and with the box ticked the same button refuses them, because
-raising the deposit invoice needs `accounting:journal` and scheduling the stages
-needs `jobs:manage`. Nothing on the screen says the checkbox changes who may
-press the button. Phase 47 at the level of a form field rather than a screen.
+Hard-coded, with a Phase 49 comment above it explaining why. So from this screen
+the branch is **always** taken: `mayDemand` *is* `willDemand` for this call site,
+and `willDemand` understates what the button needs.
 
-`logTimeAction` is the same shape and milder: an accountant may log their own
-time and not somebody else's, which is deliberate and documented in the code —
-*"Somebody else's timesheet needs the permission that manages people"* — but the
-screen offers the person-picker to everybody it admits.
+The other one is the exact opposite. `/time/board.tsx` calls `logTimeAction`
+with no `userId` at all, so `if (userId !== ctx.userId)` can never fire from that
+screen and `users:manage` is unreachable there. The same conditional gate is dead
+code from one screen and unconditional from another.
+
+**That is the finding: neither `willDemand` nor `mayDemand` answers a screen's
+question on its own, because conditionality belongs to the call.** For the two
+acts here the arguments are literals and the answer is readable exactly — which
+is why this phase reads them rather than guessing, and why the register below
+names which argument selects each conditional gate.
+
+## What the `/crm` call actually does
+
+The invoice branch is **outside** the transaction that created the customer and
+the project:
+
+```ts
+  const result = await db.transaction(async (tx) => { … })   // committed
+  …
+  if (opts.createInvoice && winningProposal) {
+    const scheduled = await scheduleForProposal(ctx, …)
+    if (scheduled.length > 0) {
+      sovStageCount    = await scheduleOnJob(ctx, …)   // jobs:manage
+      depositInvoiceId = await depositInvoice(ctx, …)  // accounting:journal
+```
+
+So a salesperson presses **Create client & job** on a won opportunity whose
+proposal has a billing schedule — the ordinary path — and:
+
+1. the transaction commits: customer, project, audit event;
+2. `scheduleOnJob` throws `Missing required permission: jobs:manage`;
+3. the screen reports a failure;
+4. the client and the job exist.
+
+A **manager** holds `jobs:manage` and not `accounting:journal`, so they get one
+step further and fail at `depositInvoice` — *after* the schedule of values has
+been written. And pressing the button again reaches
+`if (opportunity.convertedCustomerId && opportunity.convertedProjectId)` and
+answers **"This opportunity was already converted."** The user is told the
+conversion failed, and then told it already happened.
+
+This is Phase 214's defect — *"a check that ran late: `uploadEvidenceAction`
+stored the bytes, the row and the audit event and then refused, so every test of
+the refusal passed because the refusal did happen"* — found again by a different
+route, and this time with two contradictory messages to the same person.
+
+The fix is not a stricter gate on the button. A salesperson converting a won deal
+into a client and a job is the feature; raising the invoice is not theirs. So the
+billing half **degrades and says so**, which is Phase 216's rule applied to a
+write rather than a read: do the part this person may do, and never let the
+omission pass for nothing having been omitted. `convertWonOpportunity` already
+returns `depositInvoiceId` and `sovStageCount`, and `convertAction` already
+composes a sentence from them.
 
 ## Two scan errors, both in the conditionality reader
 
@@ -162,9 +211,9 @@ the suite rather than being read as ungated.
 `statementAt` and `conditionalAt` join `enclosing.ts`, so there is still one
 reader of the shape of a function. `willDemand` and `mayDemand` replace
 `demandedBy`'s single answer. `CONDITIONAL_GATES` declares the five.
-The `/crm` screen stops offering *create an invoice* to somebody who may not
-raise one, and `/time` stops offering somebody else's timesheet to somebody who
-may not manage people. ADR 0218's mechanism claim about `logTime` is corrected
+`convertWonOpportunity` stops raising the schedule and the deposit for somebody
+who may not, and says what it did not do, instead of committing half a
+conversion and then refusing. ADR 0218's mechanism claim about `logTime` is corrected
 where it was made. No schema change, no migration, no new permission.
 
 ## Nominated for Phase 220
