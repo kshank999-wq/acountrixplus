@@ -5,7 +5,7 @@ import { bankTransactions, chartAccounts } from '@/db/schema'
 import { formatCents } from '@/lib/money'
 import { categorize } from '@/modules/bookkeeping/transactions'
 import { createRule } from '@/modules/bookkeeping/rules-engine'
-import { scoped, type ActorContext } from '@/modules/tenancy/context'
+import { can, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { ask } from './gateway'
 import {
   accountOptions,
@@ -162,8 +162,30 @@ export async function acceptCategorization(
 // --- Review for anomalies --------------------------------------------------
 
 export async function reviewAnomalies(ctx: ActorContext) {
+  /*
+    Phase 216. `recentTransactions` answers `[]` when the reader may not see
+    bookkeeping, and the next branch turned that into **ok: true** with
+    "Not enough activity yet for a useful review." A clean bill of health, on a
+    company that may have ten thousand transactions, handed to a salesperson who
+    was never allowed to look at one.
+
+    Phase 215 placed this read in `DEGRADING_READS` and wrote that no caller
+    refuses on it "and none should -- 'nothing unusual' is an answer." That
+    sentence was wrong one commit after it was written. Nothing unusual is an
+    answer only if you looked.
+  */
+  if (!can(ctx, 'bookkeeping:view')) {
+    return {
+      ok: false as const,
+      message: 'Your role does not include bookkeeping.',
+      reason: 'permission' as const,
+    }
+  }
+
   const transactions = await recentTransactions(ctx, 120)
 
+  // Now unambiguous: the reader may see bookkeeping, so a short list is a short
+  // list rather than a withheld one.
   if (transactions.length < 3) {
     return {
       ok: true as const,
@@ -332,6 +354,21 @@ export async function acceptRule(ctx: ActorContext, suggestionId: string) {
 // --- Summarize the inbox ---------------------------------------------------
 
 export async function summarizeInbox(ctx: ActorContext) {
+  /*
+    Phase 216, and the worse of the pair because it does not even branch.
+    `inboxShape` answers a *shaped* empty when the reader may not see
+    bookkeeping -- zero uncategorised, no merchants -- and this passed those
+    zeroes to the model, which wrote a confident summary of a tidy inbox and
+    charged a provider call for it. A false statement with an author.
+  */
+  if (!can(ctx, 'bookkeeping:view')) {
+    return {
+      ok: false as const,
+      message: 'Your role does not include bookkeeping.',
+      reason: 'permission' as const,
+    }
+  }
+
   const shape = await inboxShape(ctx)
 
   const result = await ask(ctx, {

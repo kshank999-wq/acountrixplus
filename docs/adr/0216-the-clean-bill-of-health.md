@@ -4,8 +4,19 @@
 
 > **Written before its code**, like ADR 0215 and for the same reason: the full
 > eight-shard run for Phases 214 and 215 was going, and writing to `src/` or
-> `tests/` while it runs contaminates it. The measurement below is complete and
-> was taken against `0bd2781`. The implementation is staged and lands next.
+> `tests/` while it runs contaminates it. The measurement below was taken
+> against `0bd2781`. The code landed afterwards and changed nothing in it.
+>
+> That run finished green on all eight shards — **277 files, 5,118 tests**,
+> against Phase 213's 275 and 5,079, which is exactly the +2 files and +39 tests
+> Phases 214 and 215 added. No stale counts, and no repeat of the shard-6
+> failure Phase 213 closed out.
+>
+> One thing the code did move that the measurement had not predicted: the
+> refusal `degradingRead` throws used to warn about "an absence standing in for
+> a **refusal**", which is the same wrong half as the falsifier this phase
+> replaces. It now says **data**, and names the remedy. Phase 215's test pinned
+> the old phrase, so that assertion moved too, with the reason in it.
 
 ## The nomination, and this time it was there
 

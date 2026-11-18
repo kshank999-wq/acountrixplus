@@ -583,6 +583,63 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §11, §14 — the clean bill of health nobody checked (Phase 216)
+
+§11 claims an AI assistant and §14 claims a permission model. Phase 215 audited
+the sentence a person reads when the two meet and the answer is no. This phase
+audits the sentence they read when the answer should have been no and was not.
+
+**ADR 0215's nomination was there, and it was worse than the nomination
+guessed.** It asked whether an insight built from four of five sources stands on
+its own or is "a confident answer assembled from a third of the evidence". It is
+assembled from none of it, and reported as a success:
+
+```
+reviewAnomalies(salesperson)
+  -> { ok: true, findings: [], message: 'Not enough activity yet for a useful review.' }
+```
+
+For §11 this is the most serious defect the audit has recorded against the
+assistant, because the output is not a degraded answer or an unhelpful one. It is
+**false, specific and reassuring**: a clean bill of health on a company that may
+have ten thousand transactions, given to somebody who was never permitted to see
+one. `summarizeInbox` is worse in a way that matters to §11's own claims, because
+it does not branch at all — `inboxShape` returns a *shaped* empty rather than a
+falsy one, so zeroes went to the model and the model wrote the summary. §11
+promises a model-written summary of the transaction inbox and the system
+delivered exactly that, about an inbox the reader was not allowed to look at, and
+metered a provider call for it. **A shaped empty is the hardest absence for an
+audit to catch, because it looks exactly like data.**
+
+For §14 the finding is again that no permission was missing and nothing leaked.
+The gate worked at the read; the reader got nothing from the database. What
+failed is that two acts had no gate of their own and inferred permission from
+what the data looked like. The roles reachable are not hypothetical: they are
+exactly those holding `ai:use` without `bookkeeping:view`, which is `sales` and
+`marketing`, and both are reachable because these are server actions — Phase
+214's finding that a page guard does not protect an HTTP endpoint, arriving as a
+consequence rather than as a note.
+
+**Two corrections to this file's own previous entry.** Phase 215 recorded
+`recentTransactions` as a legitimate degradation on the grounds that *"nothing
+unusual" is an answer*. Nothing unusual is an answer only if you looked; that
+sentence was false one commit after it was written. And the property Phase 215
+asserted — that a read whose absence a caller turns into a **refusal** must say
+why — was the weaker half: **both defects here passed it**, because the dangerous
+caller is the one that *answers* on an absence. The property is now that every
+caller of a degrading read must already have **established** that read's
+permission, by checking it, by checking one whose holders all hold it (computed
+from the role table, not claimed), or by consulting a discriminated subject read
+first. The weaker falsifier is deleted rather than kept beside the stronger one.
+
+**What this says about auditing §11 against §14.** Both phases found the same
+shape from opposite ends: Phase 215, a refusal that reported itself as an absence;
+Phase 216, an absence that reported itself as a finding. Neither was a missing
+permission, and neither would have been found by asking whether the right people
+are refused. The question that found both is what the system *says* when it
+refuses — and the one this phase adds is whether an act that reads nothing knows
+the difference between nothing to see and nothing shown.
+
 ### §11, §14 — the refusal that says the record does not exist (Phase 215)
 
 §11 claims an AI assistant and §14 claims a permission model. This phase is

@@ -1,91 +1,77 @@
 import { readFileSync } from 'node:fs'
 import { RegistryError } from '@/modules/errors/registry'
-import type { Permission } from '@/modules/permissions'
-import { callArguments, functionBody } from './gate-forms'
+import { ROLE_NAMES, ROLE_PERMISSIONS, type Permission, type Role } from '@/modules/permissions'
+import { callArguments, functionBody, permissionChecksIn } from './gate-forms'
 import { withoutComments } from './enclosing'
 import { sourceFiles } from './isolation-scan'
 
 /**
  * A read that comes back empty because the reader may not see it (spec §11, §14).
  *
- * ## What ADR 0214 asked, and the answer being no
+ * ## Phase 215 built this register and its falsifier was the weaker half
  *
- * Phase 214 taught the audit scan to read `if (!can(ctx, 'x')) return { ok:
- * false, … }` as a gate, and nominated the risk that comes with that: a soft
- * refusal and a thrown one are not interchangeable, so *"a soft refusal whose
- * caller drops the result is a gate in name only."*
+ * Five permission-gated reads in `ai/retrieval.ts` answer an **absence** rather
+ * than refusing. Phase 215 found that one of them, `transactionContext`, was the
+ * **subject** of its act rather than a supplement, so `null` meant both *not on
+ * these books* and *not yours to see* and both callers said "That transaction
+ * was not found." It gave that read a discriminated result, declared the other
+ * four here, and asserted this:
  *
- * Measured, **no caller drops one.** All nine soft refusals in `src/modules` are
- * handled — seven return `{ ok: false }` and every caller tests `.ok`, two
- * return `null` and all four callers handle it. The nominated finding set is
- * empty, which is the first time in five phases that a nomination named nothing,
- * and is worth saying out loud rather than quietly finding something else to
- * call the defect.
+ * > A read whose absence a caller turns into a **refusal** must be able to say
+ * > why it is absent.
  *
- * ## What the measurement found instead
+ * That is the wrong half of the right idea. It asks about the caller that
+ * refuses. **The dangerous caller is the one that answers.**
  *
- * `ai/retrieval.ts` holds five permission-gated reads and every one answers an
- * **absence** rather than a refusal. The file states the rule and the rule is
- * right:
+ * `recentTransactions` answers `[]` without `bookkeeping:view`, and
+ * `reviewAnomalies` turned that into:
  *
- * > The checks return empty rather than throwing. A context builder assembling
- * > five kinds of data for an insight should produce an insight from the four the
- * > user may see, not fail entirely because of the fifth.
+ *     { ok: true, findings: [], message: 'Not enough activity yet for a useful review.' }
  *
- * That is correct for a **supplement**: `renderVoice(null)` is `''`,
- * `draftCampaignCopy` writes "our company", and nobody is misled. It is wrong for
- * the **subject of the act**. `suggestCategory(ctx, transactionId)` is *about*
- * that transaction, so when the reader may not see it there is nothing to degrade
- * into — and both callers of `transactionContext` said:
+ * A clean bill of health — `ok: true` — about a company that may have ten
+ * thousand transactions, handed to a salesperson who was never permitted to see
+ * one. `summarizeInbox` is worse because it does not even branch: `inboxShape`
+ * hands it a *shaped* empty, zero uncategorised and no merchants, and it passed
+ * those zeroes to the model, which wrote a confident summary of a tidy inbox and
+ * charged a provider call for it. A false statement with an author.
  *
- * > That transaction was not found.
+ * Both are reachable. They are server actions, and Phase 214's own finding is
+ * that a page guard does not protect an HTTP endpoint — `src/app` holds eleven
+ * permission checks in three files because gates live in modules. Every act in
+ * every other file of the AI module gates itself; `bookkeeping.ts` was the only
+ * one that did not, and after Phase 215 two of its four acts get their answer
+ * out through `transactionContext`. These two had nothing.
  *
- * It was found. The reader may not see it. A salesperson holds `ai:use` and not
- * `bookkeeping:view`, so a salesperson was sent looking for a transaction that
- * exists.
+ * And this register said so, in prose, one commit before it was false:
  *
- * Three rules land on that at once: two answers to one question (`null` means
- * *not on these books* and *not yours to see*); Phase 47, a refusal must name
- * something actionable, and "not found" tells you to do the one thing that
- * cannot work; and Phase 70, one vocabulary for a correction — which is the
- * sharpest, because five other acts in the same module answer both questions
- * separately and these two were the only ones in it with a `not_found` and no
- * `permission`. The shape of a return type had silently removed a sentence from
- * two acts.
+ * > No caller refuses on it, and none should — "nothing unusual" is an answer.
  *
- * ## The property, which is not "no read returns empty"
+ * Nothing unusual is an answer only if you looked.
  *
- * Four of the five *should* return empty. So the assertion is narrower and about
- * callers rather than reads:
+ * ## The property, restated
  *
- * > A read whose absence a caller turns into a refusal must be able to say why it
- * > is absent.
+ * > Every caller of a degrading read must already have **established** that
+ * > read's permission.
  *
- * `DEGRADING_READS` declares the four that may legitimately come back empty, and
- * `absentRefusalDefects()` must be empty. It is computed per caller: an entry is
- * a defect if some caller refuses on its absence, **unless** the entry names a
- * `settledBy` — a discriminated read, gated on the same permission, that the
- * caller consults *first*.
+ * Three ways, all checkable, and the register needs no new field for any of
+ * them:
  *
- * That exception is load-bearing rather than a let-off. `accountOptions`
- * returning `[]` is still ambiguous in principle, and `suggestCategory` does
- * refuse on it with "No accounts are available to choose from." But it reads
- * `transactionContext` before it, on the same permission, so by the time the
- * account list is empty the permission question has been answered and the
- * emptiness means emptiness. **Ordering is the argument**, so the register names
- * the read that must come first and the falsifier checks that it really does come
- * first — by source position, not by assertion.
+ * 1. the caller checks the permission itself;
+ * 2. the caller checks a permission whose holders *all* hold it — which is a
+ *    statement about `ROLE_PERMISSIONS`, computed rather than claimed;
+ * 3. the caller consults a discriminated subject read on the same permission
+ *    **first**, which is what `settledBy` names and what source position checks.
  *
- * ## The eleventh form
+ * This absorbs both of Phase 215's separate observations. `settledBy` was arm 3.
+ * The note that `companyContext`'s branch "cannot fire today, because both
+ * callers require `proposals:manage` or `marketing:manage` and every holder of
+ * either holds `crm:view`" was arm 2 — written as a pinned premise in a test,
+ * where it was true but inert. It is now the reason the property passes, which
+ * is where a premise belongs.
  *
- * `ifPermitted(ctx, permission, read, fallback)`, below in `retrieval.ts`, passes
- * the permission as an **argument to a wrapper**, which Phase 214's reader does
- * not match: it looks for `requirePermission(` and `can(`. Three call sites.
- *
- * Phase 214's figures are unaffected, and that was checked rather than assumed —
- * `ifPermitted` is module-private, all three uses are read-only, and none of the
- * thirty-one functions in `OPEN_ACTS` calls it. It is recorded here because
- * exporting it would reopen the hole Phase 214 spent a phase closing.
+ * `absentRefusalDefects()` is gone rather than kept beside this. Two falsifiers
+ * for one question is the defect this codebase names most often, and the weaker
+ * one would pass for exactly the reason that made it weak.
  *
  * Nothing here touches the database or the clock.
  */
@@ -99,9 +85,9 @@ export type DegradingRead = {
   /** What the reader must hold for it to answer at all. */
   permission: Permission
   /**
-   * The discriminated read that must settle this permission earlier in any
-   * caller that refuses on this read's absence. Absent when no caller may
-   * refuse on it at all.
+   * A discriminated subject read on the same permission that a caller may
+   * consult instead of checking the permission itself — the third way of
+   * establishing it. Checked by source position: it has to come first.
    */
   settledBy?: string
   why: string
@@ -110,10 +96,10 @@ export type DegradingRead = {
 /**
  * Every read that may answer empty because the reader is not permitted.
  *
- * Four entries, measured rather than listed: these are the permission checks in
- * `src/modules` that yield an absence, and `absentRefusals()` is what says so.
- * A fifth — `transactionContext` — was in this set until Phase 215 and left it
- * by being fixed, which is the only way an entry should leave.
+ * Four entries, measured rather than listed: `absentRefusals()` is what says
+ * these are the permission checks in `src/modules` that yield an absence. A
+ * fifth, `transactionContext`, was here until Phase 215 and left by being
+ * fixed, which is the only way an entry should leave.
  */
 export const DEGRADING_READS: readonly DegradingRead[] = [
   {
@@ -124,42 +110,49 @@ export const DEGRADING_READS: readonly DegradingRead[] = [
     why:
       'The chart a categorisation may choose from. Empty is a real state — a ' +
       'company with no active accounts — so the list cannot carry the permission ' +
-      'answer by itself. `suggestCategory` and `suggestRule` do refuse on it, and ' +
-      'are allowed to because both read `transactionContext` first on the same ' +
-      'permission: by the time this list is empty, the reader has already been ' +
-      'told whether they may see bookkeeping at all.',
+      'answer by itself. `suggestCategory` refuses on it, and may, because it ' +
+      'reads `transactionContext` first on the same permission: by the time this ' +
+      'list is empty, the reader has already been told whether they may see ' +
+      'bookkeeping at all.',
   },
   {
     file: 'src/modules/ai/retrieval.ts',
     symbol: 'recentTransactions',
     permission: 'bookkeeping:view',
     why:
-      'Recent activity for the anomaly review, and a genuine supplement: the ' +
-      'review reports what it found in what it could see. No caller refuses on ' +
-      'it, and none should — "nothing unusual" is an answer.',
+      'Recent activity for the anomaly review. Phase 215 wrote here that no ' +
+      'caller refuses on it "and none should — \'nothing unusual\' is an answer", ' +
+      'and that was false one commit after it was written: `reviewAnomalies` ' +
+      'answered `ok: true` with "Not enough activity yet for a useful review" to ' +
+      'a reader who had been shown nothing. Nothing unusual is an answer only if ' +
+      'you looked. The act now checks `bookkeeping:view` itself, so a short list ' +
+      'is a short list.',
   },
   {
     file: 'src/modules/ai/retrieval.ts',
     symbol: 'inboxShape',
     permission: 'bookkeeping:view',
     why:
-      'What the transaction inbox looks like, for a summary. Returns a shaped ' +
-      'empty rather than null — zero totals, no merchants — so a prompt can ' +
-      'render it without branching. Tolerated by its one caller.',
+      'What the transaction inbox looks like, for a summary. Returns a *shaped* ' +
+      'empty rather than null — zero totals, no merchants — which is why its ' +
+      'caller never noticed: there was no falsy value to branch on, so ' +
+      '`summarizeInbox` passed the zeroes to the model and published the ' +
+      'answer. A shaped empty is the hardest absence to catch, because it looks ' +
+      'exactly like data. The act now checks `bookkeeping:view` itself.',
   },
   {
     file: 'src/modules/ai/retrieval.ts',
     symbol: 'companyContext',
     permission: 'crm:view',
     why:
-      'The company’s own voice, for prompts that adapt to it. The clearest case ' +
-      'for degrading: `renderVoice(null)` is the empty string and ' +
-      '`draftCampaignCopy` writes "our company", so the copy is a little more ' +
-      'generic and nobody is told anything false. Worth noting that its branch ' +
-      'cannot currently fire — both callers require `proposals:manage` or ' +
-      '`marketing:manage`, and every holder of either holds `crm:view` — so this ' +
-      'is belt and braces rather than the only guard, which is exactly why it is ' +
-      'safe for it to be silent.',
+      'The company’s own voice, for prompts that adapt to it, and the one read ' +
+      'here that degrades correctly: `renderVoice(null)` is the empty string and ' +
+      '`draftCampaignCopy` writes "our company", so the copy is a shade more ' +
+      'generic and nobody is told anything false. Its callers establish the ' +
+      'permission by implication rather than by checking it — every holder of ' +
+      '`proposals:manage` or `marketing:manage` holds `crm:view` — which Phase ' +
+      '215 noticed and pinned as a premise, and which is now the reason this ' +
+      'entry passes.',
   },
 ]
 
@@ -175,10 +168,10 @@ export function degradingRead(file: string, symbol: string): DegradingRead {
     key: KEY(file, symbol),
     message:
       `\`${symbol}\` in ${file} answers empty when the reader lacks a permission, and no ` +
-      'entry says why that is right. An absence standing in for a refusal is how ' +
-      '`suggestCategory` came to tell a salesperson that a transaction they may not see ' +
-      'does not exist. Either return a discriminated read that can say which happened, ' +
-      'or declare the degradation here and say what the caller does with it.',
+      'entry says why that is right. An absence standing in for data is how `reviewAnomalies` ' +
+      'came to report a clean bill of health to somebody who had been shown nothing. Either ' +
+      'return a discriminated read that can say which happened, or declare the degradation ' +
+      'here — and make sure every caller establishes the permission first.',
   })
 }
 
@@ -188,45 +181,27 @@ const WRAPPED = /\bifPermitted\(/g
 
 export type AbsentRefusal = { file: string; symbol: string; permission: Permission }
 
+const holdersOf = (permission: Permission): Role[] =>
+  ROLE_NAMES.filter((role) =>
+    (ROLE_PERMISSIONS[role] as readonly Permission[]).includes(permission),
+  )
+
 /**
- * Every permission check in `src/modules` whose answer is an absence.
+ * Every holder of `narrow` also holds `wide`, so checking `narrow` settles
+ * `wide`.
  *
- * Both forms: the bare `return null` and `ifPermitted`'s fallback argument. The
- * wrapper is read with `callArguments`, the same bracket-balancing reader Phase
- * 214 wrote once rather than four times, because `ifPermitted(ctx, 'x', async
- * () => db.select(…), [])` cannot be parsed by stopping at a bracket.
+ * Computed from `ROLE_PERMISSIONS` rather than asserted, which is the whole
+ * point: `draftCampaignCopy` never checks `crm:view`, and the reason that is
+ * safe is a fact about the role table that changes when the role table does.
  */
-export function absentRefusals(): AbsentRefusal[] {
-  const found: AbsentRefusal[] = []
+export function establishedByImplication(narrow: Permission, wide: Permission): boolean {
+  if (narrow === wide) return true
 
-  for (const file of sourceFiles('src/modules')) {
-    const raw = readFileSync(file, 'utf8')
-    const src = withoutComments(raw)
+  const narrowHolders = holdersOf(narrow)
+  if (narrowHolders.length === 0) return false
 
-    for (const match of src.matchAll(BARE)) {
-      if (!/^return\s+(null|undefined|\[\]|\{\s*\}|0|false)/.test(match[2].trim())) continue
-      found.push({
-        file,
-        symbol: symbolAround(src, match.index),
-        permission: match[1] as Permission,
-      })
-    }
-
-    for (const match of src.matchAll(WRAPPED)) {
-      const open = match.index + match[0].length - 1
-      const args = callArguments(src, open)
-      // The declaration itself takes named parameters, not a literal permission.
-      const permission = args[1]?.match(/^'([a-z_]+:[a-z_]+)'$/)?.[1]
-      if (!permission) continue
-      found.push({
-        file,
-        symbol: symbolAround(src, match.index),
-        permission: permission as Permission,
-      })
-    }
-  }
-
-  return found
+  const wideHolders = new Set(holdersOf(wide))
+  return narrowHolders.every((role) => wideHolders.has(role))
 }
 
 /** The top-level function a position sits in. */
@@ -240,55 +215,94 @@ function symbolAround(src: string, index: number): string {
 }
 
 /**
- * A declared degrading read whose absence a caller turns into a refusal without
- * the permission having been settled first.
+ * Every permission check in `src/modules` whose answer is an absence.
  *
- * Must be empty. The check is per caller, and the `settledBy` exception is
- * verified by **source position** — the discriminated read has to actually come
- * first, which is the whole of the argument for letting `accountOptions` be
- * refused on.
+ * Both forms: the bare `return null` and `ifPermitted`'s fallback argument. The
+ * wrapper is the eleventh form a permission check can take in this codebase and
+ * Phase 214's gate reader does not see it, which is why it is read here.
  */
-export function absentRefusalDefects(): string[] {
-  const defects: string[] = []
+export function absentRefusals(): AbsentRefusal[] {
+  const found: AbsentRefusal[] = []
+
+  for (const file of sourceFiles('src/modules')) {
+    const src = withoutComments(readFileSync(file, 'utf8'))
+
+    for (const match of src.matchAll(BARE)) {
+      if (!/^return\s+(null|undefined|\[\]|\{\s*\}|0|false)/.test(match[2].trim())) continue
+      found.push({
+        file,
+        symbol: symbolAround(src, match.index),
+        permission: match[1] as Permission,
+      })
+    }
+
+    for (const match of src.matchAll(WRAPPED)) {
+      const args = callArguments(src, match.index + match[0].length - 1)
+      const permission = args[1]?.match(/^'([a-z_]+:[a-z_]+)'$/)?.[1]
+      if (!permission) continue
+      found.push({
+        file,
+        symbol: symbolAround(src, match.index),
+        permission: permission as Permission,
+      })
+    }
+  }
+
+  return found
+}
+
+/** Does this function body establish `read.permission` before trusting the read? */
+function establishes(body: string, read: DegradingRead): boolean {
+  const checked = permissionChecksIn(body).literal
+
+  // 1. and 2. — the permission itself, or one whose holders all hold it.
+  if (checked.some((permission) => establishedByImplication(permission, read.permission))) {
+    return true
+  }
+
+  // 3. — a discriminated subject read on the same permission, consulted first.
+  if (read.settledBy) {
+    const settled = body.indexOf(read.settledBy)
+    const degraded = body.indexOf(read.symbol)
+    if (settled > -1 && settled < degraded) return true
+  }
+
+  return false
+}
+
+/**
+ * Callers that trust a degrading read without having established its
+ * permission.
+ *
+ * Must be empty. This is the property Phase 215 should have asserted: it covers
+ * the caller that refuses on an absence *and* the caller that answers on one,
+ * and the second is the dangerous shape — `reviewAnomalies` reporting `ok: true`
+ * and `summarizeInbox` publishing a model-written summary of an inbox neither of
+ * them was allowed to look at.
+ */
+export function unestablishedReads(): string[] {
+  const gaps = new Set<string>()
 
   for (const read of DEGRADING_READS) {
     for (const file of sourceFiles('src/modules')) {
       const src = withoutComments(readFileSync(file, 'utf8'))
 
-      for (const call of src.matchAll(
-        new RegExp(`const\\s+(\\w+)\\s*=\\s*await\\s+${read.symbol}\\s*\\(`, 'g'),
-      )) {
-        const bound = call[1]
+      for (const call of src.matchAll(new RegExp(`(?<![.\\w])${read.symbol}\\s*\\(`, 'g'))) {
         const caller = symbolAround(src, call.index)
+        // Its own declaration is not a caller.
+        if (file === read.file && caller === read.symbol) continue
+
         const body = functionBody(file, caller)
-        if (body === null) continue
+        if (body === null || !body.includes(`${read.symbol}(`)) continue
+        if (establishes(body, read)) continue
 
-        const refuses = new RegExp(
-          `if\\s*\\(\\s*(?:!\\s*${bound}\\b|${bound}\\.length\\s*===?\\s*0)\\s*\\)\\s*\\{?\\s*return[^}]{0,220}?ok:\\s*false`,
-          's',
-        ).test(body)
-        if (!refuses) continue
-
-        if (!read.settledBy) {
-          defects.push(
-            `${KEY(read.file, read.symbol)}: ${file}::${caller} refuses on its absence, ` +
-              'and the read cannot say whether it was empty or withheld',
-          )
-          continue
-        }
-
-        // The named read must be consulted *earlier* in the same function.
-        const settledAt = body.indexOf(read.settledBy)
-        const degradedAt = body.indexOf(read.symbol)
-        if (settledAt < 0 || settledAt > degradedAt) {
-          defects.push(
-            `${KEY(read.file, read.symbol)}: ${file}::${caller} refuses on its absence, ` +
-              `but does not read ${read.settledBy} first`,
-          )
-        }
+        gaps.add(
+          `${file.replace('src/', '')}::${caller} trusts ${read.symbol} without establishing ` +
+            read.permission,
+        )
       }
     }
   }
 
-  return defects
+  return [...gaps].sort()
 }

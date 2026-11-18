@@ -10,9 +10,9 @@ import {
 import { RegistryError } from '@/modules/errors/registry'
 import {
   DEGRADING_READS,
-  absentRefusalDefects,
   absentRefusals,
   degradingRead,
+  unestablishedReads,
 } from '@/modules/source/degrading-reads'
 import {
   OPEN_ACTS,
@@ -161,8 +161,20 @@ describe('the register of reads that may answer empty', () => {
     }
   })
 
-  it('leaves no absence standing in for a refusal', () => {
-    expect(absentRefusalDefects()).toEqual([])
+  /**
+   * Phase 216 replaced this assertion, and the reason belongs here rather than
+   * only in that phase's file.
+   *
+   * What stood here was `absentRefusalDefects()`, which asked whether a caller
+   * that **refuses** on an absence can say why it is absent. It was the weaker
+   * half of the right idea: the dangerous caller is the one that **answers**.
+   * `reviewAnomalies` returned `ok: true` with "Not enough activity yet for a
+   * useful review" to a reader who had been shown nothing, and `summarizeInbox`
+   * published a model-written summary of an inbox it was not allowed to read —
+   * and both passed the assertion that used to be on this line.
+   */
+  it('leaves no caller trusting a degrading read it has not established', () => {
+    expect(unestablishedReads()).toEqual([])
   })
 
   it('holds the four that degrade, and every entry argues for itself', () => {
@@ -194,13 +206,27 @@ describe('the register of reads that may answer empty', () => {
     )
   })
 
-  it('refuses a read nobody has declared', () => {
+  /**
+   * Phase 216 changed the sentence this pins, and the change is the correction
+   * rather than a rewording.
+   *
+   * The refusal used to warn about "an absence standing in for a **refusal**",
+   * which is the same wrong half as the falsifier above: it describes a caller
+   * that turns an empty answer into a no. The defect is an absence standing in
+   * for **data** — `reviewAnomalies` reading `[]` as "nothing unusual" and
+   * saying so with `ok: true`. The refusal now names that, and names the
+   * remedy: declare the degradation, or establish the permission first.
+   */
+  it('refuses a read nobody has declared, and says what goes wrong', () => {
     try {
       degradingRead('src/modules/ai/retrieval.ts', 'somethingNew')
       throw new Error('should have refused')
     } catch (error) {
       expect(error).toBeInstanceOf(RegistryError)
-      expect((error as RegistryError).message).toMatch(/absence standing in for a refusal/)
+      const message = (error as RegistryError).message
+      expect(message).toMatch(/absence standing in for data/i)
+      // Phase 47: a refusal has to name something the reader can act on.
+      expect(message).toMatch(/every caller establishes the permission first/)
     }
   })
 
