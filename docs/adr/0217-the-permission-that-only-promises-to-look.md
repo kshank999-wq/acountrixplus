@@ -308,6 +308,51 @@ wrong five times; what caught it each time was reading the code the scan had jus
 accused, and the fifth was caught by writing the falsifier rather than by taking
 the measurement.
 
+## What the fix broke, and why that is the best result in the phase
+
+Tightening `createVendor` to `crm:manage` turned **Phase 214's falsifier red**:
+
+```
+blindProducers() -> [
+  { role: 'manager', entityType: 'vendor', held: ['crm:manage'], needs: ['accounting:view'] },
+  { role: 'sales',   entityType: 'vendor', held: ['crm:manage'], needs: ['accounting:view'] },
+]
+```
+
+Phase 78's rule: *an audit entry the person who made the correction cannot see
+is not much of an audit trail.* The two roles that could now create a supplier
+could not read the audit events they produced doing it.
+
+And the repair was already written, one entry above, five phases earlier:
+
+```ts
+  /** `accounting:view` since Phase 72, because a customer is a receivables
+   *  record. But `createCustomer` and `updateCustomer` are gated on `crm:manage`
+   *  — held by `manager` and `sales`, neither of whom holds `accounting:view`.
+   *  The two roles that create and correct customers were the two that could not
+   *  read what they had done. */
+  customer: ['accounting:view', 'crm:view'],
+  …
+  vendor: ['accounting:view'],
+```
+
+`vendor` had one permission and looked settled. It was not settled — it was
+**wrong twice in a way that cancelled out.** The gate was too weak to produce
+the blind producer that the one-permission visibility would have exposed. Fix
+either alone and the falsifier fires; fix neither and everything passes. Five
+phases of green on a pair of errors that were each other's cover.
+
+So `vendor: ['accounting:view', 'crm:view']`, and the symmetry `createVendor`'s
+comment has been asserting since Phase 47 is now true on both sides: the two
+contact records of the two halves of the ledger are created under the same
+permission and their histories open the same two ways. Phase 213's pin moves
+from two multi-permission entries to three, with that reason in it.
+
+This is Phase 121's device paying for itself. The falsifier was **seen to
+disagree**, and it disagreed about a change that looked purely like a
+tightening — which is the only kind of change nobody thinks to re-run the tree
+for.
+
 ## The over-collection, measured rather than feared
 
 Phase 214 argued a register beats a transitive scan because a transitive scan

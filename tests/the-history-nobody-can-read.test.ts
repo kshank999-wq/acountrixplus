@@ -364,15 +364,41 @@ describe('a record that can be opened two ways', () => {
   })
 
   /**
-   * Two, and only two. A list where a single permission would do is a way of
-   * not deciding, and the register's whole value is that each entry decided.
+   * Three, and only three. A list where a single permission would do is a way
+   * of not deciding, and the register's whole value is that each entry decided.
+   *
+   * **`vendor` joined them in Phase 217, and why it was late is the point.**
+   * Phase 72 gave `customer` its second permission because `createCustomer` is
+   * gated on `crm:manage`, held by `manager` and `sales`, neither of whom holds
+   * `accounting:view` — so the roles that create customers could not read what
+   * they had done. `vendor` kept one permission and looked settled, because
+   * `createVendor` was gated on `accounting:view`.
+   *
+   * Two errors cancelling out, not a decision. `createVendor`'s own comment
+   * reads "As on the customer side. See `createCustomer` (Phase 47)", and
+   * Phase 217 made the gate honour that claim — at which point
+   * `blindProducers()` named `manager` and `sales` on `entityType: 'vendor'`,
+   * the identical finding Phase 72 had already fixed next door. A falsifier
+   * disagreeing about a change that looked purely like a tightening is Phase
+   * 121 doing the job it was built for.
    */
   it('keeps every other entry down to one permission', () => {
     const multiple = writtenEntityTypes()
       .concat(['customer', 'proposal'])
       .filter((type) => permissionsToRead(type).length > 1)
 
-    expect([...new Set(multiple)].sort()).toEqual(['customer', 'proposal'])
+    expect([...new Set(multiple)].sort()).toEqual(['customer', 'proposal', 'vendor'])
+  })
+
+  /**
+   * And the symmetry is now real rather than claimed: the two sides of the
+   * ledger's contact records open the same two ways, because they are created
+   * under the same permission.
+   */
+  it('opens a supplier’s history the same two ways as a customer’s', () => {
+    expect([...permissionsToRead('vendor')].sort()).toEqual(
+      [...permissionsToRead('customer')].sort(),
+    )
   })
 
   /**

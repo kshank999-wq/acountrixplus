@@ -8075,6 +8075,19 @@ set it finds, which makes `deleteTime` — `accounting:view` in its body, `users
 look mislabelled. `authorityOf` **unions** instead, so the property asks whether *any* authority in the
 act is more than a promise to look. Two questions, two functions.
 
+**What the fix broke is the best result in the phase.** Tightening `createVendor` to `crm:manage`
+turned **Phase 214's falsifier red**: `blindProducers()` named `manager` and `sales` on
+`entityType: 'vendor'`, holding `crm:manage` and needing `accounting:view` — Phase 78's rule, that an
+audit entry the person who made the correction cannot see is not much of an audit trail. The repair
+was already written one entry above in `audit/visibility.ts`, five phases earlier: Phase 72 gave
+`customer` a second permission for exactly this reason, and `vendor` kept one and looked settled. It
+was not settled — it was **wrong twice in a way that cancelled out**, the gate too weak to produce the
+blind producer the one-permission visibility would have exposed. Fix either alone and the falsifier
+fires; fix neither and everything passes. So `vendor: ['accounting:view', 'crm:view']`, and the
+symmetry `createVendor`'s comment has claimed since Phase 47 is finally true on both sides. Phase 121's
+device paying for itself: the falsifier was *seen to disagree*, about a change that looked purely like
+a tightening — the one kind nobody thinks to re-run the tree for.
+
 **Over-collection, measured rather than feared.** The per-file sibling relation alone — an exported
 `ActorContext` function with no gate, in a file whose other exports do gate — collects **98** sites
 across 130 files, nearly all internal helpers reached only from gated callers. Intersected with

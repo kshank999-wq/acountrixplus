@@ -111,7 +111,29 @@ const READABLE_BY: Record<string, readonly Permission[]> = {
   payment: ['accounting:view'],
   refund: ['accounting:view'],
   deposit: ['accounting:view'],
-  vendor: ['accounting:view'],
+
+  /**
+   * The customer entry's twin, and it took until Phase 217 to notice (Phase 72,
+   * Phase 78).
+   *
+   * Phase 72 gave `customer` a second permission because `createCustomer` is
+   * gated on `crm:manage` — held by `manager` and `sales`, neither of whom holds
+   * `accounting:view` — so the two roles that create customers were the two that
+   * could not read what they had done. `vendor` was left with one permission and
+   * looked consistent, because `createVendor` was gated on `accounting:view`.
+   *
+   * It was not consistent; it was **wrong twice in a way that cancelled out**.
+   * `createVendor`'s own comment says "As on the customer side. See
+   * `createCustomer`", and Phase 217 made the gate match that claim. The moment
+   * it did, `blindProducers()` named `manager` and `sales` on `entityType:
+   * 'vendor'` — the identical finding Phase 72 fixed on the customer side, held
+   * off for five phases by a gate that was too weak to trigger it.
+   *
+   * Phase 121's device earning its keep: the falsifier was seen to disagree, and
+   * it disagreed about a change that looked purely like a tightening.
+   */
+  vendor: ['accounting:view', 'crm:view'],
+
   journal_entry: ['accounting:view'],
   chart_account: ['accounting:view'],
   financial_account: ['accounting:view'],
