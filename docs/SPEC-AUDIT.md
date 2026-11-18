@@ -583,6 +583,31 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §14 — the gate that is only sometimes a gate (Phase 219)
+
+ADR 0218's nominated register would be **236** entries, of which 230 would say the same thing, and the
+107 act references it could not place are mostly guarded by forms lexical enclosure cannot express —
+a control mounted behind a flag, or a handler whose button is guarded. React separates the call from
+the control, so that relation measures coding style.
+
+The property that replaced it reads no spans: **if even all of a component's flags together admit
+somebody the act refuses, no arrangement of them guards that control.** Over all 236 (page, component,
+act) pairs it returns **zero** once gates are read with `willDemand` — the checks on every path, as
+against `mayDemand`'s checks on some path. They differ for **27 of the 329** acts; **5** have no
+unconditional gate and are declared in `CONDITIONAL_GATES`.
+
+**Fixed:** `convertWonOpportunity` raised the billing schedule and deposit invoice **outside** the
+transaction that creates the customer and project, so a salesperson converting a won opportunity got
+both committed and then a `PermissionError` — and *"This opportunity was already converted."* on the
+retry. The billing half now degrades and reports what it did not do.
+
+**Corrected:** ADR 0218 attributed `logTime`'s conditional `users:manage` to a branch inside
+`loadOwnEditable`. It is `logTime`'s own braceless one-line `if`; `loadOwnEditable` is not on its path.
+
+**Still open:** which argument selects each computed gate, and whether that argument is a user's
+choice or a property of the record — ADR 0219 nominates it. A gate computed from the record is a fact;
+a gate computed from a checkbox is a question the screen asked and did not check the answer to.
+
 ### §14, §7, §8 — the gate a scan could not read (Phase 218)
 
 `enclosing.ts` is the single reader of *where does a top-level function begin*, and it had two
