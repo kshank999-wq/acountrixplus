@@ -42,10 +42,23 @@ the subject rather than confirming it, and the first where the nomination's own
 Two of them cannot occur here and one the nomination had no name for.
 
 - **"Gated upstream in a server action" is not a thing this codebase does.**
-  `src/app` holds eleven `requirePermission` calls in three files, because the
-  architecture puts business logic and its gates in `src/modules`. The category
-  was a guess about a codebase this is not.
-- **"Run from a worker" is empty.** The sweeps that look like background work —
+  `src/app` holds **eight** `requirePermission` calls in three files, because
+  the architecture puts business logic and its gates in `src/modules`. The
+  category was a guess about a codebase this is not.
+
+  > **Corrected by Phase 217.** This said *eleven*, which is the number of
+  > occurrences of the word rather than of calls: `6/2/3` across
+  > `operations.ts`, `security.ts` and `inventory.ts` includes three
+  > `import { requirePermission } …` lines, and the calls are `5/1/2`. The
+  > figure was repeated here, in ADR 0216, twice in `README.md` and in
+  > `SPEC-AUDIT.md` before anybody counted it again — which is the hazard of a
+  > number that supports the conclusion it is quoted for.
+- **"Run from a worker" is empty.** *(Also corrected by Phase 217: it is not.
+  `worker/handlers/receivables.ts` calls `runChases` and `runStatements` with a
+  `systemActor`, so the category has two members. It changes nothing about the
+  gate question — `systemActor`'s role is `owner`, deliberately, so module gates
+  pass under scheduled work — but the category was not empty.)* The sweeps that
+  look like background work —
   `importTransactions`, `recordRevisions`, `applyRulesToNewTransactions` — are
   reached from `syncConnection` under `bookkeeping:import`. There is no job
   runner among the forty-four.

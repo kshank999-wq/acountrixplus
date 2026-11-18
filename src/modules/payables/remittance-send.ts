@@ -163,7 +163,12 @@ export async function sendRemittance(
   paymentId: string,
   opts: { to?: string | null } = {},
 ): Promise<RemittanceSendResult> {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217, and the payables mirror of `sendStatement`. This was
+    `accounting:view` and it emails a vendor, in the company's name, to say what
+    was paid. Paying is `accounting:journal`; saying so is the same act.
+  */
+  requirePermission(ctx, 'accounting:journal')
 
   const row = await loadPayment(ctx, paymentId)
 
@@ -261,7 +266,11 @@ export async function remittanceLinkFor(
   ctx: ActorContext,
   paymentId: string,
 ): Promise<string> {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217, as `statementLinkFor`: this mints and stores a share token, which
+    publishes a payment to whoever holds the URL.
+  */
+  requirePermission(ctx, 'accounting:journal')
 
   const [payment] = await db
     .select({ id: payments.id, kind: payments.kind, shareToken: payments.shareToken })

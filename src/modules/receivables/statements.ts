@@ -539,7 +539,16 @@ export async function saveStatement(
     periodStart?: string
   },
 ) {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217. This was `accounting:view`, and it writes a statement row.
+    `readonly` holds `accounting:view` and holds nothing but view permissions,
+    so the one role defined as unable to change anything could save statements.
+
+    `accounting:journal` is what `updateStatementPolicy` requires to change when
+    statements go out, in this same module. Needing less to produce one than to
+    schedule one was the defect.
+  */
+  requirePermission(ctx, 'accounting:journal')
 
   const statement = await buildStatement(ctx, input)
 

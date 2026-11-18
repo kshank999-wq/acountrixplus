@@ -148,7 +148,13 @@ export async function sendStatement(
   statementId: string,
   opts: { to?: string | null } = {},
 ): Promise<StatementSendResult> {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217. This was `accounting:view` and it emails a customer a demand for
+    money. `sendInvoice` settled the principle for the other half of the same
+    job: "The same permission that raises one. Somebody trusted to create a
+    debt is trusted to ask for it." A statement asks for every open one at once.
+  */
+  requirePermission(ctx, 'accounting:journal')
 
   const row = await loadStatement(ctx, statementId)
   const figures = (row.statement.figures ?? {}) as FrozenFigures
@@ -247,7 +253,12 @@ export async function statementLinkFor(
   ctx: ActorContext,
   statementId: string,
 ): Promise<string> {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217. Reading a statement is a `accounting:view` act and this is not
+    reading one: absent a token it mints one and writes it, which publishes the
+    statement to anybody holding the URL. It goes with the send.
+  */
+  requirePermission(ctx, 'accounting:journal')
 
   const [statement] = await db
     .select({ id: customerStatements.id, shareToken: customerStatements.shareToken })

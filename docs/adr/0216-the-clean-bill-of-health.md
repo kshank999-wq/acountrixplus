@@ -144,6 +144,15 @@ because an action is an HTTP endpoint reachable without the page. There are
 **70** such page-level guards in `src/app`, against eleven `requirePermission`
 calls in three action files.
 
+> **Both figures corrected by Phase 217**, which measured them: there are **71**
+> guards — one is in `api/pdf/version/[id]/route.ts`, a route handler rather than
+> a page, and `payroll/workpapers/page.tsx` has two — and **8**
+> `requirePermission` calls, the eleven being occurrences of the word including
+> three `import` lines. Phase 217 also found the relation this paragraph proposes
+> to be the wrong one: a page guard says who may look at a screen, so gating
+> `runChases` on the `accounting:view` its page guards would have satisfied the
+> property and still let a read-only user send dunning letters.
+
 Each of those 70 guards a screen. The question is what the screen's *actions*
 require. Where the module function behind an action gates on the same permission,
 the page guard is a courtesy and all is well. Where it does not, the page guard

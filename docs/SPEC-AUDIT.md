@@ -583,6 +583,66 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §14, §13, §19 — the permission that only promises to look (Phase 217)
+
+§14 claims a permission model. Every audit of it so far has asked whether the
+right people are refused. This phase asks whether a gate names the **right**
+permission, and the answer changes what §14 can be said to guarantee.
+
+**What an audit of §14 had never checked.** Three consecutive phases asked
+increasingly sharp questions of a gate — is there one, can its refusal say why,
+did the caller establish it — and this function answers all three yes:
+
+```ts
+export async function sendStatement(ctx: ActorContext, statementId: string) {
+  requirePermission(ctx, 'accounting:view')
+  …  // emails the statement to the customer
+}
+```
+
+`readonly` holds `accounting:view`. So does `saveStatement`'s gate, which is why
+a read-only user's statement run did not fail part-way — **it completed**, saving
+and emailing every statement due to every customer. For §13's dunning and
+statements this is the most serious finding the audit has recorded: not a
+disclosure and not a missing check, but the company's customers receiving
+letters authorised by the one role defined as changing nothing.
+
+The property that says so needs nothing new. Five permissions are built from the
+word *view* and one role holds nothing else, so **a permission a view-only role
+holds must not be the only gate on an act that writes or sends** — with
+view-only computed from `ROLE_PERMISSIONS` rather than listed, so the premise
+fails when the role table changes. Ten acts match; seven are defects, including
+`createVendor`, whose own comment claims parity with `createCustomer` while
+requiring `accounting:view` where `createCustomer` requires `crm:manage`.
+
+**For §19 the finding is `readinessFor`**, gated at `reports:view` through
+`assemble` while `exportForAccountant` and `exportHistory` require
+`reports:financial`. It hands back the whole accountant package and an exception
+report on the books, and `readonly` holds `reports:view`. §19's limitation
+language is about what an export omits; it had nothing to say about who may
+assemble one.
+
+**A page guard is not a specification.** ADR 0216 proposed auditing each action
+against the guard on the page that offers it. That reading would have passed
+three of these defects at a permission far too weak, because a page guard decides
+who may look at a screen. The audit lesson generalises: §14's gates can only be
+checked against what the act *does*, and the only machine-readable statement of
+that in this codebase is the role table's own division between looking and
+changing.
+
+**Two corrections to this file.** The §14 record said `src/app` holds eleven
+`requirePermission` calls; it holds **eight**, the eleven being occurrences of
+the word including three `import` lines. And ADR 0214's "run from a worker is
+empty" is not empty: `worker/handlers/receivables.ts` reaches both sweeps under
+a `systemActor`, whose role is `owner` deliberately — which is what made gating
+them safe.
+
+**And the instrument.** This phase's scan was wrong five times, each time in the
+direction of accusing code that was correctly gated, and a draft of ADR 0217
+named three such acts as defects. What caught each one was reading the code the
+scan had just accused. An audit that reports a scan's output has to say which
+scan, and this one now has its five mistakes pinned as test cases.
+
 ### §11, §14 — the clean bill of health nobody checked (Phase 216)
 
 §11 claims an AI assistant and §14 claims a permission model. Phase 215 audited
@@ -724,8 +784,10 @@ Two further things belong on the record for §14.
 
 The nomination's four categories were wrong in a way that is itself a finding
 about the architecture. **"Gated upstream in a server action" cannot happen
-here** — `src/app` holds eleven `requirePermission` calls in three files, because
-business logic and its gates live in `src/modules`. So an ungated module function
+here** — `src/app` holds eight `requirePermission` calls in three files, because
+business logic and its gates live in `src/modules`. (Eleven until Phase 217,
+which counted calls rather than occurrences of the word; three of the eleven were
+`import` lines. The smaller number is the stronger evidence for the same claim.) So an ungated module function
 reached from an action is ungated, full stop, and the comfortable reading was
 never available. **"Run from a worker" is empty.** And §14's permission model is
 not the only authority model in the system: the practice side runs on

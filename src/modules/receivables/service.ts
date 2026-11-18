@@ -362,7 +362,15 @@ export async function createVendor(
     allowNamesake?: boolean
   },
 ) {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217, and the comment four lines up is the argument. It says "as on the
+    customer side", and `createCustomer` — sixty lines above this, in this file —
+    requires `crm:manage`. This required `accounting:view`, which `readonly`
+    holds and `crm:manage` is not, so the gap between the comment and the gate
+    was exactly the gap between being unable to create a customer and being able
+    to create a supplier.
+  */
+  requirePermission(ctx, 'crm:manage')
 
   await refuseNamesake(ctx, input.name, 'supplier', input.allowNamesake)
 

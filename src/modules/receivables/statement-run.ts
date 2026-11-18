@@ -325,6 +325,21 @@ export async function runStatements(
   ctx: ActorContext,
   opts: { asOf?: string } = {},
 ): Promise<StatementRunResult> {
+  /*
+    Phase 217. This had no gate of its own, and unlike `runChases` its callees
+    did not save it: `saveStatement` and `sendStatement` both settled for
+    `accounting:view` until this phase, so a read-only user's run did not fail
+    part-way — it completed, saving and sending every statement due.
+
+    In this one file: `updateStatementPolicy` needs `accounting:journal` to
+    change when statements go out, `recentStatementSends` needs
+    `accounting:view` to read the log of what was sent, and this needed nothing
+    to do the whole run. A permission to see what was sent and none to send it.
+
+    At the top, before the policy read, for the same reason as `runChases`.
+  */
+  requirePermission(ctx, 'accounting:journal')
+
   const companyId = ctx.companyId
   const today = opts.asOf ?? new Date().toISOString().slice(0, 10)
 

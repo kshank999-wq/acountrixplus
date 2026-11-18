@@ -58,6 +58,18 @@ export async function readinessFor(
   ctx: ActorContext,
   request: ExportRequest,
 ): Promise<{ assessment: Assessment; report: string; pkg: AccountantPackage }> {
+  /*
+    Phase 217. This was not ungated — `assemble` requires `reports:view` — and
+    that is the mislabelled kind rather than the missing kind: `readonly` holds
+    `reports:view`, and this hands back the whole accountant package and an
+    exception report on the books.
+
+    `exportForAccountant` and `exportHistory`, in this file, both require
+    `reports:financial`. You needed that to export the books and that to see
+    that an export happened, and a view permission to assemble them.
+  */
+  requirePermission(ctx, 'reports:financial')
+
   const allowed = mayExportTo(request.destinationKey)
   if (!allowed.ok) throw new Refusal(allowed.why)
 

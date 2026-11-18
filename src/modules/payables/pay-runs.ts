@@ -389,7 +389,11 @@ export async function listPayRuns(ctx: ActorContext, limit = 12): Promise<PayRun
  * existing link already says the payment was reversed.
  */
 export async function adviseRun(ctx: ActorContext, payRunId: string): Promise<AdviseOutcome> {
-  requirePermission(ctx, 'accounting:view')
+  /*
+    Phase 217. `sendRemittance` advises one vendor; this advises every vendor on
+    a pay run, so it cannot need less than the single act it repeats.
+  */
+  requirePermission(ctx, 'accounting:journal')
 
   const [run] = await db
     .select({ id: payRuns.id })

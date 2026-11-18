@@ -71,6 +71,17 @@ export async function installDefaultCostCodes(
   ctx: ActorContext,
   exec: Executor = db,
 ): Promise<number> {
+  /*
+    Phase 217, and the only act in `src/app/actions` with no permission
+    anywhere in its chain that is neither a self-act, a token-bearing act, a
+    bootstrap act, nor on the practice side. It creates cost-code rows.
+
+    `createCostCode` and `updateCostCode`, below in this file, both require
+    `jobs:manage`. This created several at once and required nothing, while the
+    page offering it guards `jobs:view` — which `readonly` holds.
+  */
+  requirePermission(ctx, 'jobs:manage')
+
   const existing = await exec
     .select({ code: costCodes.code })
     .from(costCodes)

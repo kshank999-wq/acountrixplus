@@ -3,9 +3,19 @@
 **Status:** accepted · **Phase:** 217 · **Spec:** §14, §13, §19
 
 > **Written before its code**, like ADRs 0215 and 0216 and for the same reason:
-> the full eight-shard run for Phase 216 is going, and writing to `src/` or
+> the full eight-shard run for Phase 216 was going, and writing to `src/` or
 > `tests/` while it runs contaminates it. The measurement below was taken
-> against `d450398`. The implementation is staged and lands next.
+> against `d450398`, and the code landed afterwards.
+>
+> Writing it first is what made the five scan errors recorded below visible as
+> errors: three of them are named as defects in a draft of this document, and
+> the draft is what I was reading when I went back to the code that the scan had
+> accused. It also cost something — the Phase 216 run was lost to a container
+> restart at shard 3 of 8, so this phase's run covers both.
+>
+> One correction the code made to the measurement: a test here asserted
+> `establishedBy` where it meant `authorityOf`, which is the very distinction
+> the two functions exist to hold apart. That is in the record below too.
 
 ## The nomination was the wrong question, and measuring it is what showed that
 

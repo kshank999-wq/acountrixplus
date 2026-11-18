@@ -2,7 +2,7 @@ import { and, eq, gt, inArray, sql } from 'drizzle-orm'
 import { db } from '@/db'
 import { customers, invoices, payments, paymentApplications } from '@/db/schema'
 import { logUnexpected } from '@/modules/errors'
-import type { ActorContext } from '@/modules/tenancy/context'
+import { requirePermission, type ActorContext } from '@/modules/tenancy/context'
 import { getChasePolicy, type ChaseSettings } from './chase-policy'
 import {
   planChases,
@@ -267,6 +267,27 @@ export async function runChases(
   ctx: ActorContext,
   opts: { asOf?: string } = {},
 ): Promise<ChaseRunResult> {
+  /*
+    Phase 217, and the position of this line is the whole point.
+
+    `sendInvoice` already requires `accounting:journal`, so this sweep was not
+    ungated — but the gate was reached inside the loop, through a catch written
+    for a different failure: "one bad address is not a reason to leave the rest
+    of the day's chases unsent." That is right about an address and wrong about a
+    PermissionError. A read-only user pressing *run now* got `0 sent, 12 could
+    not be sent` and twelve notes reading "Missing required permission:
+    accounting:journal" — Phase 47's defect, since "could not be sent" tells you
+    to go and check the addresses.
+
+    Worse, the two early returns below — policy off, nothing due — return before
+    the loop, so on most days no gate was reached at all and a reader was told
+    "Nothing was due today." Phase 216's finding one module over: nothing due is
+    an answer only if you were allowed to look.
+
+    One refusal, before anything is read.
+  */
+  requirePermission(ctx, 'accounting:journal')
+
   const companyId = ctx.companyId
   const preview = await previewChases(companyId, opts.asOf)
 

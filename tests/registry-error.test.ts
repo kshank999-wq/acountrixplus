@@ -366,9 +366,25 @@ describe('every registry refuses the same way', () => {
     // `suggestCategory` came to tell a salesperson that a transaction they may
     // not see does not exist.
     //
-    // Seventh and eighth times counted deliberately rather than after a red
-    // run, in two consecutive phases. The habit the first six bought is holding.
-    expect(thrown.length).toBe(47)
+    // **Forty-eight since Phase 217 and `OPEN_ENDPOINTS`**, the server actions
+    // that establish no permission at all. It earns the throw because of what an
+    // action is: an HTTP endpoint, with no page above it that is a gate. A
+    // lookup answering `undefined` would mean a newly written action inherits
+    // the excuse that thirty-eight argued-for ones earned — and the excuse here
+    // is not a permission but an authority that stands in for one: a bearer
+    // token, the caller's own identity, the practice side, or nothing at all
+    // because the act reads nothing.
+    //
+    // `installDefaultCostCodes` is why this is not hypothetical. It created
+    // cost-code rows with no permission anywhere in its chain, while
+    // `createCostCode` beside it required `jobs:manage` and the page offering it
+    // guarded `jobs:view` — which `readonly` holds. Nothing refused, because
+    // nothing had been asked to.
+    //
+    // Seventh, eighth and ninth times counted deliberately rather than after a
+    // red run, in three consecutive phases. The habit the first six bought is
+    // holding.
+    expect(thrown.length).toBe(48)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
