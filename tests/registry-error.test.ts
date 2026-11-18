@@ -381,10 +381,17 @@ describe('every registry refuses the same way', () => {
     // guarded `jobs:view` — which `readonly` holds. Nothing refused, because
     // nothing had been asked to.
     //
-    // Seventh, eighth and ninth times counted deliberately rather than after a
-    // red run, in three consecutive phases. The habit the first six bought is
-    // holding.
-    expect(thrown.length).toBe(48)
+    // Seventh, eighth, ninth and tenth times counted deliberately rather than
+    // after a red run, in four consecutive phases. The habit the first six
+    // bought is holding.
+    //
+    // The tenth is `CONDITIONAL_GATES` (Phase 219): an act whose only
+    // permission check sits on a branch reads, to anything that looks at the
+    // source, exactly like an act with no check at all. Reading it as ungated
+    // is ADR 0134's false positive; reading it as gated is the invented answer
+    // Phase 218 removed. So the five that are like that are declared, and the
+    // sixth refuses.
+    expect(thrown.length).toBe(49)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {

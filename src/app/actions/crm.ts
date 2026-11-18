@@ -455,7 +455,18 @@ export async function convertAction(
     if (result.sovStageCount > 0) made.push(`a ${result.sovStageCount}-stage billing schedule`)
     if (result.depositInvoiceId) made.push('an invoice for the deposit')
 
-    return `Created ${made.slice(0, -1).join(', ')} and ${made[made.length - 1]}.`
+    const created = `Created ${made.slice(0, -1).join(', ')} and ${made[made.length - 1]}.`
+
+    // Phase 219, Phase 216's rule on a write: an omission that reads as nothing
+    // having been omitted is the defect. Phase 47 for the second sentence — it
+    // names the permission and the screen that can finish the job.
+    if (!result.billingWithheld) return created
+
+    return (
+      `${created} The billing schedule and the deposit invoice were not raised: that needs ` +
+      'the ledger permission (accounting:journal) and the one that manages jobs (jobs:manage). ' +
+      'Somebody who has them can raise the first stage from the proposal.'
+    )
   })
 }
 

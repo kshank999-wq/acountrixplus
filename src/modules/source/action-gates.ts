@@ -3,7 +3,12 @@ import { dirname, join, normalize } from 'node:path'
 import { RegistryError } from '@/modules/errors/registry'
 import { ROLE_NAMES, ROLE_PERMISSIONS, type Permission, type Role } from '@/modules/permissions'
 import { functionBody, permissionChecksIn, resolveComputedGate } from './gate-forms'
-import { declaresFunction, parameterNames, withoutComments } from './enclosing'
+import {
+  conditionalAt,
+  declaresFunction,
+  parameterNames,
+  withoutComments,
+} from './enclosing'
 import { sourceFiles } from './isolation-scan'
 
 /**
@@ -486,11 +491,49 @@ function clausesIn(body: string, bound: Iterable<string> = []): Permission[][] {
  * it guards is the thing that closes it, and this phase nominates it rather than
  * pretending the scan is that.
  */
-export function demandedBy(
+export function mayDemand(
   file: string,
   symbol: string,
   depth = 4,
   seen: ReadonlySet<string> = new Set(),
+): Permission[][] {
+  return walk(file, symbol, 'may', depth, seen)
+}
+
+/**
+ * Every permission an act demands of **every** caller: the checks on every path.
+ *
+ * `mayDemand` answers *what could this act come to need*; this answers *what
+ * does it need to work at all*, which is the question a screen has. Phase 219
+ * split them because one function was answering both and the difference is 27 of
+ * the 329 acts.
+ *
+ * `convertWonOpportunity` is the case: it gates on `crm:manage` at the top and
+ * reaches `jobs:manage` and `accounting:journal` only inside
+ * `if (opts.createInvoice && winningProposal) { if (scheduled.length > 0) {`.
+ * Read as unconditional, it says a salesperson cannot convert a won deal, which
+ * is false in general — and true from `/crm`, because that screen calls
+ * `convertAction(id, true)`. **Conditionality belongs to the call**, so neither
+ * answer stands alone and a reader has to be given both.
+ */
+export function willDemand(
+  file: string,
+  symbol: string,
+  depth = 4,
+  seen: ReadonlySet<string> = new Set(),
+): Permission[][] {
+  return walk(file, symbol, 'will', depth, seen)
+}
+
+/** Kept as the name Phase 218 gave it; it always answered the `may` question. */
+export const demandedBy = mayDemand
+
+function walk(
+  file: string,
+  symbol: string,
+  mode: 'will' | 'may',
+  depth: number,
+  seen: ReadonlySet<string>,
 ): Permission[][] {
   const key = KEY(file, symbol)
   if (seen.has(key) || depth < 0) return []
@@ -501,28 +544,51 @@ export function demandedBy(
   if (body === null) return []
 
   const src = readFileSync(file, 'utf8')
-  const clauses = clausesIn(body, parameterNames(src, symbol))
+  const bare = withoutComments(body)
+  const clauses =
+    mode === 'may'
+      ? clausesIn(body, parameterNames(src, symbol))
+      : unconditionalClausesIn(bare, body, parameterNames(src, symbol))
   if (depth === 0) return dedupe(clauses)
 
-  const bare = withoutComments(body)
   const imports = importsOf(file)
 
   for (const call of bare.matchAll(/(?<![.\w])(\w+)\s*\(/g)) {
     const name = call[1]
     if (refusalSwallowed(bare, call.index + call[0].length - 1)) continue
+    if (mode === 'will' && conditionalAt(bare, call.index)) continue
 
     if (name !== symbol && declaresFunction(src, name)) {
-      clauses.push(...demandedBy(file, name, depth - 1, visited))
+      clauses.push(...walk(file, name, mode, depth - 1, visited))
     }
 
     const base = imports.get(name)
     if (!base) continue
     const target = moduleFile(base)
     if (!target) continue
-    clauses.push(...demandedBy(target, name, depth - 1, visited))
+    clauses.push(...walk(target, name, mode, depth - 1, visited))
   }
 
   return dedupe(clauses)
+}
+
+/** The clauses of a body that are not themselves inside a branch. */
+function unconditionalClausesIn(
+  bare: string,
+  body: string,
+  bound: Iterable<string>,
+): Permission[][] {
+  const checks = permissionChecksIn(body, bound)
+  const clauses: Permission[][] = []
+  for (const literal of checks.literal) {
+    const at = bare.indexOf(`'${literal}'`)
+    if (at < 0 || !conditionalAt(bare, at)) clauses.push([literal])
+  }
+  for (const expression of checks.computed) {
+    const at = bare.indexOf(expression.slice(0, 24))
+    if (at < 0 || !conditionalAt(bare, at)) clauses.push([...resolveComputedGate(expression)])
+  }
+  return clauses
 }
 
 const dedupe = (clauses: Permission[][]): Permission[][] => {
@@ -539,6 +605,113 @@ export function rolesSatisfying(clauses: Permission[][]): Role[] {
   return ROLE_NAMES.filter((role) =>
     clauses.every((clause) => clause.some((p) => ROLE_PERMISSIONS[role].includes(p))),
   )
+}
+
+/**
+ * Acts whose **only** permission check sits on a branch.
+ *
+ * `willDemand` returns nothing for these, and nothing is the answer that reads
+ * as "ungated" — ADR 0134's direction, and the one this module was built to stop
+ * taking. So they are declared, with the reason the gate is conditional, and
+ * `conditionalGate` refuses an act nobody has placed: the sixth one stops the
+ * suite rather than being read as open.
+ *
+ * Measured, not sampled: 329 server actions, 43 with no unconditional gate, of
+ * which 38 are declared in `OPEN_ENDPOINTS` as needing none at all. These five
+ * are the remainder.
+ *
+ * The first reading of "conditional" put **seventeen** acts here, including
+ * `postEntryAction`, which posts a journal entry behind an unconditional
+ * `requirePermission(ctx, 'accounting:journal')`. That reading scanned back for
+ * a ternary with `[^;]*$` in a codebase that writes no semicolons — see
+ * `statementAt`. A register is only honest if the measurement behind it is, and
+ * seventeen would have been a register of a scan error.
+ */
+export type ConditionalGate = { file: string; action: string; why: string }
+
+export const CONDITIONAL_GATES: readonly ConditionalGate[] = [
+  {
+    file: 'history',
+    action: 'recordHistoryAction',
+    why:
+      'The check *is* the branch. `historyFor` refuses with ' +
+      '`if (!permissionsToRead(type).some((p) => can(ctx, p))) requirePermission(ctx, …)` ' +
+      'because a record with two doors is open to whoever holds either key ' +
+      '(Phase 213), and the refusal names the primary so it is actionable ' +
+      '(Phase 47). Written as a plain gate it would have to name the strictest ' +
+      'of forty record kinds.',
+  },
+  {
+    file: 'importing',
+    action: 'planImportAction',
+    why:
+      'The gate follows the kind of import, so there are five of them, one per ' +
+      'branch of `buildPlan` — a statement import takes `bookkeeping:import`, a ' +
+      'journal import takes `accounting:journal`. Phase 217 found this chain ' +
+      'when its own scan read only a function’s own body and called the act ' +
+      'ungated; it is gated five times and never once unconditionally.',
+  },
+  {
+    file: 'importing',
+    action: 'commitImportAction',
+    why:
+      'The committing half of the same plan, gated the same five ways. The ' +
+      'permission has to follow what the import will write, which is the same ' +
+      'argument `GATE_RESOLVERS` makes for `revertImport`: the gate follows the ' +
+      'damage, so it cannot be a literal and it cannot be unconditional.',
+  },
+  {
+    file: 'practice',
+    action: 'respondToEngagementAction',
+    why:
+      'Two sides, two authorities (Phase 214’s tenth gate form). The practice ' +
+      'side is authorised by `requirePracticeOwner`, which is not a `Permission` ' +
+      'at all, and the client side by `company:manage` on its own branch. An ' +
+      'unconditional gate here would be a gate on whichever side happened to be ' +
+      'written first.',
+  },
+  {
+    file: 'practice',
+    action: 'endEngagementAction',
+    why:
+      'The same pair on the way out, and the one ADR 0214 measured: it gates ' +
+      '`company:manage` for the client and `requirePracticeOwner` for the ' +
+      'practice, which is why `blindProducers` could not speak about it.',
+  },
+]
+
+/** The declared reason an act’s only gate is conditional, or a refusal. */
+export function conditionalGate(file: string, action: string): ConditionalGate {
+  const found = CONDITIONAL_GATES.find((g) => g.file === file && g.action === action)
+  if (found) return found
+
+  throw new RegistryError({
+    registry: 'CONDITIONAL_GATES',
+    key: `${file}::${action}`,
+    message:
+      `No reason is declared for \`${action}\` having no gate on every path. An act whose ` +
+      'only permission check sits on a branch is indistinguishable, to anything that reads ' +
+      'the source, from an act with no permission check at all — and reading it as ungated ' +
+      'is the false positive ADR 0134 is about, while reading it as gated is the invented ' +
+      'answer Phase 218 removed. Say which branch carries the gate and why it cannot be ' +
+      'unconditional, or move the check to the top of the act.',
+  })
+}
+
+/** Acts with no unconditional gate that no entry here explains. */
+export function unexplainedConditionalGates(): string[] {
+  const open = new Set(OPEN_ENDPOINTS.map((e) => `${e.file}::${e.action}`))
+  const found: string[] = []
+
+  for (const key of serverActions()) {
+    const [file, action] = key.split('::')
+    if (open.has(key)) continue
+    if (willDemand(`src/app/actions/${file}.ts`, action).length > 0) continue
+    if (CONDITIONAL_GATES.some((g) => g.file === file && g.action === action)) continue
+    found.push(key)
+  }
+
+  return found.sort()
 }
 
 /** Every exported server action, as `file::action`. */

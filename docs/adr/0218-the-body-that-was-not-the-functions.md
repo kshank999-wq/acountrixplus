@@ -228,6 +228,16 @@ read off the source exactly, so it is; the **conditional** half cannot, and
 branch is still over-collected, and `logTimeAction` is pinned as exactly that so
 the next phase does not read it as a defect.
 
+> **Corrected by Phase 219**, which measured it. The conclusion here is right —
+> `logTime`'s `users:manage` is conditional — and the mechanism named is wrong.
+> `loadOwnEditable` is not on `logTime`'s path at all; the check is `logTime`'s
+> own one-line `if (userId !== ctx.userId) requirePermission(ctx, 'users:manage')`.
+> It was invisible to a reader that finds enclosing blocks by counting unclosed
+> braces, because a braceless `if` opens none. Phase 219 also found that the
+> conditionality reader's statement boundary, `[^;]*$`, is worthless in a
+> codebase that writes no semicolons: it put seventeen acts in the
+> conditional-only bucket, `postEntryAction` among them.
+
 ## Eight scan errors, and what each cost
 
 This phase's own scan was wrong eight times. On the record, because the pattern

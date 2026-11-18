@@ -357,12 +357,17 @@ describe('what an act will demand, which is a third question', () => {
   })
 
   /**
-   * And the half that cannot be read, pinned as a known over-collection so the
-   * next phase does not mistake it for a defect. `logTime` reaches
-   * `loadOwnEditable`, which requires `users:manage`, on a branch — so
-   * `demandedBy` reports it of everybody.
+   * And the half that could not be read when this was written, which Phase 219
+   * read: `demandedBy` is the `may` question, so a gate on a branch belongs in
+   * its answer and this assertion stands.
+   *
+   * The sentence here used to say `logTime` reaches `users:manage` *"via
+   * `loadOwnEditable`, on a branch"*. The conclusion was right and the
+   * mechanism was wrong — `loadOwnEditable` is not on `logTime`'s path at all,
+   * and the check is `logTime`'s own one-line `if`. Corrected here rather than
+   * deleted, because a register that edits its own history teaches nothing.
    */
-  it('still over-collects a gate that sits on a branch, and says so', () => {
+  it('reports a gate that sits on a branch, which is the may question', () => {
     const demanded = demandedBy('src/app/actions/timebilling.ts', 'logTimeAction')
 
     expect(demanded.flat()).toContain('users:manage')

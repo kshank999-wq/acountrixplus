@@ -177,6 +177,89 @@ export function enclosingSpan(src: string, index: number): { from: number; to: n
 }
 
 /**
+ * The logical line containing `at`: continuation lines folded in.
+ *
+ * ## Why not `[^;]*$` (Phase 219)
+ *
+ * The first reading of "the statement containing this offset" scanned back for
+ * a ternary with `/\?[^;]*$/`. **This codebase writes no semicolons**, so the
+ * scan-back never terminated: every offset after the first `?` anywhere in a
+ * function read as being inside a ternary, and seventeen acts landed in the
+ * "gate is conditional" bucket — `postEntryAction` among them, which posts a
+ * journal entry behind `requirePermission(ctx, 'accounting:journal')` at the
+ * top of `postManualEntry`.
+ *
+ * A statement is a logical line instead: lines are folded in while the previous
+ * one ends on an operator or an open bracket, which is how this codebase breaks
+ * a long expression. 17 became 5.
+ */
+export function statementAt(src: string, at: number): string {
+  let start = src.lastIndexOf('\n', at) + 1
+  for (;;) {
+    const previousEnd = start - 1
+    if (previousEnd <= 0) break
+    const previousStart = src.lastIndexOf('\n', previousEnd - 1) + 1
+    const previous = src.slice(previousStart, previousEnd).trimEnd()
+    if (!/[?:&|=+,(.[{]$|=>$|\breturn$|\bawait$/.test(previous)) break
+    start = previousStart
+  }
+  return src.slice(start, at)
+}
+
+/**
+ * Is this offset inside a conditional construct of the body it sits in?
+ *
+ * The question Phase 219 needed and nothing could answer: a permission check or
+ * a gated call that only some callers reach is not a gate on the act. Readable
+ * from the source exactly, the way a swallowed refusal is — and the reason this
+ * lives here rather than in the scan is that it is a fact about the *shape of a
+ * function*, which is what this module is the one reader of.
+ *
+ * `src` must be a function body, blanked of comments, beginning at its own `{`.
+ *
+ * Four shapes, and the last two are the ones that caught this out:
+ *
+ * 1. a block opened by `if`, `else`, `catch`, `for`, `while` or `switch`;
+ * 2. a ternary, within the statement;
+ * 3. a short-circuit `&&` or `||` immediately before the call;
+ * 4. a **braceless** single-line `if`, which opens no block for rule 1 to see:
+ *    `if (userId !== ctx.userId) requirePermission(ctx, 'users:manage')`.
+ *
+ * ADR 0218 attributed that fourth case to a branch inside `loadOwnEditable`.
+ * The conclusion was right and the mechanism was wrong: `loadOwnEditable` is
+ * not on `logTime`'s path at all, and the check is `logTime`'s own one-line
+ * `if`. A reader that cannot see a braceless `if` reports the gate as
+ * unconditional, which is the direction that invents defects.
+ */
+export function conditionalAt(src: string, at: number): boolean {
+  const opens: number[] = []
+  for (let i = 0; i < at; i += 1) {
+    if (src[i] === '{') opens.push(i)
+    else if (src[i] === '}') opens.pop()
+  }
+  // opens[0] is the function's own body brace; anything deeper is a block, and
+  // the words before it say whether that block is conditional. A bare block, a
+  // `try`, and a transaction callback are not branches.
+  for (const open of opens.slice(1)) {
+    if (/\b(if|else|catch|for|while|switch)\b[^;{]*$/.test(src.slice(Math.max(0, open - 160), open))) {
+      return true
+    }
+  }
+
+  const statement = statementAt(src, at)
+  if (/\b(?:if|else if)\s*\(/.test(statement)) return true
+  if (/\?(?!\.)[^?]*$/.test(statement)) return true
+  // Anywhere after a short-circuit in the same statement, not just immediately
+  // after it: the offset handed in is the permission's, which in
+  // `enabled && can(ctx, 'tax:view')` sits past `can(ctx, `. Deliberately loose,
+  // because over-reading conditionality makes `willDemand` smaller, and a gate
+  // this misses is a defect it fails to report rather than one it invents
+  // (Phase 126).
+  if (/&&|\|\|/.test(statement)) return true
+  return false
+}
+
+/**
  * Does this source declare `symbol` as a top-level function?
  *
  * The other half of the repair, and the half that makes the class impossible

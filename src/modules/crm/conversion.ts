@@ -9,7 +9,7 @@ import {
   proposals,
 } from '@/db/schema'
 import { recordAudit } from '@/modules/audit'
-import { requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
+import { can, requirePermission, scoped, type ActorContext } from '@/modules/tenancy/context'
 import { createInvoice } from '@/modules/receivables/service'
 import { logActivity } from './opportunities'
 import { Refusal } from '@/modules/errors'
@@ -58,6 +58,26 @@ export type ConversionResult = {
   depositInvoiceId: string | null
   /** How many stages were written onto the job's schedule of values. */
   sovStageCount: number
+  /**
+   * The proposal had a schedule and this person may not raise it (Phase 219).
+   *
+   * Conversion is two acts wearing one button. Creating the client and the job
+   * is a CRM act, gated on `crm:manage` and held by `manager` and `sales`.
+   * Writing the schedule of values needs `jobs:manage` and raising the deposit
+   * needs `accounting:journal`, and neither role holds both.
+   *
+   * Those two steps run **after** the transaction that creates the customer and
+   * the project, so until Phase 219 a salesperson pressing *Create client & job*
+   * got the client and the job committed and then
+   * `Missing required permission: jobs:manage` — and, pressing it again,
+   * *"This opportunity was already converted."* Told it failed, then told it
+   * had happened. Phase 214's check that ran late, in a second module.
+   *
+   * So the billing half degrades rather than throwing, and this flag exists so
+   * that the omission cannot pass for nothing having been omitted — which is
+   * Phase 216's rule, applied to a write instead of a read.
+   */
+  billingWithheld: boolean
   alreadyConverted: boolean
 }
 
@@ -89,6 +109,11 @@ export async function convertWonOpportunity(
       projectId: opportunity.convertedProjectId,
       depositInvoiceId: null,
       sovStageCount: 0,
+      // Nothing was withheld, because nothing was attempted: this call did no
+      // work at all. `alreadyConverted` is what the caller reads here, and
+      // claiming a withholding would have the screen explain a refusal that
+      // never happened (Phase 219).
+      billingWithheld: false,
       alreadyConverted: true,
     }
   }
@@ -252,18 +277,34 @@ export async function convertWonOpportunity(
    */
   let depositInvoiceId: string | null = null
   let sovStageCount = 0
+  let billingWithheld = false
 
   if (opts.createInvoice && winningProposal) {
     const scheduled = await scheduleForProposal(ctx, winningProposal.id, winningProposal.totalCents)
 
     if (scheduled.length > 0) {
-      sovStageCount = await scheduleOnJob(ctx, result.projectId, winningProposal.id, scheduled)
-      depositInvoiceId = await depositInvoice(
-        ctx,
-        scheduled,
-        result.customerId,
-        result.projectId,
-      )
+      /*
+        `scheduleOnJob` requires `jobs:manage` and `depositInvoice` requires
+        `accounting:journal`. Both used to be called straight through, from
+        outside the transaction above — see `billingWithheld` on the result type
+        for what that did to a salesperson.
+
+        A soft check rather than a gate at the top of the function, because the
+        answer is not "refuse": converting a won deal into a client and a job is
+        a CRM act and a salesperson may do it. What they may not do is raise the
+        money, so that part is left undone and said out loud.
+      */
+      if (can(ctx, 'jobs:manage') && can(ctx, 'accounting:journal')) {
+        sovStageCount = await scheduleOnJob(ctx, result.projectId, winningProposal.id, scheduled)
+        depositInvoiceId = await depositInvoice(
+          ctx,
+          scheduled,
+          result.customerId,
+          result.projectId,
+        )
+      } else {
+        billingWithheld = true
+      }
     } else {
       // No schedule, so nothing has been agreed about when this is billed.
       // Billing the whole contract here is what this function used to do and is
@@ -273,7 +314,7 @@ export async function convertWonOpportunity(
     }
   }
 
-  return { ...result, depositInvoiceId, sovStageCount, alreadyConverted: false }
+  return { ...result, depositInvoiceId, sovStageCount, billingWithheld, alreadyConverted: false }
 }
 
 /** The proposal's stages with the money worked out, or none if it has no schedule. */

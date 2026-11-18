@@ -480,3 +480,56 @@ learned it on a day when nothing is at stake.
 Run migrations against the session pooler before deploying code that needs them,
 the same as step 2. The application tolerates a schema ahead of it far better
 than one behind it.
+
+### What happens if you don't, measured (Phase 219)
+
+This deployment did not, for sixty-eight migrations. Vercel builds on every push
+to the development branch and deploys straight to production, so the *code* went
+out continuously from Phase 40 to Phase 219 while the schema stayed where
+`db:setup-production` had left it. Nothing alerted, because the pages that work
+still worked.
+
+What that cost, read off the live database: **19 tables absent** — among them
+`refunds`, `pay_runs`, `statement_settings`, `chase_settings`,
+`payables_settings`, `proposal_schedule_stages`, `asset_links`,
+`evidence_subjects`, `team_members`, `guard_attempts`, and the four card-payment
+tables — and columns absent across the books, including `invoices.share_token`,
+`payments.status`, `payments.currency`, `customers.merged_into_id` and
+`companies.tax_classification`. Any request touching one answered 500. The
+public invoice link was the plainest case: `/i/<token>` looks an invoice up by
+`share_token`, so **every share link a customer had been sent was a server
+error**, and the page that tells somebody what they owe could not load at all.
+
+Two things to copy from the repair rather than rediscover:
+
+- **Back up into the database, not out of it.** A schema of
+  `CREATE TABLE backup_x AS SELECT * FROM public.x` per populated table is one
+  statement each, needs no credentials in anybody's shell, and gives you a
+  row-count diff afterwards. That diff is what proved the migration moved
+  nothing it should not have: every table matched except `chart_accounts`,
+  64 → 67, which is exactly the three `is_system` accounts migrations 0042, 0045
+  and 0048 insert — all three with zero postings, so no balance moved.
+- **`drizzle.__drizzle_migrations` is the thing to fix last and not forget.**
+  Applying SQL by any route other than `npm run db:migrate` leaves that table
+  behind, and the next `db:migrate` will try to replay everything you just
+  applied. Drizzle matches on `sha256` of the migration file's bytes, in journal
+  order, so the rows can be written by hand — and must be, or the next deploy
+  fails in a way that looks like a code problem.
+
+### Row level security on Supabase, which is not what migration 0085 assumes
+
+0085 ends by counting tables with RLS and expecting **161**. That holds for a
+clean `drizzle` build. It does not hold on Supabase, which enables RLS by
+default on every table in `public` — here that was 17 non-tenant tables carrying
+RLS with **no policy and no FORCE**, which is precisely what keeps `users`,
+`sessions`, `user_mfa`, `mfa_recovery_codes` and `login_attempts` off the anon
+PostgREST API. Disabling them to make the total come out would expose all five.
+
+So the guard counts the `tenant_isolation` policy instead of every RLS-enabled
+table. The number is unchanged — 163 tenant-scoped tables less the two queue
+exemptions is the same 161 — and the thing counted is now the thing the
+migration was actually about. The guard earned its place on the way: a first
+attempt asserted 159, because it used the table count from *before* the batch
+and missed that 0083 and 0084 create two more tenant-scoped tables earlier in
+the same transaction. It refused, the transaction rolled back, and the
+arithmetic got fixed rather than the premise.
