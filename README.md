@@ -7991,6 +7991,102 @@ recognises a query by a name, and every name it uses is a place something can
 hide.
 
 
+### The body that was not the function's (Phase 218)
+
+ADR 0217 nominated **the screen that offers what it will refuse** and named three screens on which
+`readonly` could press nothing. All three already pass the right flag: `/settings/chasing` and
+`/settings/statements` hand their board `canManage={can(actor, 'accounting:journal')}`, and
+`/jobs/cost-codes` hands its library `canManage={can(actor, 'jobs:manage')}`. The nomination had
+counted the **71 refusing guards** and taken those to be everything a page does with a permission.
+There are **198** `can(actor, …)` decisions in `src/app`: 71 guards, **73 flags handed to a
+component**, 25 reads skipped by a ternary, 13 other shapes. A screen does not only admit people; it
+computes, per control, what that control needs.
+
+Which makes the real question sharper. A screen's flag and an act's gate are **two independent
+statements of one requirement**, and nothing compares them. To compare them you must read a gate.
+**Gates could not be read** — three defects, all one shape: *the scan cannot read the gate and
+answers anyway.*
+
+**1. The reading that could not see a generic function.** `enclosing.ts` anchors a declaration as
+`function <name>(`. A generic does not oblige — `export function scoped<T extends PgTable & {
+companyId: PgColumn }>(`. `functionBody` used a looser reading that *does* see one, found the
+declaration, handed the offset to `enclosingSpan`, and got back the **previous** function's span
+running on to the next declaration it recognised:
+
+```
+functionBody('src/modules/tenancy/context.ts', 'scoped')
+  -> enclosingSpan(raw, 2249) = { from: 1784, to: 3382 }   // `can` … end of file
+```
+
+Asked for `scoped`, it returned `can`'s body and everything after it — every gate in the rest of the
+file under one symbol's name, with nothing marking the answer wrong. **12 of the 2,153 exported
+functions are generic and every one was read wrongly.** `enclosingSymbol` also attributed every site
+inside a generic function to the previous function, which is **ADR 0134's leak in the function
+written to stop it**; and `declaresFunction` answered `false`, so the same-file walk never followed a
+generic helper. The shape of it: *two readings of where a function begins, disagreeing, inside the
+module built to be the one answer.* There is now one exported `DECLARATION` and four readers use it —
+including `bodyAt` in Phase 214's own test file, which was a local copy of exactly the pair that
+disagreed. **The fifth copy ADR 0134's note predicted, and the next scanner was the test.**
+
+**2. A signature is not a body.** The slice started at the declaration, so
+`requirePermission(ctx: ActorContext, permission: Permission)` answered with the computed check
+`permission: Permission` — **the permission checker reading its own declaration as a check**, in four
+functions. A check on a bare identifier the function *binds* is now `forwarded`: kept under its own
+name, because dropping it reads as ungated (ADR 0134's direction) and answering it is defect 3.
+
+**3. The catch that guessed.** `gatesIn` caught `resolveComputedGate`'s refusal and pushed
+`company:manage` — a real permission, in the same array, with the same type, beside permissions that
+had been read. The refusal exists so nothing can guess, and Phase 214 wrote the reason into it:
+*"guessing would answer that question wrongly in silence."* Its only caller caught it and guessed. Of
+**34** acts reporting `company:manage`, **23 held it and 11 were told they did** — `mergeParties`
+reported owner-only while a manager may merge two customers and an accountant two suppliers, on an
+irreversible act. `GATE_RESOLVERS`' own figure of *"exactly five distinct computed check
+expressions"* is true **across the 254 audit-writing functions** and reads as the count: the tree
+holds **20**, so the register covered 5 of 20 and 8 of 34 occurrences — **the scan invented more
+gates than it read**. The catch is deleted, the register is 17 entries covering the tree, and a test
+over the tree keeps it so.
+
+**A third question, because neither existing function asks it.** `establishedBy` stops at the first
+gate; `authorityOf` unions one file. `updateCustomerAction` calls `customerById` (`crm:view`) and
+then `updateCustomer` (`crm:manage`), so the first gate says anybody who may read a customer may
+correct one. `demandedBy` returns a **conjunction of disjunctions**, since a literal check and a
+resolver's `yields` are different relations a flat array cannot tell apart —
+`['accounting:journal','accounting:view']` is "both" for `closeShift` and "either" for a computed
+gate, and read wrongly a bookkeeper either may or may not close a till.
+
+**Eight scan errors, each found by looking at the finding and never by the property passing.** Every
+flag paired with every act its component imports (344 pairs, 42 nonsense "defects"); `{open && flag
+&& (`, `{props.flag && (` and `{flag && rows.length && (` unread (154 acts wrongly "unflagged");
+resolver yields read conjunctively; a component's two mountings collapsed into one; the page guard
+dropped (all 7 of direction B); `establishedBy` asked where every gate was needed; a `.catch`ed call
+treated as mandatory (5 false defects on the sending acts); and enclosing flags compared one at a
+time rather than as a conjunction. **The last was about to report a defect in the file that
+demonstrates the fix** — `shop/board.tsx` writes `{canManage && … {canBill && <Bill it>}}`, which is
+the ordinary correct way to nest a stricter control.
+
+**What the measurement found**, across 73 flags, 54 components and 259 act references: the screen
+offers what the act refuses **once**; the screen hides what the act allows **never**.
+`/crm/proposals` offered *"Invoice `<stage>`"* behind `proposals:manage` while `billStage` raises an
+invoice under `accounting:journal`, stranding `manager` and `sales` — two of the three roles the
+screen admits. Fixed with a second flag whose name was already in the tree: `shop/page.tsx` passes
+`canBill={can(actor, 'accounting:journal')}` beside its own `canManage`, because completing a repair
+order posts to the ledger.
+
+**And one gate, not screen, was wrong.** `design/documents.ts` holds `permissionFor`, whose docstring
+says that writing the answer out again *"refuses a marketer the right to reorder their own
+creative — two answers to one question is the defect"*; and thirty lines below it `saveAsTemplate`
+required `proposals:manage` outright while storing `kind: document.kind`. The designer is mounted by
+two screens, so **a marketer in the creative studio was shown *Save as template* and refused by
+it** — the one role the screen admits for whom the control could never work. The check now reads
+`permissionFor(document.kind, 'manage')`, below the load, which is the order `linkAsset` uses and
+`GATE_RESOLVERS` gives the reason for. That is also why Phase 214's recovered-gate count moved from
+twelve to thirteen — and the thirteenth is **not** one the repaired reader found; it is
+`saveAsTemplate`, moved from a literal to a computed gate by this phase. A count that grows just
+after a scan is fixed invites the wrong reading, so the breakdown is pinned beside it.
+
+Phase 214's and Phase 217's falsifiers all still hold and `ungatedActions()` is unchanged at 38: the
+scan got more accurate without re-baselining one answer it had already given.
+
 ### The permission that only promises to look (Phase 217)
 
 ADR 0216 nominated **the page guard that guards nothing** and proposed comparing each action's gate to
@@ -9946,6 +10042,7 @@ Coverage matches what spec §21 asks for:
 | `tests/the-access-that-disappeared-quietly.test.ts` | **The access that disappeared quietly** (Phase 204): ADR 0203's two remaining *enforced* switches, and beside them a defect **neither census could report** — both are about columns and this is about a write that never happens. Three practice-side actions remove a client's access and the client's audit log said nothing: `endEngagement` audited only `if (party.side === 'client')`, so the accountant walking away was never recorded; `removePracticeMember` deletes memberships at **every** client of the firm and audited nothing on either side; closing a practice would have been a third. §14 asks for an audit log of permission changes, and losing your accountant's access is one. Never a decision: `recordAudit` needs a company and the practice side has none, but all three things it needs are on the engagement and `ActorContext.viaPractice` was built to produce exactly the line *Dana Chen (Hartley & Co)* — it had never fired on these two. One extra column made the second possible, because the sweep selected `{ id }` alone and a client's log is keyed by company; it writes one event per client now, since an event filed against one of twelve companies is eleven companies with no record. The till settles the asymmetry ADR 0203 expected to be hard: a gift card's balance is a liability on 2590, so making a card unspendable without moving it leaves money nobody can settle — a drawer's float is cash `closeShift` already counts, so the refusal is just *close the shift first* and nothing posts. Closing a firm is `practices.isActive`, whose strongest reader is `practicesFor`: an inactive firm leaves its own members' list. Verified by reverting the audit branch. And the ordering of the last three phases rests on a correction: two Phase 202 register entries were wrong as drafted, and reading the call sites is what separated *enforced* switches from *projection-only* ones |
 | `tests/offered-and-not-offered.test.ts` | **Offered, and not offered** (Phase 205): the last two of the six switches, and **all six closed**. They were last because reading each reader split them into *enforced* (a refusal already written, so the gap was the writer) and *projection-only* (selected to be displayed, filtered by nothing — a writer alone would be a control with no effect). ADR 0204 said *filter first*, which was right and incomplete: the two need the filter in **different places**, and the reason is copying against referencing. A clause is **copied** into a document as a `clauseVersionId`, so retiring one is invisible to every proposal ever sent and not offering it is the whole job — `listClauses` filters, with the option as `includeRetired` **opt-out**, because three screens read it and two of them *offer* clauses, so forgetting the flag must be safe (the shape `listTeamMembers` already had in the same module). A work order **references** its recipe for the life of the run, so filtering the read would cost a half-built batch the recipe it was costed against — the recipe stays readable and `createWorkOrder` refuses to *start* a run against a superseded one, in the service rather than only the picker. That refusal also closed something nobody had asked about: **nothing validated `bomId` at all**, the composite foreign key having been doing the existence and tenant checks. Verified by reverting the filter. The register now declares **one** finding, `vendors.organizationId`, and Phase 202's assertion about which switches are declared reaches its third and final state — five, then two, then none |
 | `tests/a-retirement-with-no-way-back.test.ts` | **A retirement with no way back** (Phase 206): the nomination was wrong twice and measuring it found two real things. No screen was offering retired items (all three offer-sites passed the flag), and retiring an item with stock hides nothing (`stockOnHand` filters on `isInventoried`, not `isActive`) — so ADR 0205's two reasons both measured false, as did its reason for declining the fix: four callers, not five, and no behaviour change. What was real: **`deactivateServiceItem` set `isActive` false only**, from Phase 4, with no restore and no audit — a delete wearing a flag, and a **third shape no census asks about**, since a column with a one-directional writer is read *and* written and so invisible to the reader-no-writer census and to the mirror Phase 203 declined. And `listServiceItems` was **one of seven** functions with that default, not the last: `listAccounts` had four callers feeding a `<select>` with no flag — the till pay-out, the takings categories, the budget lines, the recurring-billing revenue account — so `account.retire`'s claim that retiring *takes it out of every picker* was false for four of them **for eighty-eight phases**, the reason being in the same sentence (an opt-in flag is a claim about what callers remember). Fixed, with the docstring keeping its wording and the correction attached. Not filtered everywhere: `dimensions` needs a name lookup and the §19 export needs the whole chart — *offering* against *displaying*. Found by a blanket assertion going red on a **different function** with the same default: the check was wrong and what it found was right |
+| `tests/the-body-that-was-not-the-functions.test.ts` | **The body that was not the function's** (Phase 218): ADR 0217 nominated the screen that offers what it will refuse and named three screens on which `readonly` could press nothing — all three already pass the right flag. It had counted the **71** refusing guards as everything a page does with a permission; there are **198** `can(actor, …)` decisions, including **73 flags handed to a component**. The real question is that a screen's flag and an act's gate are two independent statements of one requirement that nothing compares — and to compare them you must read a gate. **Gates could not be read.** `enclosing.ts` anchors a declaration as `function <name>(`, so a **generic** function is invisible as a boundary, while `functionBody` used a looser reading that sees one: it found `scoped`, handed the offset to `enclosingSpan`, and got back `can`'s body from `can` to the end of the file — every gate in the rest of it, under one name, unmarked. **12 of 2,153 exported functions are generic and every one was read wrongly**; `enclosingSymbol` attributing a generic function's sites to the previous function is **ADR 0134's leak inside the function written to stop it**, and the test file's own `bodyAt` was the **fifth copy** ADR 0134's note predicted, reproducing the defect exactly. `functionBody` also included the signature, so `requirePermission(ctx: ActorContext, permission: Permission)` read as a computed check — the checker gating on its own parameter list — now classified `forwarded`, since dropping it reads as ungated and answering it is the third defect. Which is: `gatesIn` caught `resolveComputedGate`'s refusal and pushed `company:manage`, a real permission in the same array with the same type as one that had been read. **34 acts reported it; 23 held it and 11 were told they did**, `mergeParties` among them, reported owner-only while a manager may merge two customers and an accountant two suppliers. `GATE_RESOLVERS`' *"exactly five"* is true of the 254 audit-writing functions and reads as the count: the tree holds **20**, so **the scan invented more gates than it read**. `demandedBy` is new because `establishedBy` (first gate) and `authorityOf` (one file) answer different questions, and returns a **conjunction of disjunctions** — a literal check and a resolver's yields are different relations a flat array cannot tell apart. **This phase's scan was wrong eight times** and each is a test case; the eighth compared enclosing flags one at a time and was about to report a defect in `shop/board.tsx`, the file that demonstrates the fix. Measured across 73 flags: the screen offers what the act refuses **once** (`/crm/proposals` offering *Invoice `<stage>`* under `proposals:manage` while `billStage` needs `accounting:journal`), and hides what it allows **never**. One gate was wrong too: `saveAsTemplate` required `proposals:manage` thirty lines below the `permissionFor` whose docstring calls writing that answer out again *"two answers to one question"* — so a marketer in the creative studio was shown *Save as template* and refused by it. 28 tests |
 | `tests/the-permission-that-only-promises-to-look.test.ts` | **The permission that only promises to look** (Phase 217): ADR 0216 nominated the page guard that guards nothing and proposed comparing each action's gate to its page's. Its figures were wrong (**71** guards, not 70 — one is an API route and `payroll/workpapers` has two; and **8** `requirePermission` calls in `src/app`, not eleven, three of the eleven being `import` lines, a figure cited in two ADRs, twice in this README and in SPEC-AUDIT), its population was wrong (**329** server actions, of which **290** establish a permission and **39** do not), and its relation was wrong: gating `runChases` on the `accounting:view` its page guards would satisfy the property and still let `readonly` send dunning letters, because **a page guard says who may look at a screen, not what the act behind it may do**. The question none of Phases 214–216 asks is whether a gate names the **right** permission — `requirePermission(ctx, 'accounting:view')` on a function that emails a customer answers all three of theirs yes. `readonly` is the one role holding nothing but `:view` permissions, **computed from `ROLE_PERMISSIONS`**, so the property is *a permission a view-only role holds must not be the only gate on an act that writes or sends*. Ten acts match and seven are defects, among them `createVendor`, whose comment says "as on the customer side" while `createCustomer` sixty lines up requires `crm:manage`; plus `readinessFor` (at `reports:view` beside siblings at `reports:financial`) and `installDefaultCostCodes` (no permission anywhere in its chain). `statement-run.ts` is the sharpest file: `accounting:journal` to reschedule, `accounting:view` to read the log of what was sent, `accounting:view` to write and send one, nothing to run the lot — so a read-only run **completed** rather than failing. `runChases` differs: its gate sat inside a loop behind a catch written for bad addresses, so a refusal came back as "12 could not be sent", and two early returns meant most days reached no gate and answered "nothing was due today". Every fix takes the permission its own sibling already names. **The scan was wrong five times** and each is a test case here: body-only reading missed `decide`, `buildPlan` and `loadOwnEditable`; `@/modules/…`-only imports missed sibling-file gates, moving the count 47 → 39 and clearing four acts a draft ADR called defects; and identity-as-a-predicate (`eq(timeEntries.userId, ctx.userId)`) was unreadable — its arm matches the comparison, not any mention of `ctx.userId`, which would have excused all seven. **The gate fix then found two more artifacts of one error, in two
 other files.** Tightening `createVendor` turned Phase 214's `blindProducers()` red — `manager` and
 `sales` could create a supplier and not read the history of doing it — repaired by

@@ -583,6 +583,36 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §14, §7, §8 — the gate a scan could not read (Phase 218)
+
+`enclosing.ts` is the single reader of *where does a top-level function begin*, and it had two
+spellings that disagreed about **generic** functions: `enclosingSpan`/`enclosingSymbol`/
+`declaresFunction` require `(` after the name, `functionBody` did not. **12 of the 2,153 exported
+functions in the tree are generic**, and `functionBody` returned the wrong body for every one —
+asked for `scoped` it returned `can`'s body from `can` to the end of `context.ts`. One exported
+`DECLARATION` now, used by all four readers including the test file's own copy.
+
+`functionBody` included the signature, so the permission checker's parameter list read as a computed
+check (4 functions). A check on a parameter the function binds is now `forwarded`.
+
+`gatesIn` substituted `company:manage` for any computed expression `GATE_RESOLVERS` did not declare.
+**Of 34 acts reporting `company:manage`, 11 were told they held it** — `mergeParties` and
+`mergePreview` reported owner-only against a real gate of `crm:manage` or `accounting:journal`. The
+register declared 5 of the **20** computed expressions in the tree; it now declares all of them, the
+catch is deleted, and the refusal is reachable again.
+
+Screens hand components **73** permission flags (against 71 refusing guards). Measured against the
+gates, one disagreed: `/crm/proposals` offered *Invoice `<stage>`* under `proposals:manage` while
+`billStage` requires `accounting:journal`. Fixed with `canBill`, as `/shop` already does.
+`saveAsTemplate` gated on a literal `proposals:manage` rather than its own module's
+`permissionFor(document.kind, 'manage')`, refusing a marketer in the creative studio the template
+button the screen offered them.
+
+**Still open:** a register pinning each of the 73 flags to the act behind its control — ADR 0218
+nominates it, because a transitive scan over-collects a gate that sits on a branch and cannot tell
+that it has. 107 act references could not be placed in a flag region; how many are a span form still
+unread, as against genuinely unflagged, decides the register's size.
+
 ### §14, §13, §19 — the permission that only promises to look (Phase 217)
 
 §14 claims a permission model. Every audit of it so far has asked whether the
