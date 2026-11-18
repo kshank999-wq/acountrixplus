@@ -42,7 +42,7 @@ checks" implies the endpoints are the thing being counted. They are not. There
 are **329 exported server actions in 44 files** under `src/app/actions`. Resolving
 each one's gate through Phase 214's `permissionChecksIn` and `resolveComputedGate`
 and following calls: **290 establish a permission and 39 do not.** The 39 are 4
-pre-authentication, 4 bearing a public share token, 13 self-acts, 15 on the
+pre-authentication, 5 bearing a public share token, 13 self-acts, 14 on the
 practice side under `requirePracticeOwner`, 2 that compute on client-supplied
 input and touch no company data — and **one** with no permission anywhere in its
 chain.
@@ -230,7 +230,7 @@ at registration time rather than at runtime by a role."* The scaffolding that
 makes module gates safe under scheduled work already existed; these two modules
 never used it.
 
-## Four false positives, two causes, and both are this phase's own scan
+## Five false positives, three causes, and all of them this phase's own scan
 
 **Cause one: the scan read only each function's own body**, so a gate one hop
 down in a private helper in the same file was invisible.
@@ -255,21 +255,48 @@ each have one; what is wrong with them is where it sits and which permission it
 names, which is a different and smaller claim than the one I was about to
 publish.
 
-This is ADR 0134's shape twice more — a scan whose window stops short of the
-thing it is deciding about — and both are false *positives*, which Phase 126 puts
+**Cause three, which the falsifier found rather than the measurement.**
+`submitTime` requires `accounting:view`, writes, and reaches no helper that
+escalates. Its authority is `eq(timeEntries.userId, ctx.userId)` in the WHERE
+clause: the only row it can touch is the caller's own draft. That is Phase 214's
+`self` form expressed as a predicate instead of an `if`, and no scan here had a
+way to read it.
+
+The arm that reads it matches the **comparison** and deliberately not any
+mention of `ctx.userId`, because the loose version is ADR 0134's
+exclusion-that-excuses in its purest form: nearly every write in this codebase
+stores `createdBy: ctx.userId`, so "mentions the caller's id" would have excused
+all seven of the acts this phase fixes. Measured: the comparison occurs **14**
+times in `src/modules` and in none of the seven, and the falsifier asserts that
+second half rather than trusting it.
+
+This is ADR 0134's shape three more times — a scan whose window stops short of
+the thing it is deciding about — and all are false *positives*, which Phase 126 puts
 on the worse side: an entry that excuses a site reads exactly like one that
 describes it, and a finding that overstates reads exactly like one that holds.
 The repair is to follow functions declared in the same file (checkable with
-`declaresFunction` and `functionBody`) and to read both import forms. The seven
-sites above are the test cases, and the register's falsifier is what keeps them
-so: the count is asserted against the register, so a scan that regresses to
-reading one import form fails rather than quietly growing the register.
+`declaresFunction` and `functionBody`), to read both import forms, and to read
+identity in a predicate. The eight sites above are the test cases, and the
+register's falsifier is what keeps them so: the count is asserted against the
+register, so a scan that regresses to reading one import form fails rather than
+quietly growing the register.
+
+One of the three also changed what the property reads. `establishedBy` answers
+*is it gated at all*, so it returns the first set it finds — and that is the
+wrong reading here, because `deleteTime`'s own body checks `accounting:view`
+while its helper escalates. Reading only the first set makes a correct self-act
+look like a mislabelled gate, so `authorityOf` **unions** the act's own gates
+with its same-file helpers' and the question becomes whether *any* authority in
+the act is more than a promise to look. Two functions, two questions — rather
+than one function quietly answering both, which is the defect this codebase
+names most often.
 
 The methodological point is Phase 164's, and it arrived from the inside this
 time. *A nomination inherited is a nomination unmeasured* — and so is a
 measurement whose instrument has not been falsified. The instrument here was
-wrong four times, and what caught it each time was reading the code the scan had
-just accused.
+wrong five times; what caught it each time was reading the code the scan had just
+accused, and the fifth was caught by writing the falsifier rather than by taking
+the measurement.
 
 ## The over-collection, measured rather than feared
 
