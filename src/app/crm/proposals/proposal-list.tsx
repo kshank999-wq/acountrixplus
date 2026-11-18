@@ -79,12 +79,15 @@ export function ProposalList({
   revenueAccounts,
   services,
   canManage,
+  canBill,
 }: {
   proposals: Proposal[]
   opportunities: Array<{ id: string; title: string; organizationName: string }>
   revenueAccounts: Array<{ id: string; number: string; name: string }>
   services: Service[]
   canManage: boolean
+  /** `accounting:journal` — see `ScheduleProgress` (Phase 218). */
+  canBill: boolean
 }) {
   const router = useRouter()
   const [pending, startTransition] = useTransition()
@@ -209,6 +212,7 @@ export function ProposalList({
                     schedule={proposal.schedule}
                     totalCents={proposal.totalCents}
                     canManage={canManage}
+                    canBill={canBill}
                     pending={pending}
                     act={act}
                   />
@@ -689,6 +693,7 @@ function ScheduleProgress({
   schedule,
   totalCents,
   canManage,
+  canBill,
   pending,
   act,
 }: {
@@ -696,6 +701,13 @@ function ScheduleProgress({
   schedule: Array<{ label: string; kind: string; percentBp: number; invoiceId: string | null }>
   totalCents: number
   canManage: boolean
+  /**
+   * Whether this reader may raise the invoice, which is a different permission
+   * from managing the proposal (Phase 218). `billStage` requires
+   * `accounting:journal`; `canManage` is `proposals:manage`. Offering the
+   * button on the second stranded `manager` and `sales`.
+   */
+  canBill: boolean
   pending: boolean
   act: (fn: () => Promise<{ ok: boolean; message?: string; error?: string }>) => void
 }) {
@@ -721,7 +733,7 @@ function ScheduleProgress({
         <span className="tnum text-xs text-faint">
           {formatCents(billedCents)} of {formatCents(totalCents)} invoiced
         </span>
-        {canManage && nextIndex >= 0 && (
+        {canManage && canBill && nextIndex >= 0 && (
           <button
             className="btn px-2 py-1 text-xs"
             disabled={pending}

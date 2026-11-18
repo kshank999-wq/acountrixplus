@@ -85,6 +85,53 @@ export function withoutComments(src: string): string {
 }
 
 /**
+ * Where a top-level function begins (Phase 218).
+ *
+ * ## Why this is a constant rather than three patterns
+ *
+ * It was three patterns, and they disagreed. `enclosingSymbol`, `enclosingSpan`
+ * and `declaresFunction` each required the opening `(` to follow the name
+ * immediately, while `functionBody` in `gate-forms.ts` looked for
+ * `function <name>\b`. A **generic** function satisfies the second and not the
+ * first:
+ *
+ * ```ts
+ * export function scoped<T extends PgTable & { companyId: PgColumn }>(
+ * export async function runOnce<T extends Record<string, unknown>>(
+ * ```
+ *
+ * So `functionBody` found the declaration and then asked `enclosingSpan` to
+ * bound it; `enclosingSpan` could not see it, attributed the offset to the
+ * **previous** declaration, and ran the span on to the next one it could see.
+ * Asked for `scoped`, it returned `can`'s body — and because nothing after
+ * `can` in `context.ts` is non-generic, it returned everything from `can` to the
+ * end of the file: every gate in the rest of the file, attributed to one symbol,
+ * with nothing to mark the answer as wrong.
+ *
+ * Measured: **12** of the 2,153 exported functions in the tree are generic, and
+ * `functionBody` returned the wrong body for every one of them.
+ *
+ * Three further consequences, all silent:
+ *
+ * - `enclosingSymbol` attributes every site inside a generic function to the
+ *   previous function — which is **ADR 0134's leak**, a window running past a
+ *   function boundary and excusing what is inside it, in the module written to
+ *   stop exactly that.
+ * - `declaresFunction` answered `false` for a generic helper, so
+ *   `establishedBy`'s same-file walk never followed one.
+ * - And the shape of it: *two readings of "where does a function begin", and
+ *   they disagree.* Two answers to one question is the defect this codebase
+ *   names most often, and it was inside the module built to be the one answer.
+ *
+ * So there is now one spelling, exported, and `functionBody` uses it too. The
+ * optional `<…>` is bounded by `[^(]*`, which cannot cross into the parameter
+ * list, so a non-generic declaration matches exactly as it did before.
+ */
+export const DECLARATION = String.raw`^(?:export )?(?:async )?function (\w+)\s*(?:<[^(]*>)?\(`
+
+const declarations = () => new RegExp(DECLARATION, 'gm')
+
+/**
  * The top-level function a character offset sits inside.
  *
  * Two rules, and each of them is one of the two things the broken version got
@@ -105,7 +152,7 @@ export function withoutComments(src: string): string {
  */
 export function enclosingSymbol(src: string, index: number): string {
   const before = withoutComments(src.slice(0, index))
-  const matches = [...before.matchAll(/^(?:export )?(?:async )?function (\w+)\(/gm)]
+  const matches = [...before.matchAll(declarations())]
 
   return matches.length > 0 ? matches[matches.length - 1][1] : '(top level)'
 }
@@ -121,9 +168,7 @@ export function enclosingSymbol(src: string, index: number): string {
  */
 export function enclosingSpan(src: string, index: number): { from: number; to: number } {
   const blanked = withoutComments(src)
-  const starts = [...blanked.matchAll(/^(?:export )?(?:async )?function \w+\(/gm)].map(
-    (match) => match.index,
-  )
+  const starts = [...blanked.matchAll(declarations())].map((match) => match.index)
 
   return {
     from: starts.filter((start) => start <= index).pop() ?? 0,
@@ -140,7 +185,63 @@ export function enclosingSpan(src: string, index: number): { from: number; to: n
  * that produced them.
  */
 export function declaresFunction(src: string, symbol: string): boolean {
-  return new RegExp(`^(?:export )?(?:async )?function ${symbol}\\(`, 'm').test(src)
+  return declarationOffset(src, symbol) !== null
+}
+
+/**
+ * The names `symbol` binds as parameters (Phase 218).
+ *
+ * A permission check whose argument is one of these states no permission of its
+ * own: the function is a *checker*, and which permission it enforces was decided
+ * by whoever called it. `ifPermitted(ctx, permission, read, fallback)` in
+ * `ai/retrieval.ts` is the case — `can(ctx, permission)` is the whole body, and
+ * the gate belongs to each of its five callers.
+ *
+ * Needed as a separate reading because `functionBody` now stops at the body's
+ * opening brace, so the parameter list is no longer in the text being scanned —
+ * which is the point, since reading it as body is what made
+ * `requirePermission(ctx: ActorContext, permission: Permission)` look like a
+ * gate on `requirePermission` itself.
+ */
+export function parameterNames(src: string, symbol: string): string[] {
+  const at = declarationOffset(src, symbol)
+  if (at === null) return []
+  const blanked = withoutComments(src)
+  const open = blanked.indexOf('(', at)
+  if (open < 0) return []
+
+  let depth = 0
+  let close = -1
+  for (let i = open; i < blanked.length; i += 1) {
+    if (blanked[i] === '(') depth += 1
+    else if (blanked[i] === ')') {
+      depth -= 1
+      if (depth === 0) {
+        close = i
+        break
+      }
+    }
+  }
+  if (close < 0) return []
+
+  return [...blanked.slice(open + 1, close).matchAll(/(?:^|,)\s*(\w+)\s*[?:,)]/g)].map(
+    (match) => match[1],
+  )
+}
+
+/**
+ * Where `symbol`'s own declaration begins, or `null`.
+ *
+ * `functionBody` had its own, looser reading (`function <name>\b`) and the two
+ * disagreed about generics — see `DECLARATION`. This is the one reading, asked
+ * about one name, so a caller that wants a particular function's span and a
+ * caller that wants the function around an offset cannot drift apart again.
+ */
+export function declarationOffset(src: string, symbol: string): number | null {
+  const at = withoutComments(src).search(
+    new RegExp(DECLARATION.replace('(\\w+)', symbol), 'm'),
+  )
+  return at < 0 ? null : at
 }
 
 /**

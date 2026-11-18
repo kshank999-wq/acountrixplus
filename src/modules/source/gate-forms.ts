@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { RegistryError } from '@/modules/errors/registry'
 import type { Permission } from '@/modules/permissions'
-import { enclosingSpan, withoutComments } from './enclosing'
+import { declarationOffset, enclosingSpan, withoutComments } from './enclosing'
 import { sourceFiles } from './isolation-scan'
 
 /**
@@ -122,6 +122,30 @@ export type GateForm =
  * its expression can yield, so a reader of the scan can check the claim against
  * the resolver without re-deriving it.
  *
+ * ## Five was the count for that population, and it read as the count (Phase 218)
+ *
+ * The sentence above is true and its scope is invisible one line later. Phase 217
+ * built a second scan over a **different** population — 329 server actions and
+ * everything they reach — and the tree holds **20** distinct computed check
+ * expressions, not five. The eleven this phase adds are not new code; they are
+ * the fifteen minus the four that were never gates at all, which
+ * `permissionChecksIn` reported because `functionBody` handed it the signature.
+ *
+ * What made that survivable, and so invisible, was the other half: `gatesIn` in
+ * `action-gates.ts` caught `resolveComputedGate`'s refusal and substituted
+ * `company:manage`. So an undeclared expression did not fail — it answered, with
+ * a real permission, in the same list and the same type as a permission that had
+ * actually been read. **34 acts reported `company:manage`; 23 held it and 11 were
+ * told they did.** `mergeParties` was reported owner-only when a manager may
+ * merge two customers and an accountant two suppliers.
+ *
+ * The refusal below was written so that nothing could guess — *"guessing would
+ * answer that question wrongly in silence, which is the defect Phase 214 exists
+ * to stop."* Its only caller caught it and guessed. The repair is not a better
+ * sentinel: it is to complete the register so the refusal is reachable again,
+ * and to delete the catch, so the next undeclared expression stops the suite
+ * instead of being answered.
+ *
  * A set means **any one of them**, not all: the act is reachable for the kinds
  * the role manages. A person who may manage marketing documents and not
  * proposals still performs `saveDocument`, on marketing documents.
@@ -165,6 +189,208 @@ export const GATE_RESOLVERS: Record<string, { yields: readonly Permission[]; why
       'bank transactions, so it takes the permission that brought them in; ' +
       'anything else wrote journal entries, so it takes the ledger. The gate ' +
       'follows the damage, which is why it cannot be a literal.',
+  },
+
+  /* ---- Phase 218 ------------------------------------------------------- *
+   * Everything below was already a computed gate in the tree and already
+   * being answered with an invented `company:manage`. Declaring them is what
+   * lets the catch in `gatesIn` go. Each `yields` is read off the registry the
+   * expression consults, not off the call site.                             */
+
+  /**
+   * Evidence and notes, whose gate is the permission of whatever the document
+   * is attached to. `SUBJECTS` in `evidence/subjects.ts` declares a `view` and
+   * a `manage` per subject, and these are the distinct values across all of
+   * them — a bank transaction answers to bookkeeping, an invoice to the ledger,
+   * a payroll run to payroll, an organisation to the CRM.
+   *
+   * Five acts were reported as owner-only on this expression:
+   * `uploadEvidence`, `attachExisting`, `detachEvidence`, `writeNote` and
+   * `resolveNote`. `uploadEvidence` is the act Phase 214 found checking *late*
+   * — it looked straight at it and still did not declare its resolver, because
+   * the invented answer was indistinguishable from a read one.
+   */
+  'subjectDefinition(input.subjectType).manage': {
+    yields: [
+      'bookkeeping:categorize',
+      'accounting:journal',
+      'reconciliation:perform',
+      'payroll:manage',
+      'crm:manage',
+      'proposals:manage',
+    ],
+    why:
+      'The permission of the record the document is attached to, from `SUBJECTS` ' +
+      'in `evidence/subjects.ts`. Attaching evidence to a thing is gated as ' +
+      'changing that thing is, which is why it cannot be a literal: the subject ' +
+      'arrives as an argument.',
+  },
+  'subjectDefinition(note.subjectType).manage': {
+    yields: [
+      'bookkeeping:categorize',
+      'accounting:journal',
+      'reconciliation:perform',
+      'payroll:manage',
+      'crm:manage',
+      'proposals:manage',
+    ],
+    why:
+      'The same resolver, reading the subject off a stored note rather than off ' +
+      'an argument. `resolveNote` closes a note somebody else opened, so the ' +
+      'subject comes from the row.',
+  },
+  'subjectDefinition(subjectType).view': {
+    yields: [
+      'bookkeeping:view',
+      'accounting:view',
+      'reconciliation:view',
+      'payroll:view',
+      'crm:view',
+      'proposals:view',
+    ],
+    why:
+      'The reading half of the same registry, for the counts and list queries ' +
+      '(`evidenceCounts`, `notesForMany`). You may see what is attached to a ' +
+      'record you may see.',
+  },
+  'subjectDefinition(ref.subjectType).view': {
+    yields: [
+      'bookkeeping:view',
+      'accounting:view',
+      'reconciliation:view',
+      'payroll:view',
+      'crm:view',
+      'proposals:view',
+    ],
+    why:
+      'The same registry, resolving from a stored reference rather than a bare ' +
+      'kind — `notesFor` and `evidenceFor` take a subject reference. Same ' +
+      'lookup, different spelling, and the scan matches the expression as ' +
+      'written rather than the function it calls.',
+  },
+  'subjectDefinition(subject).view': {
+    yields: [
+      'bookkeeping:view',
+      'accounting:view',
+      'reconciliation:view',
+      'payroll:view',
+      'crm:view',
+      'proposals:view',
+    ],
+    why:
+      'The same, where the argument is already the subject rather than its ' +
+      'type. Three spellings of one lookup, and the register names all three ' +
+      'because the scan matches the expression as written.',
+  },
+
+  /**
+   * Merging two parties, and the sharpest of the eleven.
+   *
+   * Reported as `company:manage` — owner only — while the code gates a customer
+   * merge on `crm:manage` and a supplier merge on `accounting:journal`. So the
+   * register said the owner alone could merge two records, when a **manager**
+   * can merge two customers and an **accountant** two suppliers. A merge is
+   * irreversible, which is exactly the kind of act a register of gates exists
+   * to be right about.
+   */
+  "input.side === 'customer' ? 'crm:manage' : 'accounting:journal'": {
+    yields: ['crm:manage', 'accounting:journal'],
+    why:
+      'A merge is gated by the side being merged: customers answer to the CRM, ' +
+      'suppliers to the ledger. The same shape as `revertImport` below — the ' +
+      'gate follows what the act touches, so it cannot be a literal.',
+  },
+
+  /**
+   * Assets, the reading half of the pair already declared above.
+   */
+  'assetSubjectFor(ref.kind).view': {
+    yields: ['crm:view', 'marketing:view'],
+    why:
+      '`ASSET_SUBJECTS` declares `view` as `crm:view` for the four CRM subjects ' +
+      'and `marketing:view` for a campaign. Seeing which assets went to a record ' +
+      'is gated as seeing the record is.',
+  },
+  'assetSubjectFor(kind).view': {
+    yields: ['crm:view', 'marketing:view'],
+    why:
+      'The reading half again, from a bare kind rather than a stored link. ' +
+      '`assetsForKind` lists what is attached to a kind of record before any ' +
+      'particular record is chosen, so there is no link row to read the kind ' +
+      'off — which is why this is a third spelling and not a duplicate.',
+  },
+
+  /**
+   * Documents, the reading half of `permissionFor`.
+   */
+  "permissionFor(document.kind, 'view')": {
+    yields: ['marketing:view', 'proposals:view'],
+    why:
+      'The resolver already declared for `manage`, asked for `view`. ' +
+      '`getDocument` serves both the proposal editor and the creative studio.',
+  },
+  "permissionFor(kind ?? 'proposal', 'view')": {
+    yields: ['marketing:view', 'proposals:view'],
+    why:
+      'The same, for a list query where the kind is optional and a missing one ' +
+      'means proposals — the default the screen was built for.',
+  },
+
+  /**
+   * One section of the accountant's package, gated by the permission that opens
+   * the data in it.
+   *
+   * The twentieth expression, and the one the fixed `functionBody` found that
+   * the broken one could not: `mayRead` is a local arrow inside `assemble`, so
+   * reading the enclosing body correctly is what surfaced it. A soft check
+   * (`can`, not `requirePermission`) because a section the reader may not see is
+   * **omitted and recorded as omitted** rather than failing the package — which
+   * is Phase 215's distinction, and the reason this one is a gate on a part of
+   * the answer rather than on the act.
+   */
+  'section.source.permission': {
+    yields: [
+      'bookkeeping:view',
+      'accounting:view',
+      'reconciliation:view',
+      'payroll:view',
+      'tax:view',
+      'reports:view',
+      'reports:financial',
+    ],
+    why:
+      'Every `permission` declared on a section source in the exporter registry. ' +
+      'A section is readable by whoever may read the data it is made of, so the ' +
+      'gate is the registry entry rather than one permission for the package.',
+  },
+
+  /**
+   * One record's history, gated by the permission that opens that kind of
+   * record (Phase 71's rule, Phase 213's register).
+   *
+   * The widest of the eleven, because `READABLE_BY` is wide: every permission
+   * any entity type names, plus `audit:view` for a type nobody has placed. The
+   * breadth is the point — `historyFor` is one function serving forty record
+   * kinds, and a literal would have to be the strictest of them.
+   */
+  'permissionToRead(entityType)': {
+    yields: [
+      'bookkeeping:view',
+      'accounting:view',
+      'crm:view',
+      'marketing:view',
+      'jobs:view',
+      'payroll:view',
+      'reconciliation:view',
+      'tax:view',
+      'ai:use',
+      'audit:view',
+    ],
+    why:
+      'Every permission `READABLE_BY` in `audit/visibility.ts` names, plus the ' +
+      '`audit:view` fall-through for an entity type nobody has placed. The ' +
+      'register is the resolver: a record you may read, you may read the ' +
+      'history of.',
   },
 }
 
@@ -517,6 +743,20 @@ export type PermissionChecks = {
   literal: readonly Permission[]
   /** Checks whose permission is computed, as written. */
   computed: readonly string[]
+  /**
+   * Checks applied to a permission the function did not choose (Phase 218).
+   *
+   * A bare identifier that the function binds — a parameter, or an arrow's
+   * parameter — is not an expression a register can resolve, because it is not
+   * an expression at all. `ifPermitted(ctx, permission, …)` checks whatever its
+   * caller passed; `permissionsToRead(entityType).some((p) => can(ctx, p))`
+   * checks each of a computed list whose expression is on the same line.
+   *
+   * Kept rather than dropped. Dropping it would make these functions read as
+   * ungated, which is ADR 0134's direction; answering it is what the invented
+   * `company:manage` did. A third name is the only reading that is neither.
+   */
+  forwarded: readonly string[]
 }
 
 /**
@@ -555,28 +795,89 @@ function secondArgument(body: string, open: number): string | null {
   return callArguments(body, open)[1] ?? null
 }
 
-export function permissionChecksIn(body: string): PermissionChecks {
+export function permissionChecksIn(
+  body: string,
+  bound: Iterable<string> = [],
+): PermissionChecks {
   const literal: Permission[] = []
   const computed: string[] = []
+  const forwarded: string[] = []
+
+  const names = new Set(bound)
+  // An arrow's own parameter is bound inside the body rather than in the
+  // signature: `permissionsToRead(entityType).some((permission) => …)`.
+  for (const arrow of body.matchAll(/\(\s*(\w+)\s*\)\s*=>/g)) names.add(arrow[1])
 
   for (const match of body.matchAll(CHECK)) {
     const argument = secondArgument(body, match.index + match[0].length - 1)
     if (argument === null) continue
     if (/^'[a-z_]+:[a-z_]+'$/.test(argument)) literal.push(argument.slice(1, -1) as Permission)
+    else if (/^\w+$/.test(argument) && names.has(argument)) forwarded.push(argument)
     else computed.push(argument)
   }
 
-  return { literal, computed }
+  return { literal, computed, forwarded }
 }
 
-/** The body of a top-level function, comments blanked. */
+/**
+ * The `{` that opens a declaration's body: past the parameter list, not into it.
+ *
+ * Cutting at the first `{` after the name would land inside a parameter whose
+ * type is an object literal (`input: { openDocuments: number }`), which is the
+ * same half-read signature the Phase 218 fix is removing. So the parameter list
+ * is balanced first.
+ */
+function bodyBrace(blanked: string, at: number): number | null {
+  const open = blanked.indexOf('(', at)
+  if (open < 0) return null
+  let depth = 0
+  for (let i = open; i < blanked.length; i += 1) {
+    if (blanked[i] === '(') depth += 1
+    else if (blanked[i] === ')') {
+      depth -= 1
+      if (depth === 0) {
+        const brace = blanked.indexOf('{', i)
+        return brace < 0 ? null : brace
+      }
+    }
+  }
+  return null
+}
+
+/**
+ * The body of a top-level function, comments blanked.
+ *
+ * ## The two readings that disagreed (Phase 218)
+ *
+ * This used to find the declaration with `function\s+${symbol}\b` and then hand
+ * the offset to `enclosingSpan`, which reads a declaration as
+ * `function <name>(` — so the two disagreed about every **generic** function:
+ * the first found `function scoped<T …>(`, the second could not see it,
+ * attributed the offset to the previous declaration and ran the span on to the
+ * next one it recognised. Asked for `scoped` it returned `can`'s body, from
+ * `can` to the end of `context.ts`, and nothing marked the answer as wrong.
+ *
+ * Both now go through `declarationOffset`, which is `DECLARATION` asked about
+ * one name, so there is one reading of where a function begins.
+ *
+ * The span is also cut at the body's opening brace rather than at the
+ * declaration, because the **signature** is not part of the body and reading it
+ * as one made the permission checker's own parameter list look like a gate:
+ * `requirePermission(ctx: ActorContext, permission: Permission)` answered
+ * `permissionChecksIn` with the computed check `permission: Permission`, which
+ * `gatesIn` could not resolve and so replaced with an invented
+ * `company:manage`. Four functions, all of them in `tenancy/context.ts` — the
+ * checker reading its own declaration as a check.
+ */
 export function functionBody(file: string, symbol: string): string | null {
   const raw = readFileSync(file, 'utf8')
-  const at = raw.search(new RegExp(`function\\s+${symbol}\\b`))
-  if (at < 0) return null
+  const at = declarationOffset(raw, symbol)
+  if (at === null) return null
 
   const span = enclosingSpan(raw, at)
-  return withoutComments(raw).slice(span.from, span.to)
+  const blanked = withoutComments(raw)
+  const brace = bodyBrace(blanked, at)
+  return blanked.slice(brace === null || brace >= span.to ? span.from : brace, span.to)
 }
 
 /** Every name `src/app` imports, which is every module act a route can reach. */

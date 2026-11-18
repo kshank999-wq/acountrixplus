@@ -298,15 +298,40 @@ export function permissionFor(kind: string, level: 'view' | 'manage'): Permissio
   return kind === 'marketing' ? `marketing:${level}` : `proposals:${level}`
 }
 
-/** Saves the current document as a reusable company template (spec §7). */
+/**
+ * Saves the current document as a reusable company template (spec §7).
+ *
+ * ## The answer written out again, thirty lines below the comment about it
+ *
+ * This required `proposals:manage` outright until Phase 218. `permissionFor`
+ * above exists because of precisely that mistake — its own docstring records
+ * it: *"writing the answer out again — `proposals:manage`, as the first draft of
+ * `suggestLayout` did — refuses a marketer the right to reorder their own
+ * creative. One designer serves both kinds, so there has to be one answer to
+ * what it takes to edit one: two answers to one question is the defect."*
+ *
+ * And then this function, in the same file, wrote the answer out again. It even
+ * stores `kind: document.kind` four lines down, so it knew which kind it had.
+ *
+ * What that cost: `designer.tsx` is mounted by two screens, the proposal editor
+ * (`isEditable` from `proposals:manage`) and the creative studio (`isEditable`
+ * from `marketing:manage`). A marketer in the studio was shown *Save as
+ * template* and refused by it — the only role the screen admits for whom the
+ * control could never work.
+ *
+ * The check moves below the load because the permission depends on the
+ * document's kind, which is the same order `linkAsset` uses and the same reason
+ * `GATE_RESOLVERS` gives for it: *"resolves the subject first and then gates on
+ * it."* `loadDocument` is tenant-scoped and refuses a document in another
+ * company, so nothing crosses a company boundary before the check.
+ */
 export async function saveAsTemplate(
   ctx: ActorContext,
   documentId: string,
   input: { key: string; name: string; description?: string },
 ) {
-  requirePermission(ctx, 'proposals:manage')
-
   const document = await loadDocument(ctx, documentId)
+  requirePermission(ctx, permissionFor(document.kind, 'manage'))
 
   return db.transaction(async (tx) => {
     const [template] = await tx

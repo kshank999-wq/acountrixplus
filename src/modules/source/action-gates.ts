@@ -3,7 +3,7 @@ import { dirname, join, normalize } from 'node:path'
 import { RegistryError } from '@/modules/errors/registry'
 import { ROLE_NAMES, ROLE_PERMISSIONS, type Permission, type Role } from '@/modules/permissions'
 import { functionBody, permissionChecksIn, resolveComputedGate } from './gate-forms'
-import { declaresFunction, withoutComments } from './enclosing'
+import { declaresFunction, parameterNames, withoutComments } from './enclosing'
 import { sourceFiles } from './isolation-scan'
 
 /**
@@ -304,19 +304,43 @@ function importsOf(file: string): Map<string, string> {
 const moduleFile = (base: string): string | null =>
   [`${base}.ts`, `${base}/index.ts`].find((candidate) => existsSync(candidate)) ?? null
 
-/** Permissions a body checks outright, with computed gates resolved. */
-function gatesIn(body: string): Permission[] {
-  const checks = permissionChecksIn(body)
+/**
+ * Permissions a body checks outright, with computed gates resolved.
+ *
+ * ## The catch that guessed (Phase 218)
+ *
+ * This used to be wrapped in a `try`, and the `catch` pushed `company:manage`:
+ *
+ * ```ts
+ *     } catch {
+ *       // An unreadable computed gate is still a gate: Phase 214 refuses on the
+ *       // expression elsewhere, and treating it as absent here would be the
+ *       // false positive this module exists to stop making.
+ *       found.push('company:manage')
+ *     }
+ * ```
+ *
+ * The reasoning in that comment is right about the direction and wrong about the
+ * remedy. Treating an unreadable gate as absent *would* be the false positive
+ * ADR 0134 is about — but the fix chosen was to **invent a real permission**,
+ * which lands in the same array, with the same type, beside permissions that
+ * were actually read. No consumer could tell the two apart, and one of them is
+ * wrong. Measured: 34 acts reported `company:manage`, 23 held it, **11 were told
+ * they did** — `mergeParties` among them, reported owner-only while a manager
+ * may merge two customers and an accountant two suppliers.
+ *
+ * `resolveComputedGate` throws precisely so that nothing can guess. Phase 214
+ * wrote the reason into the refusal: *"guessing would answer that question
+ * wrongly in silence, which is the defect Phase 214 exists to stop."* Its only
+ * caller caught the refusal and guessed. So the catch is gone, every expression
+ * in the tree is declared, and `everyComputedGateIsDeclared` keeps it that way:
+ * the next undeclared expression stops the suite instead of being answered.
+ */
+function gatesIn(body: string, bound: Iterable<string> = []): Permission[] {
+  const checks = permissionChecksIn(body, bound)
   const found: Permission[] = [...checks.literal]
   for (const expression of checks.computed) {
-    try {
-      found.push(...resolveComputedGate(expression))
-    } catch {
-      // An unreadable computed gate is still a gate: Phase 214 refuses on the
-      // expression elsewhere, and treating it as absent here would be the
-      // false positive this module exists to stop making.
-      found.push('company:manage')
-    }
+    found.push(...resolveComputedGate(expression))
   }
   return [...new Set(found)]
 }
@@ -340,7 +364,7 @@ export function establishedBy(
   const body = functionBody(file, symbol)
   if (body === null) return []
 
-  const own = gatesIn(body)
+  const own = gatesIn(body, parameterNames(readFileSync(file, 'utf8'), symbol))
   if (own.length > 0) return own
   if (depth === 0) return []
 
@@ -365,6 +389,156 @@ export function establishedBy(
   }
 
   return []
+}
+
+/**
+ * Is this call's refusal swallowed at the call site? (Phase 218)
+ *
+ * `sendInvoice` gates on `accounting:journal` and then calls `logCommunication`,
+ * which requires `crm:manage` — so a transitive walk concludes that an
+ * accountant cannot send an invoice. They can. The call is inside
+ * `if (row.customer.organizationId)` and carries `.catch(() => {})`, with the
+ * trade written next to it: *"A timeline entry is a nicety; the invoice has been
+ * sent either way and failing the whole call over it would be the wrong trade."*
+ *
+ * This is Phase 214's warning, which this phase walked into: *"a transitive scan
+ * over-collects in a way it cannot detect — it cannot tell a refusal that blocks
+ * an act from one it tolerates."* A swallowed refusal is the half of that which
+ * **can** be read off the source exactly, so it is read; the conditional half
+ * cannot, and `demandedBy`'s docstring says so rather than pretending otherwise.
+ */
+function refusalSwallowed(body: string, from: number): boolean {
+  let depth = 0
+  for (let i = from; i < body.length; i += 1) {
+    if (body[i] === '(') depth += 1
+    else if (body[i] === ')') {
+      depth -= 1
+      if (depth === 0) return /^\s*\.catch\s*\(/.test(body.slice(i + 1, i + 40))
+    }
+  }
+  return false
+}
+
+/**
+ * A body's checks as a **conjunction of disjunctions** (Phase 218).
+ *
+ * `gatesIn` flattens two different relations into one array: a literal check is
+ * something the caller must hold, and a resolver's `yields` are permissions any
+ * *one* of which gets you through. Flattened, the result cannot be interpreted —
+ * `['accounting:journal', 'accounting:view']` might be "both" (two literal
+ * checks, as `closeShift` has) or "either" (one computed check). Read as the
+ * wrong one, a bookkeeper either is or is not allowed to close a till, and
+ * nothing in the value says which.
+ *
+ * The same defect as the invented `company:manage`, one level up: a value whose
+ * meaning cannot be recovered from it. So each clause is "any one of these", and
+ * every clause must hold.
+ */
+function clausesIn(body: string, bound: Iterable<string> = []): Permission[][] {
+  const checks = permissionChecksIn(body, bound)
+  const clauses: Permission[][] = checks.literal.map((permission) => [permission])
+  for (const expression of checks.computed) {
+    clauses.push([...resolveComputedGate(expression)])
+  }
+  return clauses
+}
+
+/**
+ * Every permission an act will demand of its caller, along the whole path.
+ *
+ * ## Why a third function, when there are already two (Phase 218)
+ *
+ * `establishedBy` answers *is it gated at all* and stops at the first set it
+ * finds. `authorityOf` answers *what authority does the act itself carry* and
+ * unions its own body with its same-file helpers. Phase 217 split them because
+ * one question was being answered with the other's function.
+ *
+ * Neither answers the question a **screen** has to answer, which is: *if this
+ * person presses the button, will it work?* That needs every check on the path,
+ * conjunctively, because the act performs all of them. `updateCustomerAction`
+ * is the case that showed it:
+ *
+ * ```ts
+ *     const before = await customerById(actor, id)   // crm:view
+ *     …
+ *     await updateCustomer(actor, id, fields)        // crm:manage
+ * ```
+ *
+ * `establishedBy` returns `['crm:view']` — true, first, and useless to a screen,
+ * which would conclude that anybody who may read a customer may correct one.
+ * `authorityOf` does not reach `updateCustomer` at all, because it is in another
+ * module. Only the conjunction is the answer, and it had to be asked for by
+ * name rather than approximated from one of the other two.
+ *
+ * Each clause is "any one of these" and every clause must hold, because a
+ * literal check and a resolver's `yields` are different relations and a flat
+ * array cannot tell them apart — see `clausesIn`.
+ *
+ * ## What it still over-collects, said rather than hidden
+ *
+ * A call whose refusal is swallowed at the site is skipped, which is exact. A
+ * call inside a **conditional** is not, and cannot be read off the source: this
+ * walk treats every reachable check as mandatory, so an act with a gated call on
+ * a branch reads as demanding that permission of everybody. Phase 214 named this
+ * and prescribed registers rather than a deeper scan, and it was right — so
+ * `demandedBy` is the honest answer to *what could this act demand*, and not a
+ * specification of what it will. A screen register that pins a flag to the act
+ * it guards is the thing that closes it, and this phase nominates it rather than
+ * pretending the scan is that.
+ */
+export function demandedBy(
+  file: string,
+  symbol: string,
+  depth = 4,
+  seen: ReadonlySet<string> = new Set(),
+): Permission[][] {
+  const key = KEY(file, symbol)
+  if (seen.has(key) || depth < 0) return []
+  const visited = new Set(seen)
+  visited.add(key)
+
+  const body = functionBody(file, symbol)
+  if (body === null) return []
+
+  const src = readFileSync(file, 'utf8')
+  const clauses = clausesIn(body, parameterNames(src, symbol))
+  if (depth === 0) return dedupe(clauses)
+
+  const bare = withoutComments(body)
+  const imports = importsOf(file)
+
+  for (const call of bare.matchAll(/(?<![.\w])(\w+)\s*\(/g)) {
+    const name = call[1]
+    if (refusalSwallowed(bare, call.index + call[0].length - 1)) continue
+
+    if (name !== symbol && declaresFunction(src, name)) {
+      clauses.push(...demandedBy(file, name, depth - 1, visited))
+    }
+
+    const base = imports.get(name)
+    if (!base) continue
+    const target = moduleFile(base)
+    if (!target) continue
+    clauses.push(...demandedBy(target, name, depth - 1, visited))
+  }
+
+  return dedupe(clauses)
+}
+
+const dedupe = (clauses: Permission[][]): Permission[][] => {
+  const byKey = new Map<string, Permission[]>()
+  for (const clause of clauses) {
+    const sorted = [...clause].sort()
+    byKey.set(sorted.join('|'), sorted)
+  }
+  return [...byKey.values()].sort((a, b) => a.join('|').localeCompare(b.join('|')))
+}
+
+/** Roles that satisfy every clause: for each, they hold at least one member. */
+export function rolesSatisfying(clauses: Permission[][]): Role[] {
+  return ROLE_NAMES.filter((role) =>
+    clauses.every((clause) => clause.some((p) => ROLE_PERMISSIONS[role].includes(p))),
+  )
 }
 
 /** Every exported server action, as `file::action`. */

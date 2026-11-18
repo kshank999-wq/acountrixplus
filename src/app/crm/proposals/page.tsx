@@ -29,6 +29,20 @@ export default async function ProposalsPage() {
   }
 
   const canManage = can(actor, 'proposals:manage')
+  /*
+    Raising an invoice from a stage is a ledger act, not a proposals one:
+    `billStage` requires `accounting:journal`, which neither `manager` nor
+    `sales` holds. Phase 218 measured 73 permission flags handed from a screen
+    to a component and found exactly one that disagreed with the act behind its
+    control — this one, which offered "Invoice this stage" to everybody who may
+    manage a proposal and then refused two of the three roles that may.
+
+    `shop/page.tsx` already names this flag `canBill`, beside its own
+    `canManage`, for the identical reason: a repair order is completed under
+    `jobs:manage` and billed under `accounting:journal`. Same name, same
+    argument.
+  */
+  const canBill = can(actor, 'accounting:journal')
 
   const [proposals, opportunities, accounts, services, waiting] = await Promise.all([
     listProposals(actor),
@@ -120,6 +134,7 @@ export default async function ProposalsPage() {
           defaultProposalCopy: item.defaultProposalCopy,
         }))}
         canManage={canManage}
+        canBill={canBill}
       />
     </AppShell>
   )

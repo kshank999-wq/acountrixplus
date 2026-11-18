@@ -57,13 +57,19 @@ const OLD_READER = /requirePermission\(\s*\w+\s*,\s*'([a-z_]+:[a-z_]+)'/g
 const holds = (role: Role, permission: Permission) =>
   (ROLE_PERMISSIONS[role] as readonly Permission[]).includes(permission)
 
-/** The body of the function a site sits in, comments blanked. */
-function bodyAt(file: string, symbol: string): string {
-  const raw = readFileSync(file, 'utf8')
-  const at = raw.search(new RegExp(`function\\s+${symbol}\\b`))
-  const span = enclosingSpan(raw, at < 0 ? 0 : at)
-  return withoutComments(raw).slice(span.from, span.to)
-}
+/**
+ * The body of the function a site sits in, comments blanked.
+ *
+ * This was a local copy — `raw.search(/function\s+${symbol}\b/)` handed to
+ * `enclosingSpan` — and Phase 218 found that those two readings disagree about
+ * every generic function, because `enclosingSpan` required the opening `(` to
+ * follow the name. So this file held **the fifth copy** of the thing
+ * `enclosing.ts` exists to be the only copy of, and reproduced its defect
+ * exactly. ADR 0134's own note had predicted it: *"Four copies of a fixed
+ * function is four things that can drift apart again, and the next scanner
+ * makes five."* The next scanner was this test.
+ */
+const bodyAt = (file: string, symbol: string): string => functionBody(file, symbol) ?? ''
 
 describe('the reader that was wrong about both arguments', () => {
   /**
@@ -170,8 +176,15 @@ describe('the reader that was wrong about both arguments', () => {
 
     const by = (kind: string) => [...recovered.values()].filter((value) => value === kind).length
 
-    expect(recovered.size).toBe(12)
-    expect(by('computed')).toBe(8)
+    // Twelve until Phase 218, and the thirteenth is **not** one the repaired
+    // reader recovered — it is `saveAsTemplate`, which Phase 218 changed from
+    // a literal `proposals:manage` to `permissionFor(document.kind, 'manage')`,
+    // so it moved out of what `OLD_READER` can see and into this list. Worth
+    // pinning, because a count that grows after a scan is fixed invites exactly
+    // the wrong reading, and the breakdown is here to prevent it: the gain is
+    // in `computed`, where a new computed gate belongs.
+    expect(recovered.size).toBe(13)
+    expect(by('computed')).toBe(9)
     expect(by('soft')).toBe(3)
     expect(by('context-expression')).toBe(1)
 
@@ -179,6 +192,9 @@ describe('the reader that was wrong about both arguments', () => {
     // gate is computed, and the act that hid a real finding behind it.
     expect([...recovered.keys()]).toContain('src/modules/studio/asset-links.ts::linkAsset')
     expect([...recovered.keys()]).toContain('src/modules/studio/asset-links.ts::unlinkAsset')
+
+    // And the thirteenth, named so the count cannot drift without a reason.
+    expect([...recovered.keys()]).toContain('src/modules/design/documents.ts::saveAsTemplate')
   })
 
   /**
@@ -237,7 +253,13 @@ describe('a permission a pattern cannot read', () => {
 
     expect(functions.size).toBeGreaterThan(240)
     expect(expressions.size).toBe(5)
-    expect(Object.keys(GATE_RESOLVERS).sort()).toEqual([...expressions].sort())
+    // Every one of them is declared. The *equality* this used to assert —
+    // that the register holds exactly these five — was true of this
+    // population and read as true of the tree, which holds twenty (Phase
+    // 218). The register now covers the tree, and that equality is asserted
+    // where it belongs, over the tree, in
+    // `the-body-that-was-not-the-functions.test.ts`.
+    for (const expression of expressions) expect(GATE_RESOLVERS).toHaveProperty([expression])
   })
 
   it('names only permissions that exist', () => {
