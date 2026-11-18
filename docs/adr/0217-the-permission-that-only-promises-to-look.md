@@ -353,6 +353,52 @@ disagree**, and it disagreed about a change that looked purely like a
 tightening — which is the only kind of change nobody thinks to re-run the tree
 for.
 
+## The same error's third artifact, found by the tree-wide run
+
+ADR 0178's rule: *a tree-wide scan cannot be checked by running the tests near
+the code that changed.* The piecewise verification of this phase covered the
+audit trio, receivables, payables, the exporter, jobs, timebilling and the
+worker, and all of it was green. Shard 2 of the eight-shard run then failed one
+test in a file none of those batches touched:
+
+```
+FAIL tests/reading-the-record.test.ts > who may read a history
+     > refuses somebody whose role does not open that record at all
+AssertionError: promise resolved "[ { …(12) }, { …(12) } ]" instead of rejecting
+```
+
+The test read a **supplier's** history as `sales` and required a
+`PermissionError`. Its own comment carried the premise: *"Sales can work the
+pipeline and has no accounting permission."* True when it was written, and false
+the moment `vendor` gained `crm:view` — so the assertion was pinning a refusal
+that had itself become the defect, the blind producer Phase 78 names.
+
+The part worth keeping is **why that test could ever have been written.** Phase
+71's rule is *you may read the history of a record you may read*, and the two
+contact types are now identical two-door entries. Written against `customer`,
+this test would have been unsatisfiable since Phase 72 — there has been no role
+since then that cannot open a customer. It was written against `vendor` because
+`vendor` was the one-permission entry, which is to say: **the test existed
+because of the error, and was the error's only evidence of being correct.** Three
+artifacts of one mistake — a gate too weak, a register entry too narrow, and a
+test that passed on the gap between them — and all three were green together.
+
+Measured, nothing is refused a supplier's history any more, and that is not a
+loosening that slipped through: every one of the seven roles holds
+`accounting:view` or `crm:view`, so a two-door contact type is open to the whole
+table by construction. Which is right, and is the distinction the register is
+for — a contact is not a secret; the money about the contact is. So the refusal
+arm moves to a **bill** (`['accounting:view']`, which `sales` does not hold),
+where it is a refusal again rather than one that passes because the register is
+behind the gate, and the other half of the change is asserted beside it instead
+of left as a consequence nothing reads (Phase 179).
+
+One comment went stale the same way and is corrected rather than deleted: the
+manager-feed test explained its control as *"a bank transaction … a supplier
+would be withheld too, and correctly: they cannot open one."* A manager holds
+`crm:view`, and can now create a supplier. The control was always the
+transaction; the aside was the part that aged.
+
 ## The over-collection, measured rather than feared
 
 Phase 214 argued a register beats a transitive scan because a transitive scan
