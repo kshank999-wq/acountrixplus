@@ -64,14 +64,47 @@ describe('who may read a history', () => {
     expect(history.length).toBeGreaterThan(0)
   })
 
+  /**
+   * The refusal arm, and Phase 217 had to move its subject.
+   *
+   * It used to read a **supplier's** history as `sales`, on the premise written
+   * in its own comment: *"Sales can work the pipeline and has no accounting
+   * permission."* That premise stopped being true the moment `createVendor` was
+   * gated on `crm:manage` and `vendor` gained `crm:view` as its second door —
+   * because a salesperson may now open a supplier, and Phase 71's rule is that
+   * you may read the history of a record you may read.
+   *
+   * So this test was pinning a refusal that had become the defect: the exact
+   * blind producer Phase 78 names. A **bill** is the record `sales` genuinely
+   * may not open — `bill: ['accounting:view']`, and `sales` holds no accounting
+   * permission at all — so the assertion is a refusal again rather than one that
+   * passes because the register is behind the gate.
+   */
   it('refuses somebody whose role does not open that record at all', async () => {
+    const vendor = await aVendor()
+    const bill = await aBill(vendor.id)
+
+    const sales = await addUserWithRole(fixture, 'sales')
+
+    await expect(historyFor(sales, 'bill', bill.id)).rejects.toBeInstanceOf(PermissionError)
+  })
+
+  /**
+   * And the half the move exposes, asserted rather than left as a consequence
+   * nothing reads (Phase 179).
+   *
+   * `sales` can create a supplier and correct one. Phase 78's sentence — *an
+   * audit entry the person who made the correction cannot see is not much of an
+   * audit trail* — is what this is, arriving on the payables side five phases
+   * after it was fixed on the receivables side.
+   */
+  it('opens a supplier’s history to the role that may create one', async () => {
     const vendor = await aVendor()
     await updateVendor(fixture.ctx, vendor.id, { email: 'payments@harborview.test' })
 
-    // Sales can work the pipeline and has no accounting permission.
     const sales = await addUserWithRole(fixture, 'sales')
 
-    await expect(historyFor(sales, 'vendor', vendor.id)).rejects.toBeInstanceOf(PermissionError)
+    expect((await historyFor(sales, 'vendor', vendor.id)).length).toBeGreaterThan(0)
   })
 
   /**
@@ -248,8 +281,14 @@ describe('what the feed does not show (Phase 72)', () => {
         actorName: 'The owner',
         action: 'transaction.categorize',
         // A manager holds `bookkeeping:view` and not `accounting:view`, so a
-        // bank transaction is the right control here — a supplier would be
-        // withheld too, and correctly: they cannot open one.
+        // bank transaction is the right control here: a type they may open, so
+        // the test shows a filter rather than a blanket refusal.
+        //
+        // This comment used to add "a supplier would be withheld too, and
+        // correctly: they cannot open one". Wrong since Phase 217 gave `vendor`
+        // a second door on `crm:view`, which a manager holds — and a manager
+        // can create one. The control was always the transaction; the aside was
+        // the part that went stale.
         entityType: 'bank_transaction',
         entityId: randomUUID(),
         after: { description: 'Fuel' },
