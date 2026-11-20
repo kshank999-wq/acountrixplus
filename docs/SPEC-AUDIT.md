@@ -583,6 +583,38 @@ narrowing it still needs a way to say which columns are *state* rather than
 declared, not fixed; the largest is `bill_lines.itemId`, which is Phase 169's
 inventory gap on the purchase side.
 
+### §14 — the gate computed from a claim (Phase 220)
+
+ADR 0219 asked how many acts take an argument that selects between gates, and where a screen offers an
+option the gate refuses. The second half is the wrong end of it: a screen offering what its own user
+will be refused is a bad screen, and the act still refuses. The shape that matters is an argument the
+gate **believes**.
+
+**29** sites compute a permission rather than naming one, across **17** distinct expressions. By where
+the value comes from: **17** claims (a parameter — whatever the caller said), 9 records (read inside
+the act), 2 laundered through a local, 1 register constant, **0** unresolved. The first number inverts
+the nomination, which treated a gate computed from the record as the ordinary case.
+
+The property: **when a gate is computed from a caller-supplied value, that value must also select the
+record the act touches** — so a lie about it removes the record rather than changing the gate, which
+is a constraint and not a check. `mergeParties` picks its table with the same `input.side` that picks
+`crm:manage` or `accounting:journal`; `writeNote` hands its `input.subjectType` to `requireSubject`,
+which looks the id up in that type's own table. Over all 29 sites it returns **zero defects**.
+
+`OPAQUE_GATES` declares the **two** sites the property cannot judge — where the value reaches the gate
+through a local, so neither the gate's path nor the local's name is evidence — and refuses a third.
+Registry throw count 49 → **50**.
+
+**Fixed:** `declarationOf` could not read `const [row] = await db.select(…)`, this repository's
+standard single-row read, so four computed gates over tenant-scoped records — `suggestLayout`,
+`applyLayoutSuggestion`, `resolveNote`, `revertImport` — reported values nothing in the source
+declares. ADR 0134's leak a third time, in the same helper as the second.
+
+**Still open under §14:** nothing new. The nomination for Phase 221 is **the parameter a closure
+hides**: `parametersInScope` exists because `parameterNames` answers for the declared function and a
+check is often written inside a closure, and `gate-forms`, `action-gates`, `column-writers` and
+`isolation-scan` all ask that helper about what a function does with its arguments.
+
 ### §14 — the gate that is only sometimes a gate (Phase 219)
 
 ADR 0218's nominated register would be **236** entries, of which 230 would say the same thing, and the
