@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { dirname, join, normalize } from 'node:path'
 import { RegistryError } from '@/modules/errors/registry'
 import { ROLE_NAMES, ROLE_PERMISSIONS, type Permission, type Role } from '@/modules/permissions'
-import { functionBody, permissionChecksIn, resolveComputedGate } from './gate-forms'
+import { functionBody, permissionChecksIn, resolveComputedGate, sourceOf } from './gate-forms'
 import {
   conditionalAt,
   declaresFunction,
@@ -289,9 +289,16 @@ export function openEndpoint(file: string, action: string): OpenEndpoint {
 // --- Resolving a gate ------------------------------------------------------
 
 /** Both import forms: `@/modules/x/y` and `./y` beside the file. */
+/** What each file imports, worked out once: the walk revisits files constantly. */
+const imports = new Map<string, Map<string, string>>()
+
 function importsOf(file: string): Map<string, string> {
-  const src = readFileSync(file, 'utf8')
+  const already = imports.get(file)
+  if (already) return already
+
+  const src = sourceOf(file).raw
   const found = new Map<string, string>()
+  imports.set(file, found)
   for (const match of src.matchAll(/import\s*(?:type\s*)?\{([^}]+)\}\s*from\s*'([^']+)'/g)) {
     const spec = match[2]
     let base: string | null = null

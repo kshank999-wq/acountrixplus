@@ -870,14 +870,73 @@ function bodyBrace(blanked: string, at: number): number | null {
  * checker reading its own declaration as a check.
  */
 export function functionBody(file: string, symbol: string): string | null {
-  const raw = readFileSync(file, 'utf8')
-  const at = declarationOffset(raw, symbol)
-  if (at === null) return null
+  const key = `${file}::${symbol}`
+  if (bodies.has(key)) return bodies.get(key) ?? null
 
-  const span = enclosingSpan(raw, at)
-  const blanked = withoutComments(raw)
-  const brace = bodyBrace(blanked, at)
-  return blanked.slice(brace === null || brace >= span.to ? span.from : brace, span.to)
+  const { raw, blanked } = sourceOf(file)
+  const at = declarationOffset(raw, symbol)
+  const body =
+    at === null
+      ? null
+      : (() => {
+          const span = enclosingSpan(raw, at)
+          const brace = bodyBrace(blanked, at)
+          return blanked.slice(brace === null || brace >= span.to ? span.from : brace, span.to)
+        })()
+
+  bodies.set(key, body)
+  return body
+}
+
+/**
+ * Bodies already cut, by file and symbol.
+ *
+ * Separate from `sourceOf` because the walk asks the *same* pair repeatedly: a
+ * helper reached from forty acts is cut forty times, each cut running
+ * `declarationOffset` and `enclosingSpan` over the file again. A `null` is cached
+ * too — "no such function here" is an answer worth not recomputing, and it is the
+ * common one, since the walk asks every file it imports from about every name it
+ * sees called.
+ */
+const bodies = new Map<string, string | null>()
+
+/**
+ * One file's text and its comment-blanked twin, read once per process.
+ *
+ * ## Why this exists
+ *
+ * The scans read the same files over and over. `mayDemand` and `willDemand` walk
+ * 329 acts to depth four, and every step asks `functionBody`, which read the
+ * file from disk and ran `withoutComments` across all of it — a regex pass over
+ * the whole source — to answer about one symbol. For a several-thousand-line
+ * module reached by many acts, that is the same pass repeated for each of them.
+ *
+ * The measurement that forced it (Phase 220): the comparison of `willDemand`
+ * against `mayDemand` over all 329 acts took **32s against a 30s limit**. It
+ * passed in Phase 219's run on source identical to today's, so nothing had
+ * regressed — the test had always been close to the line, and the line is not
+ * where the cost belongs. Caching the reads makes it cheaper rather than
+ * permitted, which is the difference between fixing it and hiding it.
+ *
+ * Sound because a scan describes the tree as it is on disk when the process
+ * starts, and nothing here writes a source file and re-scans it in the same run:
+ * the falsifiers hand their source in as a string, for this reason among others.
+ *
+ * It lives in this module rather than in `enclosing.ts` because that one has no
+ * imports at all. Its whole argument for existing is that it is text work shared
+ * by scans that each define a table, a column and a gate their own way, and
+ * giving it a file cache would be the first thing it knows about the world.
+ */
+const sources = new Map<string, { raw: string; blanked: string }>()
+
+export function sourceOf(file: string): { raw: string; blanked: string } {
+  const cached = sources.get(file)
+  if (cached) return cached
+
+  const raw = readFileSync(file, 'utf8')
+  const entry = { raw, blanked: withoutComments(raw) }
+  sources.set(file, entry)
+  return entry
 }
 
 /** Every name `src/app` imports, which is every module act a route can reach. */
