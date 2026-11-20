@@ -85,6 +85,48 @@ export function withoutComments(src: string): string {
 }
 
 /**
+ * Source with string contents blanked out, preserving every byte offset.
+ *
+ * ## What it is for
+ *
+ * `withoutComments` is not enough for a scan that reads identifiers. This
+ * repository's registers argue for themselves in prose, and that prose is inside
+ * **string literals**, where a comment-stripper cannot reach:
+ *
+ * ```ts
+ * why: 'guarded by `can(ctx, permission)` rather than a literal',
+ * ```
+ *
+ * A scan looking for `can(` finds that one, in `action-gates.ts`, and reports a
+ * permission check in a register entry. Phase 220's first run did, and also
+ * collected `manage`, `view`, `crm` and `bank_statement` as identifiers whose
+ * origin it then could not resolve — noise shaped exactly like a finding.
+ *
+ * ## Why the length is the whole point
+ *
+ * The obvious spelling, `replace(/'[^']*'/g, "''")`, is wrong in a way that is
+ * invisible until it is catastrophic: it **shortens** the text, so every offset
+ * after the first string points somewhere else. Phase 220's scan matched calls in
+ * the blanked copy and sliced them out of the original, and reported whole
+ * function bodies as gate expressions — 162 sites where there are 32. The counts
+ * were not slightly wrong; they were measuring a different file.
+ *
+ * So the quotes stay and their contents become spaces, as comments do here. An
+ * index taken from one of these strings is only ever valid in a string of the
+ * same length, and keeping both the same length is what makes the pair usable
+ * together.
+ */
+export function withoutStrings(src: string): string {
+  const blank = (match: string) =>
+    match[0] + match.slice(1, -1).replace(/[^\n]/g, ' ') + match[match.length - 1]
+
+  return src
+    .replace(/'(?:[^'\\\n]|\\.)*'/g, blank)
+    .replace(/"(?:[^"\\\n]|\\.)*"/g, blank)
+    .replace(/`(?:[^`\\]|\\.)*`/g, blank)
+}
+
+/**
  * Where a top-level function begins (Phase 218).
  *
  * ## Why this is a constant rather than three patterns
@@ -509,6 +551,21 @@ export function declarationOf(src: string, index: number, identifier: string): s
   const head = src.slice(from, index)
 
   /*
+    Every arm below looks for the identifier somewhere in `head` — a local, a
+    destructuring, a loop binding, or an annotation in the signature — so if the
+    text above the point never mentions it, none of them can match and the
+    answer is `''` whatever they do.
+
+    Worth the line because this is the common case and the function is hot:
+    `mayDemand` walks 329 acts to depth four, and most names it asks about are
+    imports or globals that no enclosing scope declares. Phase 220 added two
+    more `matchAll` passes for the bracket forms and pushed
+    `the-gate-that-is-only-sometimes-a-gate` past its 30s timeout; this guard
+    skips all five passes instead of making one of them cheaper.
+  */
+  if (!head.includes(identifier)) return ''
+
+  /*
     The nearest local declaration, to the end of the expression it declares.
 
     Phase 197 took this to the end of its line, on the grounds that every one
@@ -530,6 +587,52 @@ export function declarationOf(src: string, index: number, identifier: string): s
   if (locals.length > 0) {
     const last = locals[locals.length - 1]
     return head.slice(last.index, last.index + declarationLength(head, last.index))
+  }
+
+  /*
+    A declaration that destructures it (Phase 220).
+
+    `const [row] = await db.select(…).from(…)` is this repository's standard
+    way to read one row, and the arm above cannot see it: its pattern wants the
+    identifier immediately after `const`, and here a `[` is in the way. So the
+    answer for `document` in
+
+    ```ts
+    const [document] = await db.select({ kind: designDocuments.kind })…
+    requirePermission(ctx, permissionFor(document.kind, 'manage'))
+    ```
+
+    was `''` — "nothing declares it". Phase 220's scan reads that as *unresolved*
+    and said so, which is why it was found rather than believed: four computed
+    gates that read a tenant-scoped record came back indistinguishable from four
+    that read a value out of nowhere. The gate was right; the reader was blind.
+
+    This is ADR 0134's leak a third time, and in the same helper as the second:
+    the arm below already knows a `for … of [ … ]` destructures, and the whole
+    note on it is that recognising one shape of destructuring is not recognising
+    destructuring. Both bracket forms now, since `const { kind } = await …` is
+    the same read with different punctuation.
+
+    Ordered after the plain arm and before the loop arm, and safe there: the
+    pattern requires an `=` after the closing bracket, which a `for … of` has
+    not got.
+  */
+  for (const [open, close] of [
+    ['\\[', '\\]'],
+    ['\\{', '\\}'],
+  ]) {
+    const destructured = [
+      ...head.matchAll(
+        new RegExp(
+          String.raw`\b(?:const|let|var)\s*${open}[^${close}]*\b${identifier}\b[^${close}]*${close}\s*=`,
+          'g',
+        ),
+      ),
+    ]
+    if (destructured.length > 0) {
+      const last = destructured[destructured.length - 1]
+      return head.slice(last.index, last.index + declarationLength(head, last.index))
+    }
   }
 
   /*

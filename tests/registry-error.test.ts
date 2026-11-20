@@ -391,7 +391,14 @@ describe('every registry refuses the same way', () => {
     // is ADR 0134's false positive; reading it as gated is the invented answer
     // Phase 218 removed. So the five that are like that are declared, and the
     // sixth refuses.
-    expect(thrown.length).toBe(49)
+    //
+    // The eleventh is `OPAQUE_GATES` (Phase 220): a gate computed from a value
+    // this scan cannot place is unmeasured, not safe, and the two sites like
+    // that say why they are sound. The twelfth refuses — because the register's
+    // first draft held three entries and two of them excused sites the scan
+    // never reported, which is an exclusion reading like a reason somebody
+    // checked.
+    expect(thrown.length).toBe(50)
   })
 
   it('names a registry that is really exported from the file it throws in', () => {
